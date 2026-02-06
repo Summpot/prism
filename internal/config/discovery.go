@@ -10,10 +10,10 @@ import (
 // naming convention and precedence.
 //
 // Precedence:
-//   1. prism.toml
-//   2. prism.yaml
-//   3. prism.yml
-//   4. prism.json
+//  1. prism.toml
+//  2. prism.yaml
+//  3. prism.yml
+//  4. prism.json
 //
 // For backward compatibility, if none of the prism.* files exist, it will fall
 // back to config.json.

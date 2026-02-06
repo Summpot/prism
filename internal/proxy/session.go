@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,13 @@ type SessionHandlerOptions struct {
 	Sessions       *SessionRegistry
 	Timeouts       config.Timeouts
 	MaxHeaderBytes int
+
+	// DefaultUpstreamPort is used when a resolved upstream address does not
+	// include a port (e.g. a bare hostname like "backend.example.com").
+	//
+	// If the incoming connection is a Minecraft handshake and the port can be
+	// parsed safely from the captured prelude, that port is preferred.
+	DefaultUpstreamPort int
 }
 
 type SessionHandler struct {
@@ -140,6 +148,7 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 		}
 		return
 	}
+	upstreamAddr = normalizeUpstreamAddr(upstreamAddr, host, captured, opts.DefaultUpstreamPort)
 	if opts.Metrics != nil {
 		opts.Metrics.AddRouteHit(host)
 	}
@@ -191,6 +200,77 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func normalizeUpstreamAddr(upstreamAddr string, routedHost string, capturedPrelude []byte, defaultPort int) string {
+	addr := strings.TrimSpace(upstreamAddr)
+	if addr == "" {
+		return addr
+	}
+	if defaultPort <= 0 {
+		defaultPort = 25565
+	}
+	if !upstreamNeedsPort(addr) {
+		return addr
+	}
+
+	// Prefer the port from a Minecraft handshake if present and it matches the
+	// routed hostname. This avoids accidentally interpreting non-Minecraft
+	// traffic as a handshake.
+	port := defaultPort
+	if h, p, ok := protocol.TryParseMinecraftHandshakeHostPort(capturedPrelude, 256*1024, 255); ok {
+		routedHost = strings.TrimSpace(strings.ToLower(routedHost))
+		if routedHost != "" && h == routedHost {
+			port = int(p)
+		}
+	}
+
+	host := stripOptionalIPv6Brackets(addr)
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func upstreamNeedsPort(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return false
+	}
+
+	// Bracketed IPv6.
+	if strings.HasPrefix(addr, "[") {
+		// If it contains ]: it's already host:port.
+		if strings.Contains(addr, "]:") {
+			return false
+		}
+		// If it ends with ], treat as a bare host.
+		return strings.HasSuffix(addr, "]")
+	}
+
+	colons := strings.Count(addr, ":")
+	if colons == 0 {
+		return true
+	}
+	if colons > 1 {
+		// Likely an unbracketed IPv6 literal without port.
+		return true
+	}
+
+	// Single colon: attempt host:port parse.
+	_, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return false
+	}
+	// Only treat it as missing-port when that's what SplitHostPort indicates.
+	// For invalid ports like "host:abc", let the dial fail rather than
+	// silently overriding the address.
+	return strings.Contains(err.Error(), "missing port in address")
+}
+
+func stripOptionalIPv6Brackets(host string) string {
+	host = strings.TrimSpace(host)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	return host
 }
 
 var sidSeq atomic.Uint64

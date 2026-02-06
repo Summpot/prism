@@ -1,2 +1,4 @@
 .idea
-config.json
+prism.json
+prism.toml
+prism.yaml

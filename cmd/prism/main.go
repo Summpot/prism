@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -148,17 +150,19 @@ func main() {
 			InjectProxyProtoV2: newCfg.ProxyProtocolV2,
 			Metrics:            metrics,
 		})
+		defaultUpstreamPort := defaultUpstreamPortFromListenAddr(newCfg.ListenAddr)
 
 		h.Update(proxy.SessionHandlerOptions{
-			Parser:         parser,
-			Resolver:       r,
-			Dialer:         dialer,
-			Bridge:         bridge,
-			Logger:         logger,
-			Metrics:        metrics,
-			Sessions:       sessions,
-			Timeouts:       newCfg.Timeouts,
-			MaxHeaderBytes: newCfg.MaxHeaderBytes,
+			Parser:              parser,
+			Resolver:            r,
+			Dialer:              dialer,
+			Bridge:              bridge,
+			Logger:              logger,
+			Metrics:             metrics,
+			Sessions:            sessions,
+			Timeouts:            newCfg.Timeouts,
+			MaxHeaderBytes:      newCfg.MaxHeaderBytes,
+			DefaultUpstreamPort: defaultUpstreamPort,
 		})
 
 		// Retire old WASM parsers after the handshake window to avoid racing in-flight handshakes.
@@ -231,4 +235,20 @@ func main() {
 		logger.Warn("tcp shutdown", "err", err)
 	}
 	logger.Info("prism exited")
+}
+
+func defaultUpstreamPortFromListenAddr(listenAddr string) int {
+	listenAddr = strings.TrimSpace(listenAddr)
+	if listenAddr == "" {
+		return 25565
+	}
+	_, portStr, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return 25565
+	}
+	p, err := strconv.Atoi(portStr)
+	if err != nil || p <= 0 || p > 65535 {
+		return 25565
+	}
+	return p
 }

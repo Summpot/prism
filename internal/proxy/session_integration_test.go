@@ -50,12 +50,13 @@ func TestSessionHandler_ForwardsHandshakeAndPayload(t *testing.T) {
 	bridge := NewProxyBridge(ProxyBridgeOptions{})
 
 	h := NewSessionHandler(SessionHandlerOptions{
-		Parser:         parser,
-		Resolver:       r,
-		Dialer:         dial,
-		Bridge:         bridge,
-		Timeouts:       config.Timeouts{HandshakeTimeout: 2 * time.Second},
-		MaxHeaderBytes: 64 * 1024,
+		Parser:              parser,
+		Resolver:            r,
+		Dialer:              dial,
+		Bridge:              bridge,
+		Timeouts:            config.Timeouts{HandshakeTimeout: 2 * time.Second},
+		MaxHeaderBytes:      64 * 1024,
+		DefaultUpstreamPort: 25565,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -89,6 +90,79 @@ func TestSessionHandler_ForwardsHandshakeAndPayload(t *testing.T) {
 	case addr := <-dial.called:
 		if addr != "127.0.0.1:25566" {
 			t.Fatalf("dial addr: want %q got %q", "127.0.0.1:25566", addr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("dial not called")
+	}
+
+	if _, err := clientConn.Write(payload); err != nil {
+		t.Fatalf("client write payload: %v", err)
+	}
+	_ = clientConn.Close()
+
+	select {
+	case err := <-backendErrCh:
+		t.Fatalf("backend read: %v", err)
+	case got := <-backendGotCh:
+		if !bytes.Equal(got, want) {
+			t.Fatalf("forwarded bytes mismatch")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("backend did not receive bytes")
+	}
+}
+
+func TestSessionHandler_AppendsPortWhenMissing_UsesHandshakePort(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	upConn, backendConn := net.Pipe()
+	defer clientConn.Close()
+	defer backendConn.Close()
+
+	dial := &mockDialer{called: make(chan string, 1), conn: upConn}
+	// Route value intentionally has no port.
+	r := router.NewRouter(map[string]string{"play.example.com": "backend.example.com"})
+	parser := protocol.NewMinecraftHostParser()
+	bridge := NewProxyBridge(ProxyBridgeOptions{})
+
+	h := NewSessionHandler(SessionHandlerOptions{
+		Parser:              parser,
+		Resolver:            r,
+		Dialer:              dial,
+		Bridge:              bridge,
+		Timeouts:            config.Timeouts{HandshakeTimeout: 2 * time.Second},
+		MaxHeaderBytes:      64 * 1024,
+		DefaultUpstreamPort: 12345, // should be overridden by handshake port
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go h.Handle(ctx, serverConn)
+
+	handshake := buildHandshakePacket("play.example.com", 25565, 763, 1)
+	payload := []byte("hello")
+	want := append(append([]byte(nil), handshake...), payload...)
+
+	backendGotCh := make(chan []byte, 1)
+	backendErrCh := make(chan error, 1)
+	go func() {
+		got := make([]byte, len(want))
+		_, err := io.ReadFull(backendConn, got)
+		if err != nil {
+			backendErrCh <- err
+			return
+		}
+		backendGotCh <- got
+	}()
+
+	if _, err := clientConn.Write(handshake); err != nil {
+		t.Fatalf("client write handshake: %v", err)
+	}
+
+	select {
+	case addr := <-dial.called:
+		if addr != "backend.example.com:25565" {
+			t.Fatalf("dial addr: want %q got %q", "backend.example.com:25565", addr)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("dial not called")

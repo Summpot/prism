@@ -35,6 +35,11 @@ Use `routes` to map hostnames to upstream addresses:
 - Exact match: `play.example.com` → `127.0.0.1:25566`
 - Wildcard suffix: `*.labs.example.com` → `127.0.0.1:25567`
 
+Upstream targets are treated as TCP dial addresses. They can be IPs or DNS names.
+If you omit the port (for example `backend.example.com`), Prism will prefer the
+port from the Minecraft handshake when available; otherwise it falls back to the
+port from `listen_addr` (default `25565`).
+
 Wildcard routes are `*.`-prefixed suffix matches (and more specific suffixes win).
 
 ## Docker

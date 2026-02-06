@@ -72,6 +72,10 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
   * Thread-safe reads; atomic writes.
   * Route tables can be updated at runtime as part of config hot-reload.
 
+* **Upstream address format**:
+  * Upstream targets are treated as TCP dial addresses (e.g. `host:port`, `ip:port`, `[ipv6]:port`).
+  * A port may be omitted (e.g. `backend.example.com`), in which case the proxy prefers the port from a Minecraft handshake when available and otherwise falls back to the listener port.
+
 
 * **Testability**:
   * Defined as an interface `UpstreamResolver`.

@@ -131,7 +131,38 @@ This module runs a separate HTTP server to provide observability. It interacts w
 * `GET /health`: Returns 200 OK if the listener is up.
 * `GET /metrics`: Returns the JSON dump of the `MetricsCollector`.
 * `GET /conns`: Returns a snapshot list of current active sessions (Client IP -> Target Host).
+* `GET /logs?limit=N`: Returns the most recent log lines from an in-memory ring buffer (if enabled).
 * `POST /reload`: Triggers a configuration reload and atomically swaps the snapshot used for new connections.
+
+
+
+### 4.3. Logging
+
+Prism uses the Go standard library structured logging package `log/slog`.
+
+**Goals**:
+
+* Make debugging and postmortem analysis practical (why was a connection dropped? which upstream was chosen?).
+* Keep the hot path fast by default (no per-connection logs at `info` level).
+* Produce machine-readable logs by default.
+
+**Design**:
+
+* A process-wide logger is constructed at startup from `config.logging`.
+* Output format is `json` by default, with an optional `text` mode for local debugging.
+* Log level is runtime-adjustable on config reload; changing output/format/source reporting requires restart.
+* Log records should be structured with consistent keys where relevant:
+  * `sid`: session identifier (process-unique)
+  * `client`: client remote address
+  * `host`: routed hostname
+  * `upstream`: upstream address
+  * `err`: error value
+
+**Admin log tail**:
+
+* When `config.logging.admin_buffer.enabled` is true, Prism tees formatted log lines into a bounded in-memory ring buffer.
+* The admin server can expose this buffer via `GET /logs?limit=N` to quickly inspect recent activity without filesystem access.
+* This is intended for debugging, not long-term retention.
 
 
 
@@ -170,6 +201,10 @@ The project will strictly adhere to the following testing pyramid:
   * New connections use the latest configuration snapshot.
   * Not all fields can be reloaded safely (e.g., listen address/admin address require a restart); reloadable fields include routes, timeouts, dial timeouts, buffer sizing and header parser selection.
 
+* **Logging reload semantics**:
+  * `logging.level` is reloadable.
+  * `logging.format`, `logging.output`, `logging.add_source`, and `logging.admin_buffer.*` require restart.
+
 ### 6.2. Buffer Management
 
 * A `BufferPool` interface wraps `sync.Pool`.
@@ -188,7 +223,7 @@ The project will strictly adhere to the following testing pyramid:
 
 ---
 
-## 8. WASM Routing Parser ABI (v1)
+## 7. WASM Routing Parser ABI (v1)
 
 Prism's WASM routing header parser interface is intentionally tiny to keep overhead low.
 
@@ -213,18 +248,3 @@ Return values:
   * upper 32 bits: `len` (u32)
 
 The hostname bytes must remain valid until the next call to `prism_parse` on the same module instance.
-
-
-## 7. Directory Structure (Proposed)
-
-```text
-/cmd/prism/        # Entry point (main.go)
-/internal/
-    /protocol/     # Routing header parsers (MC handshake, TLS SNI, WASM)
-    /proxy/        # ProxyBridge, SessionHandler
-    /router/       # Router, Config loading
-    /server/       # TCPServer/Listener wrapper
-    /telemetry/    # MetricsCollector, AdminServer
-/pkg/              # Publicly usable libraries (if any)
-    /mcproto/      # Low-level MC varint decoding (could be reused)
-```

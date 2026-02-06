@@ -1,6 +1,16 @@
 {
   "listen_addr": ":25565",
   "admin_addr": ":8080",
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "stderr",
+    "add_source": false,
+    "admin_buffer": {
+      "enabled": true,
+      "size": 1000
+    }
+  },
   "proxy_protocol_v2": false,
   "buffer_size": 32768,
   "upstream_dial_timeout_ms": 5000,

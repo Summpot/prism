@@ -3,12 +3,11 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"net"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +21,7 @@ type SessionHandlerOptions struct {
 	Resolver router.UpstreamResolver
 	Dialer   Dialer
 	Bridge   *ProxyBridge
+	Logger   *slog.Logger
 	Metrics  interface {
 		IncActive()
 		DecActive()
@@ -52,6 +52,20 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 	if opts.Parser == nil || opts.Resolver == nil || opts.Dialer == nil || opts.Bridge == nil {
 		_ = conn.Close()
 		return
+	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	sid := newSessionID()
+	clientAddr := ""
+	if conn != nil && conn.RemoteAddr() != nil {
+		clientAddr = conn.RemoteAddr().String()
+	}
+	start := time.Now()
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger.Debug("proxy: session started", "sid", sid, "client", clientAddr)
 	}
 
 	if opts.Metrics != nil {
@@ -85,6 +99,9 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 			captured = append(captured, tmp[:need]...)
 		}
 		if err != nil {
+			if logger.Enabled(ctx, slog.LevelDebug) {
+				logger.Debug("proxy: handshake read failed", "sid", sid, "client", clientAddr, "captured_bytes", len(captured), "err", err)
+			}
 			return
 		}
 
@@ -96,10 +113,20 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 		if errors.Is(perr, protocol.ErrNeedMoreData) {
 			continue
 		}
-		// No match or fatal error: drop the connection (can't route).
+		if errors.Is(perr, protocol.ErrNoMatch) {
+			if logger.Enabled(ctx, slog.LevelDebug) {
+				logger.Debug("proxy: no routing header match", "sid", sid, "client", clientAddr, "parser", opts.Parser.Name(), "captured_bytes", len(captured))
+			}
+			return
+		}
+		// Fatal parse error: drop the connection (can't route).
+		logger.Warn("proxy: routing header parse failed", "sid", sid, "client", clientAddr, "parser", opts.Parser.Name(), "captured_bytes", len(captured), "err", perr)
 		return
 	}
 	if host == "" {
+		if logger.Enabled(ctx, slog.LevelDebug) {
+			logger.Debug("proxy: exceeded max header bytes without host", "sid", sid, "client", clientAddr, "max_header_bytes", maxHeader)
+		}
 		return
 	}
 
@@ -108,6 +135,9 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 
 	upstreamAddr, ok := opts.Resolver.Resolve(host)
 	if !ok {
+		if logger.Enabled(ctx, slog.LevelDebug) {
+			logger.Debug("proxy: no route for host", "sid", sid, "client", clientAddr, "host", host)
+		}
 		return
 	}
 	if opts.Metrics != nil {
@@ -120,10 +150,10 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 
 	up, err := opts.Dialer.DialContext(ctx, "tcp", upstreamAddr)
 	if err != nil {
+		logger.Warn("proxy: upstream dial failed", "sid", sid, "client", clientAddr, "host", host, "upstream", upstreamAddr, "err", err)
 		return
 	}
 
-	sid := newSessionID()
 	if opts.Sessions != nil {
 		opts.Sessions.Add(SessionInfo{
 			ID:        sid,
@@ -134,9 +164,26 @@ func (h *SessionHandler) Handle(ctx context.Context, conn net.Conn) {
 		})
 		defer opts.Sessions.Remove(sid)
 	}
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger.Debug("proxy: routed", "sid", sid, "client", clientAddr, "host", host, "upstream", upstreamAddr)
+	}
 
 	initial := io.MultiReader(bytes.NewReader(captured), conn)
-	_ = opts.Bridge.Proxy(ctx, conn, up, initial)
+	err = opts.Bridge.Proxy(ctx, conn, up, initial)
+	dur := time.Since(start)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if logger.Enabled(ctx, slog.LevelDebug) {
+				logger.Debug("proxy: session ended", "sid", sid, "client", clientAddr, "host", host, "upstream", upstreamAddr, "duration_ms", dur.Milliseconds(), "err", err)
+			}
+			return
+		}
+		logger.Warn("proxy: session ended with error", "sid", sid, "client", clientAddr, "host", host, "upstream", upstreamAddr, "duration_ms", dur.Milliseconds(), "err", err)
+		return
+	}
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger.Debug("proxy: session ended", "sid", sid, "client", clientAddr, "host", host, "upstream", upstreamAddr, "duration_ms", dur.Milliseconds())
+	}
 }
 
 func min(a, b int) int {
@@ -146,12 +193,10 @@ func min(a, b int) int {
 	return b
 }
 
+var sidSeq atomic.Uint64
+
 func newSessionID() string {
-	var b [12]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
+	return strconv.FormatUint(sidSeq.Add(1), 10)
 }
 
 var _ interface {

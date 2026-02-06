@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ type ConnectionHandler interface {
 type TCPServer struct {
 	addr    string
 	h       ConnectionHandler
+	logger  *slog.Logger
 	metrics interface {
 		IncActive()
 		DecActive()
@@ -26,7 +28,7 @@ type TCPServer struct {
 	wg sync.WaitGroup
 }
 
-func NewTCPServer(addr string, h ConnectionHandler, metrics any) *TCPServer {
+func NewTCPServer(addr string, h ConnectionHandler, metrics any, logger *slog.Logger) *TCPServer {
 	var m interface {
 		IncActive()
 		DecActive()
@@ -37,7 +39,10 @@ func NewTCPServer(addr string, h ConnectionHandler, metrics any) *TCPServer {
 			DecActive()
 		})
 	}
-	return &TCPServer{addr: addr, h: h, metrics: m}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &TCPServer{addr: addr, h: h, metrics: m, logger: logger}
 }
 
 func (s *TCPServer) IsListening() bool {
@@ -47,17 +52,29 @@ func (s *TCPServer) IsListening() bool {
 func (s *TCPServer) ListenAndServe(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("server: listen failed", "addr", s.addr, "err", err)
+		}
 		return err
 	}
 	s.ln = ln
 	s.listening.Store(true)
+	if s.logger != nil {
+		s.logger.Info("server: listening", "addr", s.addr)
+	}
 	defer s.listening.Store(false)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
+				if s.logger != nil {
+					s.logger.Info("server: listener closed")
+				}
 				return nil
+			}
+			if s.logger != nil {
+				s.logger.Error("server: accept failed", "err", err)
 			}
 			return err
 		}
@@ -71,6 +88,9 @@ func (s *TCPServer) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *TCPServer) Shutdown(ctx context.Context) error {
+	if s.logger != nil {
+		s.logger.Info("server: shutdown requested")
+	}
 	if s.ln != nil {
 		_ = s.ln.Close()
 	}
@@ -83,8 +103,14 @@ func (s *TCPServer) Shutdown(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		if s.logger != nil {
+			s.logger.Warn("server: shutdown timed out", "err", ctx.Err())
+		}
 		return ctx.Err()
 	case <-done:
+		if s.logger != nil {
+			s.logger.Info("server: shutdown complete")
+		}
 		return nil
 	}
 }

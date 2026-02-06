@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,7 @@ type watchableProvider interface {
 // (e.g. FileConfigProvider)
 type Manager struct {
 	provider ConfigProvider
+	logger   *slog.Logger
 
 	pollInterval time.Duration
 	watchPath    string
@@ -38,10 +40,16 @@ type Manager struct {
 
 type ManagerOptions struct {
 	PollInterval time.Duration
+	Logger       *slog.Logger
 }
 
 func NewManager(provider ConfigProvider, opts ManagerOptions) *Manager {
 	m := &Manager{provider: provider}
+	if opts.Logger != nil {
+		m.logger = opts.Logger
+	} else {
+		m.logger = slog.Default()
+	}
 	m.pollInterval = opts.PollInterval
 	if m.pollInterval <= 0 {
 		m.pollInterval = 1 * time.Second
@@ -109,6 +117,9 @@ func (m *Manager) Start(ctx context.Context) {
 func (m *Manager) loop(ctx context.Context) {
 	t := time.NewTicker(m.pollInterval)
 	defer t.Stop()
+	if m.logger != nil {
+		m.logger.Info("config: reload watcher started", "poll_interval", m.pollInterval.String(), "path", m.watchPath)
+	}
 
 	for {
 		select {
@@ -116,10 +127,24 @@ func (m *Manager) loop(ctx context.Context) {
 			return
 		case <-t.C:
 			changed, err := m.changed()
-			if err != nil || !changed {
+			if err != nil {
+				if m.logger != nil {
+					m.logger.Warn("config: watch stat failed", "err", err)
+				}
 				continue
 			}
-			_ = m.ReloadNow(ctx) // best-effort; keep previous snapshot on error
+			if !changed {
+				continue
+			}
+			if err := m.ReloadNow(ctx); err != nil { // best-effort; keep previous snapshot on error
+				if m.logger != nil {
+					m.logger.Warn("config: reload failed", "err", err)
+				}
+				continue
+			}
+			if m.logger != nil {
+				m.logger.Info("config: reloaded")
+			}
 		}
 	}
 }

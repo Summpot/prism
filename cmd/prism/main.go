@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"prism/internal/config"
+	"prism/internal/logging"
 	"prism/internal/protocol"
 	"prism/internal/proxy"
 	"prism/internal/router"
@@ -91,10 +92,21 @@ func main() {
 	provider := config.NewFileConfigProvider(*configPath)
 	cfg, err := provider.Load(ctx)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
 
-	cm := config.NewManager(provider, config.ManagerOptions{PollInterval: cfg.Reload.PollInterval})
+	logrt, err := logging.NewRuntime(cfg.Logging)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "init logging: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = logrt.Close() }()
+	slog.SetDefault(logrt.Logger())
+	logger := slog.Default()
+	logger.Info("prism: starting", "config", *configPath, "listen_addr", cfg.ListenAddr, "admin_addr", cfg.AdminAddr)
+
+	cm := config.NewManager(provider, config.ManagerOptions{PollInterval: cfg.Reload.PollInterval, Logger: logger})
 	cm.SetCurrent(cfg)
 
 	metrics := telemetry.NewMetricsCollector()
@@ -104,7 +116,14 @@ func main() {
 	h := proxy.NewSessionHandler(proxy.SessionHandlerOptions{})
 
 	var currentClose parserCloser
-	applyCfg := func(newCfg *config.Config) error {
+	applyCfg := func(oldCfg, newCfg *config.Config) error {
+		if oldCfg != nil && logrt.NeedsRestart(newCfg.Logging) {
+			logger.Warn("logging config changed (restart required for format/output/buffer)")
+		}
+		if err := logrt.Apply(newCfg.Logging); err != nil {
+			logger.Warn("apply logging config failed", "err", err)
+		}
+
 		parser, closeFn, err := buildHostParser(ctx, newCfg)
 		if err != nil {
 			return err
@@ -125,6 +144,7 @@ func main() {
 			Resolver:       r,
 			Dialer:         dialer,
 			Bridge:         bridge,
+			Logger:         logger,
 			Metrics:        metrics,
 			Sessions:       sessions,
 			Timeouts:       newCfg.Timeouts,
@@ -145,25 +165,27 @@ func main() {
 	}
 
 	// Initial apply.
-	if err := applyCfg(cfg); err != nil {
-		log.Fatalf("apply config: %v", err)
+	if err := applyCfg(nil, cfg); err != nil {
+		logger.Error("apply config failed", "err", err)
+		os.Exit(1)
 	}
 
-	cm.Subscribe(func(_, newCfg *config.Config) {
-		if err := applyCfg(newCfg); err != nil {
-			log.Printf("apply config: %v", err)
+	cm.Subscribe(func(oldCfg, newCfg *config.Config) {
+		if err := applyCfg(oldCfg, newCfg); err != nil {
+			logger.Error("apply config failed", "err", err)
 		}
 	})
 	if cfg.Reload.Enabled {
 		cm.Start(ctx)
 	}
 
-	tcpServer := server.NewTCPServer(cfg.ListenAddr, h, metrics)
+	tcpServer := server.NewTCPServer(cfg.ListenAddr, h, metrics, logger)
 
 	admin := telemetry.NewAdminServer(telemetry.AdminServerOptions{
 		Addr:     cfg.AdminAddr,
 		Metrics:  metrics,
 		Sessions: sessions,
+		Logs:     logrt.Store(),
 		Reload: func(ctx context.Context) error {
 			return cm.ReloadNow(ctx)
 		},
@@ -174,14 +196,14 @@ func main() {
 
 	go func() {
 		if err := admin.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("admin server error: %v", err)
+			logger.Error("admin server error", "err", err)
 			stop()
 		}
 	}()
 
 	go func() {
 		if err := tcpServer.ListenAndServe(ctx); err != nil {
-			log.Printf("tcp server error: %v", err)
+			logger.Error("tcp server error", "err", err)
 			stop()
 		}
 	}()
@@ -192,12 +214,11 @@ func main() {
 	defer cancel()
 
 	if err := admin.Shutdown(shutdownCtx); err != nil {
-		log.Printf("admin shutdown: %v", err)
+		logger.Warn("admin shutdown", "err", err)
 	}
 
 	if err := tcpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("tcp shutdown: %v", err)
+		logger.Warn("tcp shutdown", "err", err)
 	}
-
-	fmt.Println("prism exited")
+	logger.Info("prism exited")
 }

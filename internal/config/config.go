@@ -18,6 +18,24 @@ type ReloadConfig struct {
 	PollInterval time.Duration
 }
 
+type AdminLogBufferConfig struct {
+	Enabled bool
+	Size    int
+}
+
+type LoggingConfig struct {
+	// Level is one of: debug, info, warn, error.
+	Level string
+	// Format is one of: json, text.
+	Format string
+	// Output is one of: stderr, stdout, discard; or a file path.
+	Output string
+	// AddSource enables source file/line reporting (slightly higher overhead).
+	AddSource bool
+	// AdminBuffer controls an in-memory log line ring buffer used by the admin server.
+	AdminBuffer AdminLogBufferConfig
+}
+
 type RoutingParserConfig struct {
 	Type         string
 	Name         string
@@ -29,6 +47,8 @@ type RoutingParserConfig struct {
 type Config struct {
 	ListenAddr string
 	AdminAddr  string
+
+	Logging LoggingConfig
 
 	Routes map[string]string
 
@@ -62,9 +82,19 @@ func (p *FileConfigProvider) WatchPath() string {
 }
 
 type fileConfig struct {
-	ListenAddr string            `json:"listen_addr"`
-	AdminAddr  string            `json:"admin_addr"`
-	Routes     map[string]string `json:"routes"`
+	ListenAddr string `json:"listen_addr"`
+	AdminAddr  string `json:"admin_addr"`
+	Logging    *struct {
+		Level       string `json:"level"`
+		Format      string `json:"format"`
+		Output      string `json:"output"`
+		AddSource   bool   `json:"add_source"`
+		AdminBuffer *struct {
+			Enabled bool `json:"enabled"`
+			Size    int  `json:"size"`
+		} `json:"admin_buffer"`
+	} `json:"logging"`
+	Routes map[string]string `json:"routes"`
 
 	RoutingParsers []struct {
 		Type         string `json:"type"`
@@ -101,8 +131,17 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr:          fc.ListenAddr,
-		AdminAddr:           fc.AdminAddr,
+		ListenAddr: fc.ListenAddr,
+		AdminAddr:  fc.AdminAddr,
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "json",
+			Output: "stderr",
+			AdminBuffer: AdminLogBufferConfig{
+				Enabled: false,
+				Size:    1000,
+			},
+		},
 		Routes:              fc.Routes,
 		MaxHeaderBytes:      fc.MaxHeaderBytes,
 		ProxyProtocolV2:     fc.ProxyProtocolV2,
@@ -113,6 +152,24 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			IdleTimeout:      time.Duration(fc.Timeouts.IdleTimeoutMs) * time.Millisecond,
 		},
 		Reload: ReloadConfig{},
+	}
+	if fc.Logging != nil {
+		if fc.Logging.Level != "" {
+			cfg.Logging.Level = fc.Logging.Level
+		}
+		if fc.Logging.Format != "" {
+			cfg.Logging.Format = fc.Logging.Format
+		}
+		if fc.Logging.Output != "" {
+			cfg.Logging.Output = fc.Logging.Output
+		}
+		cfg.Logging.AddSource = fc.Logging.AddSource
+		if fc.Logging.AdminBuffer != nil {
+			cfg.Logging.AdminBuffer.Enabled = fc.Logging.AdminBuffer.Enabled
+			if fc.Logging.AdminBuffer.Size != 0 {
+				cfg.Logging.AdminBuffer.Size = fc.Logging.AdminBuffer.Size
+			}
+		}
 	}
 	if fc.Reload == nil {
 		cfg.Reload.Enabled = true
@@ -140,6 +197,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	if cfg.AdminAddr == "" {
 		cfg.AdminAddr = ":8080"
 	}
+	// Logging defaults are set above.
 	if cfg.BufferSize <= 0 {
 		cfg.BufferSize = 32 * 1024
 	}

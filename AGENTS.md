@@ -51,7 +51,20 @@ Prism is a lightweight, high-performance TCP reverse proxy for the Minecraft pro
 - Prefer returning errors to the caller when possible.
 - When dropping an error intentionally (e.g., for security/noise reasons), leave a short comment explaining why.
 - Use clear, scoped error messages (package prefix like `protocol:` is already used).
-- Avoid hot-path logging; Prism is performance-oriented.
+
+### Structured logging conventions
+
+- Use `log/slog` (structured logs). Avoid adding new `log.Printf` style logging.
+- Prefer stable, queryable keys over interpolated strings. Common keys:
+  - `sid` (session id)
+  - `client` (remote addr)
+  - `host` (routed hostname)
+  - `upstream` (upstream addr)
+  - `err` (error)
+- Avoid hot-path logging; Prism is performance-oriented:
+  - No per-connection logs at `info` by default.
+  - Per-connection details should be `debug` and guarded with `logger.Enabled(ctx, slog.LevelDebug)` when building non-trivial attributes.
+- Do not log raw captured handshake bytes at `info`/`warn` (can be noisy and potentially sensitive). If needed for deep debugging, log only lengths/counts, or put raw data behind `debug` with explicit justification.
 
 ## Performance & allocations
 

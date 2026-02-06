@@ -27,8 +27,8 @@ type SessionHandlerOptions struct {
 		DecActive()
 		AddRouteHit(host string)
 	}
-	Sessions *SessionRegistry
-	Timeouts config.Timeouts
+	Sessions       *SessionRegistry
+	Timeouts       config.Timeouts
 	MaxHeaderBytes int
 }
 
@@ -154,4 +154,6 @@ func newSessionID() string {
 	return hex.EncodeToString(b[:])
 }
 
-var _ interface{ Handle(context.Context, net.Conn) } = (*SessionHandler)(nil)
+var _ interface {
+	Handle(context.Context, net.Conn)
+} = (*SessionHandler)(nil)

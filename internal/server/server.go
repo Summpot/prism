@@ -20,7 +20,7 @@ type TCPServer struct {
 		DecActive()
 	}
 
-	ln       net.Listener
+	ln        net.Listener
 	listening atomic.Bool
 
 	wg sync.WaitGroup

@@ -50,11 +50,11 @@ func TestSessionHandler_ForwardsHandshakeAndPayload(t *testing.T) {
 	bridge := NewProxyBridge(ProxyBridgeOptions{})
 
 	h := NewSessionHandler(SessionHandlerOptions{
-		Parser:   parser,
-		Resolver: r,
-		Dialer:   dial,
-		Bridge:   bridge,
-		Timeouts: config.Timeouts{HandshakeTimeout: 2 * time.Second},
+		Parser:         parser,
+		Resolver:       r,
+		Dialer:         dial,
+		Bridge:         bridge,
+		Timeouts:       config.Timeouts{HandshakeTimeout: 2 * time.Second},
 		MaxHeaderBytes: 64 * 1024,
 	})
 

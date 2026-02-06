@@ -43,11 +43,11 @@ func (m *MetricsCollector) AddRouteHit(host string) {
 }
 
 type MetricsSnapshot struct {
-	ActiveConnections     int64            `json:"active_connections"`
-	TotalConnections      int64            `json:"total_connections_handled"`
-	BytesIngress          int64            `json:"bytes_ingress"`
-	BytesEgress           int64            `json:"bytes_egress"`
-	RouteHits             map[string]int64 `json:"route_hits"`
+	ActiveConnections int64            `json:"active_connections"`
+	TotalConnections  int64            `json:"total_connections_handled"`
+	BytesIngress      int64            `json:"bytes_ingress"`
+	BytesEgress       int64            `json:"bytes_egress"`
+	RouteHits         map[string]int64 `json:"route_hits"`
 }
 
 func (m *MetricsCollector) Snapshot() MetricsSnapshot {

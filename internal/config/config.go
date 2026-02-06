@@ -39,10 +39,10 @@ type Config struct {
 
 	Reload ReloadConfig
 
-	ProxyProtocolV2      bool
-	BufferSize           int
-	UpstreamDialTimeout  time.Duration
-	Timeouts             Timeouts
+	ProxyProtocolV2     bool
+	BufferSize          int
+	UpstreamDialTimeout time.Duration
+	Timeouts            Timeouts
 }
 
 type ConfigProvider interface {
@@ -80,10 +80,10 @@ type fileConfig struct {
 		PollIntervalMs int  `json:"poll_interval_ms"`
 	} `json:"reload"`
 
-	ProxyProtocolV2         bool `json:"proxy_protocol_v2"`
-	BufferSize              int  `json:"buffer_size"`
-	UpstreamDialTimeoutMs   int  `json:"upstream_dial_timeout_ms"`
-	Timeouts                struct {
+	ProxyProtocolV2       bool `json:"proxy_protocol_v2"`
+	BufferSize            int  `json:"buffer_size"`
+	UpstreamDialTimeoutMs int  `json:"upstream_dial_timeout_ms"`
+	Timeouts              struct {
 		HandshakeTimeoutMs int `json:"handshake_timeout_ms"`
 		IdleTimeoutMs      int `json:"idle_timeout_ms"`
 	} `json:"timeouts"`
@@ -101,12 +101,12 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr:         fc.ListenAddr,
-		AdminAddr:          fc.AdminAddr,
-		Routes:             fc.Routes,
-		MaxHeaderBytes:     fc.MaxHeaderBytes,
-		ProxyProtocolV2:    fc.ProxyProtocolV2,
-		BufferSize:         fc.BufferSize,
+		ListenAddr:          fc.ListenAddr,
+		AdminAddr:           fc.AdminAddr,
+		Routes:              fc.Routes,
+		MaxHeaderBytes:      fc.MaxHeaderBytes,
+		ProxyProtocolV2:     fc.ProxyProtocolV2,
+		BufferSize:          fc.BufferSize,
 		UpstreamDialTimeout: time.Duration(fc.UpstreamDialTimeoutMs) * time.Millisecond,
 		Timeouts: Timeouts{
 			HandshakeTimeout: time.Duration(fc.Timeouts.HandshakeTimeoutMs) * time.Millisecond,

@@ -18,8 +18,8 @@ func buildTLSClientHelloWithSNI(host string) []byte {
 	sni = append(sni, name...)
 
 	ext := make([]byte, 0, 4+len(sni))
-	ext = binary.BigEndian.AppendUint16(ext, 0x0000)            // extension type
-	ext = binary.BigEndian.AppendUint16(ext, uint16(len(sni)))  // extension length
+	ext = binary.BigEndian.AppendUint16(ext, 0x0000)           // extension type
+	ext = binary.BigEndian.AppendUint16(ext, uint16(len(sni))) // extension length
 	ext = append(ext, sni...)
 
 	exts := make([]byte, 0, 2+len(ext))

@@ -12,10 +12,10 @@ var (
 // HostParser extracts a routing hostname from the captured initial bytes of a connection.
 //
 // Parse should return:
-//  - (host, nil) when it successfully extracted a hostname
-//  - ("", ErrNeedMoreData) when more bytes are required
-//  - ("", ErrNoMatch) when the parser does not apply to this stream
-//  - ("", err) for fatal errors
+//   - (host, nil) when it successfully extracted a hostname
+//   - ("", ErrNeedMoreData) when more bytes are required
+//   - ("", ErrNoMatch) when the parser does not apply to this stream
+//   - ("", err) for fatal errors
 //
 // Implementations must be pure with respect to input bytes.
 // They may be called multiple times with increasing prefixes of the same stream.

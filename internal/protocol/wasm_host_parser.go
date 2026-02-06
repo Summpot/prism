@@ -17,13 +17,13 @@ import (
 // WASMHostParser loads a HostParser implementation from a WebAssembly module.
 //
 // ABI (see DESIGN.md):
-//  - module exports memory "memory"
-//  - host writes input at offset 0
-//  - exported function prism_parse(input_len:i32) -> i64
-//		0  => need more
-//		1  => no match
-//		-1 => fatal error
-//		otherwise => packed (ptr,len) where low32=ptr, high32=len
+//   - module exports memory "memory"
+//   - host writes input at offset 0
+//   - exported function prism_parse(input_len:i32) -> i64
+//     0  => need more
+//     1  => no match
+//     -1 => fatal error
+//     otherwise => packed (ptr,len) where low32=ptr, high32=len
 //
 // Note: each Parse call uses a pooled module instance to allow concurrent use.
 type WASMHostParser struct {

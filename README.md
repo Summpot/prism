@@ -96,4 +96,4 @@ Workflow: `.github/workflows/build-release.yml`
 - PR / push: runs `go test ./...` and uploads multi-platform binaries as artifacts
 - Tag (recommended format `v1.2.3`):
   - creates a GitHub Release with platform archives and `checksums.txt`
-  - builds and pushes a multi-arch Docker image (`linux/amd64` + `linux/arm64`) to GHCR
+  - builds and pushes an Alpine-based multi-arch Docker image (`linux/amd64` + `linux/arm64`) to GHCR (native per-arch jobs, then manifest merge)

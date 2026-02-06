@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25 AS build
+FROM golang:1.25-alpine AS build
 
 WORKDIR /src
+
+RUN apk add --no-cache ca-certificates
 
 # Cache deps first
 COPY go.mod go.sum ./
@@ -18,10 +20,14 @@ ARG TARGETARCH
 ENV CGO_ENABLED=0
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -trimpath -ldflags="-s -w" -o /out/prism ./cmd/prism
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S prism \
+    && adduser -S prism -G prism
 
 COPY --from=build /out/prism /usr/local/bin/prism
 
@@ -30,6 +36,6 @@ WORKDIR /config
 
 EXPOSE 25565 8080
 
-USER nonroot:nonroot
+USER prism:prism
 
 ENTRYPOINT ["/usr/local/bin/prism"]

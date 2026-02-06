@@ -124,15 +124,23 @@ jobs:
           files: |
             dist/*
 
-  docker:
-    runs-on: ubuntu-latest
+  docker-arch:
+    name: docker (${{ matrix.arch }})
     needs: test
     if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          # Requires a native ARM64 runner. If your repo doesn't have access to
+          # GitHub-hosted ARM runners yet, switch this to self-hosted labels.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -155,12 +163,70 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
-      - name: Build and push
+      - name: Add arch suffix to tags
+        id: archtags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          suffix="-${{ matrix.arch }}"
+          out=""
+          while IFS= read -r tag; do
+            [[ -z "${tag}" ]] && continue
+            out+="${tag}${suffix}"$'\n'
+          done <<< "${{ steps.meta.outputs.tags }}"
+
+          {
+            echo 'tags<<EOF'
+            echo "${out}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (single-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.archtags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  docker:
+    name: docker (multi-arch manifest)
+    runs-on: ubuntu-latest
+    needs: docker-arch
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Create and push multi-arch manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -z "${tag}" ]] && continue
+            docker buildx imagetools create \
+              -t "${tag}" \
+              "${tag}-amd64" \
+              "${tag}-arm64"
+          done <<< "${{ steps.meta.outputs.tags }}"

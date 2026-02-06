@@ -1,0 +1,149 @@
+name: build-release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test
+        run: go test ./...
+
+  binaries:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="dev-${GITHUB_SHA:0:7}"
+          fi
+
+          OUTDIR="dist"
+          mkdir -p "${OUTDIR}"
+
+          GOOS="${{ matrix.goos }}"
+          GOARCH="${{ matrix.goarch }}"
+
+          BINNAME="prism"
+          EXT=""
+          PKGEXT="tar.gz"
+          if [[ "${GOOS}" == "windows" ]]; then
+            EXT=".exe"
+            PKGEXT="zip"
+          fi
+
+          BASENAME="prism_${VERSION}_${GOOS}_${GOARCH}"
+          TMPDIR="${OUTDIR}/${BASENAME}"
+          mkdir -p "${TMPDIR}"
+
+          echo "Building ${BASENAME}${EXT}"
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+            go build -trimpath -ldflags "-s -w" -o "${TMPDIR}/${BINNAME}${EXT}" ./cmd/prism
+
+          if [[ "${PKGEXT}" == "zip" ]]; then
+            (cd "${OUTDIR}" && zip -qr "${BASENAME}.zip" "${BASENAME}")
+          else
+            tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
+          fi
+
+          rm -rf "${TMPDIR}"
+
+      - name: checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-binaries
+          path: dist/*
+
+      - name: GitHub Release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

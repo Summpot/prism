@@ -82,14 +82,24 @@ func buildHostParser(ctx context.Context, cfg *config.Config) (protocol.HostPars
 
 func main() {
 	var (
-		configPath = flag.String("config", "config.json", "Path to Prism JSON config file")
+		configPath = flag.String("config", "", "Path to Prism config file (.toml/.yaml/.yml/.json). If empty, auto-detect prism.toml > prism.yaml > prism.yml > prism.json")
 	)
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	provider := config.NewFileConfigProvider(*configPath)
+	path := strings.TrimSpace(*configPath)
+	if path == "" {
+		p, err := config.DiscoverConfigPath(".")
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "discover config: %v\n", err)
+			os.Exit(1)
+		}
+		path = p
+	}
+
+	provider := config.NewFileConfigProvider(path)
 	cfg, err := provider.Load(ctx)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "load config: %v\n", err)
@@ -104,7 +114,7 @@ func main() {
 	defer func() { _ = logrt.Close() }()
 	slog.SetDefault(logrt.Logger())
 	logger := slog.Default()
-	logger.Info("prism: starting", "config", *configPath, "listen_addr", cfg.ListenAddr, "admin_addr", cfg.AdminAddr)
+	logger.Info("prism: starting", "config", path, "listen_addr", cfg.ListenAddr, "admin_addr", cfg.AdminAddr)
 
 	cm := config.NewManager(provider, config.ManagerOptions{PollInterval: cfg.Reload.PollInterval, Logger: logger})
 	cm.SetCurrent(cfg)

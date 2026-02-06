@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+**/*_test.go
+**/*.md
+
+# local/runtime files
+config.json
+prism.json
+
+# build output
+/bin
+/dist
+/out

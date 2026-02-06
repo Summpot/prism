@@ -1,0 +1,36 @@
+listen_addr = ":25565"
+admin_addr = ":8080"
+proxy_protocol_v2 = false
+buffer_size = 32768
+upstream_dial_timeout_ms = 5000
+max_header_bytes = 65536
+
+[logging]
+level = "info"
+format = "json"
+output = "stderr"
+add_source = false
+
+[logging.admin_buffer]
+enabled = true
+size = 1000
+
+[reload]
+enabled = true
+poll_interval_ms = 1000
+
+[[routing_parsers]]
+type = "builtin"
+name = "minecraft_handshake"
+
+[[routing_parsers]]
+type = "builtin"
+name = "tls_sni"
+
+[timeouts]
+handshake_timeout_ms = 3000
+idle_timeout_ms = 0
+
+[routes]
+"play.example.com" = "127.0.0.1:25566"
+"*.labs.example.com" = "127.0.0.1:25567"

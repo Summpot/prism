@@ -195,6 +195,11 @@ The project will strictly adhere to the following testing pyramid:
 
 * The configuration is defined as a Go struct.
 * A `ConfigProvider` interface loads this struct. This allows the config to be loaded from a file (Production) or a static string/struct (Testing).
+* **Config file formats & naming**:
+  * Prism supports **TOML**, **YAML**, and **JSON** configuration files.
+  * By convention, config files are stored as `prism.*` in the working directory.
+  * When multiple are present, precedence is: `prism.toml` > `prism.yaml` > `prism.yml` > `prism.json`.
+  * For backward compatibility, `config.json` may still be used if no `prism.*` config exists.
 * **Zero-downtime config reload**:
   * Prism can reload configuration without stopping the TCP listener.
   * Existing sessions continue with the configuration snapshot they started with.

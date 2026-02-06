@@ -5,7 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 )
 
 type Timeouts struct {
@@ -82,41 +87,41 @@ func (p *FileConfigProvider) WatchPath() string {
 }
 
 type fileConfig struct {
-	ListenAddr string `json:"listen_addr"`
-	AdminAddr  string `json:"admin_addr"`
+	ListenAddr string `json:"listen_addr" yaml:"listen_addr" toml:"listen_addr"`
+	AdminAddr  string `json:"admin_addr" yaml:"admin_addr" toml:"admin_addr"`
 	Logging    *struct {
-		Level       string `json:"level"`
-		Format      string `json:"format"`
-		Output      string `json:"output"`
-		AddSource   bool   `json:"add_source"`
+		Level       string `json:"level" yaml:"level" toml:"level"`
+		Format      string `json:"format" yaml:"format" toml:"format"`
+		Output      string `json:"output" yaml:"output" toml:"output"`
+		AddSource   bool   `json:"add_source" yaml:"add_source" toml:"add_source"`
 		AdminBuffer *struct {
-			Enabled bool `json:"enabled"`
-			Size    int  `json:"size"`
-		} `json:"admin_buffer"`
-	} `json:"logging"`
-	Routes map[string]string `json:"routes"`
+			Enabled bool `json:"enabled" yaml:"enabled" toml:"enabled"`
+			Size    int  `json:"size" yaml:"size" toml:"size"`
+		} `json:"admin_buffer" yaml:"admin_buffer" toml:"admin_buffer"`
+	} `json:"logging" yaml:"logging" toml:"logging"`
+	Routes map[string]string `json:"routes" yaml:"routes" toml:"routes"`
 
 	RoutingParsers []struct {
-		Type         string `json:"type"`
-		Name         string `json:"name"`
-		Path         string `json:"path"`
-		Function     string `json:"function"`
-		MaxOutputLen int    `json:"max_output_len"`
-	} `json:"routing_parsers"`
-	MaxHeaderBytes int `json:"max_header_bytes"`
+		Type         string `json:"type" yaml:"type" toml:"type"`
+		Name         string `json:"name" yaml:"name" toml:"name"`
+		Path         string `json:"path" yaml:"path" toml:"path"`
+		Function     string `json:"function" yaml:"function" toml:"function"`
+		MaxOutputLen int    `json:"max_output_len" yaml:"max_output_len" toml:"max_output_len"`
+	} `json:"routing_parsers" yaml:"routing_parsers" toml:"routing_parsers"`
+	MaxHeaderBytes int `json:"max_header_bytes" yaml:"max_header_bytes" toml:"max_header_bytes"`
 
 	Reload *struct {
-		Enabled        bool `json:"enabled"`
-		PollIntervalMs int  `json:"poll_interval_ms"`
-	} `json:"reload"`
+		Enabled        bool `json:"enabled" yaml:"enabled" toml:"enabled"`
+		PollIntervalMs int  `json:"poll_interval_ms" yaml:"poll_interval_ms" toml:"poll_interval_ms"`
+	} `json:"reload" yaml:"reload" toml:"reload"`
 
-	ProxyProtocolV2       bool `json:"proxy_protocol_v2"`
-	BufferSize            int  `json:"buffer_size"`
-	UpstreamDialTimeoutMs int  `json:"upstream_dial_timeout_ms"`
+	ProxyProtocolV2       bool `json:"proxy_protocol_v2" yaml:"proxy_protocol_v2" toml:"proxy_protocol_v2"`
+	BufferSize            int  `json:"buffer_size" yaml:"buffer_size" toml:"buffer_size"`
+	UpstreamDialTimeoutMs int  `json:"upstream_dial_timeout_ms" yaml:"upstream_dial_timeout_ms" toml:"upstream_dial_timeout_ms"`
 	Timeouts              struct {
-		HandshakeTimeoutMs int `json:"handshake_timeout_ms"`
-		IdleTimeoutMs      int `json:"idle_timeout_ms"`
-	} `json:"timeouts"`
+		HandshakeTimeoutMs int `json:"handshake_timeout_ms" yaml:"handshake_timeout_ms" toml:"handshake_timeout_ms"`
+		IdleTimeoutMs      int `json:"idle_timeout_ms" yaml:"idle_timeout_ms" toml:"idle_timeout_ms"`
+	} `json:"timeouts" yaml:"timeouts" toml:"timeouts"`
 }
 
 func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
@@ -126,7 +131,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	var fc fileConfig
-	if err := json.Unmarshal(data, &fc); err != nil {
+	if err := unmarshalConfigFile(p.Path, data, &fc); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", p.Path, err)
 	}
 
@@ -225,4 +230,20 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func unmarshalConfigFile(path string, data []byte, dst any) error {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".json":
+		return json.Unmarshal(data, dst)
+	case ".yaml", ".yml":
+		return yaml.Unmarshal(data, dst)
+	case ".toml":
+		// BurntSushi/toml works with string or io.Reader; this keeps things simple.
+		_, err := toml.Decode(string(data), dst)
+		return err
+	default:
+		return fmt.Errorf("unsupported config extension %q (expected .toml, .yaml/.yml, or .json)", ext)
+	}
 }

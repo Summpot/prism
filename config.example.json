@@ -1,0 +1,24 @@
+{
+  "listen_addr": ":25565",
+  "admin_addr": ":8080",
+  "proxy_protocol_v2": false,
+  "buffer_size": 32768,
+  "upstream_dial_timeout_ms": 5000,
+  "reload": {
+    "enabled": true,
+    "poll_interval_ms": 1000
+  },
+  "max_header_bytes": 65536,
+  "routing_parsers": [
+    {"type": "builtin", "name": "minecraft_handshake"},
+    {"type": "builtin", "name": "tls_sni"}
+  ],
+  "timeouts": {
+    "handshake_timeout_ms": 3000,
+    "idle_timeout_ms": 0
+  },
+  "routes": {
+    "play.example.com": "127.0.0.1:25566",
+    "*.labs.example.com": "127.0.0.1:25567"
+  }
+}

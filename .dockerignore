@@ -5,8 +5,9 @@
 **/*.md
 
 # local/runtime files
-config.json
-prism.json
+prism.toml
+prism.yaml
+prism.yml
 
 # build output
 /bin

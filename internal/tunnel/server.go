@@ -12,7 +12,6 @@ import (
 )
 
 type ServerOptions struct {
-	Enabled    bool
 	ListenAddr string
 	Transport  string
 	AuthToken  string
@@ -29,8 +28,6 @@ type Server struct {
 
 	wg        sync.WaitGroup
 	listening atomic.Bool
-
-	idSeq atomic.Uint64
 }
 
 func NewServer(opts ServerOptions) (*Server, error) {
@@ -64,11 +61,8 @@ func (s *Server) Addr() net.Addr {
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	if !s.opts.Enabled {
-		return nil
-	}
 	if s.opts.ListenAddr == "" {
-		return fmt.Errorf("tunnel: listen_addr is required when tunnel is enabled")
+		return fmt.Errorf("tunnel: listen_addr is required")
 	}
 
 	ln, err := s.tr.Listen(s.opts.ListenAddr, TransportListenOptions{QUIC: s.opts.QUIC})
@@ -103,7 +97,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) handleSession(ctx context.Context, sess TransportSession) {
-	clientID := fmt.Sprintf("c-%d", s.idSeq.Add(1))
+	clientID := ""
+	if s.opts.Manager != nil {
+		clientID = s.opts.Manager.NextClientID("c")
+	} else {
+		clientID = fmt.Sprintf("c-%d", time.Now().UnixNano())
+	}
 	remote := ""
 	if ra := sess.RemoteAddr(); ra != nil {
 		remote = ra.String()

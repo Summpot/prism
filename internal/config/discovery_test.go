@@ -17,7 +17,7 @@ func TestDiscoverConfigPath_PriorityOrder(t *testing.T) {
 	}
 
 	// If multiple files exist, prism.toml should win.
-	write("prism.json")
+	write("prism.yml")
 	write("prism.yaml")
 	write("prism.toml")
 
@@ -31,19 +31,15 @@ func TestDiscoverConfigPath_PriorityOrder(t *testing.T) {
 	}
 }
 
-func TestDiscoverConfigPath_FallsBackToLegacyConfigJSON(t *testing.T) {
+func TestDiscoverConfigPath_DoesNotUseLegacyConfigJSON(t *testing.T) {
 	tmp := t.TempDir()
 	legacy := filepath.Join(tmp, "config.json")
 	if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	got, err := DiscoverConfigPath(tmp)
-	if err != nil {
-		t.Fatalf("DiscoverConfigPath: %v", err)
-	}
-	if got != legacy {
-		t.Fatalf("path=%q want %q", got, legacy)
+	if _, err := DiscoverConfigPath(tmp); err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 }
 

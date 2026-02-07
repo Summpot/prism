@@ -9,12 +9,11 @@ import (
 
 func TestFileConfigProvider_LoggingDefaults(t *testing.T) {
 	tmp := t.TempDir()
-	path := filepath.Join(tmp, "config.json")
-	if err := os.WriteFile(path, []byte(`{
-  "listen_addr": ":25565",
-  "admin_addr": ":8080",
-  "routes": {}
-}`), 0o600); err != nil {
+	path := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+listen_addr: ":25565"
+routes: {}
+`), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -42,19 +41,19 @@ func TestFileConfigProvider_LoggingDefaults(t *testing.T) {
 
 func TestFileConfigProvider_LoggingOverrides(t *testing.T) {
 	tmp := t.TempDir()
-	path := filepath.Join(tmp, "config.json")
-	if err := os.WriteFile(path, []byte(`{
-  "listen_addr": ":25565",
-  "admin_addr": ":8080",
-  "logging": {
-    "level": "debug",
-    "format": "text",
-    "output": "stdout",
-    "add_source": true,
-    "admin_buffer": {"enabled": true, "size": 12}
-  },
-  "routes": {}
-}`), 0o600); err != nil {
+	path := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+listen_addr: ":25565"
+logging:
+  level: "debug"
+  format: "text"
+  output: "stdout"
+  add_source: true
+  admin_buffer:
+    enabled: true
+    size: 12
+routes: {}
+`), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 

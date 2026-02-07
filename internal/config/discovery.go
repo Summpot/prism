@@ -13,10 +13,9 @@ import (
 //  1. prism.toml
 //  2. prism.yaml
 //  3. prism.yml
-//  4. prism.json
 //
-// For backward compatibility, if none of the prism.* files exist, it will fall
-// back to config.json.
+// JSON config files are intentionally not supported because JSON has no
+// comments and Prism configs are expected to be annotated.
 func DiscoverConfigPath(dir string) (string, error) {
 	candidates := CandidateConfigPaths(dir)
 	for _, p := range candidates {
@@ -24,12 +23,6 @@ func DiscoverConfigPath(dir string) (string, error) {
 			return p, nil
 		}
 	}
-
-	legacy := filepath.Join(dir, "config.json")
-	if isRegularFile(legacy) {
-		return legacy, nil
-	}
-
 	return "", fmt.Errorf("no config file found in %s; looked for %v", dir, candidates)
 }
 
@@ -45,14 +38,6 @@ func DiscoverConfigPathForBase(dir, base string) (string, error) {
 		}
 	}
 
-	// Legacy fallback only applies to the server.
-	if base == "prism" {
-		legacy := filepath.Join(dir, "config.json")
-		if isRegularFile(legacy) {
-			return legacy, nil
-		}
-	}
-
 	return "", fmt.Errorf("no config file found in %s; looked for %v", dir, candidates)
 }
 
@@ -65,7 +50,6 @@ func CandidateConfigPathsForBase(dir, base string) []string {
 		filepath.Join(dir, base+".toml"),
 		filepath.Join(dir, base+".yaml"),
 		filepath.Join(dir, base+".yml"),
-		filepath.Join(dir, base+".json"),
 	}
 }
 

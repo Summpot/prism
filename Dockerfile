@@ -31,7 +31,7 @@ RUN apk add --no-cache ca-certificates \
 
 COPY --from=build /out/prism /usr/local/bin/prism
 
-# Prism auto-detects prism.toml > prism.yaml > prism.yml > prism.json from CWD.
+# Prism auto-detects prism.toml > prism.yaml > prism.yml from CWD.
 WORKDIR /config
 
 EXPOSE 25565 8080

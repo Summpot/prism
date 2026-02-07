@@ -110,52 +110,62 @@ func RunPrism(ctx context.Context, configPath string) error {
 	slog.SetDefault(logrt.Logger())
 	logger := slog.Default()
 
-	if !cfg.ServerEnabled && !cfg.TunnelClient.Enabled {
-		return fmt.Errorf("config: nothing to run (set server_enabled=true and/or tunnel_client.enabled=true)")
+	proxyEnabled := strings.TrimSpace(cfg.ListenAddr) != ""
+	tunnelServerEnabled := len(cfg.Tunnel.Listeners) > 0
+	tunnelClientEnabled := cfg.Tunnel.Client != nil && strings.TrimSpace(cfg.Tunnel.Client.ServerAddr) != "" && len(cfg.Tunnel.Services) > 0
+	adminEnabled := strings.TrimSpace(cfg.AdminAddr) != "" && (proxyEnabled || tunnelServerEnabled)
+
+	if !proxyEnabled && !tunnelServerEnabled && !tunnelClientEnabled {
+		return fmt.Errorf("config: nothing to run (set listen_addr/routes and/or tunnel.listeners and/or tunnel.client+services)")
 	}
 	logger.Info(
 		"prism: starting",
 		"config", path,
-		"server_enabled", cfg.ServerEnabled,
-		"tunnel_client_enabled", cfg.TunnelClient.Enabled,
+		"proxy_enabled", proxyEnabled,
+		"tunnel_server_enabled", tunnelServerEnabled,
+		"tunnel_client_enabled", tunnelClientEnabled,
 		"listen_addr", cfg.ListenAddr,
 		"admin_addr", cfg.AdminAddr,
+		"tunnel_listeners", len(cfg.Tunnel.Listeners),
+		"tunnel_services", len(cfg.Tunnel.Services),
 	)
 
 	// Tunnel client (optional) is created once; config changes require restart.
-	if cfg.TunnelClient.Enabled {
-		services := make([]tunnel.RegisteredService, 0, len(cfg.TunnelClient.Services))
-		for _, s := range cfg.TunnelClient.Services {
-			services = append(services, tunnel.RegisteredService{Name: s.Name, LocalAddr: s.LocalAddr})
-		}
-		client, err := tunnel.NewClient(tunnel.ClientOptions{
-			ServerAddr:  cfg.TunnelClient.ServerAddr,
-			Transport:   cfg.TunnelClient.Transport,
-			AuthToken:   cfg.TunnelClient.AuthToken,
-			Services:    services,
-			DialTimeout: cfg.TunnelClient.DialTimeout,
-			BufSize:     cfg.BufferSize,
-			QUIC: tunnel.QUICDialOptions{
-				ServerName:         cfg.TunnelClient.QUIC.ServerName,
-				InsecureSkipVerify: cfg.TunnelClient.QUIC.InsecureSkipVerify,
-			},
-			Logger: logger,
-		})
-		if err != nil {
-			return err
-		}
-		go func() {
-			if err := client.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error("tunnel client error", "err", err)
-				cancel()
+	if cfg.Tunnel.Client != nil && strings.TrimSpace(cfg.Tunnel.Client.ServerAddr) != "" {
+		if len(cfg.Tunnel.Services) == 0 {
+			logger.Warn("tunnel client configured but no services are registered; tunnel client will not start")
+		} else {
+			services := make([]tunnel.RegisteredService, 0, len(cfg.Tunnel.Services))
+			for _, s := range cfg.Tunnel.Services {
+				services = append(services, tunnel.RegisteredService{Name: s.Name, LocalAddr: s.LocalAddr})
 			}
-		}()
+			client, err := tunnel.NewClient(tunnel.ClientOptions{
+				ServerAddr:  cfg.Tunnel.Client.ServerAddr,
+				Transport:   cfg.Tunnel.Client.Transport,
+				AuthToken:   cfg.Tunnel.AuthToken,
+				Services:    services,
+				DialTimeout: cfg.Tunnel.Client.DialTimeout,
+				BufSize:     cfg.BufferSize,
+				QUIC: tunnel.QUICDialOptions{
+					ServerName:         cfg.Tunnel.Client.QUIC.ServerName,
+					InsecureSkipVerify: cfg.Tunnel.Client.QUIC.InsecureSkipVerify,
+				},
+				Logger: logger,
+			})
+			if err != nil {
+				return err
+			}
+			go func() {
+				if err := client.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+					logger.Error("tunnel client error", "err", err)
+					cancel()
+				}
+			}()
+		}
 	}
 
-	if !cfg.ServerEnabled {
-		if cfg.Tunnel.Enabled {
-			logger.Warn("tunnel server is enabled but server_enabled=false; ignoring")
-		}
+	// Client-only mode: nothing else to start.
+	if !proxyEnabled && !tunnelServerEnabled && !adminEnabled {
 		<-runCtx.Done()
 		logger.Info("prism exited")
 		return nil
@@ -171,26 +181,27 @@ func RunPrism(ctx context.Context, configPath string) error {
 	h := proxy.NewSessionHandler(proxy.SessionHandlerOptions{})
 
 	// Tunnel server (optional) is created once; config changes require restart.
-	var tunnelSrv *tunnel.Server
+	var tunnelSrvs []*tunnel.Server
 	var tunnelMgr *tunnel.Manager
-	if cfg.Tunnel.Enabled {
-		srv, err := tunnel.NewServer(tunnel.ServerOptions{
-			Enabled:    cfg.Tunnel.Enabled,
-			ListenAddr: cfg.Tunnel.ListenAddr,
-			Transport:  cfg.Tunnel.Transport,
-			AuthToken:  cfg.Tunnel.AuthToken,
-			QUIC: tunnel.QUICOptions{
-				CertFile: cfg.Tunnel.QUIC.CertFile,
-				KeyFile:  cfg.Tunnel.QUIC.KeyFile,
-			},
-			Logger:  logger,
-			Manager: nil,
-		})
-		if err != nil {
-			return err
+	if tunnelServerEnabled {
+		tunnelMgr = tunnel.NewManager(logger)
+		for _, l := range cfg.Tunnel.Listeners {
+			srv, err := tunnel.NewServer(tunnel.ServerOptions{
+				ListenAddr: l.ListenAddr,
+				Transport:  l.Transport,
+				AuthToken:  cfg.Tunnel.AuthToken,
+				QUIC: tunnel.QUICOptions{
+					CertFile: l.QUIC.CertFile,
+					KeyFile:  l.QUIC.KeyFile,
+				},
+				Logger:  logger,
+				Manager: tunnelMgr,
+			})
+			if err != nil {
+				return err
+			}
+			tunnelSrvs = append(tunnelSrvs, srv)
 		}
-		tunnelSrv = srv
-		tunnelMgr = srv.Manager()
 	}
 
 	var currentClose parserCloser
@@ -199,15 +210,15 @@ func RunPrism(ctx context.Context, configPath string) error {
 			logger.Warn("logging config changed (restart required for format/output/buffer)")
 		}
 		if oldCfg != nil {
-			if oldCfg.ServerEnabled != newCfg.ServerEnabled {
-				logger.Warn("server_enabled changed (restart required)")
+			if oldCfg.ListenAddr != newCfg.ListenAddr {
+				logger.Warn("listen_addr changed (restart required)")
+			}
+			if oldCfg.AdminAddr != newCfg.AdminAddr {
+				logger.Warn("admin_addr changed (restart required)")
 			}
 			// Tunnel settings are not hot-reloadable.
-			if oldCfg.Tunnel.Enabled != newCfg.Tunnel.Enabled || oldCfg.Tunnel.ListenAddr != newCfg.Tunnel.ListenAddr || oldCfg.Tunnel.Transport != newCfg.Tunnel.Transport {
+			if !tunnelConfigEqual(oldCfg.Tunnel, newCfg.Tunnel) {
 				logger.Warn("tunnel config changed (restart required)")
-			}
-			if oldCfg.TunnelClient.Enabled != newCfg.TunnelClient.Enabled || oldCfg.TunnelClient.ServerAddr != newCfg.TunnelClient.ServerAddr || oldCfg.TunnelClient.Transport != newCfg.TunnelClient.Transport {
-				logger.Warn("tunnel_client config changed (restart required)")
 			}
 		}
 		if err := logrt.Apply(newCfg.Logging); err != nil {
@@ -270,7 +281,10 @@ func RunPrism(ctx context.Context, configPath string) error {
 		cm.Start(runCtx)
 	}
 
-	tcpServer := server.NewTCPServer(cfg.ListenAddr, h, metrics, logger)
+	var tcpServer *server.TCPServer
+	if proxyEnabled {
+		tcpServer = server.NewTCPServer(cfg.ListenAddr, h, metrics, logger)
+	}
 
 	admin := telemetry.NewAdminServer(telemetry.AdminServerOptions{
 		Addr:     cfg.AdminAddr,
@@ -281,52 +295,111 @@ func RunPrism(ctx context.Context, configPath string) error {
 			return cm.ReloadNow(ctx)
 		},
 		Health: func() bool {
-			return tcpServer.IsListening()
+			if proxyEnabled {
+				return tcpServer != nil && tcpServer.IsListening()
+			}
+			if len(tunnelSrvs) > 0 {
+				for _, s := range tunnelSrvs {
+					if s != nil && s.IsListening() {
+						return true
+					}
+				}
+				return false
+			}
+			return true
 		},
 	})
 
-	if tunnelSrv != nil {
+	for _, srv := range tunnelSrvs {
+		s := srv
 		go func() {
-			if err := tunnelSrv.ListenAndServe(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			if err := s.ListenAndServe(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error("tunnel server error", "err", err)
 				cancel()
 			}
 		}()
 	}
 
-	go func() {
-		if err := admin.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("admin server error", "err", err)
-			cancel()
-		}
-	}()
+	if adminEnabled {
+		go func() {
+			if err := admin.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("admin server error", "err", err)
+				cancel()
+			}
+		}()
+	}
 
-	go func() {
-		if err := tcpServer.ListenAndServe(runCtx); err != nil {
-			logger.Error("tcp server error", "err", err)
-			cancel()
-		}
-	}()
+	if proxyEnabled {
+		go func() {
+			if err := tcpServer.ListenAndServe(runCtx); err != nil {
+				logger.Error("tcp server error", "err", err)
+				cancel()
+			}
+		}()
+	}
 
 	<-runCtx.Done()
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShutdown()
 
-	if err := admin.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("admin shutdown", "err", err)
+	if adminEnabled {
+		if err := admin.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("admin shutdown", "err", err)
+		}
 	}
-	if err := tcpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("tcp shutdown", "err", err)
+	if tcpServer != nil {
+		if err := tcpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("tcp shutdown", "err", err)
+		}
 	}
-	if tunnelSrv != nil {
-		if err := tunnelSrv.Shutdown(shutdownCtx); err != nil {
+	for _, srv := range tunnelSrvs {
+		if srv == nil {
+			continue
+		}
+		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Warn("tunnel shutdown", "err", err)
 		}
 	}
 
 	logger.Info("prism exited")
 	return nil
+}
+
+func tunnelConfigEqual(a, b config.TunnelConfig) bool {
+	if a.AuthToken != b.AuthToken {
+		return false
+	}
+	if (a.Client == nil) != (b.Client == nil) {
+		return false
+	}
+	if a.Client != nil {
+		if a.Client.ServerAddr != b.Client.ServerAddr || a.Client.Transport != b.Client.Transport || a.Client.DialTimeout != b.Client.DialTimeout {
+			return false
+		}
+		if a.Client.QUIC != b.Client.QUIC {
+			return false
+		}
+	}
+	if len(a.Services) != len(b.Services) {
+		return false
+	}
+	for i := range a.Services {
+		if a.Services[i] != b.Services[i] {
+			return false
+		}
+	}
+	if len(a.Listeners) != len(b.Listeners) {
+		return false
+	}
+	for i := range a.Listeners {
+		la := a.Listeners[i]
+		lb := b.Listeners[i]
+		if la.ListenAddr != lb.ListenAddr || la.Transport != lb.Transport || la.QUIC != lb.QUIC {
+			return false
+		}
+	}
+	return true
 }
 
 func defaultUpstreamPortFromListenAddr(listenAddr string) int {

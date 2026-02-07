@@ -119,8 +119,15 @@ Tunnel mode is inspired by frp, but implemented with a much smaller surface area
 
 Prism is a single binary (`prism`) that can run one or both roles depending on configuration:
 
-* **Server role**: runs the regular Prism data plane (`listen_addr`) and admin plane (`admin_addr`), and optionally runs a tunnel listener.
-* **Client role**: runs a tunnel client loop that dials a remote Prism tunnel listener over an outbound connection, registers one or more services, and forwards tunneled streams to local TCP backends.
+* **Proxy server role**: runs the regular Prism data plane (`listen_addr`) and (optionally) the admin plane (`admin_addr`).
+* **Tunnel server role**: runs one or more tunnel listeners (`tunnel.listeners`) and maintains a registry of registered services.
+* **Tunnel client role**: runs a tunnel client loop (`tunnel.client`) that dials a remote tunnel server over an outbound connection, registers one or more services (`tunnel.services`), and forwards tunneled streams to local TCP backends.
+
+Role enablement is inferred from configuration:
+
+* Proxy server role is enabled when `listen_addr` is non-empty (or when `routes` is non-empty, in which case `listen_addr` defaults to `:25565`).
+* Tunnel server role is enabled when `tunnel.listeners` has one or more entries.
+* Tunnel client role is enabled when `tunnel.client.server_addr` is set and `tunnel.services` is non-empty.
 
 ### 8.2. Tunnel registry and routing
 
@@ -137,6 +144,8 @@ The tunnel link between the client role and the server role supports multiple tr
 * `quic`: QUIC with native stream multiplexing.
 
 Only the tunnel **transport** is affected by this choice; the Prism data plane remains a TCP listener.
+
+To support multiple transports simultaneously (similar to frp's server), Prism can run multiple tunnel listeners at the same time via `tunnel.listeners`.
 
 ### 8.4. Multiplexing model
 
@@ -241,10 +250,10 @@ The project will strictly adhere to the following testing pyramid:
 * The configuration is defined as a Go struct.
 * A `ConfigProvider` interface loads this struct. This allows the config to be loaded from a file (Production) or a static string/struct (Testing).
 * **Config file formats & naming**:
-  * Prism supports **TOML**, **YAML**, and **JSON** configuration files.
+  * Prism supports **TOML** and **YAML** configuration files.
   * By convention, config files are stored as `prism.*` in the working directory.
-  * When multiple are present, precedence is: `prism.toml` > `prism.yaml` > `prism.yml` > `prism.json`.
-  * For backward compatibility, `config.json` may still be used if no `prism.*` config exists.
+  * When multiple are present, precedence is: `prism.toml` > `prism.yaml` > `prism.yml`.
+  * JSON is intentionally not supported because it cannot contain comments and Prism configs are expected to be annotated.
 * **Zero-downtime config reload**:
   * Prism can reload configuration without stopping the TCP listener.
   * Existing sessions continue with the configuration snapshot they started with.

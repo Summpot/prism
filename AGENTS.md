@@ -74,10 +74,10 @@ Prism is a lightweight, high-performance TCP reverse proxy for the Minecraft pro
 
 ## Configuration changes
 
-- Configuration is JSON (see `config.example.json` / `config.json` and `internal/config`).
+- Configuration files are **TOML** or **YAML** (see `prism.example.toml` / `prism.example.yaml` and `internal/config`).
 - If you change the config schema:
   - Update `internal/config` structs and parsing.
-  - Update **both** `config.example.json` and `config.json` (or clearly justify why not).
+  - Update the example configs (`prism.example.toml`, `prism.example.yaml`) and any repo default config (if present).
   - Consider backward compatibility and defaults.
 
 ## Testing conventions (follow existing tests)

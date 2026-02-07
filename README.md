@@ -9,24 +9,23 @@ For the intended architecture, see `DESIGN.md`.
 
 ## Getting started
 
-Prism supports `.toml`, `.yaml`/`.yml`, and `.json` config files.
+Prism supports `.toml` and `.yaml`/`.yml` config files.
 
-- Run: `prism -config /path/to/prism.json`
-- Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml` > `prism.json`
+- Run: `prism -config /path/to/prism.toml`
+- Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml`
 
 This repo includes example configs:
 
 - `prism.example.toml`
 - `prism.example.yaml`
-- `prism.example.json`
 
 ### Run locally
 
-1. Copy an example config into your working directory (for example, `prism.json`)
+1. Copy an example config into your working directory (for example, `prism.toml`)
 2. Start Prism:
 
-- Windows (PowerShell): `./prism.exe -config prism.json`
-- Linux/macOS: `./prism -config prism.json`
+- Windows (PowerShell): `./prism.exe -config prism.toml`
+- Linux/macOS: `./prism -config prism.toml`
 
 ### Routing rules
 
@@ -46,18 +45,18 @@ Wildcard routes are `*.`-prefixed suffix matches (and more specific suffixes win
 
 If your upstream server has **no public IP**, you can run Prism in a “tunnel client” role on the private machine and have it create an outbound tunnel to Prism running in the “server” role.
 
-On the **public server** (server role):
+On the **public server**:
 
-- Ensure `server_enabled=true`.
-- Enable `tunnel` and choose a transport (`tcp`, `udp`, or `quic`).
+- Configure your proxy listener (`listen_addr`) and `routes` as usual.
+- Configure one or more tunnel listeners under `tunnel.listeners`.
+  - Multiple listeners let you serve multiple transports at the same time (similar to frp's server).
 - Point a route upstream at a tunnel service using `tunnel:<service>`.
 
-On the **private machine** (tunnel client role):
+On the **private machine**:
 
-- Set `server_enabled=false`.
-- Enable `tunnel_client`.
-- Configure the same `auth_token` (if set).
-- Register the service name and local address (TCP): `name -> local_addr`.
+- Configure `tunnel.client` to connect to the public server.
+- Configure the same `tunnel.auth_token` (if set).
+- Register services under `tunnel.services`: `name -> local_addr`.
 
 Transport notes:
 
@@ -71,7 +70,7 @@ This repository ships a `Dockerfile`, and the GitHub Actions workflow builds and
 
 - `ghcr.io/<owner>/<repo>` (for example `ghcr.io/Summpot/prism`)
 
-The container image uses `/config` as the working directory. If you mount a config file to `/config/prism.json` (or `prism.toml`/`prism.yaml`/`prism.yml`), Prism will auto-discover it without extra flags.
+The container image uses `/config` as the working directory. If you mount a config file to `/config/prism.toml` (or `prism.yaml`/`prism.yml`), Prism will auto-discover it without extra flags.
 
 ### Run (Linux/macOS)
 
@@ -82,7 +81,7 @@ The container image uses `/config` as the working directory. If you mount a conf
 docker run --rm \
   -p 25565:25565 \
   -p 8080:8080 \
-  -v "$PWD/prism.json:/config/prism.json:ro" \
+  -v "$PWD/prism.toml:/config/prism.toml:ro" \
   ghcr.io/Summpot/prism:latest
 ```
 
@@ -92,7 +91,7 @@ docker run --rm \
 docker run --rm `
   -p 25565:25565 `
   -p 8080:8080 `
-  -v "${PWD}\prism.json:/config/prism.json:ro" `
+  -v "${PWD}\prism.toml:/config/prism.toml:ro" `
   ghcr.io/Summpot/prism:latest
 ```
 

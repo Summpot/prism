@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Manager struct {
 	services map[string]string
 
 	logger *slog.Logger
+	idSeq  atomic.Uint64
 }
 
 type clientConn struct {
@@ -39,6 +41,13 @@ func NewManager(logger *slog.Logger) *Manager {
 		services: map[string]string{},
 		logger:   logger,
 	}
+}
+
+func (m *Manager) NextClientID(prefix string) string {
+	if prefix == "" {
+		prefix = "c"
+	}
+	return fmt.Sprintf("%s-%d", prefix, m.idSeq.Add(1))
 }
 
 func (m *Manager) RegisterClient(id string, sess TransportSession, services []RegisteredService) error {

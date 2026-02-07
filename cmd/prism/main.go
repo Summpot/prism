@@ -13,7 +13,7 @@ import (
 
 func main() {
 	var (
-		configPath = flag.String("config", "", "Path to Prism config file (.toml/.yaml/.yml/.json). If empty, auto-detect prism.toml > prism.yaml > prism.yml > prism.json")
+		configPath = flag.String("config", "", "Path to Prism config file (.toml/.yaml/.yml). If empty, auto-detect prism.toml > prism.yaml > prism.yml")
 	)
 	flag.Parse()
 

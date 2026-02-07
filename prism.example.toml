@@ -1,4 +1,3 @@
-server_enabled = true
 listen_addr = ":25565"
 admin_addr = ":8080"
 proxy_protocol_v2 = false
@@ -7,35 +6,39 @@ upstream_dial_timeout_ms = 5000
 max_header_bytes = 65536
 
 [tunnel]
-# Enable tunnel mode to allow tunnel clients to register services that can be
-# used as upstreams via the syntax: tunnel:<service>
-enabled = false
-listen_addr = ":7000"
-transport = "tcp" # tcp | udp | quic
 auth_token = ""
 
-[tunnel.quic]
+# Configure one or more tunnel listeners. Multiple listeners allow serving
+# multiple transports at the same time (similar to frp's server).
+
+[[tunnel.listeners]]
+listen_addr = ":7000"
+transport = "tcp" # tcp | udp | quic
+
+[[tunnel.listeners]]
+listen_addr = ":7001"
+transport = "quic"
+
+[tunnel.listeners.quic]
 # If transport=quic and cert/key are empty, prism will generate a self-signed
 # certificate at startup.
 cert_file = ""
 key_file = ""
 
-[tunnel_client]
-# When enabled, prism runs a tunnel client loop that dials a remote tunnel
-# server and registers one or more services.
-enabled = false
-server_addr = "127.0.0.1:7000"
-transport = "tcp" # tcp | udp | quic
-auth_token = ""
-dial_timeout_ms = 5000
-
-[tunnel_client.quic]
-server_name = "localhost"
-insecure_skip_verify = true
-
-[[tunnel_client.services]]
-name = "home-mc"
-local_addr = "127.0.0.1:25565"
+# Optional: tunnel client role (uncomment to enable).
+#
+# [tunnel.client]
+# server_addr = "127.0.0.1:7000"
+# transport = "tcp" # tcp | udp | quic
+# dial_timeout_ms = 5000
+#
+# [tunnel.client.quic]
+# server_name = "localhost"
+# insecure_skip_verify = true
+#
+# [[tunnel.services]]
+# name = "home-mc"
+# local_addr = "127.0.0.1:25565"
 
 [logging]
 level = "info"

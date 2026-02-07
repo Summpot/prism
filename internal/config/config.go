@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,20 +48,6 @@ type RoutingParserConfig struct {
 	MaxOutputLen int
 }
 
-type TunnelServerConfig struct {
-	Enabled    bool
-	ListenAddr string
-	// Transport is one of: tcp, udp, quic.
-	Transport string
-	// AuthToken is an optional shared secret required for prismc registration.
-	AuthToken string
-
-	QUIC struct {
-		CertFile string
-		KeyFile  string
-	}
-}
-
 type TunnelClientServiceConfig struct {
 	Name      string
 	LocalAddr string
@@ -73,26 +58,45 @@ type TunnelClientQUICConfig struct {
 	InsecureSkipVerify bool
 }
 
-type TunnelClientConfig struct {
-	Enabled    bool
-	ServerAddr string
-	Transport  string
-	AuthToken  string
-	Services   []TunnelClientServiceConfig
+type TunnelListenerConfig struct {
+	// ListenAddr is the address the tunnel server listens on.
+	//
+	// The presence of one or more listeners enables the tunnel server role.
+	ListenAddr string
+	// Transport is one of: tcp, udp, quic.
+	Transport string
+	QUIC      struct {
+		CertFile string
+		KeyFile  string
+	}
+}
 
+type TunnelClientConnectConfig struct {
+	ServerAddr  string
+	Transport   string
 	DialTimeout time.Duration
 	QUIC        TunnelClientQUICConfig
 }
 
-type Config struct {
-	// ServerEnabled controls whether Prism runs the data plane (TCP listener),
-	// admin server, routing, and (optional) tunnel server.
-	//
-	// When false, Prism can still run as a tunnel client only.
-	ServerEnabled bool
+type TunnelConfig struct {
+	// AuthToken is an optional shared secret required for client registration.
+	AuthToken string
 
+	// Listeners configures one or more tunnel server listeners. Multiple entries
+	// allow serving multiple transports at the same time (similar to frps).
+	Listeners []TunnelListenerConfig
+
+	// Client configures the tunnel client role (optional). If Client is present
+	// and Services is non-empty, Prism runs the tunnel client loop.
+	Client   *TunnelClientConnectConfig
+	Services []TunnelClientServiceConfig
+}
+
+type Config struct {
+	// ListenAddr enables the Prism proxy data-plane when non-empty.
 	ListenAddr string
-	AdminAddr  string
+	// AdminAddr enables the admin HTTP server when non-empty.
+	AdminAddr string
 
 	Logging LoggingConfig
 
@@ -110,14 +114,10 @@ type Config struct {
 	UpstreamDialTimeout time.Duration
 	Timeouts            Timeouts
 
-	// Tunnel enables reverse-connection mode (prismc -> prisms) for reaching
+	// Tunnel enables reverse-connection mode (client -> server) for reaching
 	// private backends without public IPs. Routes can target services via the
 	// upstream syntax tunnel:<service>.
-	Tunnel TunnelServerConfig
-
-	// TunnelClient runs a reverse tunnel client loop (like frp's client) that
-	// dials a remote tunnel server and registers services.
-	TunnelClient TunnelClientConfig
+	Tunnel TunnelConfig
 }
 
 type ConfigProvider interface {
@@ -137,69 +137,97 @@ func (p *FileConfigProvider) WatchPath() string {
 }
 
 type fileConfig struct {
-	ServerEnabled *bool  `json:"server_enabled" yaml:"server_enabled" toml:"server_enabled"`
-	ListenAddr    string `json:"listen_addr" yaml:"listen_addr" toml:"listen_addr"`
-	AdminAddr     string `json:"admin_addr" yaml:"admin_addr" toml:"admin_addr"`
+	// ServerEnabled is deprecated. It is kept for backward compatibility but
+	// should not be used in new configs.
+	ServerEnabled *bool `yaml:"server_enabled" toml:"server_enabled"`
+
+	ListenAddr *string `yaml:"listen_addr" toml:"listen_addr"`
+	AdminAddr  *string `yaml:"admin_addr" toml:"admin_addr"`
 	Logging       *struct {
-		Level       string `json:"level" yaml:"level" toml:"level"`
-		Format      string `json:"format" yaml:"format" toml:"format"`
-		Output      string `json:"output" yaml:"output" toml:"output"`
-		AddSource   bool   `json:"add_source" yaml:"add_source" toml:"add_source"`
+		Level       string `yaml:"level" toml:"level"`
+		Format      string `yaml:"format" toml:"format"`
+		Output      string `yaml:"output" toml:"output"`
+		AddSource   bool   `yaml:"add_source" toml:"add_source"`
 		AdminBuffer *struct {
-			Enabled bool `json:"enabled" yaml:"enabled" toml:"enabled"`
-			Size    int  `json:"size" yaml:"size" toml:"size"`
-		} `json:"admin_buffer" yaml:"admin_buffer" toml:"admin_buffer"`
-	} `json:"logging" yaml:"logging" toml:"logging"`
-	Routes map[string]string `json:"routes" yaml:"routes" toml:"routes"`
+			Enabled bool `yaml:"enabled" toml:"enabled"`
+			Size    int  `yaml:"size" toml:"size"`
+		} `yaml:"admin_buffer" toml:"admin_buffer"`
+	} `yaml:"logging" toml:"logging"`
+	Routes map[string]string `yaml:"routes" toml:"routes"`
 
 	RoutingParsers []struct {
-		Type         string `json:"type" yaml:"type" toml:"type"`
-		Name         string `json:"name" yaml:"name" toml:"name"`
-		Path         string `json:"path" yaml:"path" toml:"path"`
-		Function     string `json:"function" yaml:"function" toml:"function"`
-		MaxOutputLen int    `json:"max_output_len" yaml:"max_output_len" toml:"max_output_len"`
-	} `json:"routing_parsers" yaml:"routing_parsers" toml:"routing_parsers"`
-	MaxHeaderBytes int `json:"max_header_bytes" yaml:"max_header_bytes" toml:"max_header_bytes"`
+		Type         string `yaml:"type" toml:"type"`
+		Name         string `yaml:"name" toml:"name"`
+		Path         string `yaml:"path" toml:"path"`
+		Function     string `yaml:"function" toml:"function"`
+		MaxOutputLen int    `yaml:"max_output_len" toml:"max_output_len"`
+	} `yaml:"routing_parsers" toml:"routing_parsers"`
+	MaxHeaderBytes int `yaml:"max_header_bytes" toml:"max_header_bytes"`
 
 	Reload *struct {
-		Enabled        bool `json:"enabled" yaml:"enabled" toml:"enabled"`
-		PollIntervalMs int  `json:"poll_interval_ms" yaml:"poll_interval_ms" toml:"poll_interval_ms"`
-	} `json:"reload" yaml:"reload" toml:"reload"`
+		Enabled        bool `yaml:"enabled" toml:"enabled"`
+		PollIntervalMs int  `yaml:"poll_interval_ms" toml:"poll_interval_ms"`
+	} `yaml:"reload" toml:"reload"`
 
-	ProxyProtocolV2       bool `json:"proxy_protocol_v2" yaml:"proxy_protocol_v2" toml:"proxy_protocol_v2"`
-	BufferSize            int  `json:"buffer_size" yaml:"buffer_size" toml:"buffer_size"`
-	UpstreamDialTimeoutMs int  `json:"upstream_dial_timeout_ms" yaml:"upstream_dial_timeout_ms" toml:"upstream_dial_timeout_ms"`
+	ProxyProtocolV2       bool `yaml:"proxy_protocol_v2" toml:"proxy_protocol_v2"`
+	BufferSize            int  `yaml:"buffer_size" toml:"buffer_size"`
+	UpstreamDialTimeoutMs int  `yaml:"upstream_dial_timeout_ms" toml:"upstream_dial_timeout_ms"`
 	Timeouts              struct {
-		HandshakeTimeoutMs int `json:"handshake_timeout_ms" yaml:"handshake_timeout_ms" toml:"handshake_timeout_ms"`
-		IdleTimeoutMs      int `json:"idle_timeout_ms" yaml:"idle_timeout_ms" toml:"idle_timeout_ms"`
-	} `json:"timeouts" yaml:"timeouts" toml:"timeouts"`
+		HandshakeTimeoutMs int `yaml:"handshake_timeout_ms" toml:"handshake_timeout_ms"`
+		IdleTimeoutMs      int `yaml:"idle_timeout_ms" toml:"idle_timeout_ms"`
+	} `yaml:"timeouts" toml:"timeouts"`
 
 	Tunnel *struct {
-		Enabled    bool   `json:"enabled" yaml:"enabled" toml:"enabled"`
-		ListenAddr string `json:"listen_addr" yaml:"listen_addr" toml:"listen_addr"`
-		Transport  string `json:"transport" yaml:"transport" toml:"transport"`
-		AuthToken  string `json:"auth_token" yaml:"auth_token" toml:"auth_token"`
-		QUIC       *struct {
-			CertFile string `json:"cert_file" yaml:"cert_file" toml:"cert_file"`
-			KeyFile  string `json:"key_file" yaml:"key_file" toml:"key_file"`
-		} `json:"quic" yaml:"quic" toml:"quic"`
-	} `json:"tunnel" yaml:"tunnel" toml:"tunnel"`
-
-	TunnelClient *struct {
-		Enabled       bool   `json:"enabled" yaml:"enabled" toml:"enabled"`
-		ServerAddr    string `json:"server_addr" yaml:"server_addr" toml:"server_addr"`
-		Transport     string `json:"transport" yaml:"transport" toml:"transport"`
-		AuthToken     string `json:"auth_token" yaml:"auth_token" toml:"auth_token"`
-		DialTimeoutMs int    `json:"dial_timeout_ms" yaml:"dial_timeout_ms" toml:"dial_timeout_ms"`
-		QUIC          *struct {
-			ServerName         string `json:"server_name" yaml:"server_name" toml:"server_name"`
-			InsecureSkipVerify bool   `json:"insecure_skip_verify" yaml:"insecure_skip_verify" toml:"insecure_skip_verify"`
-		} `json:"quic" yaml:"quic" toml:"quic"`
+		// New schema.
+		AuthToken string `yaml:"auth_token" toml:"auth_token"`
+		Listeners []struct {
+			Transport  string `yaml:"transport" toml:"transport"`
+			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
+			QUIC       *struct {
+				CertFile string `yaml:"cert_file" toml:"cert_file"`
+				KeyFile  string `yaml:"key_file" toml:"key_file"`
+			} `yaml:"quic" toml:"quic"`
+		} `yaml:"listeners" toml:"listeners"`
+		Client *struct {
+			ServerAddr    string `yaml:"server_addr" toml:"server_addr"`
+			Transport     string `yaml:"transport" toml:"transport"`
+			DialTimeoutMs int    `yaml:"dial_timeout_ms" toml:"dial_timeout_ms"`
+			QUIC          *struct {
+				ServerName         string `yaml:"server_name" toml:"server_name"`
+				InsecureSkipVerify bool   `yaml:"insecure_skip_verify" toml:"insecure_skip_verify"`
+			} `yaml:"quic" toml:"quic"`
+		} `yaml:"client" toml:"client"`
 		Services []struct {
-			Name      string `json:"name" yaml:"name" toml:"name"`
-			LocalAddr string `json:"local_addr" yaml:"local_addr" toml:"local_addr"`
-		} `json:"services" yaml:"services" toml:"services"`
-	} `json:"tunnel_client" yaml:"tunnel_client" toml:"tunnel_client"`
+			Name      string `yaml:"name" toml:"name"`
+			LocalAddr string `yaml:"local_addr" toml:"local_addr"`
+		} `yaml:"services" toml:"services"`
+
+		// Legacy schema (deprecated): a single tunnel server listener.
+		Enabled    *bool  `yaml:"enabled" toml:"enabled"`
+		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
+		Transport  string `yaml:"transport" toml:"transport"`
+		QUIC       *struct {
+			CertFile string `yaml:"cert_file" toml:"cert_file"`
+			KeyFile  string `yaml:"key_file" toml:"key_file"`
+		} `yaml:"quic" toml:"quic"`
+	} `yaml:"tunnel" toml:"tunnel"`
+
+	// Legacy schema (deprecated): tunnel client block.
+	TunnelClient *struct {
+		Enabled       *bool  `yaml:"enabled" toml:"enabled"`
+		ServerAddr    string `yaml:"server_addr" toml:"server_addr"`
+		Transport     string `yaml:"transport" toml:"transport"`
+		AuthToken     string `yaml:"auth_token" toml:"auth_token"`
+		DialTimeoutMs int    `yaml:"dial_timeout_ms" toml:"dial_timeout_ms"`
+		QUIC          *struct {
+			ServerName         string `yaml:"server_name" toml:"server_name"`
+			InsecureSkipVerify bool   `yaml:"insecure_skip_verify" toml:"insecure_skip_verify"`
+		} `yaml:"quic" toml:"quic"`
+		Services []struct {
+			Name      string `yaml:"name" toml:"name"`
+			LocalAddr string `yaml:"local_addr" toml:"local_addr"`
+		} `yaml:"services" toml:"services"`
+	} `yaml:"tunnel_client" toml:"tunnel_client"`
 }
 
 func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
@@ -214,9 +242,8 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	cfg := &Config{
-		ServerEnabled: true,
-		ListenAddr:    fc.ListenAddr,
-		AdminAddr:     fc.AdminAddr,
+		ListenAddr: "",
+		AdminAddr:  "",
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",
@@ -236,20 +263,10 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			IdleTimeout:      time.Duration(fc.Timeouts.IdleTimeoutMs) * time.Millisecond,
 		},
 		Reload: ReloadConfig{},
-		Tunnel: TunnelServerConfig{
-			Enabled:   false,
-			Transport: "tcp",
-		},
-		TunnelClient: TunnelClientConfig{
-			Enabled:     false,
-			Transport:   "tcp",
-			DialTimeout: 5 * time.Second,
-			Services:    nil,
-		},
+		Tunnel: TunnelConfig{},
 	}
-	if fc.ServerEnabled != nil {
-		cfg.ServerEnabled = *fc.ServerEnabled
-	}
+
+	// --- Logging / reload / parsers ---
 	if fc.Logging != nil {
 		if fc.Logging.Level != "" {
 			cfg.Logging.Level = fc.Logging.Level
@@ -288,11 +305,185 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		}
 	}
 
-	if cfg.ListenAddr == "" {
-		cfg.ListenAddr = ":25565"
+	// --- Tunnel config (new schema) + legacy mapping ---
+	var tun TunnelConfig
+	if fc.Tunnel != nil {
+		tun.AuthToken = strings.TrimSpace(fc.Tunnel.AuthToken)
+
+		// New: multiple listeners.
+		if len(fc.Tunnel.Listeners) > 0 {
+			tun.Listeners = make([]TunnelListenerConfig, 0, len(fc.Tunnel.Listeners))
+			for _, l := range fc.Tunnel.Listeners {
+				la := strings.TrimSpace(l.ListenAddr)
+				if la == "" {
+					return nil, fmt.Errorf("config: tunnel.listeners entry missing listen_addr")
+				}
+				tr := strings.TrimSpace(l.Transport)
+				if tr == "" {
+					tr = "tcp"
+				}
+				lc := TunnelListenerConfig{ListenAddr: la, Transport: tr}
+				if l.QUIC != nil {
+					lc.QUIC.CertFile = strings.TrimSpace(l.QUIC.CertFile)
+					lc.QUIC.KeyFile = strings.TrimSpace(l.QUIC.KeyFile)
+				}
+				tun.Listeners = append(tun.Listeners, lc)
+			}
+		}
+
+		// New: client.
+		if fc.Tunnel.Client != nil {
+			cc := &TunnelClientConnectConfig{}
+			cc.ServerAddr = strings.TrimSpace(fc.Tunnel.Client.ServerAddr)
+			cc.Transport = strings.TrimSpace(fc.Tunnel.Client.Transport)
+			if cc.Transport == "" {
+				cc.Transport = "tcp"
+			}
+			if fc.Tunnel.Client.DialTimeoutMs > 0 {
+				cc.DialTimeout = time.Duration(fc.Tunnel.Client.DialTimeoutMs) * time.Millisecond
+			} else {
+				cc.DialTimeout = 5 * time.Second
+			}
+			if fc.Tunnel.Client.QUIC != nil {
+				cc.QUIC.ServerName = strings.TrimSpace(fc.Tunnel.Client.QUIC.ServerName)
+				cc.QUIC.InsecureSkipVerify = fc.Tunnel.Client.QUIC.InsecureSkipVerify
+			}
+			tun.Client = cc
+		}
+
+		if len(fc.Tunnel.Services) > 0 {
+			tun.Services = make([]TunnelClientServiceConfig, 0, len(fc.Tunnel.Services))
+			for _, s := range fc.Tunnel.Services {
+				name := strings.TrimSpace(s.Name)
+				addr := strings.TrimSpace(s.LocalAddr)
+				if name == "" || addr == "" {
+					continue
+				}
+				tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, LocalAddr: addr})
+			}
+		}
+
+		// Legacy: single tunnel server config (enabled/listen_addr/transport).
+		legacyOn := true
+		if fc.Tunnel.Enabled != nil {
+			legacyOn = *fc.Tunnel.Enabled
+		}
+		if legacyOn {
+			if la := strings.TrimSpace(fc.Tunnel.ListenAddr); la != "" {
+				tr := strings.TrimSpace(fc.Tunnel.Transport)
+				if tr == "" {
+					tr = "tcp"
+				}
+				lc := TunnelListenerConfig{ListenAddr: la, Transport: tr}
+				if fc.Tunnel.QUIC != nil {
+					lc.QUIC.CertFile = strings.TrimSpace(fc.Tunnel.QUIC.CertFile)
+					lc.QUIC.KeyFile = strings.TrimSpace(fc.Tunnel.QUIC.KeyFile)
+				}
+				tun.Listeners = append(tun.Listeners, lc)
+			}
+		}
 	}
-	if cfg.AdminAddr == "" {
-		cfg.AdminAddr = ":8080"
+
+	// Legacy: tunnel_client block.
+	if fc.TunnelClient != nil {
+		legacyOn := true
+		if fc.TunnelClient.Enabled != nil {
+			legacyOn = *fc.TunnelClient.Enabled
+		}
+		if legacyOn {
+			// Auth token.
+			if tun.AuthToken == "" {
+				tun.AuthToken = strings.TrimSpace(fc.TunnelClient.AuthToken)
+			}
+			// Client.
+			if tun.Client == nil {
+				cc := &TunnelClientConnectConfig{}
+				cc.ServerAddr = strings.TrimSpace(fc.TunnelClient.ServerAddr)
+				cc.Transport = strings.TrimSpace(fc.TunnelClient.Transport)
+				if cc.Transport == "" {
+					cc.Transport = "tcp"
+				}
+				if fc.TunnelClient.DialTimeoutMs > 0 {
+					cc.DialTimeout = time.Duration(fc.TunnelClient.DialTimeoutMs) * time.Millisecond
+				} else {
+					cc.DialTimeout = 5 * time.Second
+				}
+				if fc.TunnelClient.QUIC != nil {
+					cc.QUIC.ServerName = strings.TrimSpace(fc.TunnelClient.QUIC.ServerName)
+					cc.QUIC.InsecureSkipVerify = fc.TunnelClient.QUIC.InsecureSkipVerify
+				}
+				tun.Client = cc
+			}
+
+			// Services.
+			if len(fc.TunnelClient.Services) > 0 {
+				if tun.Services == nil {
+					tun.Services = make([]TunnelClientServiceConfig, 0, len(fc.TunnelClient.Services))
+				}
+				for _, s := range fc.TunnelClient.Services {
+					name := strings.TrimSpace(s.Name)
+					addr := strings.TrimSpace(s.LocalAddr)
+					if name == "" || addr == "" {
+						continue
+					}
+					tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, LocalAddr: addr})
+				}
+			}
+		}
+	}
+
+	cfg.Tunnel = tun
+
+	// --- Defaults and inferred enablement ---
+	var listenAddr string
+	if fc.ListenAddr != nil {
+		listenAddr = strings.TrimSpace(*fc.ListenAddr)
+	}
+	var adminAddr string
+	if fc.AdminAddr != nil {
+		adminAddr = strings.TrimSpace(*fc.AdminAddr)
+	}
+
+	// Infer whether the proxy server should run.
+	proxyEnabled := false
+	if fc.ServerEnabled != nil {
+		// Deprecated explicit override.
+		proxyEnabled = *fc.ServerEnabled
+	} else {
+		proxyEnabled = listenAddr != "" || len(cfg.Routes) > 0
+	}
+
+	// Prevent confusing states: routes imply a listener.
+	if len(cfg.Routes) > 0 && fc.ListenAddr != nil && listenAddr == "" {
+		return nil, fmt.Errorf("config: routes are set but listen_addr is empty")
+	}
+
+	if proxyEnabled {
+		if listenAddr == "" {
+			listenAddr = ":25565"
+		}
+		cfg.ListenAddr = listenAddr
+		if fc.AdminAddr == nil {
+			cfg.AdminAddr = ":8080"
+		} else {
+			// Explicit empty disables admin.
+			cfg.AdminAddr = adminAddr
+		}
+	} else {
+		// Allow admin (or listener) to be explicitly configured even when the
+		// proxy server is disabled (e.g. tunnel-server-only setups).
+		if fc.ListenAddr != nil {
+			cfg.ListenAddr = listenAddr
+		}
+		if fc.AdminAddr != nil {
+			cfg.AdminAddr = adminAddr
+		}
+
+		// If the tunnel server is configured and admin_addr was not specified,
+		// keep the old behavior of defaulting the admin server on server roles.
+		if cfg.AdminAddr == "" && fc.AdminAddr == nil && len(cfg.Tunnel.Listeners) > 0 {
+			cfg.AdminAddr = ":8080"
+		}
 	}
 	// Logging defaults are set above.
 	if cfg.BufferSize <= 0 {
@@ -321,56 +512,12 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		}
 	}
 
-	if fc.Tunnel != nil {
-		cfg.Tunnel.Enabled = fc.Tunnel.Enabled
-		if fc.Tunnel.ListenAddr != "" {
-			cfg.Tunnel.ListenAddr = fc.Tunnel.ListenAddr
-		}
-		if fc.Tunnel.Transport != "" {
-			cfg.Tunnel.Transport = fc.Tunnel.Transport
-		}
-		cfg.Tunnel.AuthToken = fc.Tunnel.AuthToken
-		if fc.Tunnel.QUIC != nil {
-			cfg.Tunnel.QUIC.CertFile = fc.Tunnel.QUIC.CertFile
-			cfg.Tunnel.QUIC.KeyFile = fc.Tunnel.QUIC.KeyFile
-		}
-	}
-
-	if fc.TunnelClient != nil {
-		cfg.TunnelClient.Enabled = fc.TunnelClient.Enabled
-		cfg.TunnelClient.ServerAddr = strings.TrimSpace(fc.TunnelClient.ServerAddr)
-		if strings.TrimSpace(fc.TunnelClient.Transport) != "" {
-			cfg.TunnelClient.Transport = strings.TrimSpace(fc.TunnelClient.Transport)
-		}
-		cfg.TunnelClient.AuthToken = fc.TunnelClient.AuthToken
-		if fc.TunnelClient.DialTimeoutMs > 0 {
-			cfg.TunnelClient.DialTimeout = time.Duration(fc.TunnelClient.DialTimeoutMs) * time.Millisecond
-		}
-		if fc.TunnelClient.QUIC != nil {
-			cfg.TunnelClient.QUIC.ServerName = strings.TrimSpace(fc.TunnelClient.QUIC.ServerName)
-			cfg.TunnelClient.QUIC.InsecureSkipVerify = fc.TunnelClient.QUIC.InsecureSkipVerify
-		}
-		if len(fc.TunnelClient.Services) > 0 {
-			cfg.TunnelClient.Services = make([]TunnelClientServiceConfig, 0, len(fc.TunnelClient.Services))
-			for _, s := range fc.TunnelClient.Services {
-				name := strings.TrimSpace(s.Name)
-				addr := strings.TrimSpace(s.LocalAddr)
-				if name == "" || addr == "" {
-					continue
-				}
-				cfg.TunnelClient.Services = append(cfg.TunnelClient.Services, TunnelClientServiceConfig{Name: name, LocalAddr: addr})
-			}
-		}
-	}
-
 	return cfg, nil
 }
 
 func unmarshalConfigFile(path string, data []byte, dst any) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case ".json":
-		return json.Unmarshal(data, dst)
 	case ".yaml", ".yml":
 		return yaml.Unmarshal(data, dst)
 	case ".toml":
@@ -378,6 +525,6 @@ func unmarshalConfigFile(path string, data []byte, dst any) error {
 		_, err := toml.Decode(string(data), dst)
 		return err
 	default:
-		return fmt.Errorf("unsupported config extension %q (expected .toml, .yaml/.yml, or .json)", ext)
+		return fmt.Errorf("unsupported config extension %q (expected .toml or .yaml/.yml)", ext)
 	}
 }

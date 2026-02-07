@@ -10,7 +10,7 @@ import (
 
 func TestManager_ReloadsOnFileChange(t *testing.T) {
 	tmp := t.TempDir()
-	path := filepath.Join(tmp, "config.json")
+	path := filepath.Join(tmp, "config.yaml")
 
 	write := func(body string) {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -20,11 +20,10 @@ func TestManager_ReloadsOnFileChange(t *testing.T) {
 		time.Sleep(15 * time.Millisecond)
 	}
 
-	write(`{
-  "listen_addr": ":25565",
-  "admin_addr": ":8080",
-  "routes": {"a.example.com": "127.0.0.1:1"}
-}`)
+	write(`
+listen_addr: ":25565"
+routes: {"a.example.com": "127.0.0.1:1"}
+`)
 
 	p := NewFileConfigProvider(path)
 	m := NewManager(p, ManagerOptions{PollInterval: 10 * time.Millisecond})
@@ -45,11 +44,10 @@ func TestManager_ReloadsOnFileChange(t *testing.T) {
 	})
 	m.Start(ctx)
 
-	write(`{
-  "listen_addr": ":25565",
-  "admin_addr": ":8080",
-  "routes": {"b.example.com": "127.0.0.1:2"}
-}`)
+	write(`
+listen_addr: ":25565"
+routes: {"b.example.com": "127.0.0.1:2"}
+`)
 
 	select {
 	case cfg := <-changedCh:

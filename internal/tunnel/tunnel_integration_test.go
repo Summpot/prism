@@ -43,7 +43,6 @@ func TestTunnelTCPForwarding(t *testing.T) {
 
 	mgr := NewManager(nil)
 	srv, err := NewServer(ServerOptions{
-		Enabled:    true,
 		ListenAddr: "127.0.0.1:0",
 		Transport:  "tcp",
 		AuthToken:  "secret",

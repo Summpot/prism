@@ -87,13 +87,15 @@ func RunPrism(ctx context.Context, configPath string) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	path := strings.TrimSpace(configPath)
-	if path == "" {
-		p, err := config.DiscoverConfigPath(".")
-		if err != nil {
-			return fmt.Errorf("discover config: %w", err)
-		}
-		path = p
+	resolved, err := config.ResolveConfigPath(configPath)
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	path := resolved.Path
+
+	created, err := config.EnsureConfigFile(path)
+	if err != nil {
+		return fmt.Errorf("ensure config file: %w", err)
 	}
 
 	provider := config.NewFileConfigProvider(path)
@@ -109,6 +111,9 @@ func RunPrism(ctx context.Context, configPath string) error {
 	defer func() { _ = logrt.Close() }()
 	slog.SetDefault(logrt.Logger())
 	logger := slog.Default()
+	if created {
+		logger.Warn("config: created new config file", "path", path, "source", resolved.Source)
+	}
 
 	proxyEnabled := strings.TrimSpace(cfg.ListenAddr) != ""
 	if len(cfg.Listeners) > 0 {
@@ -119,7 +124,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 	adminEnabled := strings.TrimSpace(cfg.AdminAddr) != "" && (proxyEnabled || tunnelServerEnabled)
 
 	if !proxyEnabled && !tunnelServerEnabled && !tunnelClientEnabled {
-		return fmt.Errorf("config: nothing to run (set listen_addr/routes and/or tunnel.listeners and/or tunnel.client+services)")
+		return fmt.Errorf("config: nothing to run (set listen_addr/routes and/or tunnel.endpoints (legacy tunnel.listeners) and/or tunnel.client+services)")
 	}
 	logger.Info(
 		"prism: starting",

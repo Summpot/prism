@@ -2,7 +2,7 @@
 
 Prism is a lightweight, high-performance TCP reverse proxy for the Minecraft protocol (L4). It routes incoming connections to different upstreams based on the hostname extracted from the first bytes of the stream (Minecraft handshake / TLS SNI / WASM).
 
-- **Data plane**: TCP listener (default `:25565`)
+- **Data plane**: TCP listener (commonly `:25565`)
 - **Control plane**: HTTP admin server (default `:8080`)
 
 For the intended architecture, see `DESIGN.md`.
@@ -12,7 +12,13 @@ For the intended architecture, see `DESIGN.md`.
 Prism supports `.toml` and `.yaml`/`.yml` config files.
 
 - Run: `prism -config /path/to/prism.toml`
+- Or set an env var: `PRISM_CONFIG=/path/to/prism.toml prism`
 - Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml`
+- Fallback default path (OS-specific): `${UserConfigDir}/prism/prism.toml` (based on Go's `os.UserConfigDir()`)
+
+If the resolved config path does not exist, Prism will create a runnable default config file at that path and continue starting.
+
+The auto-generated default config starts Prism in **tunnel server** mode (frp-like): it listens on `:7000/tcp` and waits for tunnel clients to connect and register services.
 
 This repo includes example configs:
 
@@ -48,7 +54,7 @@ If your upstream server has **no public IP**, you can run Prism in a “tunnel c
 On the **public server**:
 
 - Configure your proxy listener (`listen_addr`) and `routes` as usual.
-- Configure one or more tunnel listeners under `tunnel.listeners`.
+- Configure one or more tunnel endpoints under `tunnel.endpoints` (preferred; `tunnel.listeners` is legacy).
   - Multiple listeners let you serve multiple transports at the same time (similar to frp's server).
 - Point a route upstream at a tunnel service using `tunnel:<service>`.
 

@@ -34,7 +34,7 @@ tunnel:
   # When true, prisms will automatically open server-side listeners for tunnel
   # services that specify remote_addr (frp-like behavior).
   auto_listen_services: true
-  listeners:
+  endpoints:
     - listen_addr: ":7000"
       transport: "tcp" # tcp | udp | quic
     - listen_addr: ":7001"

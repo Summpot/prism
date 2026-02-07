@@ -28,18 +28,18 @@ auth_token = ""
 # services that specify remote_addr (frp-like behavior).
 auto_listen_services = true
 
-# Configure one or more tunnel listeners. Multiple listeners allow serving
+# Configure one or more tunnel endpoints. Multiple endpoints allow serving
 # multiple transports at the same time (similar to frp's server).
 
-[[tunnel.listeners]]
+[[tunnel.endpoints]]
 listen_addr = ":7000"
 transport = "tcp" # tcp | udp | quic
 
-[[tunnel.listeners]]
+[[tunnel.endpoints]]
 listen_addr = ":7001"
 transport = "quic"
 
-[tunnel.listeners.quic]
+[tunnel.endpoints.quic]
 # If transport=quic and cert/key are empty, prism will generate a self-signed
 # certificate at startup.
 cert_file = ""

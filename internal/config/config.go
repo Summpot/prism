@@ -111,8 +111,11 @@ type TunnelConfig struct {
 	// automatically open a server-side listener for that service.
 	AutoListenServices bool
 
-	// Listeners configures one or more tunnel server listeners. Multiple entries
-	// allow serving multiple transports at the same time (similar to frps).
+	// Listeners configures one or more tunnel server endpoints (server-side
+	// acceptors for tunnel clients). Multiple entries allow serving multiple
+	// transports at the same time (similar to frps).
+	//
+	// Preferred config key: tunnel.endpoints (legacy: tunnel.listeners).
 	Listeners []TunnelListenerConfig
 
 	// Client configures the tunnel client role (optional). If Client is present
@@ -221,7 +224,17 @@ type fileConfig struct {
 		// New schema.
 		AuthToken          string `yaml:"auth_token" toml:"auth_token"`
 		AutoListenServices *bool  `yaml:"auto_listen_services" toml:"auto_listen_services"`
-		Listeners          []struct {
+		// Endpoints is the preferred name for tunnel server listeners to avoid
+		// confusion with top-level proxy listeners.
+		Endpoints []struct {
+			Transport  string `yaml:"transport" toml:"transport"`
+			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
+			QUIC       *struct {
+				CertFile string `yaml:"cert_file" toml:"cert_file"`
+				KeyFile  string `yaml:"key_file" toml:"key_file"`
+			} `yaml:"quic" toml:"quic"`
+		} `yaml:"endpoints" toml:"endpoints"`
+		Listeners []struct {
 			Transport  string `yaml:"transport" toml:"transport"`
 			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
 			QUIC       *struct {
@@ -360,13 +373,17 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			tun.AutoListenServices = *fc.Tunnel.AutoListenServices
 		}
 
-		// New: multiple listeners.
-		if len(fc.Tunnel.Listeners) > 0 {
-			tun.Listeners = make([]TunnelListenerConfig, 0, len(fc.Tunnel.Listeners))
-			for _, l := range fc.Tunnel.Listeners {
+		// New: multiple tunnel server endpoints (preferred key: tunnel.endpoints).
+		listeners := fc.Tunnel.Listeners
+		if len(fc.Tunnel.Endpoints) > 0 {
+			listeners = fc.Tunnel.Endpoints
+		}
+		if len(listeners) > 0 {
+			tun.Listeners = make([]TunnelListenerConfig, 0, len(listeners))
+			for _, l := range listeners {
 				la := strings.TrimSpace(l.ListenAddr)
 				if la == "" {
-					return nil, fmt.Errorf("config: tunnel.listeners entry missing listen_addr")
+					return nil, fmt.Errorf("config: tunnel.endpoints entry missing listen_addr")
 				}
 				tr := strings.TrimSpace(l.Transport)
 				if tr == "" {

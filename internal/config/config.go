@@ -170,7 +170,7 @@ func (p *FileConfigProvider) WatchPath() string {
 }
 
 type fileConfig struct {
-	Listeners  []struct {
+	Listeners []struct {
 		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
 		Protocol   string `yaml:"protocol" toml:"protocol"`
 		Upstream   string `yaml:"upstream" toml:"upstream"`
@@ -254,7 +254,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 
 	cfg := &Config{
 		Listeners: nil,
-		AdminAddr:  "",
+		AdminAddr: "",
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",

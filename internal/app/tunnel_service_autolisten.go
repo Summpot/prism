@@ -14,9 +14,9 @@ import (
 )
 
 type tunnelServiceAutoListener struct {
-	ctx    context.Context
-	logger *slog.Logger
-	tm     *tunnel.Manager
+	ctx     context.Context
+	logger  *slog.Logger
+	tm      *tunnel.Manager
 	metrics any
 
 	runtimeMu sync.RWMutex
@@ -29,7 +29,7 @@ type tunnelServiceAutoListener struct {
 }
 
 type tunnelServiceListener struct {
-	name string
+	name  string
 	proto string
 	addr  string
 

@@ -178,12 +178,12 @@ type fileConfig struct {
 	ListenAddr *string `yaml:"listen_addr" toml:"listen_addr"`
 	Listeners  []struct {
 		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
-		Protocol  string `yaml:"protocol" toml:"protocol"`
-		Mode      string `yaml:"mode" toml:"mode"`
-		Upstream  string `yaml:"upstream" toml:"upstream"`
+		Protocol   string `yaml:"protocol" toml:"protocol"`
+		Mode       string `yaml:"mode" toml:"mode"`
+		Upstream   string `yaml:"upstream" toml:"upstream"`
 	} `yaml:"listeners" toml:"listeners"`
-	AdminAddr  *string `yaml:"admin_addr" toml:"admin_addr"`
-	Logging    *struct {
+	AdminAddr *string `yaml:"admin_addr" toml:"admin_addr"`
+	Logging   *struct {
 		Level       string `yaml:"level" toml:"level"`
 		Format      string `yaml:"format" toml:"format"`
 		Output      string `yaml:"output" toml:"output"`
@@ -219,9 +219,9 @@ type fileConfig struct {
 
 	Tunnel *struct {
 		// New schema.
-		AuthToken string `yaml:"auth_token" toml:"auth_token"`
-		AutoListenServices *bool `yaml:"auto_listen_services" toml:"auto_listen_services"`
-		Listeners []struct {
+		AuthToken          string `yaml:"auth_token" toml:"auth_token"`
+		AutoListenServices *bool  `yaml:"auto_listen_services" toml:"auto_listen_services"`
+		Listeners          []struct {
 			Transport  string `yaml:"transport" toml:"transport"`
 			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
 			QUIC       *struct {

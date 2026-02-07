@@ -143,7 +143,7 @@ type fileConfig struct {
 
 	ListenAddr *string `yaml:"listen_addr" toml:"listen_addr"`
 	AdminAddr  *string `yaml:"admin_addr" toml:"admin_addr"`
-	Logging       *struct {
+	Logging    *struct {
 		Level       string `yaml:"level" toml:"level"`
 		Format      string `yaml:"format" toml:"format"`
 		Output      string `yaml:"output" toml:"output"`

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -116,8 +117,6 @@ type TunnelConfig struct {
 	// Listeners configures one or more tunnel server endpoints (server-side
 	// acceptors for tunnel clients). Multiple entries allow serving multiple
 	// transports at the same time (similar to frps).
-	//
-	// Preferred config key: tunnel.endpoints (legacy: tunnel.listeners).
 	Listeners []TunnelListenerConfig
 
 	// Client configures the tunnel client role (optional). If Client is present
@@ -127,11 +126,6 @@ type TunnelConfig struct {
 }
 
 type Config struct {
-	// ListenAddr is a legacy single-listener configuration.
-	//
-	// Prefer Listeners for new configs. When listen_addr is set (or inferred),
-	// it is mapped into Listeners as a TCP routing listener.
-	ListenAddr string
 	// Listeners configures one or more proxy listeners (multi-port / multi-protocol).
 	Listeners []ProxyListenerConfig
 	// AdminAddr enables the admin HTTP server when non-empty.
@@ -176,11 +170,6 @@ func (p *FileConfigProvider) WatchPath() string {
 }
 
 type fileConfig struct {
-	// ServerEnabled is deprecated. It is kept for backward compatibility but
-	// should not be used in new configs.
-	ServerEnabled *bool `yaml:"server_enabled" toml:"server_enabled"`
-
-	ListenAddr *string `yaml:"listen_addr" toml:"listen_addr"`
 	Listeners  []struct {
 		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
 		Protocol   string `yaml:"protocol" toml:"protocol"`
@@ -222,11 +211,9 @@ type fileConfig struct {
 	} `yaml:"timeouts" toml:"timeouts"`
 
 	Tunnel *struct {
-		// New schema.
 		AuthToken          string `yaml:"auth_token" toml:"auth_token"`
 		AutoListenServices *bool  `yaml:"auto_listen_services" toml:"auto_listen_services"`
-		// Endpoints is the preferred name for tunnel server listeners to avoid
-		// confusion with top-level proxy listeners.
+		// Endpoints configures one or more tunnel server endpoints.
 		Endpoints []struct {
 			Transport  string `yaml:"transport" toml:"transport"`
 			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
@@ -235,14 +222,6 @@ type fileConfig struct {
 				KeyFile  string `yaml:"key_file" toml:"key_file"`
 			} `yaml:"quic" toml:"quic"`
 		} `yaml:"endpoints" toml:"endpoints"`
-		Listeners []struct {
-			Transport  string `yaml:"transport" toml:"transport"`
-			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
-			QUIC       *struct {
-				CertFile string `yaml:"cert_file" toml:"cert_file"`
-				KeyFile  string `yaml:"key_file" toml:"key_file"`
-			} `yaml:"quic" toml:"quic"`
-		} `yaml:"listeners" toml:"listeners"`
 		Client *struct {
 			ServerAddr    string `yaml:"server_addr" toml:"server_addr"`
 			Transport     string `yaml:"transport" toml:"transport"`
@@ -259,36 +238,7 @@ type fileConfig struct {
 			RouteOnly  bool   `yaml:"route_only" toml:"route_only"`
 			RemoteAddr string `yaml:"remote_addr" toml:"remote_addr"`
 		} `yaml:"services" toml:"services"`
-
-		// Legacy schema (deprecated): a single tunnel server listener.
-		Enabled    *bool  `yaml:"enabled" toml:"enabled"`
-		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
-		Transport  string `yaml:"transport" toml:"transport"`
-		QUIC       *struct {
-			CertFile string `yaml:"cert_file" toml:"cert_file"`
-			KeyFile  string `yaml:"key_file" toml:"key_file"`
-		} `yaml:"quic" toml:"quic"`
 	} `yaml:"tunnel" toml:"tunnel"`
-
-	// Legacy schema (deprecated): tunnel client block.
-	TunnelClient *struct {
-		Enabled       *bool  `yaml:"enabled" toml:"enabled"`
-		ServerAddr    string `yaml:"server_addr" toml:"server_addr"`
-		Transport     string `yaml:"transport" toml:"transport"`
-		AuthToken     string `yaml:"auth_token" toml:"auth_token"`
-		DialTimeoutMs int    `yaml:"dial_timeout_ms" toml:"dial_timeout_ms"`
-		QUIC          *struct {
-			ServerName         string `yaml:"server_name" toml:"server_name"`
-			InsecureSkipVerify bool   `yaml:"insecure_skip_verify" toml:"insecure_skip_verify"`
-		} `yaml:"quic" toml:"quic"`
-		Services []struct {
-			Name       string `yaml:"name" toml:"name"`
-			Proto      string `yaml:"proto" toml:"proto"`
-			LocalAddr  string `yaml:"local_addr" toml:"local_addr"`
-			RouteOnly  bool   `yaml:"route_only" toml:"route_only"`
-			RemoteAddr string `yaml:"remote_addr" toml:"remote_addr"`
-		} `yaml:"services" toml:"services"`
-	} `yaml:"tunnel_client" toml:"tunnel_client"`
 }
 
 func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
@@ -303,8 +253,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr: "",
-		Listeners:  nil,
+		Listeners: nil,
 		AdminAddr:  "",
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -367,7 +316,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		}
 	}
 
-	// --- Tunnel config (new schema) + legacy mapping ---
+	// --- Tunnel config ---
 	var tun TunnelConfig
 	if fc.Tunnel != nil {
 		tun.AuthToken = strings.TrimSpace(fc.Tunnel.AuthToken)
@@ -375,15 +324,9 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		if fc.Tunnel.AutoListenServices != nil {
 			tun.AutoListenServices = *fc.Tunnel.AutoListenServices
 		}
-
-		// New: multiple tunnel server endpoints (preferred key: tunnel.endpoints).
-		listeners := fc.Tunnel.Listeners
 		if len(fc.Tunnel.Endpoints) > 0 {
-			listeners = fc.Tunnel.Endpoints
-		}
-		if len(listeners) > 0 {
-			tun.Listeners = make([]TunnelListenerConfig, 0, len(listeners))
-			for _, l := range listeners {
+			tun.Listeners = make([]TunnelListenerConfig, 0, len(fc.Tunnel.Endpoints))
+			for _, l := range fc.Tunnel.Endpoints {
 				la := strings.TrimSpace(l.ListenAddr)
 				if la == "" {
 					return nil, fmt.Errorf("config: tunnel.endpoints entry missing listen_addr")
@@ -449,91 +392,6 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 				tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RouteOnly: routeOnly, RemoteAddr: remote})
 			}
 		}
-
-		// Legacy: single tunnel server config (enabled/listen_addr/transport).
-		legacyOn := true
-		if fc.Tunnel.Enabled != nil {
-			legacyOn = *fc.Tunnel.Enabled
-		}
-		if legacyOn {
-			if la := strings.TrimSpace(fc.Tunnel.ListenAddr); la != "" {
-				tr := strings.TrimSpace(fc.Tunnel.Transport)
-				if tr == "" {
-					tr = "tcp"
-				}
-				lc := TunnelListenerConfig{ListenAddr: la, Transport: tr}
-				if fc.Tunnel.QUIC != nil {
-					lc.QUIC.CertFile = strings.TrimSpace(fc.Tunnel.QUIC.CertFile)
-					lc.QUIC.KeyFile = strings.TrimSpace(fc.Tunnel.QUIC.KeyFile)
-				}
-				tun.Listeners = append(tun.Listeners, lc)
-			}
-		}
-	}
-
-	// Legacy: tunnel_client block.
-	if fc.TunnelClient != nil {
-		legacyOn := true
-		if fc.TunnelClient.Enabled != nil {
-			legacyOn = *fc.TunnelClient.Enabled
-		}
-		if legacyOn {
-			// Auth token.
-			if tun.AuthToken == "" {
-				tun.AuthToken = strings.TrimSpace(fc.TunnelClient.AuthToken)
-			}
-			// Client.
-			if tun.Client == nil {
-				cc := &TunnelClientConnectConfig{}
-				cc.ServerAddr = strings.TrimSpace(fc.TunnelClient.ServerAddr)
-				cc.Transport = strings.TrimSpace(fc.TunnelClient.Transport)
-				if cc.Transport == "" {
-					cc.Transport = "tcp"
-				}
-				if fc.TunnelClient.DialTimeoutMs > 0 {
-					cc.DialTimeout = time.Duration(fc.TunnelClient.DialTimeoutMs) * time.Millisecond
-				} else {
-					cc.DialTimeout = 5 * time.Second
-				}
-				if fc.TunnelClient.QUIC != nil {
-					cc.QUIC.ServerName = strings.TrimSpace(fc.TunnelClient.QUIC.ServerName)
-					cc.QUIC.InsecureSkipVerify = fc.TunnelClient.QUIC.InsecureSkipVerify
-				}
-				tun.Client = cc
-			}
-
-			// Services.
-			if len(fc.TunnelClient.Services) > 0 {
-				if tun.Services == nil {
-					tun.Services = make([]TunnelClientServiceConfig, 0, len(fc.TunnelClient.Services))
-				}
-				for _, s := range fc.TunnelClient.Services {
-					name := strings.TrimSpace(s.Name)
-					proto := strings.TrimSpace(strings.ToLower(s.Proto))
-					addr := strings.TrimSpace(s.LocalAddr)
-					remote := strings.TrimSpace(s.RemoteAddr)
-					routeOnly := s.RouteOnly
-					if name == "" || addr == "" {
-						continue
-					}
-					if routeOnly && remote != "" {
-						return nil, fmt.Errorf("config: tunnel_client.services entry %q sets route_only=true but also sets remote_addr", name)
-					}
-					if routeOnly {
-						remote = ""
-					}
-					if proto == "" {
-						proto = "tcp"
-					}
-					switch proto {
-					case "tcp", "udp":
-					default:
-						return nil, fmt.Errorf("config: tunnel_client.services entry %q has invalid proto %q", name, proto)
-					}
-					tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RouteOnly: routeOnly, RemoteAddr: remote})
-				}
-			}
-		}
 	}
 
 	cfg.Tunnel = tun
@@ -570,50 +428,20 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 
 	// --- Defaults and inferred enablement ---
-	var listenAddr string
-	if fc.ListenAddr != nil {
-		listenAddr = strings.TrimSpace(*fc.ListenAddr)
-	}
 	var adminAddr string
 	if fc.AdminAddr != nil {
 		adminAddr = strings.TrimSpace(*fc.AdminAddr)
 	}
 
 	// Infer whether the proxy server should run.
-	proxyEnabled := false
-	if fc.ServerEnabled != nil {
-		// Deprecated explicit override.
-		proxyEnabled = *fc.ServerEnabled
-	} else {
-		proxyEnabled = len(listeners) > 0 || listenAddr != "" || len(cfg.Routes) > 0
-	}
-
-	// Prevent confusing states: routes imply a listener unless explicit multi-listener config is used.
-	if len(cfg.Routes) > 0 && fc.ListenAddr != nil && listenAddr == "" && len(listeners) == 0 {
-		return nil, fmt.Errorf("config: routes are set but listen_addr is empty")
-	}
+	proxyEnabled := len(listeners) > 0 || len(cfg.Routes) > 0
 
 	if proxyEnabled {
-		// Legacy listen_addr maps to a TCP routing listener.
-		if listenAddr != "" {
-			dup := false
-			for _, l := range listeners {
-				if strings.TrimSpace(l.ListenAddr) == listenAddr && strings.TrimSpace(strings.ToLower(l.Protocol)) == "tcp" && strings.TrimSpace(l.Upstream) == "" {
-					dup = true
-					break
-				}
-			}
-			if !dup {
-				listeners = append(listeners, ProxyListenerConfig{ListenAddr: listenAddr, Protocol: "tcp"})
-			}
-		}
 		if len(listeners) == 0 {
-			// Backward compatible default: routes imply a default TCP listener.
+			// Default: routes imply a default TCP listener.
 			listeners = append(listeners, ProxyListenerConfig{ListenAddr: ":25565", Protocol: "tcp"})
 		}
 		cfg.Listeners = listeners
-		// Preserve legacy field for logs and default port inference.
-		cfg.ListenAddr = cfg.Listeners[0].ListenAddr
 		if fc.AdminAddr == nil {
 			cfg.AdminAddr = ":8080"
 		} else {
@@ -666,11 +494,19 @@ func unmarshalConfigFile(path string, data []byte, dst any) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".yaml", ".yml":
-		return yaml.Unmarshal(data, dst)
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		return dec.Decode(dst)
 	case ".toml":
 		// BurntSushi/toml works with string or io.Reader; this keeps things simple.
-		_, err := toml.Decode(string(data), dst)
-		return err
+		md, err := toml.Decode(string(data), dst)
+		if err != nil {
+			return err
+		}
+		if undec := md.Undecoded(); len(undec) > 0 {
+			return fmt.Errorf("unknown fields: %v", undec)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported config extension %q (expected .toml or .yaml/.yml)", ext)
 	}

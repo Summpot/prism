@@ -128,14 +128,14 @@ Tunnel mode is inspired by frp, but implemented with a much smaller surface area
 
 Prism is a single binary (`prism`) that can run one or both roles depending on configuration:
 
-* **Proxy server role**: runs the regular Prism data plane (`listen_addr`) and (optionally) the admin plane (`admin_addr`).
-* **Tunnel server role**: runs one or more tunnel endpoints (`tunnel.endpoints`, legacy `tunnel.listeners`) and maintains a registry of registered services.
+* **Proxy server role**: runs one or more proxy listeners (`listeners`) and (optionally) the admin plane (`admin_addr`).
+* **Tunnel server role**: runs one or more tunnel endpoints (`tunnel.endpoints`) and maintains a registry of registered services.
 * **Tunnel client role**: runs a tunnel client loop (`tunnel.client`) that dials a remote tunnel server over an outbound connection, registers one or more services (`tunnel.services`), and forwards tunneled streams to local TCP backends.
 
 Role enablement is inferred from configuration:
 
-* Proxy server role is enabled when `listen_addr` is non-empty (or when `routes` is non-empty, in which case `listen_addr` defaults to `:25565`).
-* Tunnel server role is enabled when `tunnel.endpoints` (or legacy `tunnel.listeners`) has one or more entries.
+* Proxy server role is enabled when `listeners` has one or more entries (or when `routes` is non-empty, in which case a default TCP listener on `:25565` is added).
+* Tunnel server role is enabled when `tunnel.endpoints` has one or more entries.
 * Tunnel client role is enabled when `tunnel.client.server_addr` is set and `tunnel.services` is non-empty.
 
 ### 8.2. Tunnel registry and routing
@@ -178,7 +178,7 @@ The tunnel link between the client role and the server role supports multiple tr
 
 Only the tunnel **transport** is affected by this choice; the Prism data plane remains a TCP listener.
 
-To support multiple transports simultaneously (similar to frp's server), Prism can run multiple tunnel endpoints at the same time via `tunnel.endpoints` (or legacy `tunnel.listeners`).
+To support multiple transports simultaneously (similar to frp's server), Prism can run multiple tunnel endpoints at the same time via `tunnel.endpoints`.
 
 ### 8.4. Multiplexing model
 

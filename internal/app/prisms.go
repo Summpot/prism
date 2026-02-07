@@ -115,16 +115,17 @@ func RunPrism(ctx context.Context, configPath string) error {
 		logger.Warn("config: created new config file", "path", path, "source", resolved.Source)
 	}
 
-	proxyEnabled := strings.TrimSpace(cfg.ListenAddr) != ""
-	if len(cfg.Listeners) > 0 {
-		proxyEnabled = true
-	}
+	proxyEnabled := len(cfg.Listeners) > 0
 	tunnelServerEnabled := len(cfg.Tunnel.Listeners) > 0
 	tunnelClientEnabled := cfg.Tunnel.Client != nil && strings.TrimSpace(cfg.Tunnel.Client.ServerAddr) != "" && len(cfg.Tunnel.Services) > 0
 	adminEnabled := strings.TrimSpace(cfg.AdminAddr) != "" && (proxyEnabled || tunnelServerEnabled)
 
 	if !proxyEnabled && !tunnelServerEnabled && !tunnelClientEnabled {
-		return fmt.Errorf("config: nothing to run (set listen_addr/routes and/or tunnel.endpoints (legacy tunnel.listeners) and/or tunnel.client+services)")
+		return fmt.Errorf("config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.client+services)")
+	}
+	primaryListenAddr := ""
+	if len(cfg.Listeners) > 0 {
+		primaryListenAddr = cfg.Listeners[0].ListenAddr
 	}
 	logger.Info(
 		"prism: starting",
@@ -132,7 +133,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 		"proxy_enabled", proxyEnabled,
 		"tunnel_server_enabled", tunnelServerEnabled,
 		"tunnel_client_enabled", tunnelClientEnabled,
-		"listen_addr", cfg.ListenAddr,
+		"listen_addr", primaryListenAddr,
 		"admin_addr", cfg.AdminAddr,
 		"tunnel_listeners", len(cfg.Tunnel.Listeners),
 		"tunnel_services", len(cfg.Tunnel.Services),
@@ -271,9 +272,6 @@ func RunPrism(ctx context.Context, configPath string) error {
 			logger.Warn("logging config changed (restart required for format/output/buffer)")
 		}
 		if oldCfg != nil {
-			if oldCfg.ListenAddr != newCfg.ListenAddr {
-				logger.Warn("listen_addr changed (restart required)")
-			}
 			if !proxyListenersEqual(oldCfg.Listeners, newCfg.Listeners) {
 				logger.Warn("listeners changed (restart required)")
 			}

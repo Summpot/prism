@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ tunnel:
 	}
 }
 
-func TestTunnelEndpoints_AcceptsLegacyListenersKey(t *testing.T) {
+func TestTunnelEndpoints_RejectsLegacyListenersKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "prism.yaml")
 	data := []byte(`admin_addr: ":8080"
 
@@ -45,14 +46,11 @@ tunnel:
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	cfg, err := NewFileConfigProvider(p).Load(context.Background())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	_, err := NewFileConfigProvider(p).Load(context.Background())
+	if err == nil {
+		t.Fatalf("Load: expected error")
 	}
-	if len(cfg.Tunnel.Listeners) != 1 {
-		t.Fatalf("tunnel.listeners=%d want 1", len(cfg.Tunnel.Listeners))
-	}
-	if cfg.Tunnel.Listeners[0].ListenAddr != ":7000" {
-		t.Fatalf("listen_addr=%q want %q", cfg.Tunnel.Listeners[0].ListenAddr, ":7000")
+	if !strings.Contains(err.Error(), "listeners") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

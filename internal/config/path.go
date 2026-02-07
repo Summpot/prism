@@ -164,7 +164,8 @@ func defaultConfigTemplateForPath(path string) (string, error) {
 	}
 }
 
-const defaultConfigTemplateTOML = `# Prism configuration (auto-generated)
+const defaultConfigTemplateTOML = `# $schema=https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
+# Prism configuration (auto-generated)
 #
 # This file was created because Prism could not find a configuration file at the
 # resolved config path.

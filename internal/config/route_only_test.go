@@ -37,34 +37,6 @@ tunnel:
 	}
 }
 
-func TestFileConfigProvider_Load_TunnelClientServices_RouteOnlyRejectsRemoteAddr(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "prism.yaml")
-
-	if err := os.WriteFile(path, []byte(`
-routes: {}
-
-tunnel_client:
-  server_addr: "127.0.0.1:7000"
-  services:
-    - name: "svc"
-      local_addr: "127.0.0.1:25565"
-      route_only: true
-      remote_addr: ":25565"
-`), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	p := NewFileConfigProvider(path)
-	_, err := p.Load(context.Background())
-	if err == nil {
-		t.Fatalf("Load: expected error")
-	}
-	if !strings.Contains(err.Error(), "route_only=true") || !strings.Contains(err.Error(), "remote_addr") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestFileConfigProvider_Load_TunnelServices_RouteOnlyNormalizesRemoteAddrEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "prism.yaml")

@@ -72,7 +72,7 @@ Use `routes` to map hostnames to upstream addresses:
 Upstream targets are treated as TCP dial addresses. They can be IPs or DNS names.
 If you omit the port (for example `backend.example.com`), Prism will prefer the
 port from the Minecraft handshake when available; otherwise it falls back to the
-port from `listen_addr` (default `25565`).
+port from the matched listener (default `25565`).
 
 Wildcard routes are `*.`-prefixed suffix matches (and more specific suffixes win).
 
@@ -82,8 +82,8 @@ If your upstream server has **no public IP**, you can run Prism in a “tunnel c
 
 On the **public server**:
 
-- Configure your proxy listener (`listen_addr`) and `routes` as usual.
-- Configure one or more tunnel endpoints under `tunnel.endpoints` (preferred; `tunnel.listeners` is legacy).
+- Configure one or more proxy listeners (`listeners`) and `routes` as usual.
+- Configure one or more tunnel endpoints under `tunnel.endpoints`.
   - Multiple listeners let you serve multiple transports at the same time (similar to frp's server).
 - Point a route upstream at a tunnel service using `tunnel:<service>`.
 

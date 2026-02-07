@@ -6,15 +6,6 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "server_enabled": {
-      "type": "boolean",
-      "description": "(Deprecated) Explicitly enable/disable the proxy server role. Prefer configuring listeners/routes instead."
-    },
-    "listen_addr": {
-      "type": "string",
-      "description": "(Legacy) Single TCP routing listener address. Prefer listeners[].listen_addr.",
-      "examples": [":25565"]
-    },
     "listeners": {
       "type": "array",
       "description": "Public-facing proxy listeners (multi-port / multi-protocol).",
@@ -68,8 +59,7 @@
       "examples": [5000]
     },
     "timeouts": { "$ref": "#/$defs/timeouts" },
-    "tunnel": { "$ref": "#/$defs/tunnel" },
-    "tunnel_client": { "$ref": "#/$defs/tunnelClientLegacy" }
+    "tunnel": { "$ref": "#/$defs/tunnel" }
   },
   "$defs": {
     "nonEmptyString": {
@@ -233,12 +223,7 @@
         },
         "endpoints": {
           "type": "array",
-          "description": "Preferred key for tunnel server endpoints (legacy: tunnel.listeners).",
-          "items": { "$ref": "#/$defs/tunnelEndpoint" }
-        },
-        "listeners": {
-          "type": "array",
-          "description": "(Legacy alias) Tunnel server endpoints. Prefer tunnel.endpoints.",
+          "description": "Tunnel server endpoints.",
           "items": { "$ref": "#/$defs/tunnelEndpoint" }
         },
         "client": { "$ref": "#/$defs/tunnelClient" },
@@ -246,21 +231,7 @@
           "type": "array",
           "description": "Tunnel client registered services.",
           "items": { "$ref": "#/$defs/tunnelService" }
-        },
-        "enabled": {
-          "type": "boolean",
-          "description": "(Deprecated) Legacy single tunnel server enable flag. Prefer tunnel.endpoints."
-        },
-        "listen_addr": {
-          "type": "string",
-          "description": "(Deprecated) Legacy single tunnel server listen address. Prefer tunnel.endpoints[].listen_addr."
-        },
-        "transport": {
-          "type": "string",
-          "description": "(Deprecated) Legacy single tunnel server transport. Prefer tunnel.endpoints[].transport.",
-          "enum": ["tcp", "udp", "quic"]
-        },
-        "quic": { "$ref": "#/$defs/quicServer" }
+        }
       }
     },
     "tunnelEndpoint": {
@@ -364,23 +335,6 @@
           }
         }
       ]
-    },
-    "tunnelClientLegacy": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "(Deprecated) Legacy top-level tunnel_client block. Prefer tunnel.client + tunnel.services.",
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "server_addr": { "type": "string" },
-        "transport": { "type": "string", "enum": ["tcp", "udp", "quic"] },
-        "auth_token": { "type": "string" },
-        "dial_timeout_ms": { "$ref": "#/$defs/ms" },
-        "quic": { "$ref": "#/$defs/quicClient" },
-        "services": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/tunnelService" }
-        }
-      }
     }
   }
 }

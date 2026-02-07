@@ -31,8 +31,8 @@ tunnel:
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.ListenAddr != "" {
-		t.Fatalf("ListenAddr=%q want empty (client-only)", cfg.ListenAddr)
+	if len(cfg.Listeners) != 0 {
+		t.Fatalf("Listeners=%d want 0 (client-only)", len(cfg.Listeners))
 	}
 	if cfg.Tunnel.Client == nil {
 		t.Fatalf("Tunnel.Client=nil want non-nil")

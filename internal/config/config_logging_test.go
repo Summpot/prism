@@ -11,7 +11,9 @@ func TestFileConfigProvider_LoggingDefaults(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
 	if err := os.WriteFile(path, []byte(`
-listen_addr: ":25565"
+listeners:
+  - listen_addr: ":25565"
+    protocol: "tcp"
 routes: {}
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -42,18 +44,20 @@ routes: {}
 func TestFileConfigProvider_LoggingOverrides(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
-	if err := os.WriteFile(path, []byte(`
-listen_addr: ":25565"
-logging:
-  level: "debug"
-  format: "text"
-  output: "stdout"
-  add_source: true
-  admin_buffer:
-    enabled: true
-    size: 12
-routes: {}
-`), 0o600); err != nil {
+	body := "" +
+		"listeners:\n" +
+		"  - listen_addr: \":25565\"\n" +
+		"    protocol: \"tcp\"\n" +
+		"logging:\n" +
+		"  level: \"debug\"\n" +
+		"  format: \"text\"\n" +
+		"  output: \"stdout\"\n" +
+		"  add_source: true\n" +
+		"  admin_buffer:\n" +
+		"    enabled: true\n" +
+		"    size: 12\n" +
+		"routes: {}\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -82,19 +86,21 @@ routes: {}
 func TestFileConfigProvider_ParsesYAML(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
-	if err := os.WriteFile(path, []byte(`
-listen_addr: ":25565"
-admin_addr: ":8080"
-logging:
-  level: "debug"
-  format: "text"
-  output: "stdout"
-  add_source: true
-  admin_buffer:
-    enabled: true
-    size: 12
-routes: {}
-`), 0o600); err != nil {
+	body := "" +
+		"listeners:\n" +
+		"  - listen_addr: \":25565\"\n" +
+		"    protocol: \"tcp\"\n" +
+		"admin_addr: \":8080\"\n" +
+		"logging:\n" +
+		"  level: \"debug\"\n" +
+		"  format: \"text\"\n" +
+		"  output: \"stdout\"\n" +
+		"  add_source: true\n" +
+		"  admin_buffer:\n" +
+		"    enabled: true\n" +
+		"    size: 12\n" +
+		"routes: {}\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -124,8 +130,11 @@ func TestFileConfigProvider_ParsesTOML(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
 	if err := os.WriteFile(path, []byte(`
-listen_addr = ":25565"
 admin_addr = ":8080"
+
+[[listeners]]
+listen_addr = ":25565"
+protocol = "tcp"
 
 [logging]
 level = "debug"

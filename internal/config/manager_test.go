@@ -21,7 +21,9 @@ func TestManager_ReloadsOnFileChange(t *testing.T) {
 	}
 
 	write(`
-listen_addr: ":25565"
+listeners:
+  - listen_addr: ":25565"
+    protocol: "tcp"
 routes: {"a.example.com": "127.0.0.1:1"}
 `)
 
@@ -45,7 +47,9 @@ routes: {"a.example.com": "127.0.0.1:1"}
 	m.Start(ctx)
 
 	write(`
-listen_addr: ":25565"
+listeners:
+  - listen_addr: ":25565"
+    protocol: "tcp"
 routes: {"b.example.com": "127.0.0.1:2"}
 `)
 

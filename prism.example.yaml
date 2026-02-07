@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=./prism.schema.json
+
 admin_addr: ":8080"
 
 # Public-facing proxy listeners (multi-port / multi-protocol).

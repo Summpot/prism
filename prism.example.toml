@@ -1,3 +1,5 @@
+# Schema (editor/LSP): see prism.schema.json and README for VS Code mapping tips.
+
 admin_addr = ":8080"
 proxy_protocol_v2 = false
 buffer_size = 32768

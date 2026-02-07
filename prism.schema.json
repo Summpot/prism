@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json",
+  "title": "Prism configuration",
+  "description": "JSON Schema for Prism .toml and .yaml/.yml configuration files.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "server_enabled": {
+      "type": "boolean",
+      "description": "(Deprecated) Explicitly enable/disable the proxy server role. Prefer configuring listeners/routes instead."
+    },
+    "listen_addr": {
+      "type": "string",
+      "description": "(Legacy) Single TCP routing listener address. Prefer listeners[].listen_addr.",
+      "examples": [":25565"]
+    },
+    "listeners": {
+      "type": "array",
+      "description": "Public-facing proxy listeners (multi-port / multi-protocol).",
+      "items": { "$ref": "#/$defs/proxyListener" }
+    },
+    "admin_addr": {
+      "type": "string",
+      "description": "Admin HTTP server listen address. Empty disables the admin server.",
+      "examples": [":8080", "127.0.0.1:8080", ""]
+    },
+    "logging": { "$ref": "#/$defs/logging" },
+    "routes": {
+      "type": "object",
+      "description": "Hostname routes: host pattern -> upstream target (host:port or tunnel:<service>).",
+      "additionalProperties": { "type": "string" },
+      "examples": [
+        {
+          "play.example.com": "127.0.0.1:25566",
+          "*.labs.example.com": "127.0.0.1:25567",
+          "home.example.com": "tunnel:home-mc"
+        }
+      ]
+    },
+    "routing_parsers": {
+      "type": "array",
+      "description": "Controls how Prism extracts the routing hostname from the first bytes of the stream.",
+      "items": { "$ref": "#/$defs/routingParser" }
+    },
+    "max_header_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum number of bytes to peek/read for routing (handshake/SNI/etc). 0 means use the default.",
+      "examples": [65536]
+    },
+    "reload": { "$ref": "#/$defs/reload" },
+    "proxy_protocol_v2": {
+      "type": "boolean",
+      "description": "Whether to accept HAProxy PROXY protocol v2 on TCP listeners.",
+      "default": false
+    },
+    "buffer_size": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Buffer size (bytes) used for proxying. 0 means use the default.",
+      "examples": [32768]
+    },
+    "upstream_dial_timeout_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Dial timeout for upstream connections (milliseconds). 0 means use the default.",
+      "examples": [5000]
+    },
+    "timeouts": { "$ref": "#/$defs/timeouts" },
+    "tunnel": { "$ref": "#/$defs/tunnel" },
+    "tunnel_client": { "$ref": "#/$defs/tunnelClientLegacy" }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Duration in milliseconds."
+    },
+    "proxyListener": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen_addr"],
+      "properties": {
+        "listen_addr": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Listener address.",
+          "examples": [":25565"]
+        },
+        "protocol": {
+          "type": "string",
+          "description": "Listener protocol.",
+          "enum": ["tcp", "udp"],
+          "default": "tcp"
+        },
+        "upstream": {
+          "type": "string",
+          "description": "Forward target. For tcp: empty means hostname-routing mode; non-empty means fixed forward mode. For udp: required.",
+          "examples": ["127.0.0.1:19132", "tunnel:home-mc", ""]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "protocol": { "const": "udp" } },
+            "required": ["protocol"]
+          },
+          "then": {
+            "required": ["upstream"],
+            "properties": {
+              "upstream": { "$ref": "#/$defs/nonEmptyString" }
+            }
+          }
+        }
+      ]
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Log level.",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info"
+        },
+        "format": {
+          "type": "string",
+          "description": "Log format.",
+          "enum": ["json", "text"],
+          "default": "json"
+        },
+        "output": {
+          "type": "string",
+          "description": "Log output: stderr, stdout, discard, or a file path.",
+          "default": "stderr",
+          "examples": ["stderr", "stdout", "discard", "./prism.log"]
+        },
+        "add_source": {
+          "type": "boolean",
+          "description": "Include source file/line in logs (slightly higher overhead).",
+          "default": false
+        },
+        "admin_buffer": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "In-memory ring buffer used by the admin server to serve recent logs.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "size": { "type": "integer", "minimum": 0, "default": 1000 }
+          }
+        }
+      }
+    },
+    "routingParser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Parser type (e.g. builtin, wasm)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Parser name (e.g. minecraft_handshake, tls_sni)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Optional file path (e.g. wasm module path)."
+        },
+        "function": {
+          "type": "string",
+          "description": "Optional function name (e.g. exported WASM function)."
+        },
+        "max_output_len": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum output length from a parser.",
+          "examples": [255]
+        }
+      }
+    },
+    "reload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable automatic reload watching (file-based provider only).",
+          "default": true
+        },
+        "poll_interval_ms": {
+          "$ref": "#/$defs/ms",
+          "description": "How often to poll for file changes (milliseconds).",
+          "default": 1000
+        }
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "handshake_timeout_ms": {
+          "$ref": "#/$defs/ms",
+          "description": "Timeout for reading the initial handshake/header for routing.",
+          "default": 3000
+        },
+        "idle_timeout_ms": {
+          "$ref": "#/$defs/ms",
+          "description": "Optional idle timeout for connections. 0 means disabled.",
+          "default": 0
+        }
+      }
+    },
+    "tunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Reverse-connection mode (client -> server) for reaching private backends.",
+      "properties": {
+        "auth_token": {
+          "type": "string",
+          "description": "Optional shared secret required for tunnel client registration.",
+          "default": ""
+        },
+        "auto_listen_services": {
+          "type": "boolean",
+          "description": "When true, Prism auto-opens server-side listeners for services that set remote_addr.",
+          "default": true
+        },
+        "endpoints": {
+          "type": "array",
+          "description": "Preferred key for tunnel server endpoints (legacy: tunnel.listeners).",
+          "items": { "$ref": "#/$defs/tunnelEndpoint" }
+        },
+        "listeners": {
+          "type": "array",
+          "description": "(Legacy alias) Tunnel server endpoints. Prefer tunnel.endpoints.",
+          "items": { "$ref": "#/$defs/tunnelEndpoint" }
+        },
+        "client": { "$ref": "#/$defs/tunnelClient" },
+        "services": {
+          "type": "array",
+          "description": "Tunnel client registered services.",
+          "items": { "$ref": "#/$defs/tunnelService" }
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "(Deprecated) Legacy single tunnel server enable flag. Prefer tunnel.endpoints."
+        },
+        "listen_addr": {
+          "type": "string",
+          "description": "(Deprecated) Legacy single tunnel server listen address. Prefer tunnel.endpoints[].listen_addr."
+        },
+        "transport": {
+          "type": "string",
+          "description": "(Deprecated) Legacy single tunnel server transport. Prefer tunnel.endpoints[].transport.",
+          "enum": ["tcp", "udp", "quic"]
+        },
+        "quic": { "$ref": "#/$defs/quicServer" }
+      }
+    },
+    "tunnelEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen_addr"],
+      "properties": {
+        "listen_addr": { "$ref": "#/$defs/nonEmptyString" },
+        "transport": {
+          "type": "string",
+          "enum": ["tcp", "udp", "quic"],
+          "default": "tcp"
+        },
+        "quic": { "$ref": "#/$defs/quicServer" }
+      }
+    },
+    "quicServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cert_file": {
+          "type": "string",
+          "description": "Path to TLS certificate PEM file. If empty, Prism may generate a self-signed cert.",
+          "default": ""
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Path to TLS private key PEM file. If empty, Prism may generate a self-signed key.",
+          "default": ""
+        }
+      }
+    },
+    "tunnelClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "server_addr": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Tunnel server address."
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["tcp", "udp", "quic"],
+          "default": "tcp"
+        },
+        "dial_timeout_ms": {
+          "$ref": "#/$defs/ms",
+          "description": "Dial timeout for connecting to the tunnel server.",
+          "default": 5000
+        },
+        "quic": { "$ref": "#/$defs/quicClient" }
+      }
+    },
+    "quicClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "server_name": {
+          "type": "string",
+          "description": "TLS SNI / server name used for QUIC.",
+          "default": ""
+        },
+        "insecure_skip_verify": {
+          "type": "boolean",
+          "description": "Skip TLS verification (dev/testing only).",
+          "default": false
+        }
+      }
+    },
+    "tunnelService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "local_addr"],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "proto": {
+          "type": "string",
+          "enum": ["tcp", "udp"],
+          "default": "tcp"
+        },
+        "local_addr": { "$ref": "#/$defs/nonEmptyString" },
+        "route_only": {
+          "type": "boolean",
+          "description": "If true, only reachable via routes (tunnel:<service>) and never exposed via remote_addr.",
+          "default": false
+        },
+        "remote_addr": {
+          "type": "string",
+          "description": "Optional server-side listener request (frp-like). Must not be set when route_only=true.",
+          "examples": [":25565", ""]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "route_only": { "const": true } },
+            "required": ["route_only"]
+          },
+          "then": {
+            "not": { "required": ["remote_addr"] }
+          }
+        }
+      ]
+    },
+    "tunnelClientLegacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "(Deprecated) Legacy top-level tunnel_client block. Prefer tunnel.client + tunnel.services.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "server_addr": { "type": "string" },
+        "transport": { "type": "string", "enum": ["tcp", "udp", "quic"] },
+        "auth_token": { "type": "string" },
+        "dial_timeout_ms": { "$ref": "#/$defs/ms" },
+        "quic": { "$ref": "#/$defs/quicClient" },
+        "services": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tunnelService" }
+        }
+      }
+    }
+  }
+}

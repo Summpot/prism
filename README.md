@@ -11,6 +11,10 @@ For the intended architecture, see `DESIGN.md`.
 
 Prism supports `.toml` and `.yaml`/`.yml` config files.
 
+This repo also ships a JSON Schema for config validation and editor/LSP completion:
+
+- `prism.schema.json`
+
 - Run: `prism -config /path/to/prism.toml`
 - Or set an env var: `PRISM_CONFIG=/path/to/prism.toml prism`
 - Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml`
@@ -24,6 +28,31 @@ This repo includes example configs:
 
 - `prism.example.toml`
 - `prism.example.yaml`
+
+### Config schema (validation + LSP)
+
+#### YAML
+
+If you use the YAML Language Server (for example in VS Code), you can add this to the top of your config:
+
+```yaml
+# yaml-language-server: $schema=./prism.schema.json
+```
+
+#### TOML
+
+TOML doesn’t have a universal inline `$schema` directive. In VS Code, you can map the schema to your config filename pattern in settings:
+
+```json
+{
+  "toml.schemas": {
+    "./prism.schema.json": [
+      "prism.toml",
+      "**/prism.toml"
+    ]
+  }
+}
+```
 
 ### Run locally
 
@@ -47,7 +76,7 @@ port from `listen_addr` (default `25565`).
 
 Wildcard routes are `*.`-prefixed suffix matches (and more specific suffixes win).
 
-## Tunnel mode (内网穿透)
+## Tunnel mode
 
 If your upstream server has **no public IP**, you can run Prism in a “tunnel client” role on the private machine and have it create an outbound tunnel to Prism running in the “server” role.
 

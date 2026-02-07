@@ -95,6 +95,11 @@ func (a *tunnelServiceAutoListener) Reconcile() {
 		if name == "" {
 			continue
 		}
+		if svc.RouteOnly {
+			// Route-only services are meant to be referenced via tunnel:<service>
+			// (routes/forwards) but never auto-exposed as server-side listeners.
+			continue
+		}
 		proto := strings.TrimSpace(strings.ToLower(svc.Proto))
 		if proto == "" {
 			proto = "tcp"

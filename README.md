@@ -63,6 +63,8 @@ On the **private machine**:
 - Configure `tunnel.client` to connect to the public server.
 - Configure the same `tunnel.auth_token` (if set).
 - Register services under `tunnel.services`: `name -> local_addr`.
+  - Optional: set `remote_addr` to request a server-side listener for the service (frp-like).
+  - Optional: set `route_only=true` to ensure the service is **only** reachable via `tunnel:<service>` and never auto-exposed (must not set `remote_addr`).
 
 Transport notes:
 

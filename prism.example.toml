@@ -60,6 +60,7 @@ key_file = ""
 # name = "home-mc"
 # proto = "tcp" # tcp | udp
 # local_addr = "127.0.0.1:25565"
+# route_only = true # optional. If true, only reachable via routes (tunnel:home-mc).
 # remote_addr = ":25565" # optional (frp-like). If set, prisms opens this listener automatically.
 
 [logging]

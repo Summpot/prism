@@ -146,7 +146,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 		} else {
 			services := make([]tunnel.RegisteredService, 0, len(cfg.Tunnel.Services))
 			for _, s := range cfg.Tunnel.Services {
-				services = append(services, tunnel.RegisteredService{Name: s.Name, Proto: s.Proto, LocalAddr: s.LocalAddr, RemoteAddr: s.RemoteAddr})
+				services = append(services, tunnel.RegisteredService{Name: s.Name, Proto: s.Proto, LocalAddr: s.LocalAddr, RouteOnly: s.RouteOnly, RemoteAddr: s.RemoteAddr})
 			}
 			client, err := tunnel.NewClient(tunnel.ClientOptions{
 				ServerAddr:  cfg.Tunnel.Client.ServerAddr,

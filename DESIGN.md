@@ -142,13 +142,16 @@ Role enablement is inferred from configuration:
 
 * The tunnel client registers one or more **services**.
   * At minimum: `name -> local_addr` (used by the client role to dial a local backend).
-  * Optionally: `name` can also request a **remote listener** (protocol + listen address) to be opened on the server side.
+  * Optionally: a service can request a **remote listener** (protocol + listen address) to be opened on the server side (`remote_addr`).
+  * Optionally: a service can be marked `route_only=true` to indicate it should only be used as a routing target (`tunnel:<service>`) and never exposed as a server-side listener.
 * The tunnel server maintains an in-memory registry mapping `service name -> active client session`.
 * A route whose upstream is `tunnel:<service>` is forwarded through the active client session that registered that service.
 
 ### 8.2.1. frp-like "auto listen" for services
 
 When enabled on the tunnel server role, Prism will automatically open server-side listeners for any registered services that specify a remote listen address.
+
+Services marked `route_only=true` are excluded from auto-listen (and `remote_addr` is ignored/invalid for them).
 
 This matches frp-style behavior:
 

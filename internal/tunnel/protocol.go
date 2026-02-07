@@ -35,6 +35,11 @@ type RegisteredService struct {
 	Proto string `json:"proto,omitempty"`
 	// LocalAddr is only used by prismc; prisms stores it for debugging.
 	LocalAddr string `json:"local_addr"`
+	// RouteOnly marks this service as only reachable via routing (tunnel:<service>)
+	// and never exposed as a server-side listener.
+	//
+	// When true, RemoteAddr should be empty.
+	RouteOnly bool `json:"route_only,omitempty"`
 	// RemoteAddr (optional) requests prisms to open a public listener for this
 	// service (frp-like behavior).
 	RemoteAddr string `json:"remote_addr,omitempty"`
@@ -99,7 +104,12 @@ func readRegisterRequest(r io.Reader) (RegisterRequest, error) {
 		if req.Services[i].Proto == "" {
 			req.Services[i].Proto = "tcp"
 		}
+		req.Services[i].LocalAddr = strings.TrimSpace(req.Services[i].LocalAddr)
 		req.Services[i].RemoteAddr = strings.TrimSpace(req.Services[i].RemoteAddr)
+		if req.Services[i].RouteOnly {
+			// Defensive normalization: route-only services are never auto-exposed.
+			req.Services[i].RemoteAddr = ""
+		}
 	}
 	return req, nil
 }

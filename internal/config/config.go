@@ -72,6 +72,11 @@ type TunnelClientServiceConfig struct {
 	Proto string
 	// LocalAddr is the local backend address on the tunnel client.
 	LocalAddr string
+	// RouteOnly marks this service as only reachable via routing (tunnel:<service>)
+	// and never exposed as a server-side listener.
+	//
+	// When true, RemoteAddr must be empty.
+	RouteOnly bool
 	// RemoteAddr (optional) requests the tunnel server to open a public listener
 	// for this service (frp-like behavior). Example: ":25565".
 	RemoteAddr string
@@ -255,6 +260,7 @@ type fileConfig struct {
 			Name       string `yaml:"name" toml:"name"`
 			Proto      string `yaml:"proto" toml:"proto"`
 			LocalAddr  string `yaml:"local_addr" toml:"local_addr"`
+			RouteOnly  bool   `yaml:"route_only" toml:"route_only"`
 			RemoteAddr string `yaml:"remote_addr" toml:"remote_addr"`
 		} `yaml:"services" toml:"services"`
 
@@ -283,6 +289,7 @@ type fileConfig struct {
 			Name       string `yaml:"name" toml:"name"`
 			Proto      string `yaml:"proto" toml:"proto"`
 			LocalAddr  string `yaml:"local_addr" toml:"local_addr"`
+			RouteOnly  bool   `yaml:"route_only" toml:"route_only"`
 			RemoteAddr string `yaml:"remote_addr" toml:"remote_addr"`
 		} `yaml:"services" toml:"services"`
 	} `yaml:"tunnel_client" toml:"tunnel_client"`
@@ -425,8 +432,15 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 				proto := strings.TrimSpace(strings.ToLower(s.Proto))
 				addr := strings.TrimSpace(s.LocalAddr)
 				remote := strings.TrimSpace(s.RemoteAddr)
+				routeOnly := s.RouteOnly
 				if name == "" || addr == "" {
 					continue
+				}
+				if routeOnly && remote != "" {
+					return nil, fmt.Errorf("config: tunnel.services entry %q sets route_only=true but also sets remote_addr", name)
+				}
+				if routeOnly {
+					remote = ""
 				}
 				if proto == "" {
 					proto = "tcp"
@@ -436,7 +450,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 				default:
 					return nil, fmt.Errorf("config: tunnel.services entry %q has invalid proto %q", name, proto)
 				}
-				tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RemoteAddr: remote})
+				tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RouteOnly: routeOnly, RemoteAddr: remote})
 			}
 		}
 
@@ -502,8 +516,15 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 					proto := strings.TrimSpace(strings.ToLower(s.Proto))
 					addr := strings.TrimSpace(s.LocalAddr)
 					remote := strings.TrimSpace(s.RemoteAddr)
+					routeOnly := s.RouteOnly
 					if name == "" || addr == "" {
 						continue
+					}
+					if routeOnly && remote != "" {
+						return nil, fmt.Errorf("config: tunnel_client.services entry %q sets route_only=true but also sets remote_addr", name)
+					}
+					if routeOnly {
+						remote = ""
 					}
 					if proto == "" {
 						proto = "tcp"
@@ -513,7 +534,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 					default:
 						return nil, fmt.Errorf("config: tunnel_client.services entry %q has invalid proto %q", name, proto)
 					}
-					tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RemoteAddr: remote})
+					tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RouteOnly: routeOnly, RemoteAddr: remote})
 				}
 			}
 		}

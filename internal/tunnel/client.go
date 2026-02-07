@@ -46,6 +46,9 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{opts: opts, tr: tr, bridge: NewBridge(opts.BufSize), localMap: map[string]RegisteredService{}}
+	// Normalize service entries once so both local routing and registration use
+	// consistent data.
+	svcs := make([]RegisteredService, 0, len(opts.Services))
 	for _, s := range opts.Services {
 		name := strings.TrimSpace(s.Name)
 		addr := strings.TrimSpace(s.LocalAddr)
@@ -56,8 +59,16 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		if proto == "" {
 			proto = "tcp"
 		}
-		c.localMap[name] = RegisteredService{Name: name, Proto: proto, LocalAddr: addr, RemoteAddr: strings.TrimSpace(s.RemoteAddr)}
+		remote := strings.TrimSpace(s.RemoteAddr)
+		routeOnly := s.RouteOnly
+		if routeOnly {
+			remote = ""
+		}
+		svc := RegisteredService{Name: name, Proto: proto, LocalAddr: addr, RouteOnly: routeOnly, RemoteAddr: remote}
+		c.localMap[name] = svc
+		svcs = append(svcs, svc)
 	}
+	c.opts.Services = svcs
 	if opts.DialTimeout <= 0 {
 		c.opts.DialTimeout = 5 * time.Second
 	}

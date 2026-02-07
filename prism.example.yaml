@@ -1,5 +1,14 @@
-listen_addr: ":25565"
 admin_addr: ":8080"
+
+# Public-facing proxy listeners (multi-port / multi-protocol).
+listeners:
+  - listen_addr: ":25565"
+    protocol: "tcp"
+    mode: "routing" # routing | forward
+  # Example UDP game port forwarding (direct):
+  - listen_addr: ":19132"
+    protocol: "udp"
+    upstream: "127.0.0.1:19132"
 
 logging:
   level: "info"
@@ -22,6 +31,9 @@ max_header_bytes: 65536
 
 tunnel:
   auth_token: ""
+  # When true, prisms will automatically open server-side listeners for tunnel
+  # services that specify remote_addr (frp-like behavior).
+  auto_listen_services: true
   listeners:
     - listen_addr: ":7000"
       transport: "tcp" # tcp | udp | quic
@@ -44,7 +56,9 @@ tunnel:
   #
   # services:
   #   - name: "home-mc"
+  #     proto: "tcp" # tcp | udp
   #     local_addr: "127.0.0.1:25565"
+  #     remote_addr: ":25565" # optional (frp-like). If set, prisms opens this listener automatically.
 
 routing_parsers:
   - type: "builtin"

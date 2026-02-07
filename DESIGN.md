@@ -2,7 +2,10 @@
 
 ## 1. Executive Summary
 
-Prism is a lightweight, high-performance TCP reverse proxy designed primarily for the Minecraft protocol. It multiplexes incoming traffic from a single port to multiple backend servers based on a hostname found in the connection's initial bytes.
+Prism is a lightweight, high-performance reverse proxy designed primarily for the Minecraft protocol.
+
+* For **TCP**, Prism can multiplex incoming traffic from one or more listening ports to multiple backend servers based on a hostname found in the connection's initial bytes (Minecraft handshake or TLS SNI).
+* For **UDP**, Prism can expose one or more listening ports and forward datagrams to an upstream (directly or via tunnel). This enables proxying UDP-based games (for example, Bedrock-like protocols) where hostname-based routing is not available.
 
 Prism can also operate in a **reverse-connection ("tunnel")** mode similar to frp: a tunnel client running on a private network establishes an outbound connection to a tunnel server. When a route targets a tunnel service, Prism forwards the incoming TCP session over that existing reverse connection, allowing access to backends that have no public IP.
 
@@ -18,7 +21,7 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 
 ### High-Level Data Flow
 
-1. **Transport Layer**: Accepts raw TCP connections.
+1. **Transport Layer**: Accepts raw TCP connections and/or UDP datagrams.
 2. **Header Parsing Layer**: Reads/peeks the initial bytes to extract a routing hostname.
 3. **Routing Layer**: Resolves the destination address based on the extracted hostname.
 4. **(Optional) Tunnel Layer**: If the resolved upstream is a tunnel service, opens a tunneled stream to the registered tunnel client instead of dialing a direct upstream address.
@@ -30,10 +33,16 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 
 ### 3.1. `Listener` (Transport Layer)
 
-* **Responsibility**: Wraps the standard `net.Listener`. It accepts connections and spawns a `SessionHandler` for each.
+* **Responsibility**:
+  * **TCP**: wraps the standard `net.Listener`. It accepts connections and spawns a `SessionHandler` for each.
+  * **UDP**: wraps a `net.PacketConn`. It reads datagrams and hands them to a packet handler which maintains lightweight per-client sessions.
 * **Testability**:
 * The `Listener` accepts a `ConnectionHandler` interface.
 * This allows integration tests to simulate a flood of connections without spawning real goroutines for the entire logic stack.
+
+**Multi-listener**:
+
+Prism can run multiple listeners at once (different ports and/or protocols). Each listener is configured independently (e.g., TCP hostname-routing on `:25565` and UDP forwarding on `:19132`).
 
 
 
@@ -131,9 +140,25 @@ Role enablement is inferred from configuration:
 
 ### 8.2. Tunnel registry and routing
 
-* The tunnel client registers one or more **services**: `name -> local_addr`.
+* The tunnel client registers one or more **services**.
+  * At minimum: `name -> local_addr` (used by the client role to dial a local backend).
+  * Optionally: `name` can also request a **remote listener** (protocol + listen address) to be opened on the server side.
 * The tunnel server maintains an in-memory registry mapping `service name -> active client session`.
 * A route whose upstream is `tunnel:<service>` is forwarded through the active client session that registered that service.
+
+### 8.2.1. frp-like "auto listen" for services
+
+When enabled on the tunnel server role, Prism will automatically open server-side listeners for any registered services that specify a remote listen address.
+
+This matches frp-style behavior:
+
+* A service can be exposed by **port** (TCP/UDP) without requiring a hostname route.
+* If a service has no matching entry in `routes`, it can still be reachable through its configured remote listener.
+
+Notes / limitations:
+
+* For **UDP over tunnel**, Prism forwards datagrams over a framed stream inside the tunnel session.
+* UDP forwarding does **not** preserve the original client IP/port at the backend (the backend sees the tunnel client's source address), similar to typical UDP reverse-proxying constraints.
 
 ### 8.3. Transport protocols (server <-> client)
 

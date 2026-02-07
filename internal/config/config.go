@@ -17,6 +17,24 @@ type Timeouts struct {
 	IdleTimeout      time.Duration
 }
 
+// ProxyListenerConfig configures a single public-facing listener.
+//
+// TCP listeners can run in routing mode (hostname-based via routing_parsers + routes)
+// or forward mode (fixed upstream).
+//
+// UDP listeners run in forward mode only.
+type ProxyListenerConfig struct {
+	ListenAddr string
+	// Protocol is one of: tcp, udp.
+	Protocol string
+	// Mode is one of: routing, forward.
+	// For udp it is implicitly forward.
+	Mode string
+	// Upstream is required for forward mode. It may be a dial address (host:port)
+	// or a tunnel target (tunnel:<service>).
+	Upstream string
+}
+
 type ReloadConfig struct {
 	Enabled      bool
 	PollInterval time.Duration
@@ -49,8 +67,14 @@ type RoutingParserConfig struct {
 }
 
 type TunnelClientServiceConfig struct {
-	Name      string
+	Name string
+	// Proto is one of: tcp, udp. Defaults to tcp.
+	Proto string
+	// LocalAddr is the local backend address on the tunnel client.
 	LocalAddr string
+	// RemoteAddr (optional) requests the tunnel server to open a public listener
+	// for this service (frp-like behavior). Example: ":25565".
+	RemoteAddr string
 }
 
 type TunnelClientQUICConfig struct {
@@ -82,6 +106,11 @@ type TunnelConfig struct {
 	// AuthToken is an optional shared secret required for client registration.
 	AuthToken string
 
+	// AutoListenServices enables frp-like behavior on the tunnel server: when a
+	// tunnel client registers a service with a RemoteAddr, prisms will
+	// automatically open a server-side listener for that service.
+	AutoListenServices bool
+
 	// Listeners configures one or more tunnel server listeners. Multiple entries
 	// allow serving multiple transports at the same time (similar to frps).
 	Listeners []TunnelListenerConfig
@@ -93,8 +122,13 @@ type TunnelConfig struct {
 }
 
 type Config struct {
-	// ListenAddr enables the Prism proxy data-plane when non-empty.
+	// ListenAddr is a legacy single-listener configuration.
+	//
+	// Prefer Listeners for new configs. When listen_addr is set (or inferred),
+	// it is mapped into Listeners as a TCP routing listener.
 	ListenAddr string
+	// Listeners configures one or more proxy listeners (multi-port / multi-protocol).
+	Listeners []ProxyListenerConfig
 	// AdminAddr enables the admin HTTP server when non-empty.
 	AdminAddr string
 
@@ -142,6 +176,12 @@ type fileConfig struct {
 	ServerEnabled *bool `yaml:"server_enabled" toml:"server_enabled"`
 
 	ListenAddr *string `yaml:"listen_addr" toml:"listen_addr"`
+	Listeners  []struct {
+		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
+		Protocol  string `yaml:"protocol" toml:"protocol"`
+		Mode      string `yaml:"mode" toml:"mode"`
+		Upstream  string `yaml:"upstream" toml:"upstream"`
+	} `yaml:"listeners" toml:"listeners"`
 	AdminAddr  *string `yaml:"admin_addr" toml:"admin_addr"`
 	Logging    *struct {
 		Level       string `yaml:"level" toml:"level"`
@@ -180,6 +220,7 @@ type fileConfig struct {
 	Tunnel *struct {
 		// New schema.
 		AuthToken string `yaml:"auth_token" toml:"auth_token"`
+		AutoListenServices *bool `yaml:"auto_listen_services" toml:"auto_listen_services"`
 		Listeners []struct {
 			Transport  string `yaml:"transport" toml:"transport"`
 			ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
@@ -198,8 +239,10 @@ type fileConfig struct {
 			} `yaml:"quic" toml:"quic"`
 		} `yaml:"client" toml:"client"`
 		Services []struct {
-			Name      string `yaml:"name" toml:"name"`
-			LocalAddr string `yaml:"local_addr" toml:"local_addr"`
+			Name       string `yaml:"name" toml:"name"`
+			Proto      string `yaml:"proto" toml:"proto"`
+			LocalAddr  string `yaml:"local_addr" toml:"local_addr"`
+			RemoteAddr string `yaml:"remote_addr" toml:"remote_addr"`
 		} `yaml:"services" toml:"services"`
 
 		// Legacy schema (deprecated): a single tunnel server listener.
@@ -224,8 +267,10 @@ type fileConfig struct {
 			InsecureSkipVerify bool   `yaml:"insecure_skip_verify" toml:"insecure_skip_verify"`
 		} `yaml:"quic" toml:"quic"`
 		Services []struct {
-			Name      string `yaml:"name" toml:"name"`
-			LocalAddr string `yaml:"local_addr" toml:"local_addr"`
+			Name       string `yaml:"name" toml:"name"`
+			Proto      string `yaml:"proto" toml:"proto"`
+			LocalAddr  string `yaml:"local_addr" toml:"local_addr"`
+			RemoteAddr string `yaml:"remote_addr" toml:"remote_addr"`
 		} `yaml:"services" toml:"services"`
 	} `yaml:"tunnel_client" toml:"tunnel_client"`
 }
@@ -243,6 +288,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 
 	cfg := &Config{
 		ListenAddr: "",
+		Listeners:  nil,
 		AdminAddr:  "",
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -263,7 +309,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			IdleTimeout:      time.Duration(fc.Timeouts.IdleTimeoutMs) * time.Millisecond,
 		},
 		Reload: ReloadConfig{},
-		Tunnel: TunnelConfig{},
+		Tunnel: TunnelConfig{AutoListenServices: true},
 	}
 
 	// --- Logging / reload / parsers ---
@@ -309,6 +355,10 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	var tun TunnelConfig
 	if fc.Tunnel != nil {
 		tun.AuthToken = strings.TrimSpace(fc.Tunnel.AuthToken)
+		tun.AutoListenServices = true
+		if fc.Tunnel.AutoListenServices != nil {
+			tun.AutoListenServices = *fc.Tunnel.AutoListenServices
+		}
 
 		// New: multiple listeners.
 		if len(fc.Tunnel.Listeners) > 0 {
@@ -355,11 +405,21 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			tun.Services = make([]TunnelClientServiceConfig, 0, len(fc.Tunnel.Services))
 			for _, s := range fc.Tunnel.Services {
 				name := strings.TrimSpace(s.Name)
+				proto := strings.TrimSpace(strings.ToLower(s.Proto))
 				addr := strings.TrimSpace(s.LocalAddr)
+				remote := strings.TrimSpace(s.RemoteAddr)
 				if name == "" || addr == "" {
 					continue
 				}
-				tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, LocalAddr: addr})
+				if proto == "" {
+					proto = "tcp"
+				}
+				switch proto {
+				case "tcp", "udp":
+				default:
+					return nil, fmt.Errorf("config: tunnel.services entry %q has invalid proto %q", name, proto)
+				}
+				tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RemoteAddr: remote})
 			}
 		}
 
@@ -422,17 +482,81 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 				}
 				for _, s := range fc.TunnelClient.Services {
 					name := strings.TrimSpace(s.Name)
+					proto := strings.TrimSpace(strings.ToLower(s.Proto))
 					addr := strings.TrimSpace(s.LocalAddr)
+					remote := strings.TrimSpace(s.RemoteAddr)
 					if name == "" || addr == "" {
 						continue
 					}
-					tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, LocalAddr: addr})
+					if proto == "" {
+						proto = "tcp"
+					}
+					switch proto {
+					case "tcp", "udp":
+					default:
+						return nil, fmt.Errorf("config: tunnel_client.services entry %q has invalid proto %q", name, proto)
+					}
+					tun.Services = append(tun.Services, TunnelClientServiceConfig{Name: name, Proto: proto, LocalAddr: addr, RemoteAddr: remote})
 				}
 			}
 		}
 	}
 
 	cfg.Tunnel = tun
+
+	// --- Proxy listeners (multi-port / multi-protocol) ---
+	var listeners []ProxyListenerConfig
+	if len(fc.Listeners) > 0 {
+		listeners = make([]ProxyListenerConfig, 0, len(fc.Listeners))
+		for i, l := range fc.Listeners {
+			la := strings.TrimSpace(l.ListenAddr)
+			if la == "" {
+				return nil, fmt.Errorf("config: listeners[%d] missing listen_addr", i)
+			}
+			proto := strings.TrimSpace(strings.ToLower(l.Protocol))
+			if proto == "" {
+				proto = "tcp"
+			}
+			mode := strings.TrimSpace(strings.ToLower(l.Mode))
+			up := strings.TrimSpace(l.Upstream)
+
+			switch proto {
+			case "tcp":
+				if mode == "" {
+					if up == "" {
+						mode = "routing"
+					} else {
+						mode = "forward"
+					}
+				}
+				switch mode {
+				case "routing":
+					if up != "" {
+						return nil, fmt.Errorf("config: listeners[%d] mode=routing cannot set upstream", i)
+					}
+				case "forward":
+					if up == "" {
+						return nil, fmt.Errorf("config: listeners[%d] mode=forward requires upstream", i)
+					}
+				default:
+					return nil, fmt.Errorf("config: listeners[%d] has invalid mode %q", i, mode)
+				}
+			case "udp":
+				// UDP only supports forward mode.
+				if mode != "" && mode != "forward" {
+					return nil, fmt.Errorf("config: listeners[%d] protocol=udp only supports mode=forward", i)
+				}
+				mode = "forward"
+				if up == "" {
+					return nil, fmt.Errorf("config: listeners[%d] protocol=udp requires upstream", i)
+				}
+			default:
+				return nil, fmt.Errorf("config: listeners[%d] has invalid protocol %q", i, proto)
+			}
+
+			listeners = append(listeners, ProxyListenerConfig{ListenAddr: la, Protocol: proto, Mode: mode, Upstream: up})
+		}
+	}
 
 	// --- Defaults and inferred enablement ---
 	var listenAddr string
@@ -450,19 +574,35 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		// Deprecated explicit override.
 		proxyEnabled = *fc.ServerEnabled
 	} else {
-		proxyEnabled = listenAddr != "" || len(cfg.Routes) > 0
+		proxyEnabled = len(listeners) > 0 || listenAddr != "" || len(cfg.Routes) > 0
 	}
 
-	// Prevent confusing states: routes imply a listener.
-	if len(cfg.Routes) > 0 && fc.ListenAddr != nil && listenAddr == "" {
+	// Prevent confusing states: routes imply a listener unless explicit multi-listener config is used.
+	if len(cfg.Routes) > 0 && fc.ListenAddr != nil && listenAddr == "" && len(listeners) == 0 {
 		return nil, fmt.Errorf("config: routes are set but listen_addr is empty")
 	}
 
 	if proxyEnabled {
-		if listenAddr == "" {
-			listenAddr = ":25565"
+		// Legacy listen_addr maps to a TCP routing listener.
+		if listenAddr != "" {
+			dup := false
+			for _, l := range listeners {
+				if strings.TrimSpace(l.ListenAddr) == listenAddr && strings.TrimSpace(strings.ToLower(l.Protocol)) == "tcp" && strings.TrimSpace(strings.ToLower(l.Mode)) == "routing" {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				listeners = append(listeners, ProxyListenerConfig{ListenAddr: listenAddr, Protocol: "tcp", Mode: "routing"})
+			}
 		}
-		cfg.ListenAddr = listenAddr
+		if len(listeners) == 0 {
+			// Backward compatible default: routes imply a default TCP listener.
+			listeners = append(listeners, ProxyListenerConfig{ListenAddr: ":25565", Protocol: "tcp", Mode: "routing"})
+		}
+		cfg.Listeners = listeners
+		// Preserve legacy field for logs and default port inference.
+		cfg.ListenAddr = cfg.Listeners[0].ListenAddr
 		if fc.AdminAddr == nil {
 			cfg.AdminAddr = ":8080"
 		} else {
@@ -470,11 +610,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			cfg.AdminAddr = adminAddr
 		}
 	} else {
-		// Allow admin (or listener) to be explicitly configured even when the
-		// proxy server is disabled (e.g. tunnel-server-only setups).
-		if fc.ListenAddr != nil {
-			cfg.ListenAddr = listenAddr
-		}
+		// Proxy role disabled.
 		if fc.AdminAddr != nil {
 			cfg.AdminAddr = adminAddr
 		}

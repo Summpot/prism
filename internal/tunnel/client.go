@@ -29,7 +29,7 @@ type Client struct {
 	bridge *Bridge
 
 	mu       sync.RWMutex
-	localMap map[string]string // service -> local addr
+	localMap map[string]RegisteredService // service -> metadata (proto/local)
 }
 
 func NewClient(opts ClientOptions) (*Client, error) {
@@ -45,14 +45,18 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{opts: opts, tr: tr, bridge: NewBridge(opts.BufSize), localMap: map[string]string{}}
+	c := &Client{opts: opts, tr: tr, bridge: NewBridge(opts.BufSize), localMap: map[string]RegisteredService{}}
 	for _, s := range opts.Services {
 		name := strings.TrimSpace(s.Name)
 		addr := strings.TrimSpace(s.LocalAddr)
 		if name == "" || addr == "" {
 			continue
 		}
-		c.localMap[name] = addr
+		proto := strings.TrimSpace(strings.ToLower(s.Proto))
+		if proto == "" {
+			proto = "tcp"
+		}
+		c.localMap[name] = RegisteredService{Name: name, Proto: proto, LocalAddr: addr, RemoteAddr: strings.TrimSpace(s.RemoteAddr)}
 	}
 	if opts.DialTimeout <= 0 {
 		c.opts.DialTimeout = 5 * time.Second
@@ -128,7 +132,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 func (c *Client) handleStream(ctx context.Context, st net.Conn) {
 	defer st.Close()
 
-	svc, err := readProxyStreamHeader(st)
+	kind, svc, err := readProxyStreamHeader(st)
 	if err != nil {
 		// Server may have opened an unknown stream type.
 		c.opts.Logger.Debug("tunnel: stream header error", "err", err)
@@ -136,19 +140,35 @@ func (c *Client) handleStream(ctx context.Context, st net.Conn) {
 	}
 
 	c.mu.RLock()
-	local := c.localMap[svc]
+	meta := c.localMap[svc]
 	c.mu.RUnlock()
-	if strings.TrimSpace(local) == "" {
+	local := strings.TrimSpace(meta.LocalAddr)
+	if local == "" {
 		c.opts.Logger.Warn("tunnel: unknown service", "service", svc)
 		return
 	}
 
-	var d net.Dialer
-	up, err := d.DialContext(ctx, "tcp", local)
-	if err != nil {
-		c.opts.Logger.Warn("tunnel: dial local failed", "service", svc, "local", local, "err", err)
+	switch kind {
+	case ProxyStreamTCP:
+		var d net.Dialer
+		up, err := d.DialContext(ctx, "tcp", local)
+		if err != nil {
+			c.opts.Logger.Warn("tunnel: dial local failed", "service", svc, "local", local, "err", err)
+			return
+		}
+		_ = c.bridge.Proxy(ctx, st, up)
+	case ProxyStreamUDP:
+		var d net.Dialer
+		up, err := d.DialContext(ctx, "udp", local)
+		if err != nil {
+			c.opts.Logger.Warn("tunnel: dial local failed", "service", svc, "local", local, "err", err)
+			return
+		}
+		// After the proxy header, the stream carries framed UDP datagrams.
+		dg := NewDatagramConn(st)
+		_ = c.bridge.Proxy(ctx, dg, up)
+	default:
+		c.opts.Logger.Debug("tunnel: unknown proxy stream kind", "kind", string(kind), "service", svc)
 		return
 	}
-
-	_ = c.bridge.Proxy(ctx, st, up)
 }

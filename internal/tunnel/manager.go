@@ -22,6 +22,7 @@ type Manager struct {
 
 	logger *slog.Logger
 	idSeq  atomic.Uint64
+	subs   []func()
 }
 
 type clientConn struct {
@@ -93,6 +94,8 @@ func (m *Manager) RegisterClient(id string, sess TransportSession, services []Re
 		m.services[name] = id
 	}
 
+	// Notify subscribers outside the lock.
+	go m.notify()
 	return nil
 }
 
@@ -111,6 +114,55 @@ func (m *Manager) UnregisterClient(id string) {
 		}
 	}
 	_ = cc.sess.Close()
+	go m.notify()
+}
+
+// Subscribe registers a callback that is invoked whenever the service registry
+// changes (client register/unregister). Callbacks may be called concurrently.
+func (m *Manager) Subscribe(fn func()) {
+	if fn == nil {
+		return
+	}
+	m.mu.Lock()
+	m.subs = append(m.subs, fn)
+	m.mu.Unlock()
+}
+
+func (m *Manager) notify() {
+	m.mu.RLock()
+	subs := append([]func(){}, m.subs...)
+	m.mu.RUnlock()
+	for _, fn := range subs {
+		if fn == nil {
+			continue
+		}
+		fn()
+	}
+}
+
+type ServiceSnapshot struct {
+	Service  RegisteredService
+	ClientID string
+	Remote   string
+}
+
+func (m *Manager) SnapshotServices() []ServiceSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]ServiceSnapshot, 0, len(m.services))
+	for name, cid := range m.services {
+		cc := m.clients[cid]
+		if cc == nil {
+			continue
+		}
+		svc, ok := cc.services[name]
+		if !ok {
+			continue
+		}
+		out = append(out, ServiceSnapshot{Service: svc, ClientID: cid, Remote: cc.remote})
+	}
+	return out
 }
 
 func (m *Manager) DialService(ctx context.Context, service string) (net.Conn, error) {
@@ -126,11 +178,36 @@ func (m *Manager) DialService(ctx context.Context, service string) (net.Conn, er
 	if err != nil {
 		return nil, err
 	}
-	if err := writeProxyStreamHeader(st, service); err != nil {
+	if err := writeProxyStreamHeaderKind(st, ProxyStreamTCP, service); err != nil {
 		_ = st.Close()
 		return nil, err
 	}
 	return st, nil
+}
+
+// DialServiceUDP opens a tunnel stream for proxying UDP datagrams to the named
+// service.
+//
+// The returned net.Conn implements datagram semantics via length-prefixed
+// framing (see DatagramConn).
+func (m *Manager) DialServiceUDP(ctx context.Context, service string) (net.Conn, error) {
+	m.mu.RLock()
+	cid, ok := m.services[service]
+	cc := m.clients[cid]
+	m.mu.RUnlock()
+	if !ok || cc == nil {
+		return nil, ErrServiceNotFound
+	}
+
+	st, err := cc.sess.OpenStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeProxyStreamHeaderKind(st, ProxyStreamUDP, service); err != nil {
+		_ = st.Close()
+		return nil, err
+	}
+	return NewDatagramConn(st), nil
 }
 
 func (m *Manager) HasService(service string) bool {

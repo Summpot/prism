@@ -14,7 +14,8 @@ import (
 
 const (
 	magicRegister = "PRRG" // Prism Reverse Register
-	magicProxy    = "PRPX" // Prism Reverse Proxy
+	magicProxyTCP = "PRPX" // Prism Reverse Proxy (TCP stream)
+	magicProxyUDP = "PRPU" // Prism Reverse Proxy (UDP datagram stream)
 	protocolV1    = byte(1)
 )
 
@@ -29,8 +30,14 @@ type RegisterRequest struct {
 }
 
 type RegisteredService struct {
-	Name      string `json:"name"`
-	LocalAddr string `json:"local_addr"` // only used by prismc; prisms stores it for debugging
+	Name string `json:"name"`
+	// Proto is one of: tcp, udp. Defaults to tcp if omitted.
+	Proto string `json:"proto,omitempty"`
+	// LocalAddr is only used by prismc; prisms stores it for debugging.
+	LocalAddr string `json:"local_addr"`
+	// RemoteAddr (optional) requests prisms to open a public listener for this
+	// service (frp-like behavior).
+	RemoteAddr string `json:"remote_addr,omitempty"`
 }
 
 func writeRegisterRequest(w io.Writer, req RegisterRequest) error {
@@ -88,12 +95,37 @@ func readRegisterRequest(r io.Reader) (RegisterRequest, error) {
 	}
 	for i := range req.Services {
 		req.Services[i].Name = strings.TrimSpace(req.Services[i].Name)
+		req.Services[i].Proto = strings.TrimSpace(strings.ToLower(req.Services[i].Proto))
+		if req.Services[i].Proto == "" {
+			req.Services[i].Proto = "tcp"
+		}
+		req.Services[i].RemoteAddr = strings.TrimSpace(req.Services[i].RemoteAddr)
 	}
 	return req, nil
 }
 
+type ProxyStreamKind string
+
+const (
+	ProxyStreamTCP ProxyStreamKind = "tcp"
+	ProxyStreamUDP ProxyStreamKind = "udp"
+)
+
 func writeProxyStreamHeader(w io.Writer, service string) error {
-	if _, err := io.WriteString(w, magicProxy); err != nil {
+	return writeProxyStreamHeaderKind(w, ProxyStreamTCP, service)
+}
+
+func writeProxyStreamHeaderKind(w io.Writer, kind ProxyStreamKind, service string) error {
+	magic := ""
+	switch kind {
+	case ProxyStreamTCP:
+		magic = magicProxyTCP
+	case ProxyStreamUDP:
+		magic = magicProxyUDP
+	default:
+		return fmt.Errorf("tunnel: unknown proxy stream kind %q", kind)
+	}
+	if _, err := io.WriteString(w, magic); err != nil {
 		return err
 	}
 	if _, err := w.Write([]byte{protocolV1}); err != nil {
@@ -103,29 +135,33 @@ func writeProxyStreamHeader(w io.Writer, service string) error {
 	return err
 }
 
-func readProxyStreamHeader(r io.Reader) (service string, err error) {
-	r = bufio.NewReader(r)
+func readProxyStreamHeader(r io.Reader) (kind ProxyStreamKind, service string, err error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return "", err
+		return "", "", err
 	}
-	if string(hdr[:]) != magicProxy {
-		return "", ErrBadMagic
+	switch string(hdr[:]) {
+	case magicProxyTCP:
+		kind = ProxyStreamTCP
+	case magicProxyUDP:
+		kind = ProxyStreamUDP
+	default:
+		return "", "", ErrBadMagic
 	}
 	var ver [1]byte
 	if _, err := io.ReadFull(r, ver[:]); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if ver[0] != protocolV1 {
-		return "", ErrBadVersion
+		return "", "", ErrBadVersion
 	}
 	s, _, err := mcproto.ReadString(r)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", fmt.Errorf("tunnel: empty service")
+		return "", "", fmt.Errorf("tunnel: empty service")
 	}
-	return s, nil
+	return kind, s, nil
 }

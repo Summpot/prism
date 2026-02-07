@@ -111,6 +111,9 @@ func RunPrism(ctx context.Context, configPath string) error {
 	logger := slog.Default()
 
 	proxyEnabled := strings.TrimSpace(cfg.ListenAddr) != ""
+	if len(cfg.Listeners) > 0 {
+		proxyEnabled = true
+	}
 	tunnelServerEnabled := len(cfg.Tunnel.Listeners) > 0
 	tunnelClientEnabled := cfg.Tunnel.Client != nil && strings.TrimSpace(cfg.Tunnel.Client.ServerAddr) != "" && len(cfg.Tunnel.Services) > 0
 	adminEnabled := strings.TrimSpace(cfg.AdminAddr) != "" && (proxyEnabled || tunnelServerEnabled)
@@ -128,6 +131,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 		"admin_addr", cfg.AdminAddr,
 		"tunnel_listeners", len(cfg.Tunnel.Listeners),
 		"tunnel_services", len(cfg.Tunnel.Services),
+		"proxy_listeners", len(cfg.Listeners),
 	)
 
 	// Tunnel client (optional) is created once; config changes require restart.
@@ -137,7 +141,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 		} else {
 			services := make([]tunnel.RegisteredService, 0, len(cfg.Tunnel.Services))
 			for _, s := range cfg.Tunnel.Services {
-				services = append(services, tunnel.RegisteredService{Name: s.Name, LocalAddr: s.LocalAddr})
+				services = append(services, tunnel.RegisteredService{Name: s.Name, Proto: s.Proto, LocalAddr: s.LocalAddr, RemoteAddr: s.RemoteAddr})
 			}
 			client, err := tunnel.NewClient(tunnel.ClientOptions{
 				ServerAddr:  cfg.Tunnel.Client.ServerAddr,
@@ -178,13 +182,71 @@ func RunPrism(ctx context.Context, configPath string) error {
 	sessions := proxy.NewSessionRegistry()
 
 	r := router.NewRouter(cfg.Routes)
-	h := proxy.NewSessionHandler(proxy.SessionHandlerOptions{})
+
+	type runningListener struct {
+		cfg config.ProxyListenerConfig
+		// Exactly one of these handlers is non-nil.
+		routing *proxy.SessionHandler
+		forward *proxy.ForwardHandler
+		udp     *proxy.UDPForwarder
+
+		tcp *server.TCPServer
+		u   *server.UDPServer
+	}
+	var listeners []*runningListener
+	if proxyEnabled {
+		// Freeze listener topology at startup (changing listeners requires restart).
+		for _, l := range cfg.Listeners {
+			lc := l
+			proto := strings.TrimSpace(strings.ToLower(lc.Protocol))
+			if proto == "" {
+				proto = "tcp"
+			}
+			lc.Protocol = proto
+			mode := strings.TrimSpace(strings.ToLower(lc.Mode))
+			if mode == "" {
+				mode = "routing"
+			}
+			lc.Mode = mode
+
+			rl := &runningListener{cfg: lc}
+			switch proto {
+			case "tcp":
+				switch mode {
+				case "routing":
+					rl.routing = proxy.NewSessionHandler(proxy.SessionHandlerOptions{})
+					rl.tcp = server.NewTCPServer(lc.ListenAddr, rl.routing, metrics, logger)
+				case "forward":
+					rl.forward = proxy.NewForwardHandler(proxy.ForwardHandlerOptions{Network: "tcp", Upstream: lc.Upstream})
+					rl.tcp = server.NewTCPServer(lc.ListenAddr, rl.forward, metrics, logger)
+				default:
+					return fmt.Errorf("config: unsupported tcp listener mode %q", mode)
+				}
+			case "udp":
+				rl.udp = proxy.NewUDPForwarder(proxy.UDPForwarderOptions{Upstream: lc.Upstream, IdleTimeout: cfg.Timeouts.IdleTimeout, Logger: logger})
+				rl.u = server.NewUDPServer(lc.ListenAddr, rl.udp, logger)
+			default:
+				return fmt.Errorf("config: unsupported listener protocol %q", proto)
+			}
+			listeners = append(listeners, rl)
+		}
+	}
 
 	// Tunnel server (optional) is created once; config changes require restart.
 	var tunnelSrvs []*tunnel.Server
 	var tunnelMgr *tunnel.Manager
+	var svcAuto *tunnelServiceAutoListener
 	if tunnelServerEnabled {
 		tunnelMgr = tunnel.NewManager(logger)
+		if cfg.Tunnel.AutoListenServices {
+			svcAuto = newTunnelServiceAutoListener(runCtx, tunnelMgr, metrics, logger)
+			// Reconcile on any registry change.
+			tunnelMgr.Subscribe(func() {
+				if svcAuto != nil {
+					svcAuto.Reconcile()
+				}
+			})
+		}
 		for _, l := range cfg.Tunnel.Listeners {
 			srv, err := tunnel.NewServer(tunnel.ServerOptions{
 				ListenAddr: l.ListenAddr,
@@ -213,6 +275,9 @@ func RunPrism(ctx context.Context, configPath string) error {
 			if oldCfg.ListenAddr != newCfg.ListenAddr {
 				logger.Warn("listen_addr changed (restart required)")
 			}
+			if !proxyListenersEqual(oldCfg.Listeners, newCfg.Listeners) {
+				logger.Warn("listeners changed (restart required)")
+			}
 			if oldCfg.AdminAddr != newCfg.AdminAddr {
 				logger.Warn("admin_addr changed (restart required)")
 			}
@@ -240,20 +305,55 @@ func RunPrism(ctx context.Context, configPath string) error {
 			InjectProxyProtoV2: newCfg.ProxyProtocolV2,
 			Metrics:            metrics,
 		})
-		defaultUpstreamPort := defaultUpstreamPortFromListenAddr(newCfg.ListenAddr)
 
-		h.Update(proxy.SessionHandlerOptions{
-			Parser:              parser,
-			Resolver:            r,
-			Dialer:              dialer,
-			Bridge:              bridge,
-			Logger:              logger,
-			Metrics:             metrics,
-			Sessions:            sessions,
-			Timeouts:            newCfg.Timeouts,
-			MaxHeaderBytes:      newCfg.MaxHeaderBytes,
-			DefaultUpstreamPort: defaultUpstreamPort,
-		})
+		// Update handlers for each configured listener.
+		for _, rl := range listeners {
+			if rl == nil {
+				continue
+			}
+			switch rl.cfg.Protocol {
+			case "tcp":
+				if rl.routing != nil {
+					defaultUpstreamPort := defaultUpstreamPortFromListenAddr(rl.cfg.ListenAddr)
+					rl.routing.Update(proxy.SessionHandlerOptions{
+						Parser:              parser,
+						Resolver:            r,
+						Dialer:              dialer,
+						Bridge:              bridge,
+						Logger:              logger,
+						Metrics:             metrics,
+						Sessions:            sessions,
+						Timeouts:            newCfg.Timeouts,
+						MaxHeaderBytes:      newCfg.MaxHeaderBytes,
+						DefaultUpstreamPort: defaultUpstreamPort,
+					})
+				}
+				if rl.forward != nil {
+					rl.forward.Update(proxy.ForwardHandlerOptions{
+						Network:  "tcp",
+						Upstream: rl.cfg.Upstream,
+						Dialer:   dialer,
+						Bridge:   bridge,
+						Logger:   logger,
+						Timeouts: newCfg.Timeouts,
+					})
+				}
+			case "udp":
+				if rl.udp != nil {
+					rl.udp.Update(proxy.UDPForwarderOptions{
+						Upstream:    rl.cfg.Upstream,
+						Dialer:      dialer,
+						IdleTimeout: newCfg.Timeouts.IdleTimeout,
+						Logger:      logger,
+					})
+				}
+			}
+		}
+		if svcAuto != nil {
+			svcAuto.UpdateRuntime(dialer, bridge, newCfg.Timeouts)
+			// Initial reconcile after config/runtime is ready.
+			svcAuto.Reconcile()
+		}
 
 		// Retire old WASM parsers after the handshake window to avoid racing in-flight handshakes.
 		oldClose := currentClose
@@ -281,10 +381,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 		cm.Start(runCtx)
 	}
 
-	var tcpServer *server.TCPServer
-	if proxyEnabled {
-		tcpServer = server.NewTCPServer(cfg.ListenAddr, h, metrics, logger)
-	}
+	// Servers created earlier from cfg.Listeners.
 
 	admin := telemetry.NewAdminServer(telemetry.AdminServerOptions{
 		Addr:     cfg.AdminAddr,
@@ -296,7 +393,18 @@ func RunPrism(ctx context.Context, configPath string) error {
 		},
 		Health: func() bool {
 			if proxyEnabled {
-				return tcpServer != nil && tcpServer.IsListening()
+				for _, rl := range listeners {
+					if rl == nil {
+						continue
+					}
+					if rl.tcp != nil && rl.tcp.IsListening() {
+						return true
+					}
+					if rl.u != nil && rl.u.IsListening() {
+						return true
+					}
+				}
+				return false
 			}
 			if len(tunnelSrvs) > 0 {
 				for _, s := range tunnelSrvs {
@@ -330,12 +438,28 @@ func RunPrism(ctx context.Context, configPath string) error {
 	}
 
 	if proxyEnabled {
-		go func() {
-			if err := tcpServer.ListenAndServe(runCtx); err != nil {
-				logger.Error("tcp server error", "err", err)
-				cancel()
+		for _, rl := range listeners {
+			s := rl
+			if s == nil {
+				continue
 			}
-		}()
+			if s.tcp != nil {
+				go func() {
+					if err := s.tcp.ListenAndServe(runCtx); err != nil {
+						logger.Error("tcp server error", "err", err)
+						cancel()
+					}
+				}()
+			}
+			if s.u != nil {
+				go func() {
+					if err := s.u.ListenAndServe(runCtx); err != nil {
+						logger.Error("udp server error", "err", err)
+						cancel()
+					}
+				}()
+			}
+		}
 	}
 
 	<-runCtx.Done()
@@ -348,9 +472,19 @@ func RunPrism(ctx context.Context, configPath string) error {
 			logger.Warn("admin shutdown", "err", err)
 		}
 	}
-	if tcpServer != nil {
-		if err := tcpServer.Shutdown(shutdownCtx); err != nil {
-			logger.Warn("tcp shutdown", "err", err)
+	for _, rl := range listeners {
+		if rl == nil {
+			continue
+		}
+		if rl.tcp != nil {
+			if err := rl.tcp.Shutdown(shutdownCtx); err != nil {
+				logger.Warn("tcp shutdown", "err", err)
+			}
+		}
+		if rl.u != nil {
+			if err := rl.u.Shutdown(shutdownCtx); err != nil {
+				logger.Warn("udp shutdown", "err", err)
+			}
 		}
 	}
 	for _, srv := range tunnelSrvs {
@@ -361,6 +495,9 @@ func RunPrism(ctx context.Context, configPath string) error {
 			logger.Warn("tunnel shutdown", "err", err)
 		}
 	}
+	if svcAuto != nil {
+		svcAuto.ShutdownAll(shutdownCtx)
+	}
 
 	logger.Info("prism exited")
 	return nil
@@ -368,6 +505,9 @@ func RunPrism(ctx context.Context, configPath string) error {
 
 func tunnelConfigEqual(a, b config.TunnelConfig) bool {
 	if a.AuthToken != b.AuthToken {
+		return false
+	}
+	if a.AutoListenServices != b.AutoListenServices {
 		return false
 	}
 	if (a.Client == nil) != (b.Client == nil) {
@@ -396,6 +536,18 @@ func tunnelConfigEqual(a, b config.TunnelConfig) bool {
 		la := a.Listeners[i]
 		lb := b.Listeners[i]
 		if la.ListenAddr != lb.ListenAddr || la.Transport != lb.Transport || la.QUIC != lb.QUIC {
+			return false
+		}
+	}
+	return true
+}
+
+func proxyListenersEqual(a, b []config.ProxyListenerConfig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ListenAddr != b[i].ListenAddr || a[i].Protocol != b[i].Protocol || a[i].Mode != b[i].Mode || a[i].Upstream != b[i].Upstream {
 			return false
 		}
 	}

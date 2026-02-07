@@ -32,6 +32,10 @@ func (d *TunnelDialer) DialContext(ctx context.Context, network, address string)
 		if d.Tunnel == nil {
 			return nil, fmt.Errorf("proxy: tunnel dial requested but tunnel is not configured")
 		}
+		n := strings.ToLower(strings.TrimSpace(network))
+		if strings.HasPrefix(n, "udp") {
+			return d.Tunnel.DialServiceUDP(ctx, svc)
+		}
 		return d.Tunnel.DialService(ctx, svc)
 	}
 	if d.Fallback == nil {

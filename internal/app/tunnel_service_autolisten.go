@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,6 @@ type tunnelServiceAutoListener struct {
 	metrics any
 
 	runtimeMu sync.RWMutex
-	dialer    proxy.Dialer
 	bridge    *proxy.ProxyBridge
 	timeouts  config.Timeouts
 
@@ -29,15 +29,31 @@ type tunnelServiceAutoListener struct {
 }
 
 type tunnelServiceListener struct {
-	name  string
-	proto string
-	addr  string
+	key      string
+	clientID string
+	name     string
+	proto    string
+	addr     string
 
 	forward *proxy.ForwardHandler
 	udpFwd  *proxy.UDPForwarder
 
 	tcp *server.TCPServer
 	udp *server.UDPServer
+}
+
+type pinnedTunnelDialer struct {
+	tm       *tunnel.Manager
+	clientID string
+	service  string
+}
+
+func (d pinnedTunnelDialer) DialContext(ctx context.Context, network, _ string) (net.Conn, error) {
+	n := strings.ToLower(strings.TrimSpace(network))
+	if strings.HasPrefix(n, "udp") {
+		return d.tm.DialServiceUDPFromClient(ctx, d.clientID, d.service)
+	}
+	return d.tm.DialServiceFromClient(ctx, d.clientID, d.service)
 }
 
 func newTunnelServiceAutoListener(ctx context.Context, tm *tunnel.Manager, metrics any, logger *slog.Logger) *tunnelServiceAutoListener {
@@ -49,7 +65,7 @@ func newTunnelServiceAutoListener(ctx context.Context, tm *tunnel.Manager, metri
 
 func (a *tunnelServiceAutoListener) UpdateRuntime(dialer proxy.Dialer, bridge *proxy.ProxyBridge, timeouts config.Timeouts) {
 	a.runtimeMu.Lock()
-	a.dialer = dialer
+	_ = dialer // auto-listen uses pinned dialers per service; keep param for call-site simplicity.
 	a.bridge = bridge
 	a.timeouts = timeouts
 	a.runtimeMu.Unlock()
@@ -61,11 +77,12 @@ func (a *tunnelServiceAutoListener) UpdateRuntime(dialer proxy.Dialer, bridge *p
 		if r == nil {
 			continue
 		}
+		d := pinnedTunnelDialer{tm: a.tm, clientID: r.clientID, service: r.name}
 		if r.forward != nil {
 			r.forward.Update(proxy.ForwardHandlerOptions{
 				Network:  "tcp",
 				Upstream: "tunnel:" + r.name,
-				Dialer:   dialer,
+				Dialer:   d,
 				Bridge:   bridge,
 				Logger:   a.logger,
 				Timeouts: timeouts,
@@ -74,7 +91,7 @@ func (a *tunnelServiceAutoListener) UpdateRuntime(dialer proxy.Dialer, bridge *p
 		if r.udpFwd != nil {
 			r.udpFwd.Update(proxy.UDPForwarderOptions{
 				Upstream:    "tunnel:" + r.name,
-				Dialer:      dialer,
+				Dialer:      d,
 				IdleTimeout: timeouts.IdleTimeout,
 				Logger:      a.logger,
 			})
@@ -88,7 +105,13 @@ func (a *tunnelServiceAutoListener) Reconcile() {
 	}
 
 	snaps := a.tm.SnapshotServices()
-	desired := map[string]tunnel.RegisteredService{}
+	type desiredSvc struct {
+		ClientID string
+		Name     string
+		Proto    string
+		Addr     string
+	}
+	desired := map[string]desiredSvc{}
 	for _, s := range snaps {
 		svc := s.Service
 		name := strings.TrimSpace(svc.Name)
@@ -100,6 +123,10 @@ func (a *tunnelServiceAutoListener) Reconcile() {
 			// (routes/forwards) but never auto-exposed as server-side listeners.
 			continue
 		}
+		cid := strings.TrimSpace(s.ClientID)
+		if cid == "" {
+			continue
+		}
 		proto := strings.TrimSpace(strings.ToLower(svc.Proto))
 		if proto == "" {
 			proto = "tcp"
@@ -108,98 +135,97 @@ func (a *tunnelServiceAutoListener) Reconcile() {
 		if remote == "" {
 			continue
 		}
-		svc.Proto = proto
-		svc.RemoteAddr = remote
-		desired[name] = svc
+		key := cid + "/" + name
+		desired[key] = desiredSvc{ClientID: cid, Name: name, Proto: proto, Addr: remote}
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	// Stop removed or changed listeners.
-	for name, r := range a.running {
-		svc, ok := desired[name]
+	for key, r := range a.running {
+		svc, ok := desired[key]
 		if !ok {
-			a.shutdownLocked(name, r)
-			delete(a.running, name)
+			a.shutdownLocked(key, r)
+			delete(a.running, key)
 			continue
 		}
 		if r == nil {
-			delete(a.running, name)
+			delete(a.running, key)
 			continue
 		}
-		if r.proto != svc.Proto || r.addr != svc.RemoteAddr {
-			a.shutdownLocked(name, r)
-			delete(a.running, name)
+		if r.clientID != svc.ClientID || r.name != svc.Name || r.proto != svc.Proto || r.addr != svc.Addr {
+			a.shutdownLocked(key, r)
+			delete(a.running, key)
 		}
 	}
 
 	// Start new listeners.
-	for name, svc := range desired {
-		if a.running[name] != nil {
+	for key, svc := range desired {
+		if a.running[key] != nil {
 			continue
 		}
 
 		a.runtimeMu.RLock()
-		dialer := a.dialer
 		bridge := a.bridge
 		timeouts := a.timeouts
 		a.runtimeMu.RUnlock()
-		if dialer == nil || bridge == nil {
+		if bridge == nil {
 			// Not ready yet; will be retried on next reconcile.
 			continue
 		}
 
-		rl := &tunnelServiceListener{name: name, proto: svc.Proto, addr: svc.RemoteAddr}
+		d := pinnedTunnelDialer{tm: a.tm, clientID: svc.ClientID, service: svc.Name}
+		rl := &tunnelServiceListener{key: key, clientID: svc.ClientID, name: svc.Name, proto: svc.Proto, addr: svc.Addr}
 		switch svc.Proto {
 		case "tcp":
 			rl.forward = proxy.NewForwardHandler(proxy.ForwardHandlerOptions{
 				Network:  "tcp",
-				Upstream: "tunnel:" + name,
-				Dialer:   dialer,
+				Upstream: "tunnel:" + svc.Name,
+				Dialer:   d,
 				Bridge:   bridge,
 				Logger:   a.logger,
 				Timeouts: timeouts,
 			})
-			rl.tcp = server.NewTCPServer(svc.RemoteAddr, rl.forward, a.metrics, a.logger)
-			go func(s *server.TCPServer, svcName string, addr string) {
+			rl.tcp = server.NewTCPServer(svc.Addr, rl.forward, a.metrics, a.logger)
+			go func(s *server.TCPServer, svcName string, cid string, addr string) {
 				if err := s.ListenAndServe(a.ctx); err != nil {
 					// Avoid tearing down Prism on per-service listener failures.
-					a.logger.Warn("tunnel: service tcp listener stopped", "service", svcName, "addr", addr, "err", err)
+					a.logger.Warn("tunnel: service tcp listener stopped", "service", svcName, "cid", cid, "addr", addr, "err", err)
 				}
-			}(rl.tcp, name, svc.RemoteAddr)
+			}(rl.tcp, svc.Name, svc.ClientID, svc.Addr)
 		case "udp":
 			rl.udpFwd = proxy.NewUDPForwarder(proxy.UDPForwarderOptions{
-				Upstream:    "tunnel:" + name,
-				Dialer:      dialer,
+				Upstream:    "tunnel:" + svc.Name,
+				Dialer:      d,
 				IdleTimeout: timeouts.IdleTimeout,
 				Logger:      a.logger,
 			})
-			rl.udp = server.NewUDPServer(svc.RemoteAddr, rl.udpFwd, a.logger)
-			go func(s *server.UDPServer, svcName string, addr string) {
+			rl.udp = server.NewUDPServer(svc.Addr, rl.udpFwd, a.logger)
+			go func(s *server.UDPServer, svcName string, cid string, addr string) {
 				if err := s.ListenAndServe(a.ctx); err != nil {
-					a.logger.Warn("tunnel: service udp listener stopped", "service", svcName, "addr", addr, "err", err)
+					a.logger.Warn("tunnel: service udp listener stopped", "service", svcName, "cid", cid, "addr", addr, "err", err)
 				}
-			}(rl.udp, name, svc.RemoteAddr)
+			}(rl.udp, svc.Name, svc.ClientID, svc.Addr)
 		default:
 			continue
 		}
 
-		a.logger.Info("tunnel: auto listening for service", "service", name, "proto", svc.Proto, "addr", svc.RemoteAddr)
-		a.running[name] = rl
+		a.logger.Info("tunnel: auto listening for service", "service", svc.Name, "cid", svc.ClientID, "proto", svc.Proto, "addr", svc.Addr)
+		a.running[key] = rl
 	}
 }
 
 func (a *tunnelServiceAutoListener) ShutdownAll(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for name, r := range a.running {
-		a.shutdownLocked(name, r)
-		delete(a.running, name)
+	for key, r := range a.running {
+		a.shutdownLocked(key, r)
+		delete(a.running, key)
 	}
 }
 
-func (a *tunnelServiceAutoListener) shutdownLocked(name string, r *tunnelServiceListener) {
+func (a *tunnelServiceAutoListener) shutdownLocked(key string, r *tunnelServiceListener) {
 	if r == nil {
 		return
 	}
@@ -212,5 +238,5 @@ func (a *tunnelServiceAutoListener) shutdownLocked(name string, r *tunnelService
 	if r.udp != nil {
 		_ = r.udp.Shutdown(ctx)
 	}
-	a.logger.Info("tunnel: stopped service listener", "service", name)
+	a.logger.Info("tunnel: stopped service listener", "service", r.name, "cid", r.clientID, "key", key)
 }

@@ -4,7 +4,8 @@ admin_addr: ":8080"
 listeners:
   - listen_addr: ":25565"
     protocol: "tcp"
-    mode: "routing" # routing | forward
+    # If upstream is omitted for a TCP listener, Prism uses hostname routing.
+    # If upstream is set, Prism forwards to that fixed upstream.
   # Example UDP game port forwarding (direct):
   - listen_addr: ":19132"
     protocol: "udp"

@@ -147,6 +147,11 @@ Role enablement is inferred from configuration:
 * The tunnel server maintains an in-memory registry mapping `service name -> active client session`.
 * A route whose upstream is `tunnel:<service>` is forwarded through the active client session that registered that service.
 
+Service name conflicts:
+
+* If multiple tunnel clients register the same service `name`, Prism keeps the **first** active registrant as the routing target for `tunnel:<service>`.
+* Later registrations with the same `name` do **not** override routing. They can still be exposed by **port** via `remote_addr` + auto-listen.
+
 ### 8.2.1. frp-like "auto listen" for services
 
 When enabled on the tunnel server role, Prism will automatically open server-side listeners for any registered services that specify a remote listen address.

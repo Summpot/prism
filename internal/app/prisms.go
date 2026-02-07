@@ -208,24 +208,18 @@ func RunPrism(ctx context.Context, configPath string) error {
 				proto = "tcp"
 			}
 			lc.Protocol = proto
-			mode := strings.TrimSpace(strings.ToLower(lc.Mode))
-			if mode == "" {
-				mode = "routing"
-			}
-			lc.Mode = mode
+			up := strings.TrimSpace(lc.Upstream)
+			lc.Upstream = up
 
 			rl := &runningListener{cfg: lc}
 			switch proto {
 			case "tcp":
-				switch mode {
-				case "routing":
+				if lc.Upstream == "" {
 					rl.routing = proxy.NewSessionHandler(proxy.SessionHandlerOptions{})
 					rl.tcp = server.NewTCPServer(lc.ListenAddr, rl.routing, metrics, logger)
-				case "forward":
+				} else {
 					rl.forward = proxy.NewForwardHandler(proxy.ForwardHandlerOptions{Network: "tcp", Upstream: lc.Upstream})
 					rl.tcp = server.NewTCPServer(lc.ListenAddr, rl.forward, metrics, logger)
-				default:
-					return fmt.Errorf("config: unsupported tcp listener mode %q", mode)
 				}
 			case "udp":
 				rl.udp = proxy.NewUDPForwarder(proxy.UDPForwarderOptions{Upstream: lc.Upstream, IdleTimeout: cfg.Timeouts.IdleTimeout, Logger: logger})
@@ -552,7 +546,7 @@ func proxyListenersEqual(a, b []config.ProxyListenerConfig) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].ListenAddr != b[i].ListenAddr || a[i].Protocol != b[i].Protocol || a[i].Mode != b[i].Mode || a[i].Upstream != b[i].Upstream {
+		if a[i].ListenAddr != b[i].ListenAddr || a[i].Protocol != b[i].Protocol || a[i].Upstream != b[i].Upstream {
 			return false
 		}
 	}

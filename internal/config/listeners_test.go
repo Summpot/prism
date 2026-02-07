@@ -15,7 +15,6 @@ func TestFileConfigProvider_Load_ListenersYAML(t *testing.T) {
 listeners:
   - listen_addr: ":25565"
     protocol: "tcp"
-    mode: "routing"
   - listen_addr: ":19132"
     protocol: "udp"
     upstream: "127.0.0.1:19132"
@@ -34,10 +33,10 @@ routes:
 	if len(cfg.Listeners) != 2 {
 		t.Fatalf("Listeners len=%d want 2", len(cfg.Listeners))
 	}
-	if cfg.Listeners[0].Protocol != "tcp" || cfg.Listeners[0].Mode != "routing" || cfg.Listeners[0].ListenAddr != ":25565" {
+	if cfg.Listeners[0].Protocol != "tcp" || cfg.Listeners[0].ListenAddr != ":25565" || cfg.Listeners[0].Upstream != "" {
 		t.Fatalf("Listeners[0]=%+v", cfg.Listeners[0])
 	}
-	if cfg.Listeners[1].Protocol != "udp" || cfg.Listeners[1].Mode != "forward" || cfg.Listeners[1].ListenAddr != ":19132" || cfg.Listeners[1].Upstream != "127.0.0.1:19132" {
+	if cfg.Listeners[1].Protocol != "udp" || cfg.Listeners[1].ListenAddr != ":19132" || cfg.Listeners[1].Upstream != "127.0.0.1:19132" {
 		t.Fatalf("Listeners[1]=%+v", cfg.Listeners[1])
 	}
 }

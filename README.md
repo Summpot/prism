@@ -66,6 +66,8 @@ On the **private machine**:
   - Optional: set `remote_addr` to request a server-side listener for the service (frp-like).
   - Optional: set `route_only=true` to ensure the service is **only** reachable via `tunnel:<service>` and never auto-exposed (must not set `remote_addr`).
 
+If multiple tunnel clients register the same service `name`, Prism keeps the **first** active registrant as the routing target for `tunnel:<service>`. Later registrations with the same name do not override routing; they can still be exposed by port via `remote_addr` + `auto_listen_services`.
+
 Transport notes:
 
 - `tcp`: simplest, works everywhere.

@@ -19,17 +19,14 @@ type Timeouts struct {
 
 // ProxyListenerConfig configures a single public-facing listener.
 //
-// TCP listeners can run in routing mode (hostname-based via routing_parsers + routes)
-// or forward mode (fixed upstream).
+// TCP listeners route by hostname (Minecraft handshake / TLS SNI / WASM) when
+// Upstream is empty, or forward to a fixed upstream when Upstream is set.
 //
-// UDP listeners run in forward mode only.
+// UDP listeners always forward to a fixed upstream.
 type ProxyListenerConfig struct {
 	ListenAddr string
 	// Protocol is one of: tcp, udp.
 	Protocol string
-	// Mode is one of: routing, forward.
-	// For udp it is implicitly forward.
-	Mode string
 	// Upstream is required for forward mode. It may be a dial address (host:port)
 	// or a tunnel target (tunnel:<service>).
 	Upstream string
@@ -187,7 +184,6 @@ type fileConfig struct {
 	Listeners  []struct {
 		ListenAddr string `yaml:"listen_addr" toml:"listen_addr"`
 		Protocol   string `yaml:"protocol" toml:"protocol"`
-		Mode       string `yaml:"mode" toml:"mode"`
 		Upstream   string `yaml:"upstream" toml:"upstream"`
 	} `yaml:"listeners" toml:"listeners"`
 	AdminAddr *string `yaml:"admin_addr" toml:"admin_addr"`
@@ -555,36 +551,13 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 			if proto == "" {
 				proto = "tcp"
 			}
-			mode := strings.TrimSpace(strings.ToLower(l.Mode))
 			up := strings.TrimSpace(l.Upstream)
 
 			switch proto {
 			case "tcp":
-				if mode == "" {
-					if up == "" {
-						mode = "routing"
-					} else {
-						mode = "forward"
-					}
-				}
-				switch mode {
-				case "routing":
-					if up != "" {
-						return nil, fmt.Errorf("config: listeners[%d] mode=routing cannot set upstream", i)
-					}
-				case "forward":
-					if up == "" {
-						return nil, fmt.Errorf("config: listeners[%d] mode=forward requires upstream", i)
-					}
-				default:
-					return nil, fmt.Errorf("config: listeners[%d] has invalid mode %q", i, mode)
-				}
+				// Routing is implied when upstream is empty; forward is implied when upstream is set.
+				// No explicit mode is supported.
 			case "udp":
-				// UDP only supports forward mode.
-				if mode != "" && mode != "forward" {
-					return nil, fmt.Errorf("config: listeners[%d] protocol=udp only supports mode=forward", i)
-				}
-				mode = "forward"
 				if up == "" {
 					return nil, fmt.Errorf("config: listeners[%d] protocol=udp requires upstream", i)
 				}
@@ -592,7 +565,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 				return nil, fmt.Errorf("config: listeners[%d] has invalid protocol %q", i, proto)
 			}
 
-			listeners = append(listeners, ProxyListenerConfig{ListenAddr: la, Protocol: proto, Mode: mode, Upstream: up})
+			listeners = append(listeners, ProxyListenerConfig{ListenAddr: la, Protocol: proto, Upstream: up})
 		}
 	}
 
@@ -625,18 +598,18 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		if listenAddr != "" {
 			dup := false
 			for _, l := range listeners {
-				if strings.TrimSpace(l.ListenAddr) == listenAddr && strings.TrimSpace(strings.ToLower(l.Protocol)) == "tcp" && strings.TrimSpace(strings.ToLower(l.Mode)) == "routing" {
+				if strings.TrimSpace(l.ListenAddr) == listenAddr && strings.TrimSpace(strings.ToLower(l.Protocol)) == "tcp" && strings.TrimSpace(l.Upstream) == "" {
 					dup = true
 					break
 				}
 			}
 			if !dup {
-				listeners = append(listeners, ProxyListenerConfig{ListenAddr: listenAddr, Protocol: "tcp", Mode: "routing"})
+				listeners = append(listeners, ProxyListenerConfig{ListenAddr: listenAddr, Protocol: "tcp"})
 			}
 		}
 		if len(listeners) == 0 {
 			// Backward compatible default: routes imply a default TCP listener.
-			listeners = append(listeners, ProxyListenerConfig{ListenAddr: ":25565", Protocol: "tcp", Mode: "routing"})
+			listeners = append(listeners, ProxyListenerConfig{ListenAddr: ":25565", Protocol: "tcp"})
 		}
 		cfg.Listeners = listeners
 		// Preserve legacy field for logs and default port inference.

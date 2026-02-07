@@ -75,7 +75,7 @@ jobs:
           TMPDIR="${OUTDIR}/${BASENAME}"
           mkdir -p "${TMPDIR}"
 
-          echo "Building ${BASENAME}${EXT}"
+          echo "Building prism for ${BASENAME}${EXT}"
           CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
             go build -trimpath -ldflags "-s -w" -o "${TMPDIR}/${BINNAME}${EXT}" ./cmd/prism
 

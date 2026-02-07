@@ -4,6 +4,8 @@
 
 Prism is a lightweight, high-performance TCP reverse proxy designed primarily for the Minecraft protocol. It multiplexes incoming traffic from a single port to multiple backend servers based on a hostname found in the connection's initial bytes.
 
+Prism can also operate in a **reverse-connection ("tunnel")** mode similar to frp: a tunnel client running on a private network establishes an outbound connection to a tunnel server. When a route targets a tunnel service, Prism forwards the incoming TCP session over that existing reverse connection, allowing access to backends that have no public IP.
+
 While Minecraft handshake parsing is the primary use-case, Prism also supports extracting hostnames from standard TLS SNI so the same routing stack can be reused for other TCP frontends.
 
 The system is designed with a **test-first architecture**, ensuring that core logic (protocol parsing, routing, traffic shaping) can be verified via unit tests without requiring active network sockets or running Minecraft server instances.
@@ -19,7 +21,8 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 1. **Transport Layer**: Accepts raw TCP connections.
 2. **Header Parsing Layer**: Reads/peeks the initial bytes to extract a routing hostname.
 3. **Routing Layer**: Resolves the destination address based on the extracted hostname.
-4. **Proxy Layer**: Establishes the upstream connection and pipes data between client and server.
+4. **(Optional) Tunnel Layer**: If the resolved upstream is a tunnel service, opens a tunneled stream to the registered tunnel client instead of dialing a direct upstream address.
+5. **Proxy Layer**: Establishes the upstream connection (direct TCP or tunneled stream) and pipes data between client and server.
 
 ---
 
@@ -75,6 +78,7 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 * **Upstream address format**:
   * Upstream targets are treated as TCP dial addresses (e.g. `host:port`, `ip:port`, `[ipv6]:port`).
   * A port may be omitted (e.g. `backend.example.com`), in which case the proxy prefers the port from a Minecraft handshake when available and otherwise falls back to the listener port.
+  * Tunnel upstreams use the prefix `tunnel:` (for example `tunnel:home-mc`). In this case the target is **not** treated as a TCP dial address; it is resolved via the tunnel registry maintained by the tunnel server.
 
 
 * **Testability**:
@@ -86,6 +90,7 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 ### 3.5. `UpstreamDialer` (Network Abstraction)
 
 * **Responsibility**: Establishes the connection to the backend Minecraft server.
+  * In tunnel mode, the dialer may return a `net.Conn` backed by a multiplexed tunnel stream instead of a direct TCP socket.
 * **Testability**:
 * Instead of calling `net.Dial` directly, the proxy uses a `Dialer` interface.
 * **Mocking**: In tests, a `MockDialer` can return a `net.Pipe()`. This connects the "client" side of the test directly to a "mock backend" in memory, allowing end-to-end traffic simulation without real TCP overhead.
@@ -107,6 +112,42 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 
 
 ---
+
+## 8. Tunnel mode (reverse connection)
+
+Tunnel mode is inspired by frp, but implemented with a much smaller surface area.
+
+Prism is a single binary (`prism`) that can run one or both roles depending on configuration:
+
+* **Server role**: runs the regular Prism data plane (`listen_addr`) and admin plane (`admin_addr`), and optionally runs a tunnel listener.
+* **Client role**: runs a tunnel client loop that dials a remote Prism tunnel listener over an outbound connection, registers one or more services, and forwards tunneled streams to local TCP backends.
+
+### 8.2. Tunnel registry and routing
+
+* The tunnel client registers one or more **services**: `name -> local_addr`.
+* The tunnel server maintains an in-memory registry mapping `service name -> active client session`.
+* A route whose upstream is `tunnel:<service>` is forwarded through the active client session that registered that service.
+
+### 8.3. Transport protocols (server <-> client)
+
+The tunnel link between the client role and the server role supports multiple transport protocols:
+
+* `tcp`: a single TCP connection with stream multiplexing.
+* `udp`: a reliable UDP-based connection (KCP) with stream multiplexing.
+* `quic`: QUIC with native stream multiplexing.
+
+Only the tunnel **transport** is affected by this choice; the Prism data plane remains a TCP listener.
+
+### 8.4. Multiplexing model
+
+* One long-lived tunnel connection is established from the client role to the server role.
+* Within that connection, multiple independent streams are opened:
+  * a short control stream used for registration
+  * one stream per proxied TCP session
+
+### 8.5. Authentication
+
+Tunnel mode supports a shared secret token. The tunnel client must present the token during registration; otherwise the tunnel server rejects the tunnel connection.
 
 ## 4. Admin & Telemetry Module
 

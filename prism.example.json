@@ -1,4 +1,5 @@
 {
+  "server_enabled": true,
   "listen_addr": ":25565",
   "admin_addr": ":8080",
   "logging": {
@@ -19,6 +20,33 @@
     "poll_interval_ms": 1000
   },
   "max_header_bytes": 65536,
+  "tunnel": {
+    "enabled": false,
+    "listen_addr": ":7000",
+    "transport": "tcp",
+    "auth_token": "",
+    "quic": {
+      "cert_file": "",
+      "key_file": ""
+    }
+  },
+  "tunnel_client": {
+    "enabled": false,
+    "server_addr": "127.0.0.1:7000",
+    "transport": "tcp",
+    "auth_token": "",
+    "dial_timeout_ms": 5000,
+    "quic": {
+      "server_name": "localhost",
+      "insecure_skip_verify": true
+    },
+    "services": [
+      {
+        "name": "home-mc",
+        "local_addr": "127.0.0.1:25565"
+      }
+    ]
+  },
   "routing_parsers": [
     {"type": "builtin", "name": "minecraft_handshake"},
     {"type": "builtin", "name": "tls_sni"}
@@ -29,6 +57,7 @@
   },
   "routes": {
     "play.example.com": "127.0.0.1:25566",
-    "*.labs.example.com": "127.0.0.1:25567"
+    "*.labs.example.com": "127.0.0.1:25567",
+    "home.example.com": "tunnel:home-mc"
   }
 }

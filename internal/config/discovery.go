@@ -34,11 +34,38 @@ func DiscoverConfigPath(dir string) (string, error) {
 }
 
 func CandidateConfigPaths(dir string) []string {
+	return CandidateConfigPathsForBase(dir, "prism")
+}
+
+func DiscoverConfigPathForBase(dir, base string) (string, error) {
+	candidates := CandidateConfigPathsForBase(dir, base)
+	for _, p := range candidates {
+		if isRegularFile(p) {
+			return p, nil
+		}
+	}
+
+	// Legacy fallback only applies to the server.
+	if base == "prism" {
+		legacy := filepath.Join(dir, "config.json")
+		if isRegularFile(legacy) {
+			return legacy, nil
+		}
+	}
+
+	return "", fmt.Errorf("no config file found in %s; looked for %v", dir, candidates)
+}
+
+func CandidateConfigPathsForBase(dir, base string) []string {
+	base = filepath.Base(base)
+	if base == "" {
+		base = "prism"
+	}
 	return []string{
-		filepath.Join(dir, "prism.toml"),
-		filepath.Join(dir, "prism.yaml"),
-		filepath.Join(dir, "prism.yml"),
-		filepath.Join(dir, "prism.json"),
+		filepath.Join(dir, base+".toml"),
+		filepath.Join(dir, base+".yaml"),
+		filepath.Join(dir, base+".yml"),
+		filepath.Join(dir, base+".json"),
 	}
 }
 

@@ -11,14 +11,14 @@ For the intended architecture, see `DESIGN.md`.
 
 Prism supports `.toml`, `.yaml`/`.yml`, and `.json` config files.
 
-- Explicit: `prism -config /path/to/prism.json`
+- Run: `prism -config /path/to/prism.json`
 - Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml` > `prism.json`
 
 This repo includes example configs:
 
-- `config.example.json`
 - `prism.example.toml`
 - `prism.example.yaml`
+- `prism.example.json`
 
 ### Run locally
 
@@ -41,6 +41,29 @@ port from the Minecraft handshake when available; otherwise it falls back to the
 port from `listen_addr` (default `25565`).
 
 Wildcard routes are `*.`-prefixed suffix matches (and more specific suffixes win).
+
+## Tunnel mode (内网穿透)
+
+If your upstream server has **no public IP**, you can run Prism in a “tunnel client” role on the private machine and have it create an outbound tunnel to Prism running in the “server” role.
+
+On the **public server** (server role):
+
+- Ensure `server_enabled=true`.
+- Enable `tunnel` and choose a transport (`tcp`, `udp`, or `quic`).
+- Point a route upstream at a tunnel service using `tunnel:<service>`.
+
+On the **private machine** (tunnel client role):
+
+- Set `server_enabled=false`.
+- Enable `tunnel_client`.
+- Configure the same `auth_token` (if set).
+- Register the service name and local address (TCP): `name -> local_addr`.
+
+Transport notes:
+
+- `tcp`: simplest, works everywhere.
+- `udp`: reliable UDP (KCP) similar to frp's UDP-based mode.
+- `quic`: QUIC streams over UDP (requires TLS; prisms can auto-generate a self-signed cert for convenience).
 
 ## Docker
 

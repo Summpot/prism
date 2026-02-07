@@ -1,9 +1,41 @@
+server_enabled = true
 listen_addr = ":25565"
 admin_addr = ":8080"
 proxy_protocol_v2 = false
 buffer_size = 32768
 upstream_dial_timeout_ms = 5000
 max_header_bytes = 65536
+
+[tunnel]
+# Enable tunnel mode to allow tunnel clients to register services that can be
+# used as upstreams via the syntax: tunnel:<service>
+enabled = false
+listen_addr = ":7000"
+transport = "tcp" # tcp | udp | quic
+auth_token = ""
+
+[tunnel.quic]
+# If transport=quic and cert/key are empty, prism will generate a self-signed
+# certificate at startup.
+cert_file = ""
+key_file = ""
+
+[tunnel_client]
+# When enabled, prism runs a tunnel client loop that dials a remote tunnel
+# server and registers one or more services.
+enabled = false
+server_addr = "127.0.0.1:7000"
+transport = "tcp" # tcp | udp | quic
+auth_token = ""
+dial_timeout_ms = 5000
+
+[tunnel_client.quic]
+server_name = "localhost"
+insecure_skip_verify = true
+
+[[tunnel_client.services]]
+name = "home-mc"
+local_addr = "127.0.0.1:25565"
 
 [logging]
 level = "info"
@@ -34,3 +66,4 @@ idle_timeout_ms = 0
 [routes]
 "play.example.com" = "127.0.0.1:25566"
 "*.labs.example.com" = "127.0.0.1:25567"
+"home.example.com" = "tunnel:home-mc"

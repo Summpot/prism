@@ -13,6 +13,12 @@ While Minecraft handshake parsing is the primary use-case, Prism also supports e
 
 The system is designed with a **test-first architecture**, ensuring that core logic (protocol parsing, routing, traffic shaping) can be verified via unit tests without requiring active network sockets or running Minecraft server instances.
 
+**Implementation note (current codebase):** Prism is implemented in **Rust**.
+
+* CLI parsing uses **clap**.
+* WebAssembly routing parsers execute via **wasmtime**.
+* The default routing parsers (`minecraft_handshake` and `tls_sni`) are shipped as embedded WASM modules that implement the same ABI as third-party parsers and can be replaced at runtime via configuration.
+
 ---
 
 ## 2. Architecture Overview
@@ -34,8 +40,8 @@ The system follows a **Layered Architecture**. Each layer communicates with the 
 ### 3.1. `Listener` (Transport Layer)
 
 * **Responsibility**:
-  * **TCP**: wraps the standard `net.Listener`. It accepts connections and spawns a `SessionHandler` for each.
-  * **UDP**: wraps a `net.PacketConn`. It reads datagrams and hands them to a packet handler which maintains lightweight per-client sessions.
+  * **TCP**: accepts connections (e.g. `tokio::net::TcpListener`) and spawns a `SessionHandler` for each.
+  * **UDP**: reads datagrams (e.g. `tokio::net::UdpSocket`) and hands them to a packet handler which maintains lightweight per-client sessions.
 * **Testability**:
 * The `Listener` accepts a `ConnectionHandler` interface.
 * This allows integration tests to simulate a flood of connections without spawning real goroutines for the entire logic stack.
@@ -61,14 +67,16 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
   * `no match` (parser does not apply to this stream)
   * fatal error
 
-* **Bundled implementations (default)**:
-  * Minecraft handshake hostname extractor (shipped as an embedded WASM module)
-  * TLS ClientHello SNI hostname extractor (shipped as an embedded WASM module)
+* **Implementations**:
+  * All routing header parsers are **WASM modules** implementing the ABI described in section 7.
+  * Prism ships two default parsers as embedded WASM modules:
+    * `minecraft_handshake`
+    * `tls_sni`
+  * These defaults are not "special" at runtime: they can be replaced by providing a different module path in configuration.
 
 * **Plugin support (WASM)**:
-  * Parsers can be loaded from WebAssembly modules to avoid hardcoding parsing logic in Go.
-  * Prism also ships the default parsers as embedded WASM modules, so the default routing
-    behavior uses the same ABI as external plugins.
+  * Parsers can be loaded from WebAssembly modules to avoid hardcoding parsing logic in the host language.
+  * Prism ships the default parsers as embedded WASM modules, so the default routing behavior uses the same ABI as external plugins.
   * WASM is used only on the connection prelude; the hot path (byte bridging) remains native.
 
 * **Testability**:
@@ -113,7 +121,7 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
 ### 3.5. `UpstreamDialer` (Network Abstraction)
 
 * **Responsibility**: Establishes the connection to the backend Minecraft server.
-  * In tunnel mode, the dialer may return a `net.Conn` backed by a multiplexed tunnel stream instead of a direct TCP socket.
+  * In tunnel mode, the dialer may return a stream backed by a multiplexed tunnel channel instead of a direct TCP socket.
 * **Testability**:
 * Instead of calling `net.Dial` directly, the proxy uses a `Dialer` interface.
 * **Mocking**: In tests, a `MockDialer` can return a `net.Pipe()`. This connects the "client" side of the test directly to a "mock backend" in memory, allowing end-to-end traffic simulation without real TCP overhead.
@@ -239,7 +247,7 @@ This module runs a separate HTTP server to provide observability. It interacts w
 
 ### 4.3. Logging
 
-Prism uses the Go standard library structured logging package `log/slog`.
+Prism uses Rust structured logging (`tracing` + `tracing-subscriber`).
 
 **Goals**:
 
@@ -281,7 +289,7 @@ The project will strictly adhere to the following testing pyramid:
 
 ### 5.2. Integration Tests (Component Interaction)
 
-* **Mock Network Test**: Use `net.Pipe()` to simulate a client connecting to Prism, and Prism connecting to a backend. Send a handshake message into the client pipe and verify it arrives at the backend pipe.
+* **Mock Network Test**: Use an in-memory duplex stream (for example `tokio::io::DuplexStream`) to simulate a client connecting to Prism, and Prism connecting to a backend. Send a handshake message into the client side and verify it arrives at the backend side.
 * **Hot Reload Test**: Start the router, resolve a host, modify the underlying config source, trigger reload, and verify the host resolves to a new address.
 
 ### 5.3. End-to-End (E2E) Tests (Optional)
@@ -294,12 +302,12 @@ The project will strictly adhere to the following testing pyramid:
 
 ### 6.1. Configuration Model
 
-* The configuration is defined as a Go struct.
+* The configuration is defined as a Rust struct (Serde-deserializable).
 * A `ConfigProvider` interface loads this struct. This allows the config to be loaded from a file (Production) or a static string/struct (Testing).
 * **Config file formats & naming**:
   * Prism supports **TOML** and **YAML** configuration files.
   * **Config path resolution** (highest precedence first):
-    * CLI flag: `-config /path/to/prism.toml`
+    * CLI flag: `--config /path/to/prism.toml`
     * Environment variable: `PRISM_CONFIG=/path/to/prism.toml`
     * Auto-discovery in the current working directory: `prism.toml` > `prism.yaml` > `prism.yml`
     * OS-specific default user config path: `${UserConfigDir}/prism/prism.toml` (where `UserConfigDir` comes from `os.UserConfigDir()`)

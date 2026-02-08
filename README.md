@@ -1,194 +1,301 @@
-# Prism
+Welcome to your new TanStack app! 
 
-Prism is a lightweight, high-performance TCP reverse proxy for the Minecraft protocol (L4). It routes incoming connections to different upstreams based on the hostname extracted from the first bytes of the stream (Minecraft handshake / TLS SNI / WASM).
+# Getting Started
 
-- **Data plane**: TCP listener (commonly `:25565`)
-- **Control plane**: HTTP admin server (default `:8080`)
+To run this application:
 
-For the intended architecture, see `DESIGN.md`.
-
-## Getting started
-
-Prism supports `.toml` and `.yaml`/`.yml` config files.
-
-This repo also ships a JSON Schema for config validation and editor/LSP completion:
-
-- `prism.schema.json`
-
-- Run: `prism -config /path/to/prism.toml`
-- Or set an env var: `PRISM_CONFIG=/path/to/prism.toml prism`
-- Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml`
-- Fallback default path (OS-specific): `${UserConfigDir}/prism/prism.toml` (based on Go's `os.UserConfigDir()`)
-
-If the resolved config path does not exist, Prism will create a runnable default config file at that path and continue starting.
-
-The auto-generated default config starts Prism in **tunnel server** mode (frp-like): it listens on `:7000/tcp` and waits for tunnel clients to connect and register services.
-
-This repo includes example configs:
-
-- `prism.example.toml`
-- `prism.example.yaml`
-
-### Config schema (validation + LSP)
-
-#### YAML
-
-If you use the YAML Language Server (for example in VS Code), you can add this to the top of your config:
-
-```yaml
-# yaml-language-server: $schema=./prism.schema.json
+```bash
+pnpm install
+pnpm dev
 ```
 
-#### TOML
+# Building For Production
 
-TOML doesn’t have a universal inline `$schema` directive. In VS Code, you can map the schema to your config filename pattern in settings:
+To build this application for production:
 
-```json
-{
-  "toml.schemas": {
-    "./prism.schema.json": [
-      "prism.toml",
-      "**/prism.toml"
-    ]
-  }
+```bash
+pnpm build
+```
+
+## Testing
+
+This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+
+```bash
+pnpm test
+```
+
+## Styling
+
+This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
+
+
+## Linting & Formatting
+
+This project uses [Biome](https://biomejs.dev/) for linting and formatting. The following scripts are available:
+
+
+```bash
+pnpm lint
+pnpm format
+pnpm check
+```
+
+
+
+## Routing
+This project uses [TanStack Router](https://tanstack.com/router). The initial setup is a file based router. Which means that the routes are managed as files in `src/routes`.
+
+### Adding A Route
+
+To add a new route to your application just add another a new file in the `./src/routes` directory.
+
+TanStack will automatically generate the content of the route file for you.
+
+Now that you have two routes you can use a `Link` component to navigate between them.
+
+### Adding Links
+
+To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
+
+```tsx
+import { Link } from "@tanstack/react-router";
+```
+
+Then anywhere in your JSX you can use it like so:
+
+```tsx
+<Link to="/about">About</Link>
+```
+
+This will create a link that will navigate to the `/about` route.
+
+More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
+
+### Using A Layout
+
+In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you use the `<Outlet />` component.
+
+Here is an example layout that includes a header:
+
+```tsx
+import { Outlet, createRootRoute } from '@tanstack/react-router'
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+
+import { Link } from "@tanstack/react-router";
+
+export const Route = createRootRoute({
+  component: () => (
+    <>
+      <header>
+        <nav>
+          <Link to="/">Home</Link>
+          <Link to="/about">About</Link>
+        </nav>
+      </header>
+      <Outlet />
+      <TanStackRouterDevtools />
+    </>
+  ),
+})
+```
+
+The `<TanStackRouterDevtools />` component is not required so you can remove it if you don't want it in your layout.
+
+More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
+
+
+## Data Fetching
+
+There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
+
+For example:
+
+```tsx
+const peopleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/people",
+  loader: async () => {
+    const response = await fetch("https://swapi.dev/api/people");
+    return response.json() as Promise<{
+      results: {
+        name: string;
+      }[];
+    }>;
+  },
+  component: () => {
+    const data = peopleRoute.useLoaderData();
+    return (
+      <ul>
+        {data.results.map((person) => (
+          <li key={person.name}>{person.name}</li>
+        ))}
+      </ul>
+    );
+  },
+});
+```
+
+Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
+
+### React-Query
+
+React-Query is an excellent addition or alternative to route loading and integrating it into you application is a breeze.
+
+First add your dependencies:
+
+```bash
+pnpm add @tanstack/react-query @tanstack/react-query-devtools
+```
+
+Next we'll need to create a query client and provider. We recommend putting those in `main.tsx`.
+
+```tsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+// ...
+
+const queryClient = new QueryClient();
+
+// ...
+
+if (!rootElement.innerHTML) {
+  const root = ReactDOM.createRoot(rootElement);
+
+  root.render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
 }
 ```
 
-### Run locally
+You can also add TanStack Query Devtools to the root route (optional).
 
-1. Copy an example config into your working directory (for example, `prism.toml`)
-2. Start Prism:
+```tsx
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 
-- Windows (PowerShell): `./prism.exe -config prism.toml`
-- Linux/macOS: `./prism -config prism.toml`
-
-### Routing rules
-
-Use `routes` to map hostnames to upstream addresses.
-
-`routes` is an **ordered list**: routes are checked in the order they appear, and the **first match wins**. Put more specific patterns earlier.
-
-Each route specifies:
-
-- `host` / `hosts`: one hostname pattern or a list of patterns
-- `upstream` / `upstreams` (aliases: `backend` / `backends`): one or more upstream targets
-- `strategy` (optional): how to pick an upstream when multiple are configured (`sequential`, `random`, `round-robin`)
-- `cache_ping_ttl` (optional): Minecraft status (ping) response cache TTL (Go duration like `60s`; `-1` disables)
-
-Hostname patterns support glob-like wildcards:
-
-- `*` matches any string (captured as a group)
-- `?` matches any single character (captured as a group)
-
-If a pattern contains wildcards, any upstream strings may reference the captured groups as `$1`, `$2`, ...
-
-Upstream targets are treated as TCP dial addresses. They can be IPs or DNS names.
-If you omit the port (for example `backend.example.com`), Prism will prefer the
-port from the Minecraft handshake when available; otherwise it falls back to the
-port from the matched listener (default `25565`).
-
-If multiple upstreams are configured, Prism will try them in the order produced by `strategy` and fall back to the next one if dialing fails.
-
-### Routing parsers (WASM)
-
-Prism extracts the routing hostname from the first bytes of each TCP connection using `routing_parsers`.
-
-By default, Prism enables two parsers implemented as **embedded WASM modules**:
-
-- `minecraft_handshake`
-- `tls_sni`
-
-You can reference the embedded modules using the special path scheme `builtin:<name>`:
-
-- `builtin:minecraft_handshake`
-- `builtin:tls_sni`
-
-You can also load your own parser from a `.wasm` file by setting `type="wasm"` and `path` to the file path.
-
-## Tunnel mode
-
-If your upstream server has **no public IP**, you can run Prism in a “tunnel client” role on the private machine and have it create an outbound tunnel to Prism running in the “server” role.
-
-On the **public server**:
-
-- Configure one or more proxy listeners (`listeners`) and `routes` as usual.
-- Configure one or more tunnel endpoints under `tunnel.endpoints`.
-  - Multiple listeners let you serve multiple transports at the same time (similar to frp's server).
-- Point a route upstream at a tunnel service using `tunnel:<service>`.
-
-On the **private machine**:
-
-- Configure `tunnel.client` to connect to the public server.
-- Configure the same `tunnel.auth_token` (if set).
-- Register services under `tunnel.services`: `name -> local_addr`.
-  - Optional: set `remote_addr` to request a server-side listener for the service (frp-like).
-  - Optional: set `route_only=true` to ensure the service is **only** reachable via `tunnel:<service>` and never auto-exposed (must not set `remote_addr`).
-
-If multiple tunnel clients register the same service `name`, Prism keeps the **first** active registrant as the routing target for `tunnel:<service>`. Later registrations with the same name do not override routing; they can still be exposed by port via `remote_addr` + `auto_listen_services`.
-
-Transport notes:
-
-- `tcp`: simplest, works everywhere.
-- `udp`: reliable UDP (KCP) similar to frp's UDP-based mode.
-- `quic`: QUIC streams over UDP (requires TLS; prisms can auto-generate a self-signed cert for convenience).
-
-## Docker
-
-This repository ships a `Dockerfile`, and the GitHub Actions workflow builds and pushes images to GHCR:
-
-- `ghcr.io/<owner>/<repo>` (for example `ghcr.io/Summpot/prism`)
-
-The container image uses `/config` as the working directory. If you mount a config file to `/config/prism.toml` (or `prism.yaml`/`prism.yml`), Prism will auto-discover it without extra flags.
-
-### Run (Linux/macOS)
-
-- Proxy: `25565/tcp`
-- Admin: `8080/tcp`
-
-```text
-docker run --rm \
-  -p 25565:25565 \
-  -p 8080:8080 \
-  -v "$PWD/prism.toml:/config/prism.toml:ro" \
-  ghcr.io/Summpot/prism:latest
+const rootRoute = createRootRoute({
+  component: () => (
+    <>
+      <Outlet />
+      <ReactQueryDevtools buttonPosition="top-right" />
+      <TanStackRouterDevtools />
+    </>
+  ),
+});
 ```
 
-### Run (Windows PowerShell)
+Now you can use `useQuery` to fetch your data.
 
-```text
-docker run --rm `
-  -p 25565:25565 `
-  -p 8080:8080 `
-  -v "${PWD}\prism.toml:/config/prism.toml:ro" `
-  ghcr.io/Summpot/prism:latest
+```tsx
+import { useQuery } from "@tanstack/react-query";
+
+import "./App.css";
+
+function App() {
+  const { data } = useQuery({
+    queryKey: ["people"],
+    queryFn: () =>
+      fetch("https://swapi.dev/api/people")
+        .then((res) => res.json())
+        .then((data) => data.results as { name: string }[]),
+    initialData: [],
+  });
+
+  return (
+    <div>
+      <ul>
+        {data.map((person) => (
+          <li key={person.name}>{person.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default App;
 ```
 
-If your config file has a different name/path, pass it explicitly:
+You can find out everything you need to know on how to use React-Query in the [React-Query documentation](https://tanstack.com/query/latest/docs/framework/react/overview).
 
-- `prism -config /config/myconfig.toml`
+## State Management
 
-## Admin API
+Another common requirement for React applications is state management. There are many options for state management in React. TanStack Store provides a great starting point for your project.
 
-The admin server listens on `admin_addr` (default `:8080`).
+First you need to add TanStack Store as a dependency:
 
-- `GET /health` — health check (non-200 indicates unhealthy)
-- `GET /metrics` — JSON metrics snapshot
-- `GET /conns` — JSON active connection snapshot
-- `GET /logs?limit=200` — recent log lines (requires `logging.admin_buffer.enabled=true`)
-- `POST /reload` — trigger an on-demand config reload (requires reload to be enabled)
+```bash
+pnpm add @tanstack/store
+```
 
-## Build
+Now let's create a simple counter in the `src/App.tsx` file as a demonstration.
 
-You need Go (version is defined in `go.mod`).
+```tsx
+import { useStore } from "@tanstack/react-store";
+import { Store } from "@tanstack/store";
+import "./App.css";
 
-- Build: `go build ./cmd/prism`
-- Test: `go test ./...`
+const countStore = new Store(0);
 
-## GitHub Actions
+function App() {
+  const count = useStore(countStore);
+  return (
+    <div>
+      <button onClick={() => countStore.setState((n) => n + 1)}>
+        Increment - {count}
+      </button>
+    </div>
+  );
+}
 
-Workflow: `.github/workflows/build-release.yml`
+export default App;
+```
 
-- PR / push: runs `go test ./...` and uploads multi-platform binaries as artifacts
-- Tag (recommended format `v1.2.3`):
-  - creates a GitHub Release with platform archives and `checksums.txt`
-  - builds and pushes an Alpine-based multi-arch Docker image (`linux/amd64` + `linux/arm64`) to GHCR (native per-arch jobs, then manifest merge)
+One of the many nice features of TanStack Store is the ability to derive state from other state. That derived state will update when the base state updates.
+
+Let's check this out by doubling the count using derived state.
+
+```tsx
+import { useStore } from "@tanstack/react-store";
+import { Store, Derived } from "@tanstack/store";
+import "./App.css";
+
+const countStore = new Store(0);
+
+const doubledStore = new Derived({
+  fn: () => countStore.state * 2,
+  deps: [countStore],
+});
+doubledStore.mount();
+
+function App() {
+  const count = useStore(countStore);
+  const doubledCount = useStore(doubledStore);
+
+  return (
+    <div>
+      <button onClick={() => countStore.setState((n) => n + 1)}>
+        Increment - {count}
+      </button>
+      <div>Doubled - {doubledCount}</div>
+    </div>
+  );
+}
+
+export default App;
+```
+
+We use the `Derived` class to create a new store that is derived from another store. The `Derived` class has a `mount` method that will start the derived store updating.
+
+Once we've created the derived store we can use it in the `App` component just like we would any other store using the `useStore` hook.
+
+You can find out everything you need to know on how to use TanStack Store in the [TanStack Store documentation](https://tanstack.com/store/latest).
+
+# Demo files
+
+Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
+
+# Learn More
+
+You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).

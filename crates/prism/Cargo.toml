@@ -14,10 +14,8 @@ dashmap = "6.1"
 directories = "6.0"
 futures-util = "0.3"
 humantime = "2.3"
-opentelemetry = "0.31"
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "http-proto"] }
-opentelemetry-semantic-conventions = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
 pin-project-lite = "0.2"
 quinn = "0.11"
 rand = "0.9"
@@ -35,7 +33,8 @@ toml = "0.8"
 tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-opentelemetry = "0.32"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-wasmtime = "24.0"
+wasmer = "2.3.0"
+wasmer-compiler-singlepass = "2.3.0"
+wasmer-engine-universal = "2.3.0"
 tokio-yamux = "0.3"

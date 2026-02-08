@@ -48,16 +48,27 @@ jobs:
         run: pnpm build
 
   rust-binaries:
-    name: rust binaries (linux/${{ matrix.arch }})
+    name: rust binaries (${{ matrix.os }}/${{ matrix.arch }})
     needs: test-rust
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - os: linux
+            arch: amd64
             runner: ubuntu-latest
-          - arch: arm64
+          - os: linux
+            arch: arm64
             runner: ubuntu-24.04-arm
+          - os: darwin
+            arch: amd64
+            runner: macos-13
+          - os: darwin
+            arch: arm64
+            runner: macos-14
+          - os: windows
+            arch: amd64
+            runner: windows-latest
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -68,13 +79,13 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-binaries-${{ matrix.arch }}
+          shared-key: rust-binaries-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Build (release)
-        shell: bash
         run: cargo build --release -p prism
 
-      - name: Package
+      - name: Package (unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -88,7 +99,7 @@ jobs:
           OUTDIR="dist"
           mkdir -p "${OUTDIR}"
 
-          OS="linux"
+          OS="${{ matrix.os }}"
           ARCH="${{ matrix.arch }}"
 
           BASENAME="prism_${VERSION}_${OS}_${ARCH}"
@@ -100,10 +111,35 @@ jobs:
           tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
           rm -rf "${TMPDIR}"
 
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME
+          } else {
+            $version = "dev-$($env:GITHUB_SHA.Substring(0,7))"
+          }
+
+          $outdir = "dist"
+          New-Item -ItemType Directory -Force -Path $outdir | Out-Null
+
+          $os = "${{ matrix.os }}"
+          $arch = "${{ matrix.arch }}"
+
+          $basename = "prism_${version}_${os}_${arch}"
+          $tmpdir = Join-Path $outdir $basename
+          New-Item -ItemType Directory -Force -Path $tmpdir | Out-Null
+
+          Copy-Item -Force -Path "target/release/prism.exe" -Destination (Join-Path $tmpdir "prism.exe")
+
+          Compress-Archive -Path $tmpdir -DestinationPath (Join-Path $outdir "$basename.zip") -Force
+          Remove-Item -Recurse -Force $tmpdir
+
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prism-rust-binaries-linux-${{ matrix.arch }}
+          name: prism-rust-binaries-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
 
   release:

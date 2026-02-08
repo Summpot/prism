@@ -9,6 +9,22 @@ use tokio::{
 
 use crate::prism::{protocol, router, telemetry, tunnel};
 
+struct ActiveConnGuard;
+
+impl ActiveConnGuard {
+    fn new() -> Self {
+        metrics::counter!("prism_connections_total").increment(1);
+        metrics::gauge!("prism_active_connections").increment(1.0);
+        Self
+    }
+}
+
+impl Drop for ActiveConnGuard {
+    fn drop(&mut self) {
+        metrics::gauge!("prism_active_connections").decrement(1.0);
+    }
+}
+
 #[derive(Clone)]
 pub enum TcpHandler {
     Routing(Arc<TcpRoutingHandlerOptions>),
@@ -35,7 +51,6 @@ impl TcpHandler {
 pub struct TcpRoutingHandlerOptions {
     pub parser: protocol::SharedHostParser,
     pub router: Arc<router::Router>,
-    pub metrics: telemetry::SharedMetrics,
     pub sessions: telemetry::SharedSessions,
 
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
@@ -49,8 +64,6 @@ pub struct TcpRoutingHandlerOptions {
 
 pub struct TcpForwardHandlerOptions {
     pub upstream: String,
-
-    pub metrics: telemetry::SharedMetrics,
     pub sessions: telemetry::SharedSessions,
 
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
@@ -81,14 +94,13 @@ pub async fn serve_tcp(listen_addr: &str, handler: TcpHandler) -> anyhow::Result
 }
 
 async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>) {
-    opts.metrics.inc_active();
+    let _active = ActiveConnGuard::new();
     let sid = telemetry::new_session_id();
     let client = conn.peer_addr().map(|a| a.to_string()).unwrap_or_default();
 
     let upstream = opts.upstream.trim().to_string();
     if upstream.is_empty() {
         let _ = conn.shutdown().await;
-        opts.metrics.dec_active();
         return;
     }
 
@@ -104,7 +116,6 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         Err(err) => {
             tracing::warn!(sid = %sid, client = %client, upstream = %upstream, err = %err, "proxy: forward dial failed");
             let _ = conn.shutdown().await;
-            opts.metrics.dec_active();
             return;
         }
     };
@@ -120,11 +131,11 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
     let res = proxy_bidirectional(&mut conn, up, opts.buffer_size, opts.idle_timeout).await;
 
     opts.sessions.remove(&sid);
-    opts.metrics.dec_active();
 
     match res {
         Ok((ingress, egress)) => {
-            opts.metrics.add_bytes(ingress, egress);
+            metrics::counter!("prism_bytes_ingress_total").increment(ingress);
+            metrics::counter!("prism_bytes_egress_total").increment(egress);
         }
         Err(err) => {
             tracing::debug!(sid = %sid, err = %err, "proxy: forward ended with error");
@@ -133,7 +144,7 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
 }
 
 async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>) {
-    opts.metrics.inc_active();
+    let _active = ActiveConnGuard::new();
     let sid = telemetry::new_session_id();
     let client = conn.peer_addr().map(|a| a.to_string()).unwrap_or_default();
 
@@ -179,13 +190,11 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
                 Ok(Err(e)) => {
                     tracing::warn!(sid=%sid, client=%client, parser=%opts.parser.name(), err=%e, "proxy: routing header parse failed");
                     let _ = conn.shutdown().await;
-                    opts.metrics.dec_active();
                     return;
                 }
                 Err(_) => {
                     tracing::debug!(sid=%sid, client=%client, "proxy: handshake timeout");
                     let _ = conn.shutdown().await;
-                    opts.metrics.dec_active();
                     return;
                 }
             }
@@ -195,7 +204,6 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
                 Err(e) => {
                     tracing::warn!(sid=%sid, client=%client, parser=%opts.parser.name(), err=%e, "proxy: routing header parse failed");
                     let _ = conn.shutdown().await;
-                    opts.metrics.dec_active();
                     return;
                 }
             }
@@ -205,18 +213,16 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let host = host.trim().to_ascii_lowercase();
     if host.is_empty() {
         let _ = conn.shutdown().await;
-        opts.metrics.dec_active();
         return;
     }
 
     let Some(res) = opts.router.resolve(&host) else {
         tracing::debug!(sid=%sid, client=%client, host=%host, "proxy: no route for host");
         let _ = conn.shutdown().await;
-        opts.metrics.dec_active();
         return;
     };
 
-    opts.metrics.add_route_hit(&host);
+    metrics::counter!("prism_route_hits_total", "host" => host.clone()).increment(1);
 
     let default_port = mc_handshake_port(&captured)
         .or_else(|| conn.local_addr().ok().map(|a| a.port()))
@@ -249,7 +255,6 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let Some(mut up) = up_conn else {
         tracing::warn!(sid=%sid, client=%client, host=%host, err=%last_err.map(|e| e.to_string()).unwrap_or_default(), "proxy: upstream dial failed");
         let _ = conn.shutdown().await;
-        opts.metrics.dec_active();
         return;
     };
 
@@ -270,18 +275,17 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         tracing::debug!(sid=%sid, err=%err, "proxy: failed writing prelude to upstream");
         let _ = conn.shutdown().await;
         opts.sessions.remove(&sid);
-        opts.metrics.dec_active();
         return;
     }
 
     let res = proxy_bidirectional(&mut conn, up, opts.buffer_size, opts.idle_timeout).await;
 
     opts.sessions.remove(&sid);
-    opts.metrics.dec_active();
 
     match res {
         Ok((ingress, egress)) => {
-            opts.metrics.add_bytes(ingress, egress);
+            metrics::counter!("prism_bytes_ingress_total").increment(ingress);
+            metrics::counter!("prism_bytes_egress_total").increment(egress);
         }
         Err(err) => {
             tracing::debug!(sid=%sid, err=%err, "proxy: session ended with error");

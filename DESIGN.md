@@ -16,7 +16,7 @@ The system is designed with a **test-first architecture**, ensuring that core lo
 **Implementation note (current codebase):** Prism is implemented in **Rust**.
 
 * CLI parsing uses **clap**.
-* WebAssembly routing parsers execute via **wasmtime**.
+* WebAssembly routing parsers execute via **wasmer** (Singlepass compiler).
 * The default routing parsers (`minecraft_handshake` and `tls_sni`) are shipped as embedded WASM modules that implement the same ABI as third-party parsers and can be replaced at runtime via configuration.
 
 ---
@@ -264,37 +264,47 @@ After the header:
 
 This module runs a separate HTTP server to provide observability. It interacts with the core components via thread-safe data stores.
 
-### 4.1. `MetricsCollector`
+### 4.1. Metrics
 
-* **Responsibility**: A central repository for atomic counters and gauges.
-* **Metrics Tracked**:
-* `active_connections` (Gauge)
-* `total_connections_handled` (Counter)
-* `bytes_ingress` / `bytes_egress` (Counter)
-* `route_hits` (Map/Vector: Hostname -> Count)
+Prism publishes metrics using the Rust [`metrics`](https://crates.io/crates/metrics) facade.
 
+* **Export format**: Prometheus text exposition.
+* **Collection model**: pull-based scraping.
 
-* **Design**:
-* Uses atomic operations (`sync/atomic`) for minimal performance impact.
-* Decoupled from the HTTP handlers.
+Prism exposes metrics via the admin plane at:
+
+* `GET /metrics` (Prometheus format)
+
+Typical deployment:
+
+* Prism logs are written to stdout/stderr.
+* Vector (or another log shipper) captures container stdout and forwards to a log store (for example Quickwit).
+* VictoriaMetrics (or Prometheus) scrapes `GET /metrics` directly.
+
+Tracked metrics (names are subject to change, but intent is stable):
+
+* `prism_active_connections` (gauge)
+* `prism_connections_total` (counter)
+* `prism_bytes_ingress_total` / `prism_bytes_egress_total` (counters)
+* `prism_route_hits_total{host="..."}` (counter)
 
 
 
 ### 4.2. `AdminServer`
 
-* **Responsibility**: Exposes the data from `MetricsCollector` via HTTP/JSON.
+* **Responsibility**: Exposes health, metrics, and operational snapshots.
 * **Endpoints**:
 * `GET /health`: Returns 200 OK if the listener is up.
-* `GET /metrics`: Returns the JSON dump of the `MetricsCollector`.
+* `GET /metrics`: Returns Prometheus text exposition.
 * `GET /conns`: Returns a snapshot list of current active sessions (Client IP -> Target Host).
 * `POST /reload`: Triggers a configuration reload and atomically swaps the snapshot used for new connections.
 * `GET /tunnel/services`: Returns a snapshot of currently registered tunnel services (when tunnel server role is enabled).
 
 
 
-### 4.3. Logging & OpenTelemetry
+### 4.3. Logging
 
-Prism uses Rust structured logging (`tracing` + `tracing-subscriber`) and integrates with **OpenTelemetry**.
+Prism uses Rust structured logging (`tracing` + `tracing-subscriber`).
 
 **Goals**:
 
@@ -302,9 +312,7 @@ Prism uses Rust structured logging (`tracing` + `tracing-subscriber`) and integr
 * Keep the hot path fast by default (no per-connection logs at `info` level).
 * Produce machine-readable logs by default.
 
-Additionally:
-
-* Export logs/traces/metrics to the user's OpenTelemetry pipeline (Collector + backend) without Prism owning retention.
+Prism intentionally does **not** export OpenTelemetry data and does **not** collect distributed traces.
 
 **Design**:
 
@@ -329,10 +337,10 @@ Additionally:
 * Prism does **not** maintain an in-memory log ring buffer.
 * Prism does **not** provide a "tail logs" endpoint backed by process memory.
 
-**OpenTelemetry export**:
+**External log pipelines**:
 
-* When enabled, Prism exports telemetry via OTLP to a user-provided endpoint (typically an OpenTelemetry Collector).
-* Storage/retention and querying are delegated to the user's backend (for example Grafana/Loki, SigNoz, Elastic, etc.).
+* Prism writes logs to stdout/stderr (JSON by default).
+* A log shipper (for example Vector) captures stdout and forwards logs to your backend.
 
 ### 4.4. Log viewing in the frontend
 
@@ -391,7 +399,6 @@ The project will strictly adhere to the following testing pyramid:
 * **Logging reload semantics**:
   * `logging.level` is reloadable.
   * `logging.format`, `logging.output`, `logging.add_source` may require restart depending on the sink implementation.
-  * OpenTelemetry exporter settings (endpoint/protocol/headers) are expected to require restart initially; future versions may support live reconfiguration.
 
 ### 6.2. Buffer Management
 

@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -16,7 +16,7 @@ use crate::prism::tunnel;
 
 #[derive(Clone)]
 pub struct AdminState {
-    pub metrics: telemetry::SharedMetrics,
+    pub prom: telemetry::SharedPrometheusHandle,
     pub sessions: telemetry::SharedSessions,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
@@ -55,8 +55,14 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn metrics(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let snap = st.metrics.snapshot();
-    (StatusCode::OK, Json(snap))
+    let body = st.prom.render();
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; version=0.0.4"),
+        )],
+        body,
+    )
 }
 
 async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {

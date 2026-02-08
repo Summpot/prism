@@ -26,19 +26,19 @@ services:
     image: timberio/vector:0.44.0-alpine
     volumes:
       - ./deploy/vector/vector.yaml:/etc/vector/vector.yaml:ro
-    ports:
-      - "4317:4317" # OTLP/gRPC
-      - "4318:4318" # OTLP/HTTP
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
-      - victoriametrics
       - quickwit
       - quickwit-init
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:latest
-    command: ["-storageDataPath=/storage"]
+    command:
+      - "-storageDataPath=/storage"
+      - "-promscrape.config=/etc/victoria-metrics/promscrape.yml"
     volumes:
       - vmdata:/storage
+      - ./deploy/victoriametrics/promscrape.yml:/etc/victoria-metrics/promscrape.yml:ro
     ports:
       - "8428:8428"
 
@@ -62,8 +62,7 @@ services:
       echo "waiting for quickwit..."
       until curl -sf http://quickwit:7280/api/v1/version >/dev/null; do sleep 1; done
       echo "creating quickwit indexes (idempotent)..."
-      curl -sf -XPOST http://quickwit:7280/api/v1/indexes -H 'content-type: application/yaml' --data-binary @/configs/prism-otel-logs.yaml || true
-      curl -sf -XPOST http://quickwit:7280/api/v1/indexes -H 'content-type: application/yaml' --data-binary @/configs/prism-otel-traces.yaml || true
+      curl -sf -XPOST http://quickwit:7280/api/v1/indexes -H 'content-type: application/yaml' --data-binary @/configs/prism-logs.yaml || true
       echo "quickwit init done"
 
 volumes:

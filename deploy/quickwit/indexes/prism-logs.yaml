@@ -1,12 +1,10 @@
-# Quickwit index for OTLP logs coming from Vector.
-# This index is intentionally permissive (dynamic mapping) to avoid tight coupling
-# to a specific OTLP schema.
+# Quickwit index for Prism JSON logs coming from Vector.
+# Logs are emitted by tracing-subscriber (json) to stdout, collected by Vector, and ingested as NDJSON.
 
 version: 0.7
 
-index_id: prism-otel-logs
+index_id: prism-logs
 
-# Use a dynamic mapping, but make a few common fields explicit.
 doc_mapping:
   mode: dynamic
   field_mappings:
@@ -21,11 +19,11 @@ doc_mapping:
       tokenizer: default
       record: position
       stored: true
-    - name: trace_id
+    - name: level
       type: text
       tokenizer: raw
       stored: true
-    - name: span_id
+    - name: target
       type: text
       tokenizer: raw
       stored: true

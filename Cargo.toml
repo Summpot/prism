@@ -8,3 +8,12 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = 0
+incremental = false

@@ -17,7 +17,6 @@
       "examples": [":8080", "127.0.0.1:8080", ""]
     },
     "logging": { "$ref": "#/$defs/logging" },
-    "opentelemetry": { "$ref": "#/$defs/opentelemetry" },
     "routes": {
       "type": "array",
       "description": "Ordered hostname routes. Routes are matched in order; each route can target one or more upstreams and can cache Minecraft status (ping) responses.",
@@ -159,77 +158,6 @@
           "description": "Include source file/line in logs (slightly higher overhead).",
           "default": false
         }
-      }
-    },
-    "opentelemetry": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "OpenTelemetry export configuration. Prism does not serve logs from memory; configure OTLP export and use your own observability stack/UI.",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable OpenTelemetry export.",
-          "default": false
-        },
-        "service_name": {
-          "type": "string",
-          "description": "Service name attached to exported telemetry.",
-          "default": "prism",
-          "examples": ["prism"]
-        },
-        "otlp_endpoint": {
-          "type": "string",
-          "description": "OTLP endpoint URL. For gRPC typically http://host:4317, for HTTP/protobuf typically http://host:4318.",
-          "default": "",
-          "examples": ["http://127.0.0.1:4317", "http://127.0.0.1:4318", ""]
-        },
-        "protocol": {
-          "type": "string",
-          "description": "OTLP transport protocol.",
-          "enum": ["grpc", "http"],
-          "default": "grpc"
-        },
-        "timeout_ms": {
-          "$ref": "#/$defs/ms",
-          "description": "Exporter timeout (milliseconds).",
-          "default": 5000
-        },
-        "headers": {
-          "type": "object",
-          "description": "Optional OTLP headers (HTTP exporter).",
-          "additionalProperties": { "type": "string" },
-          "default": {}
-        },
-        "ui": { "$ref": "#/$defs/opentelemetryUi" }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": { "enabled": { "const": true } },
-            "required": ["enabled"]
-          },
-          "then": {
-            "required": ["otlp_endpoint"],
-            "properties": {
-              "otlp_endpoint": { "$ref": "#/$defs/nonEmptyString" }
-            }
-          }
-        }
-      ]
-    },
-    "opentelemetryUi": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Optional external UI links for logs/traces/metrics (Grafana, Tempo, Loki, Jaeger, etc).",
-      "properties": {
-        "logs_url": { "type": "string", "default": "" },
-        "traces_url": { "type": "string", "default": "" },
-        "metrics_url": { "type": "string", "default": "" }
-      },
-      "default": {
-        "logs_url": "",
-        "traces_url": "",
-        "metrics_url": ""
       }
     },
     "routingParser": {

@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -192,7 +191,6 @@ pub struct Config {
     pub listeners: Vec<ProxyListenerConfig>,
     pub admin_addr: String,
     pub logging: LoggingConfig,
-    pub opentelemetry: OpenTelemetryConfig,
     pub routes: Vec<RouteConfig>,
     pub routing_parsers: Vec<RoutingParserConfig>,
     pub max_header_bytes: usize,
@@ -229,24 +227,6 @@ pub struct LoggingConfig {
     pub format: String,
     pub output: String,
     pub add_source: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct OpenTelemetryUiConfig {
-    pub logs_url: String,
-    pub traces_url: String,
-    pub metrics_url: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct OpenTelemetryConfig {
-    pub enabled: bool,
-    pub service_name: String,
-    pub otlp_endpoint: String,
-    pub protocol: String, // grpc | http
-    pub timeout: Duration,
-    pub headers: BTreeMap<String, String>,
-    pub ui: OpenTelemetryUiConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -320,8 +300,6 @@ struct FileConfig {
 
     logging: Option<FileLogging>,
 
-    opentelemetry: Option<FileOpenTelemetry>,
-
     #[serde(default)]
     routes: Vec<FileRoute>,
 
@@ -363,25 +341,6 @@ struct FileLogging {
     output: Option<String>,
     #[serde(default)]
     add_source: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct FileOpenTelemetry {
-    #[serde(default)]
-    enabled: bool,
-    service_name: Option<String>,
-    otlp_endpoint: Option<String>,
-    protocol: Option<String>,
-    timeout_ms: Option<i64>,
-    headers: Option<BTreeMap<String, String>>,
-    ui: Option<FileOpenTelemetryUi>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FileOpenTelemetryUi {
-    logs_url: Option<String>,
-    traces_url: Option<String>,
-    metrics_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -495,19 +454,6 @@ impl Config {
                 format: "json".into(),
                 output: "stderr".into(),
                 add_source: false,
-            },
-            opentelemetry: OpenTelemetryConfig {
-                enabled: false,
-                service_name: "prism".into(),
-                otlp_endpoint: "".into(),
-                protocol: "grpc".into(),
-                timeout: Duration::from_millis(5000),
-                headers: BTreeMap::new(),
-                ui: OpenTelemetryUiConfig {
-                    logs_url: "".into(),
-                    traces_url: "".into(),
-                    metrics_url: "".into(),
-                },
             },
             routes: vec![],
             routing_parsers: vec![],
@@ -655,45 +601,6 @@ impl Config {
                 }
             }
             cfg.logging.add_source = l.add_source;
-        }
-
-        // --- OpenTelemetry ---
-        if let Some(ot) = &fc.opentelemetry {
-            cfg.opentelemetry.enabled = ot.enabled;
-            if let Some(sn) = &ot.service_name {
-                if !sn.trim().is_empty() {
-                    cfg.opentelemetry.service_name = sn.trim().to_string();
-                }
-            }
-            if let Some(ep) = &ot.otlp_endpoint {
-                if !ep.trim().is_empty() {
-                    cfg.opentelemetry.otlp_endpoint = ep.trim().to_string();
-                }
-            }
-            if let Some(p) = &ot.protocol {
-                if !p.trim().is_empty() {
-                    cfg.opentelemetry.protocol = p.trim().to_ascii_lowercase();
-                }
-            }
-            if let Some(ms) = ot.timeout_ms {
-                if ms > 0 {
-                    cfg.opentelemetry.timeout = Duration::from_millis(ms as u64);
-                }
-            }
-            if let Some(h) = &ot.headers {
-                cfg.opentelemetry.headers = h.clone();
-            }
-            if let Some(ui) = &ot.ui {
-                if let Some(v) = &ui.logs_url {
-                    cfg.opentelemetry.ui.logs_url = v.trim().to_string();
-                }
-                if let Some(v) = &ui.traces_url {
-                    cfg.opentelemetry.ui.traces_url = v.trim().to_string();
-                }
-                if let Some(v) = &ui.metrics_url {
-                    cfg.opentelemetry.ui.metrics_url = v.trim().to_string();
-                }
-            }
         }
 
         // --- Routing parsers ---
@@ -891,18 +798,6 @@ format = "json"
 output = "stderr"
 add_source = false
 
-[opentelemetry]
-enabled = false
-service_name = "prism"
-otlp_endpoint = "" # e.g. http://127.0.0.1:4317 (OTLP/gRPC) or http://127.0.0.1:4318 (OTLP/HTTP)
-protocol = "grpc" # grpc | http
-timeout_ms = 5000
-
-[opentelemetry.ui]
-logs_url = "" # optional: external logs UI link
-traces_url = "" # optional: external traces UI link
-metrics_url = "" # optional: external metrics UI link
-
 [reload]
 enabled = true
 poll_interval_ms = 1000
@@ -941,17 +836,6 @@ logging:
   format: "json"
   output: "stderr"
   add_source: false
-
-opentelemetry:
-    enabled: false
-    service_name: "prism"
-    otlp_endpoint: "" # e.g. http://127.0.0.1:4317 (OTLP/gRPC) or http://127.0.0.1:4318 (OTLP/HTTP)
-    protocol: "grpc" # grpc | http
-    timeout_ms: 5000
-    ui:
-        logs_url: "" # optional: external logs UI link
-        traces_url: "" # optional: external traces UI link
-        metrics_url: "" # optional: external metrics UI link
 
 reload:
   enabled: true

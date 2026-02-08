@@ -1,0 +1,13 @@
+# VictoriaMetrics scrape configuration for the Prism docker-compose stack.
+#
+# Scrapes Prometheus-format metrics directly from Prism.
+
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: prism
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - prism-backend:8080

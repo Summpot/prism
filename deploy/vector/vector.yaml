@@ -1,51 +1,40 @@
 # Vector configuration for the Prism docker-compose stack.
 #
-# Receives OTLP data from Prism and routes:
-# - metrics -> VictoriaMetrics (remote_write)
-# - logs/traces -> Quickwit (NDJSON ingest)
+# - Collects Prism JSON logs from container stdout.
+# - Forwards logs to Quickwit (NDJSON ingest).
+#
+# Metrics are scraped directly by VictoriaMetrics from Prism's /metrics endpoint.
 
 sources:
-  otlp:
-    type: opentelemetry
-    grpc:
-      address: 0.0.0.0:4317
-    http:
-      address: 0.0.0.0:4318
+  docker_prism:
+    type: docker_logs
+    include_containers:
+      - prism-backend
 
 transforms:
-  logs_with_ts:
+  parse_prism_json:
     type: remap
-    inputs: [otlp.logs]
+    inputs: [docker_prism]
     source: |
-      if !exists(.timestamp) { .timestamp = now() }
+      # docker_logs provides a timestamp; keep a stable field name for Quickwit.
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
 
-  traces_with_ts:
-    type: remap
-    inputs: [otlp.traces]
-    source: |
-      if !exists(.timestamp) { .timestamp = now() }
+      # Prism emits JSON logs via tracing-subscriber. The docker_logs source exposes the log line
+      # as `.message`.
+      if is_string(.message) {
+        parsed, err = parse_json(.message)
+        if err == null {
+          . = merge(., parsed)
+        }
+      }
 
 sinks:
-  victoriametrics:
-    type: prometheus_remote_write
-    inputs: [otlp.metrics]
-    endpoint: http://victoriametrics:8428/api/v1/write
-
   quickwit_logs:
     type: http
-    inputs: [logs_with_ts]
-    uri: http://quickwit:7280/api/v1/prism-otel-logs/ingest?commit=auto
-    method: post
-    encoding:
-      codec: ndjson
-    batch:
-      max_events: 1000
-      timeout_secs: 1
-
-  quickwit_traces:
-    type: http
-    inputs: [traces_with_ts]
-    uri: http://quickwit:7280/api/v1/prism-otel-traces/ingest?commit=auto
+    inputs: [parse_prism_json]
+    uri: http://quickwit:7280/api/v1/prism-logs/ingest?commit=auto
     method: post
     encoding:
       codec: ndjson

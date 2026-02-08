@@ -2,7 +2,8 @@
 #
 # - Tunnel server listens on :7000 (tcp) and auto-listens any client services that set remote_addr.
 # - Admin API listens on :8080.
-# - OpenTelemetry traces are exported to Vector via OTLP/gRPC.
+# - Logs are printed to stdout and collected by Vector.
+# - Metrics are exposed at GET /metrics (Prometheus text format) and scraped by VictoriaMetrics.
 
 admin_addr = ":8080"
 
@@ -19,18 +20,6 @@ level = "info"
 format = "json"
 output = "stdout"
 add_source = false
-
-[opentelemetry]
-enabled = true
-service_name = "prism-backend"
-otlp_endpoint = "http://vector:4317" # OTLP/gRPC
-protocol = "grpc" # grpc | http
-timeout_ms = 5000
-
-[opentelemetry.ui]
-logs_url = ""
-traces_url = ""
-metrics_url = ""
 
 [timeouts]
 handshake_timeout_ms = 3000

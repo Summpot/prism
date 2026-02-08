@@ -13,7 +13,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let cfg = config::load_config(&resolved.path)
         .with_context(|| format!("load config: {}", resolved.path.display()))?;
 
-    let logrt = logging::init(&cfg.logging, &cfg.opentelemetry)?;
+    let logrt = logging::init(&cfg.logging)?;
     let _logrt_guard = logrt; // keep alive
 
     if created {
@@ -43,7 +43,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     );
 
     // Shared state for admin endpoints.
-    let metrics = Arc::new(telemetry::MetricsCollector::new());
+    let prom = Arc::new(telemetry::init_prometheus()?);
     let sessions = Arc::new(telemetry::SessionRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
 
@@ -64,7 +64,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             .with_context(|| format!("invalid admin_addr: {}", cfg.admin_addr))?;
 
         let admin_state = admin::AdminState {
-            metrics: metrics.clone(),
+            prom: prom.clone(),
             sessions: sessions.clone(),
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
@@ -86,7 +86,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                         proxy::TcpHandler::routing(proxy::TcpRoutingHandlerOptions {
                             parser: host_parser.clone(),
                             router: rtr.clone(),
-                            metrics: metrics.clone(),
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
                             max_header_bytes: cfg.max_header_bytes,
@@ -98,7 +97,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                     } else {
                         proxy::TcpHandler::forward(proxy::TcpForwardHandlerOptions {
                             upstream,
-                            metrics: metrics.clone(),
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
                             idle_timeout: cfg.timeouts.idle_timeout,

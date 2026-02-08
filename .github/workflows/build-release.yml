@@ -11,42 +11,70 @@ permissions:
   packages: write
 
 jobs:
-  test:
+  test-rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: go test
-        run: go test ./...
 
-  binaries:
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-tests
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  test-frontend:
     runs-on: ubuntu-latest
-    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend build
+        run: pnpm build
+
+  rust-binaries:
+    name: rust binaries (linux/${{ matrix.arch }})
+    needs: test-rust
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
 
-      - name: build
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-binaries-${{ matrix.arch }}
+
+      - name: Build (release)
+        shell: bash
+        run: cargo build --release -p prism
+
+      - name: Package
         shell: bash
         run: |
           set -euo pipefail
@@ -60,48 +88,33 @@ jobs:
           OUTDIR="dist"
           mkdir -p "${OUTDIR}"
 
-          GOOS="${{ matrix.goos }}"
-          GOARCH="${{ matrix.goarch }}"
+          OS="linux"
+          ARCH="${{ matrix.arch }}"
 
-          BINNAME="prism"
-          EXT=""
-          PKGEXT="tar.gz"
-          if [[ "${GOOS}" == "windows" ]]; then
-            EXT=".exe"
-            PKGEXT="zip"
-          fi
-
-          BASENAME="prism_${VERSION}_${GOOS}_${GOARCH}"
+          BASENAME="prism_${VERSION}_${OS}_${ARCH}"
           TMPDIR="${OUTDIR}/${BASENAME}"
           mkdir -p "${TMPDIR}"
 
-          echo "Building prism for ${BASENAME}${EXT}"
-          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
-            go build -trimpath -ldflags "-s -w" -o "${TMPDIR}/${BINNAME}${EXT}" ./cmd/prism
+          cp -v target/release/prism "${TMPDIR}/prism"
 
-          if [[ "${PKGEXT}" == "zip" ]]; then
-            (cd "${OUTDIR}" && zip -qr "${BASENAME}.zip" "${BASENAME}")
-          else
-            tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
-          fi
-
+          tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
           rm -rf "${TMPDIR}"
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prism-binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: prism-rust-binaries-linux-${{ matrix.arch }}
           path: dist/*
 
   release:
     runs-on: ubuntu-latest
-    needs: binaries
+    needs: rust-binaries
     if: github.ref_type == 'tag'
     steps:
       - name: download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: prism-binaries-*
+          pattern: prism-rust-binaries-*
           path: dist
           merge-multiple: true
 
@@ -124,9 +137,9 @@ jobs:
           files: |
             dist/*
 
-  docker-arch:
-    name: docker (${{ matrix.arch }})
-    needs: test
+  docker-backend-arch:
+    name: docker backend (${{ matrix.arch }})
+    needs: test-rust
     if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
@@ -191,11 +204,13 @@ jobs:
           push: true
           tags: ${{ steps.archtags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=backend-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=backend-${{ matrix.arch }}
 
-  docker:
-    name: docker (multi-arch manifest)
+  docker-backend:
+    name: docker backend (multi-arch manifest)
     runs-on: ubuntu-latest
-    needs: docker-arch
+    needs: docker-backend-arch
     if: github.event_name != 'pull_request'
     steps:
       - name: Set up Buildx
@@ -213,6 +228,113 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Create and push multi-arch manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -z "${tag}" ]] && continue
+            docker buildx imagetools create \
+              -t "${tag}" \
+              "${tag}-amd64" \
+              "${tag}-arm64"
+          done <<< "${{ steps.meta.outputs.tags }}"
+
+  docker-frontend-arch:
+    name: docker frontend (${{ matrix.arch }})
+    needs: test-frontend
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
+          tags: |
+            type=sha
+            type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Add arch suffix to tags
+        id: archtags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          suffix="-${{ matrix.arch }}"
+          out=""
+          while IFS= read -r tag; do
+            [[ -z "${tag}" ]] && continue
+            out+="${tag}${suffix}"$'\n'
+          done <<< "${{ steps.meta.outputs.tags }}"
+
+          {
+            echo 'tags<<EOF'
+            echo "${out}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (single-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ steps.archtags.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=frontend-${{ matrix.arch }}
+
+  docker-frontend:
+    name: docker frontend (multi-arch manifest)
+    runs-on: ubuntu-latest
+    needs: docker-frontend-arch
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
           tags: |
             type=sha
             type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}

@@ -55,7 +55,7 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
 ### 3.2. `SessionHandler` (Orchestrator)
 
 * **Responsibility**: Manages the lifecycle of a single client connection. It does not contain business logic but orchestrates calls to the Parser, Router, and Proxy components.
-* **Context Management**: Owns the `context.Context` for the connection, handling timeouts and cancellation signals.
+* **Cancellation/Timeouts**: Owns the per-connection cancellation scope and applies configured timeouts (handshake, idle, dial). In Rust this is modeled via task cancellation and `tokio::time::timeout` (and may use a cancellation token internally).
 
 ### 3.3. `RoutingHeaderParser` (Pure Logic, Pluggable)
 
@@ -213,6 +213,53 @@ To support multiple transports simultaneously (similar to frp's server), Prism c
 
 Tunnel mode supports a shared secret token. The tunnel client must present the token during registration; otherwise the tunnel server rejects the tunnel connection.
 
+### 8.6. Tunnel wire protocol (v1)
+
+Prism's tunnel protocol is intentionally small and compatible across implementations.
+
+**Register stream (client → server, first stream in a session)**
+
+* The first stream opened on a tunnel session is the **register** stream.
+* Header:
+  * 4 bytes ASCII magic: `PRRG` ("Prism Reverse Register")
+  * 1 byte version: `0x01`
+  * 4 bytes big-endian length $N$
+  * $N$ bytes JSON payload (cap: 1 MiB)
+
+Payload (JSON):
+
+* `token: string` (optional shared secret)
+* `services: []service`
+
+Service fields:
+
+* `name: string`
+* `proto: "tcp" | "udp"` (defaults to `tcp`)
+* `local_addr: string` (used by tunnel client to dial the local backend)
+* `route_only: bool` (when true, the service is only reachable via `tunnel:<name>` routing)
+* `remote_addr: string` (optional; requests server-side auto-listen exposure; ignored when `route_only=true`)
+
+Implementations should normalize the request (trim whitespace, lowercase `proto`, and force `remote_addr=""` when `route_only=true`).
+
+**Proxy stream (server → client, one stream per proxied session)**
+
+The tunnel server opens a new stream to the client for each proxied session.
+
+Header:
+
+* 4 bytes ASCII magic:
+  * `PRPX` for TCP streams ("Prism Reverse Proxy")
+  * `PRPU` for UDP streams
+* 1 byte version: `0x01`
+* Service name encoded as a Minecraft-style string: VarInt length + UTF-8 bytes
+
+After the header:
+
+* **TCP**: raw byte stream (the proxy simply bridges bytes).
+* **UDP**: datagram framing over a stream:
+  * each datagram is `u32be length` + `payload`
+  * per-datagram cap: 1 MiB
+
 ## 4. Admin & Telemetry Module
 
 This module runs a separate HTTP server to provide observability. It interacts with the core components via thread-safe data stores.
@@ -240,14 +287,14 @@ This module runs a separate HTTP server to provide observability. It interacts w
 * `GET /health`: Returns 200 OK if the listener is up.
 * `GET /metrics`: Returns the JSON dump of the `MetricsCollector`.
 * `GET /conns`: Returns a snapshot list of current active sessions (Client IP -> Target Host).
-* `GET /logs?limit=N`: Returns the most recent log lines from an in-memory ring buffer (if enabled).
 * `POST /reload`: Triggers a configuration reload and atomically swaps the snapshot used for new connections.
+* `GET /tunnel/services`: Returns a snapshot of currently registered tunnel services (when tunnel server role is enabled).
 
 
 
-### 4.3. Logging
+### 4.3. Logging & OpenTelemetry
 
-Prism uses Rust structured logging (`tracing` + `tracing-subscriber`).
+Prism uses Rust structured logging (`tracing` + `tracing-subscriber`) and integrates with **OpenTelemetry**.
 
 **Goals**:
 
@@ -255,11 +302,15 @@ Prism uses Rust structured logging (`tracing` + `tracing-subscriber`).
 * Keep the hot path fast by default (no per-connection logs at `info` level).
 * Produce machine-readable logs by default.
 
+Additionally:
+
+* Export logs/traces/metrics to the user's OpenTelemetry pipeline (Collector + backend) without Prism owning retention.
+
 **Design**:
 
 * A process-wide logger is constructed at startup from `config.logging`.
 * Output format is `json` by default, with an optional `text` mode for local debugging.
-* Log level is runtime-adjustable on config reload; changing output/format/source reporting requires restart.
+* Log level is runtime-adjustable on config reload; changing output/format/source reporting may require restart.
 * Log records should be structured with consistent keys where relevant:
   * `sid`: session identifier (process-unique)
   * `client`: client remote address
@@ -267,11 +318,28 @@ Prism uses Rust structured logging (`tracing` + `tracing-subscriber`).
   * `upstream`: upstream address
   * `err`: error value
 
-**Admin log tail**:
+**Implementation guidance (logging on the hot path)**:
 
-* When `config.logging.admin_buffer.enabled` is true, Prism tees formatted log lines into a bounded in-memory ring buffer.
-* The admin server can expose this buffer via `GET /logs?limit=N` to quickly inspect recent activity without filesystem access.
-* This is intended for debugging, not long-term retention.
+* Avoid per-connection logs at `info` by default; prefer `debug` for per-session details.
+* When building non-trivial fields, guard with `tracing::enabled!(Level::DEBUG)` to avoid allocations when disabled.
+* Do not log raw captured handshake bytes at `info`/`warn`. If needed for deep debugging, log only lengths/counts or keep raw data behind `debug` with an explicit justification.
+
+**No in-process log storage**:
+
+* Prism does **not** maintain an in-memory log ring buffer.
+* Prism does **not** provide a "tail logs" endpoint backed by process memory.
+
+**OpenTelemetry export**:
+
+* When enabled, Prism exports telemetry via OTLP to a user-provided endpoint (typically an OpenTelemetry Collector).
+* Storage/retention and querying are delegated to the user's backend (for example Grafana/Loki, SigNoz, Elastic, etc.).
+
+### 4.4. Log viewing in the frontend
+
+The Prism frontend does not read logs from Prism's process memory.
+
+* The UI can link to (or embed) an external observability UI configured by the user.
+* Optionally, the UI can query the user's log backend directly if that backend provides an HTTP query API and is reachable from the browser environment.
 
 
 
@@ -322,7 +390,8 @@ The project will strictly adhere to the following testing pyramid:
 
 * **Logging reload semantics**:
   * `logging.level` is reloadable.
-  * `logging.format`, `logging.output`, `logging.add_source`, and `logging.admin_buffer.*` require restart.
+  * `logging.format`, `logging.output`, `logging.add_source` may require restart depending on the sink implementation.
+  * OpenTelemetry exporter settings (endpoint/protocol/headers) are expected to require restart initially; future versions may support live reconfiguration.
 
 ### 6.2. Buffer Management
 

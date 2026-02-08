@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    collections::BTreeMap,
     time::Duration,
 };
 
@@ -191,6 +192,7 @@ pub struct Config {
     pub listeners: Vec<ProxyListenerConfig>,
     pub admin_addr: String,
     pub logging: LoggingConfig,
+    pub opentelemetry: OpenTelemetryConfig,
     pub routes: Vec<RouteConfig>,
     pub routing_parsers: Vec<RoutingParserConfig>,
     pub max_header_bytes: usize,
@@ -222,18 +224,29 @@ pub struct ReloadConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct AdminBufferConfig {
-    pub enabled: bool,
-    pub size: usize,
-}
-
-#[derive(Debug, Clone)]
 pub struct LoggingConfig {
     pub level: String,
     pub format: String,
     pub output: String,
     pub add_source: bool,
-    pub admin_buffer: AdminBufferConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenTelemetryUiConfig {
+    pub logs_url: String,
+    pub traces_url: String,
+    pub metrics_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenTelemetryConfig {
+    pub enabled: bool,
+    pub service_name: String,
+    pub otlp_endpoint: String,
+    pub protocol: String, // grpc | http
+    pub timeout: Duration,
+    pub headers: BTreeMap<String, String>,
+    pub ui: OpenTelemetryUiConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -265,6 +278,7 @@ pub struct TunnelConfig {
 pub struct TunnelEndpointConfig {
     pub listen_addr: String,
     pub transport: String,
+    pub quic: QuicServerConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +286,19 @@ pub struct TunnelClientConfig {
     pub server_addr: String,
     pub transport: String,
     pub dial_timeout: Duration,
+    pub quic: QuicClientConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct QuicServerConfig {
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct QuicClientConfig {
+    pub server_name: String,
+    pub insecure_skip_verify: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -292,6 +319,8 @@ struct FileConfig {
     admin_addr: String,
 
     logging: Option<FileLogging>,
+
+    opentelemetry: Option<FileOpenTelemetry>,
 
     #[serde(default)]
     routes: Vec<FileRoute>,
@@ -334,14 +363,25 @@ struct FileLogging {
     output: Option<String>,
     #[serde(default)]
     add_source: bool,
-    admin_buffer: Option<FileAdminBuffer>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FileAdminBuffer {
+struct FileOpenTelemetry {
     #[serde(default)]
     enabled: bool,
-    size: Option<usize>,
+    service_name: Option<String>,
+    otlp_endpoint: Option<String>,
+    protocol: Option<String>,
+    timeout_ms: Option<i64>,
+    headers: Option<BTreeMap<String, String>>,
+    ui: Option<FileOpenTelemetryUi>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileOpenTelemetryUi {
+    logs_url: Option<String>,
+    traces_url: Option<String>,
+    metrics_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,6 +435,7 @@ struct FileTunnel {
 struct FileTunnelEndpoint {
     listen_addr: String,
     transport: Option<String>,
+    quic: Option<FileQuicServer>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -402,6 +443,20 @@ struct FileTunnelClient {
     server_addr: String,
     transport: Option<String>,
     dial_timeout_ms: Option<i64>,
+    quic: Option<FileQuicClient>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileQuicServer {
+    cert_file: Option<String>,
+    key_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileQuicClient {
+    server_name: Option<String>,
+    #[serde(default)]
+    insecure_skip_verify: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -440,9 +495,18 @@ impl Config {
                 format: "json".into(),
                 output: "stderr".into(),
                 add_source: false,
-                admin_buffer: AdminBufferConfig {
-                    enabled: false,
-                    size: 1000,
+            },
+            opentelemetry: OpenTelemetryConfig {
+                enabled: false,
+                service_name: "prism".into(),
+                otlp_endpoint: "".into(),
+                protocol: "grpc".into(),
+                timeout: Duration::from_millis(5000),
+                headers: BTreeMap::new(),
+                ui: OpenTelemetryUiConfig {
+                    logs_url: "".into(),
+                    traces_url: "".into(),
+                    metrics_url: "".into(),
                 },
             },
             routes: vec![],
@@ -591,12 +655,43 @@ impl Config {
                 }
             }
             cfg.logging.add_source = l.add_source;
-            if let Some(b) = &l.admin_buffer {
-                cfg.logging.admin_buffer.enabled = b.enabled;
-                if let Some(sz) = b.size {
-                    if sz != 0 {
-                        cfg.logging.admin_buffer.size = sz;
-                    }
+        }
+
+        // --- OpenTelemetry ---
+        if let Some(ot) = &fc.opentelemetry {
+            cfg.opentelemetry.enabled = ot.enabled;
+            if let Some(sn) = &ot.service_name {
+                if !sn.trim().is_empty() {
+                    cfg.opentelemetry.service_name = sn.trim().to_string();
+                }
+            }
+            if let Some(ep) = &ot.otlp_endpoint {
+                if !ep.trim().is_empty() {
+                    cfg.opentelemetry.otlp_endpoint = ep.trim().to_string();
+                }
+            }
+            if let Some(p) = &ot.protocol {
+                if !p.trim().is_empty() {
+                    cfg.opentelemetry.protocol = p.trim().to_ascii_lowercase();
+                }
+            }
+            if let Some(ms) = ot.timeout_ms {
+                if ms > 0 {
+                    cfg.opentelemetry.timeout = Duration::from_millis(ms as u64);
+                }
+            }
+            if let Some(h) = &ot.headers {
+                cfg.opentelemetry.headers = h.clone();
+            }
+            if let Some(ui) = &ot.ui {
+                if let Some(v) = &ui.logs_url {
+                    cfg.opentelemetry.ui.logs_url = v.trim().to_string();
+                }
+                if let Some(v) = &ui.traces_url {
+                    cfg.opentelemetry.ui.traces_url = v.trim().to_string();
+                }
+                if let Some(v) = &ui.metrics_url {
+                    cfg.opentelemetry.ui.metrics_url = v.trim().to_string();
                 }
             }
         }
@@ -661,6 +756,22 @@ impl Config {
                             .unwrap_or_else(|| "tcp".into())
                             .trim()
                             .to_ascii_lowercase(),
+                        quic: QuicServerConfig {
+                            cert_file: ep
+                                .quic
+                                .as_ref()
+                                .and_then(|q| q.cert_file.clone())
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                            key_file: ep
+                                .quic
+                                .as_ref()
+                                .and_then(|q| q.key_file.clone())
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                        },
                     });
                 }
             }
@@ -675,6 +786,16 @@ impl Config {
                         .trim()
                         .to_ascii_lowercase(),
                     dial_timeout: Duration::from_millis(c.dial_timeout_ms.unwrap_or(5000).max(0) as u64),
+                    quic: QuicClientConfig {
+                        server_name: c
+                            .quic
+                            .as_ref()
+                            .and_then(|q| q.server_name.clone())
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
+                        insecure_skip_verify: c.quic.as_ref().map(|q| q.insecure_skip_verify).unwrap_or(false),
+                    },
                 });
             }
 
@@ -762,9 +883,17 @@ format = "json"
 output = "stderr"
 add_source = false
 
-[logging.admin_buffer]
-enabled = true
-size = 1000
+[opentelemetry]
+enabled = false
+service_name = "prism"
+otlp_endpoint = "" # e.g. http://127.0.0.1:4317 (OTLP/gRPC) or http://127.0.0.1:4318 (OTLP/HTTP)
+protocol = "grpc" # grpc | http
+timeout_ms = 5000
+
+[opentelemetry.ui]
+logs_url = "" # optional: external logs UI link
+traces_url = "" # optional: external traces UI link
+metrics_url = "" # optional: external metrics UI link
 
 [reload]
 enabled = true
@@ -803,9 +932,17 @@ logging:
   format: "json"
   output: "stderr"
   add_source: false
-  admin_buffer:
-    enabled: true
-    size: 1000
+
+opentelemetry:
+    enabled: false
+    service_name: "prism"
+    otlp_endpoint: "" # e.g. http://127.0.0.1:4317 (OTLP/gRPC) or http://127.0.0.1:4318 (OTLP/HTTP)
+    protocol: "grpc" # grpc | http
+    timeout_ms: 5000
+    ui:
+        logs_url: "" # optional: external logs UI link
+        traces_url: "" # optional: external traces UI link
+        metrics_url: "" # optional: external metrics UI link
 
 reload:
   enabled: true

@@ -18,9 +18,18 @@ logging:
   format: "json"
   output: "stderr"
   add_source: false
-  admin_buffer:
-    enabled: true
-    size: 1000
+
+opentelemetry:
+  enabled: false
+  service_name: "prism"
+  otlp_endpoint: "" # e.g. http://127.0.0.1:4317 (OTLP/gRPC) or http://127.0.0.1:4318 (OTLP/HTTP)
+  protocol: "grpc" # grpc | http
+  timeout_ms: 5000
+  headers: {}
+  ui:
+    logs_url: "" # optional: link to your external logs UI
+    traces_url: "" # optional: link to your external traces UI
+    metrics_url: "" # optional: link to your external metrics UI
 
 proxy_protocol_v2: false
 buffer_size: 32768

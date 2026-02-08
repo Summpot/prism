@@ -13,7 +13,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let cfg = config::load_config(&resolved.path)
         .with_context(|| format!("load config: {}", resolved.path.display()))?;
 
-    let logrt = logging::init(&cfg.logging)?;
+    let logrt = logging::init(&cfg.logging, &cfg.opentelemetry)?;
     let _logrt_guard = logrt; // keep alive
 
     if created {
@@ -63,7 +63,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         let admin_state = admin::AdminState {
             metrics: metrics.clone(),
             sessions: sessions.clone(),
-            logs: logging::global_log_buffer(),
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
         };

@@ -1,61 +1,36 @@
-use std::{
-    collections::VecDeque,
-    io,
-    path::Path,
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::{collections::HashMap, io, path::Path};
 
 use anyhow::Context;
+use opentelemetry::{global, KeyValue};
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
+use opentelemetry_sdk::{trace as sdktrace, Resource};
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::Layer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use crate::prism::config;
-
-static GLOBAL_LOG_BUFFER: OnceLock<Arc<LogBuffer>> = OnceLock::new();
-
-#[derive(Debug)]
-pub struct LogBuffer {
-    cap: usize,
-    inner: Mutex<VecDeque<String>>,
-}
-
-impl LogBuffer {
-    pub fn new(cap: usize) -> Self {
-        Self {
-            cap: cap.max(1),
-            inner: Mutex::new(VecDeque::new()),
-        }
-    }
-
-    pub fn push_line(&self, line: String) {
-        let mut g = self.inner.lock().unwrap();
-        while g.len() >= self.cap {
-            g.pop_front();
-        }
-        g.push_back(line);
-    }
-
-    pub fn tail(&self, limit: usize) -> Vec<String> {
-        let g = self.inner.lock().unwrap();
-        let limit = limit.min(g.len());
-        g.iter().rev().take(limit).cloned().collect()
-    }
-}
 
 #[derive(Debug)]
 pub struct LoggingRuntime {
     _guard: WorkerGuard,
+    otel_provider: Option<sdktrace::SdkTracerProvider>,
 }
 
-pub fn global_log_buffer() -> Option<Arc<LogBuffer>> {
-    GLOBAL_LOG_BUFFER.get().cloned()
+impl Drop for LoggingRuntime {
+    fn drop(&mut self) {
+        if let Some(provider) = self.otel_provider.take() {
+            // Best-effort flush for batch exporters.
+            // (This is intentionally best-effort; shutdown failures shouldn't crash on exit.)
+            let _ = provider.shutdown();
+        }
+    }
 }
 
-pub fn init(cfg: &config::LoggingConfig) -> anyhow::Result<LoggingRuntime> {
-    let level = cfg.level.trim().to_ascii_lowercase();
-    let fmt = cfg.format.trim().to_ascii_lowercase();
-    let out = cfg.output.trim();
+pub fn init(logging: &config::LoggingConfig, otel: &config::OpenTelemetryConfig) -> anyhow::Result<LoggingRuntime> {
+    let level = logging.level.trim().to_ascii_lowercase();
+    let fmt = logging.format.trim().to_ascii_lowercase();
+    let out = logging.output.trim();
 
     let filter = EnvFilter::try_from_default_env()
         .or_else(|_| {
@@ -76,8 +51,8 @@ pub fn init(cfg: &config::LoggingConfig) -> anyhow::Result<LoggingRuntime> {
         .with_writer(writer)
         .with_ansi(fmt == "text")
         .with_target(true)
-        .with_file(cfg.add_source)
-        .with_line_number(cfg.add_source);
+        .with_file(logging.add_source)
+        .with_line_number(logging.add_source);
 
     let base_fmt = if fmt == "json" {
         base_fmt.json().boxed()
@@ -85,33 +60,84 @@ pub fn init(cfg: &config::LoggingConfig) -> anyhow::Result<LoggingRuntime> {
         base_fmt.boxed()
     };
 
-    let buf_layer = if cfg.admin_buffer.enabled {
-        let buf = Arc::new(LogBuffer::new(cfg.admin_buffer.size.max(1)));
-        let _ = GLOBAL_LOG_BUFFER.set(buf.clone());
-
-        Some(
-            tracing_subscriber::fmt::layer()
-                .with_writer(LogBufferMakeWriter { buf })
-                .with_ansi(false)
-                .with_target(true)
-                .with_file(cfg.add_source)
-                .with_line_number(cfg.add_source)
-                .json(),
-        )
-    } else {
-        None
-    };
+    let (otel_provider, otel_layer) = build_otel_layer(otel)?;
 
     tracing_subscriber::registry()
+        .with(otel_layer)
         .with(filter)
         .with(base_fmt)
-        .with(buf_layer)
         .init();
 
-    Ok(LoggingRuntime { _guard: guard })
+    Ok(LoggingRuntime {
+        _guard: guard,
+        otel_provider,
+    })
 }
 
-fn make_writer(output: &str) -> anyhow::Result<(tracing_appender::non_blocking::NonBlocking, WorkerGuard)> {
+fn build_otel_layer(
+    otel: &config::OpenTelemetryConfig,
+) -> anyhow::Result<(
+    Option<sdktrace::SdkTracerProvider>,
+    Option<impl Layer<tracing_subscriber::Registry> + Send + Sync + 'static>,
+)> {
+    if !otel.enabled {
+        return Ok((None, None));
+    }
+
+    let endpoint = otel.otlp_endpoint.trim();
+    if endpoint.is_empty() {
+        anyhow::bail!("opentelemetry: enabled but otlp_endpoint is empty");
+    }
+
+    let mut headers: HashMap<String, String> = HashMap::new();
+    for (k, v) in &otel.headers {
+        let k = k.trim();
+        if k.is_empty() {
+            continue;
+        }
+        headers.insert(k.to_string(), v.clone());
+    }
+
+    let resource = Resource::builder()
+        .with_attribute(KeyValue::new(SERVICE_NAME, otel.service_name.clone()))
+        .build();
+
+    // Traces: tracing spans -> OpenTelemetry traces.
+    // opentelemetry-otlp >= 0.28 uses exporter/provider builders (no new_pipeline/new_exporter).
+    let exporter = match otel.protocol.trim().to_ascii_lowercase().as_str() {
+        "grpc" => {
+            let mut b = opentelemetry_otlp::SpanExporter::builder().with_tonic();
+            b = b.with_endpoint(endpoint);
+            b = b.with_timeout(otel.timeout);
+            b.build()?
+        }
+        "http" | "http/protobuf" => {
+            let mut b = opentelemetry_otlp::SpanExporter::builder().with_http();
+            b = b.with_endpoint(endpoint);
+            b = b.with_timeout(otel.timeout);
+            if !headers.is_empty() {
+                b = b.with_headers(headers);
+            }
+            b.build()?
+        }
+        other => anyhow::bail!("opentelemetry: unsupported protocol {other:?} (expected grpc|http)"),
+    };
+
+    let provider = sdktrace::SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(exporter)
+        .build();
+
+    global::set_tracer_provider(provider.clone());
+    let tracer = provider.tracer("prism");
+
+    let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    Ok((Some(provider), Some(layer)))
+}
+
+fn make_writer(
+    output: &str,
+) -> anyhow::Result<(tracing_appender::non_blocking::NonBlocking, WorkerGuard)> {
     match output {
         "stderr" => Ok(tracing_appender::non_blocking(io::stderr())),
         "stdout" => Ok(tracing_appender::non_blocking(io::stdout())),
@@ -131,47 +157,5 @@ fn make_writer(output: &str) -> anyhow::Result<(tracing_appender::non_blocking::
                 .with_context(|| format!("logging: open {}", p.display()))?;
             Ok(tracing_appender::non_blocking(file))
         }
-    }
-}
-
-#[derive(Clone)]
-struct LogBufferMakeWriter {
-    buf: Arc<LogBuffer>,
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBufferMakeWriter {
-    type Writer = LogBufferWriter;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        LogBufferWriter {
-            buf: self.buf.clone(),
-            pending: Vec::with_capacity(512),
-        }
-    }
-}
-
-struct LogBufferWriter {
-    buf: Arc<LogBuffer>,
-    pending: Vec<u8>,
-}
-
-impl io::Write for LogBufferWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.pending.extend_from_slice(buf);
-
-        // Drain complete lines.
-        while let Some(pos) = self.pending.iter().position(|b| *b == b'\n') {
-            let line = self.pending.drain(..=pos).collect::<Vec<u8>>();
-            let s = String::from_utf8_lossy(&line).trim_end().to_string();
-            if !s.is_empty() {
-                self.buf.push_line(s);
-            }
-        }
-
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
     }
 }

@@ -5,26 +5,25 @@ use std::{
 };
 
 use axum::{
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::sync::watch;
 use tower_http::{
     cors::CorsLayer,
     trace::TraceLayer,
 };
 
-use crate::prism::{logging, telemetry};
+use crate::prism::telemetry;
 
 #[derive(Clone)]
 pub struct AdminState {
     pub metrics: telemetry::SharedMetrics,
     pub sessions: telemetry::SharedSessions,
-    pub logs: Option<Arc<logging::LogBuffer>>,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
 }
@@ -36,7 +35,6 @@ pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/conns", get(conns))
-        .route("/logs", get(logs))
         .route("/reload", post(reload))
         .route("/config", get(config))
         .with_state(shared)
@@ -68,24 +66,6 @@ async fn metrics(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
 async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     let snap = st.sessions.snapshot();
     (StatusCode::OK, Json(snap))
-}
-
-#[derive(Debug, Deserialize)]
-struct LogsQuery {
-    limit: Option<usize>,
-}
-
-async fn logs(State(st): State<Arc<AdminState>>, Query(q): Query<LogsQuery>) -> impl IntoResponse {
-    let limit = q.limit.unwrap_or(200).clamp(1, 10_000);
-
-    let Some(buf) = &st.logs else {
-        return (StatusCode::OK, Json(Vec::<String>::new()));
-    };
-
-    let mut lines = buf.tail(limit);
-    lines.reverse(); // oldest -> newest
-
-    (StatusCode::OK, Json(lines))
 }
 
 #[derive(Debug, Serialize)]

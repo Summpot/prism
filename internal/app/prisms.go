@@ -187,7 +187,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 	metrics := telemetry.NewMetricsCollector()
 	sessions := proxy.NewSessionRegistry()
 
-	r := router.NewRouter(cfg.Routes)
+	r := router.NewRouter(toRouterRoutes(cfg.Routes))
 
 	type runningListener struct {
 		cfg config.ProxyListenerConfig
@@ -292,7 +292,7 @@ func RunPrism(ctx context.Context, configPath string) error {
 			return err
 		}
 		// Update routes atomically.
-		r.Update(newCfg.Routes)
+		r.Update(toRouterRoutes(newCfg.Routes))
 
 		// Rotate dialer/bridge/parser for new sessions.
 		baseDialer := proxy.NewNetDialer(&proxy.NetDialerOptions{Timeout: newCfg.UpstreamDialTimeout})
@@ -565,4 +565,15 @@ func defaultUpstreamPortFromListenAddr(listenAddr string) int {
 		return 25565
 	}
 	return p
+}
+
+func toRouterRoutes(in []config.RouteConfig) []router.Route {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]router.Route, 0, len(in))
+	for _, r := range in {
+		out = append(out, router.Route{Host: r.Host, Upstreams: r.Upstreams, Strategy: r.Strategy, CachePingTTL: r.CachePingTTL})
+	}
+	return out
 }

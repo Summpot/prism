@@ -80,14 +80,26 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
 
 * **Responsibility**: Maps a hostname string to an upstream address.
 * **Design**:
-  * Supports exact matches and wildcard matches.
-  * Thread-safe reads; atomic writes.
+  * Routes are an **ordered list**; the router checks them in order and the **first match wins**.
+    * Operationally: put more specific patterns earlier.
+  * Host patterns support exact matches and glob-like wildcards:
+    * `*` matches any string (captured as a group)
+    * `?` matches any single character (captured as a group)
+  * Wildcard patterns produce capture groups which can be substituted into upstream templates using `$1`, `$2`, ...
+  * A single route can target **one or more upstreams**.
+    * When multiple upstreams are configured, a simple load-balancing strategy chooses the candidate order (for example `sequential`, `random`, `round-robin`).
+    * The proxy layer performs **dial failover** by trying upstreams in that order until one succeeds.
+  * Thread-safe reads; atomic updates.
   * Route tables can be updated at runtime as part of config hot-reload.
 
 * **Upstream address format**:
   * Upstream targets are treated as TCP dial addresses (e.g. `host:port`, `ip:port`, `[ipv6]:port`).
   * A port may be omitted (e.g. `backend.example.com`), in which case the proxy prefers the port from a Minecraft handshake when available and otherwise falls back to the listener port.
   * Tunnel upstreams use the prefix `tunnel:` (for example `tunnel:home-mc`). In this case the target is **not** treated as a TCP dial address; it is resolved via the tunnel registry maintained by the tunnel server.
+
+* **Optional protocol-aware fast paths**:
+  * For Minecraft status (ping) traffic, Prism may serve a cached status response for a route when configured to do so (TTL-based).
+  * The cache is keyed by upstream + protocol version and uses request coalescing to avoid stampedes under concurrent pings.
 
 
 * **Testability**:

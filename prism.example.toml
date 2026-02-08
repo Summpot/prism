@@ -93,7 +93,18 @@ name = "tls_sni"
 handshake_timeout_ms = 3000
 idle_timeout_ms = 0
 
-[routes]
-"play.example.com" = "127.0.0.1:25566"
-"*.labs.example.com" = "127.0.0.1:25567"
-"home.example.com" = "tunnel:home-mc"
+[[routes]]
+host = "play.example.com"
+upstream = "127.0.0.1:25566"
+
+# Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
+# using $1, $2, ... (see DESIGN.md for details).
+[[routes]]
+host = "*.labs.example.com"
+upstreams = ["127.0.0.1:25567", "127.0.0.1:25568"]
+strategy = "round-robin"
+cache_ping_ttl = "60s"
+
+[[routes]]
+host = "home.example.com"
+upstream = "tunnel:home-mc"

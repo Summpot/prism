@@ -14,7 +14,7 @@ func TestFileConfigProvider_LoggingDefaults(t *testing.T) {
 listeners:
   - listen_addr: ":25565"
     protocol: "tcp"
-routes: {}
+routes: []
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestFileConfigProvider_LoggingOverrides(t *testing.T) {
 		"  admin_buffer:\n" +
 		"    enabled: true\n" +
 		"    size: 12\n" +
-		"routes: {}\n"
+		"routes: []\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestFileConfigProvider_ParsesYAML(t *testing.T) {
 		"  admin_buffer:\n" +
 		"    enabled: true\n" +
 		"    size: 12\n" +
-		"routes: {}\n"
+		"routes: []\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -132,6 +132,8 @@ func TestFileConfigProvider_ParsesTOML(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`
 admin_addr = ":8080"
 
+routes = []
+
 [[listeners]]
 listen_addr = ":25565"
 protocol = "tcp"
@@ -145,8 +147,6 @@ add_source = true
 [logging.admin_buffer]
 enabled = true
 size = 12
-
-[routes]
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

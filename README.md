@@ -64,17 +64,30 @@ TOML doesn’t have a universal inline `$schema` directive. In VS Code, you can 
 
 ### Routing rules
 
-Use `routes` to map hostnames to upstream addresses:
+Use `routes` to map hostnames to upstream addresses.
 
-- Exact match: `play.example.com` → `127.0.0.1:25566`
-- Wildcard suffix: `*.labs.example.com` → `127.0.0.1:25567`
+`routes` is an **ordered list**: routes are checked in the order they appear, and the **first match wins**. Put more specific patterns earlier.
+
+Each route specifies:
+
+- `host` / `hosts`: one hostname pattern or a list of patterns
+- `upstream` / `upstreams` (aliases: `backend` / `backends`): one or more upstream targets
+- `strategy` (optional): how to pick an upstream when multiple are configured (`sequential`, `random`, `round-robin`)
+- `cache_ping_ttl` (optional): Minecraft status (ping) response cache TTL (Go duration like `60s`; `-1` disables)
+
+Hostname patterns support glob-like wildcards:
+
+- `*` matches any string (captured as a group)
+- `?` matches any single character (captured as a group)
+
+If a pattern contains wildcards, any upstream strings may reference the captured groups as `$1`, `$2`, ...
 
 Upstream targets are treated as TCP dial addresses. They can be IPs or DNS names.
 If you omit the port (for example `backend.example.com`), Prism will prefer the
 port from the Minecraft handshake when available; otherwise it falls back to the
 port from the matched listener (default `25565`).
 
-Wildcard routes are `*.`-prefixed suffix matches (and more specific suffixes win).
+If multiple upstreams are configured, Prism will try them in the order produced by `strategy` and fall back to the next one if dialing fails.
 
 ## Tunnel mode
 

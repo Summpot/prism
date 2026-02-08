@@ -24,7 +24,10 @@ func TestManager_ReloadsOnFileChange(t *testing.T) {
 listeners:
   - listen_addr: ":25565"
     protocol: "tcp"
-routes: {"a.example.com": "127.0.0.1:1"}
+
+routes:
+  - host: "a.example.com"
+    upstream: "127.0.0.1:1"
 `)
 
 	p := NewFileConfigProvider(path)
@@ -50,12 +53,15 @@ routes: {"a.example.com": "127.0.0.1:1"}
 listeners:
   - listen_addr: ":25565"
     protocol: "tcp"
-routes: {"b.example.com": "127.0.0.1:2"}
+
+routes:
+  - host: "b.example.com"
+    upstream: "127.0.0.1:2"
 `)
 
 	select {
 	case cfg := <-changedCh:
-		if _, ok := cfg.Routes["b.example.com"]; !ok {
+		if len(cfg.Routes) != 1 || len(cfg.Routes[0].Host) == 0 || cfg.Routes[0].Host[0] != "b.example.com" {
 			t.Fatalf("expected updated routes, got: %#v", cfg.Routes)
 		}
 	case <-ctx.Done():

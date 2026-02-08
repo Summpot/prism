@@ -56,6 +56,104 @@ type LoggingConfig struct {
 	AdminBuffer AdminLogBufferConfig
 }
 
+// StringList unmarshals from either a single string or a list of strings.
+// It supports both YAML and TOML decoding.
+type StringList []string
+
+func (s *StringList) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		*s = nil
+		return nil
+	}
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var v string
+		if err := value.Decode(&v); err != nil {
+			return err
+		}
+		*s = []string{v}
+		return nil
+	case yaml.SequenceNode:
+		out := make([]string, 0, len(value.Content))
+		for _, n := range value.Content {
+			if n == nil {
+				continue
+			}
+			var v string
+			if err := n.Decode(&v); err != nil {
+				return err
+			}
+			out = append(out, v)
+		}
+		*s = out
+		return nil
+	case yaml.DocumentNode:
+		// A full document node should not appear here, but handle it defensively.
+		if len(value.Content) == 1 {
+			return s.UnmarshalYAML(value.Content[0])
+		}
+		*s = nil
+		return nil
+	case 0:
+		// null
+		*s = nil
+		return nil
+	default:
+		return fmt.Errorf("config: expected string or list of strings")
+	}
+}
+
+// UnmarshalTOML implements BurntSushi/toml's custom decoding hook.
+func (s *StringList) UnmarshalTOML(data any) error {
+	if data == nil {
+		*s = nil
+		return nil
+	}
+	switch v := data.(type) {
+	case string:
+		*s = []string{v}
+		return nil
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			str, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("config: expected string array")
+			}
+			out = append(out, str)
+		}
+		*s = out
+		return nil
+	case []string:
+		*s = append((*s)[:0], v...)
+		return nil
+	default:
+		return fmt.Errorf("config: expected string or string array")
+	}
+}
+
+type RouteConfig struct {
+	// Host is one or more host patterns. Matching is case-insensitive.
+	// Wildcards are supported:
+	//  - "*" matches any sequence of characters (and captures it as a group)
+	//  - "?" matches any single character (and captures it as a group)
+	// Matching is performed in the order routes appear in the config.
+	Host []string
+
+	// Upstreams is one or more upstream targets for this route.
+	// Targets can be dial addresses (host:port) or tunnel targets (tunnel:<service>).
+	// When wildcards capture groups, "$1", "$2", ... in an upstream string are substituted.
+	Upstreams []string
+
+	// Strategy controls load balancing when multiple upstreams are configured.
+	// Supported values: sequential, random, round-robin.
+	Strategy string
+
+	// CachePingTTL controls caching of Minecraft Status (server list ping) responses.
+	// A negative value disables caching for this route.
+	CachePingTTL time.Duration
+}
+
 type RoutingParserConfig struct {
 	Type         string
 	Name         string
@@ -133,7 +231,9 @@ type Config struct {
 
 	Logging LoggingConfig
 
-	Routes map[string]string
+	// Routes are evaluated in order. Each route can match one or more host patterns
+	// and can load-balance across one or more upstreams.
+	Routes []RouteConfig
 
 	// RoutingParsers controls how Prism extracts the routing hostname from the
 	// first bytes of the stream.
@@ -186,7 +286,19 @@ type fileConfig struct {
 			Size    int  `yaml:"size" toml:"size"`
 		} `yaml:"admin_buffer" toml:"admin_buffer"`
 	} `yaml:"logging" toml:"logging"`
-	Routes map[string]string `yaml:"routes" toml:"routes"`
+	Routes []struct {
+		Host      StringList `yaml:"host" toml:"host"`
+		Hosts     StringList `yaml:"hosts" toml:"hosts"`
+		Upstream  StringList `yaml:"upstream" toml:"upstream"`
+		Upstreams StringList `yaml:"upstreams" toml:"upstreams"`
+		Backend   StringList `yaml:"backend" toml:"backend"`
+		Backends  StringList `yaml:"backends" toml:"backends"`
+		Strategy  string     `yaml:"strategy" toml:"strategy"`
+		// CachePingTTL supports either cache_ping_ttl (duration string like "60s")
+		// or cache_ping_ttl_ms (milliseconds). If both are set, cache_ping_ttl wins.
+		CachePingTTL   string `yaml:"cache_ping_ttl" toml:"cache_ping_ttl"`
+		CachePingTTLms *int   `yaml:"cache_ping_ttl_ms" toml:"cache_ping_ttl_ms"`
+	} `yaml:"routes" toml:"routes"`
 
 	RoutingParsers []struct {
 		Type         string `yaml:"type" toml:"type"`
@@ -264,7 +376,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 				Size:    1000,
 			},
 		},
-		Routes:              fc.Routes,
+		Routes:              nil,
 		MaxHeaderBytes:      fc.MaxHeaderBytes,
 		ProxyProtocolV2:     fc.ProxyProtocolV2,
 		BufferSize:          fc.BufferSize,
@@ -275,6 +387,80 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		},
 		Reload: ReloadConfig{},
 		Tunnel: TunnelConfig{AutoListenServices: true},
+	}
+
+	// --- Routes ---
+	if len(fc.Routes) > 0 {
+		cfg.Routes = make([]RouteConfig, 0, len(fc.Routes))
+		for i, fr := range fc.Routes {
+			hosts := append([]string{}, fr.Host...)
+			if len(hosts) == 0 {
+				hosts = append(hosts, fr.Hosts...)
+			}
+			upstreams := append([]string{}, fr.Upstreams...)
+			if len(upstreams) == 0 {
+				upstreams = append(upstreams, fr.Upstream...)
+			}
+			if len(upstreams) == 0 {
+				upstreams = append(upstreams, fr.Backends...)
+			}
+			if len(upstreams) == 0 {
+				upstreams = append(upstreams, fr.Backend...)
+			}
+
+			// Normalize.
+			nh := hosts[:0]
+			for _, h := range hosts {
+				h = strings.TrimSpace(strings.ToLower(h))
+				if h == "" {
+					continue
+				}
+				nh = append(nh, h)
+			}
+			if len(nh) == 0 {
+				return nil, fmt.Errorf("config: routes[%d] missing host", i)
+			}
+			nu := upstreams[:0]
+			for _, u := range upstreams {
+				u = strings.TrimSpace(u)
+				if u == "" {
+					continue
+				}
+				nu = append(nu, u)
+			}
+			if len(nu) == 0 {
+				return nil, fmt.Errorf("config: routes[%d] missing upstreams", i)
+			}
+
+			strategy := strings.TrimSpace(strings.ToLower(fr.Strategy))
+			if strategy == "" {
+				strategy = "sequential"
+			}
+
+			// Default matches gate lite: cache enabled by default for a short TTL.
+			cacheTTL := 10 * time.Second
+			if strings.TrimSpace(fr.CachePingTTL) != "" {
+				st := strings.TrimSpace(fr.CachePingTTL)
+				if st == "-1" {
+					cacheTTL = -1
+				} else {
+					d, err := time.ParseDuration(st)
+					if err != nil {
+						return nil, fmt.Errorf("config: routes[%d] invalid cache_ping_ttl: %w", i, err)
+					}
+					cacheTTL = d
+				}
+			} else if fr.CachePingTTLms != nil {
+				cacheTTL = time.Duration(*fr.CachePingTTLms) * time.Millisecond
+			}
+			// Disable when negative (gate-style -1).
+			if fr.CachePingTTLms != nil && *fr.CachePingTTLms < 0 {
+				cacheTTL = -1
+			}
+			// cache_ping_ttl="-1" is handled above.
+
+			cfg.Routes = append(cfg.Routes, RouteConfig{Host: nh, Upstreams: nu, Strategy: strategy, CachePingTTL: cacheTTL})
+		}
 	}
 
 	// --- Logging / reload / parsers ---
@@ -471,7 +657,7 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 		cfg.Timeouts.HandshakeTimeout = 3 * time.Second
 	}
 	if cfg.Routes == nil {
-		cfg.Routes = map[string]string{}
+		cfg.Routes = []RouteConfig{}
 	}
 	if cfg.MaxHeaderBytes <= 0 {
 		cfg.MaxHeaderBytes = 64 * 1024

@@ -13,7 +13,7 @@ func TestFileConfigProvider_Load_TunnelClientAndServerEnabled(t *testing.T) {
 	path := filepath.Join(tmp, "prism.yaml")
 
 	if err := os.WriteFile(path, []byte(`
-routes: {}
+routes: []
 
 tunnel:
   client:

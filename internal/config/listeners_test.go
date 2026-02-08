@@ -20,7 +20,9 @@ listeners:
     upstream: "127.0.0.1:19132"
 
 routes:
-  play.example.com: "127.0.0.1:25566"
+
+  - host: "play.example.com"
+    upstream: "127.0.0.1:25566"
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -49,7 +51,7 @@ func TestFileConfigProvider_Load_UDPListenerRequiresUpstream(t *testing.T) {
 listeners:
   - listen_addr: ":19132"
     protocol: "udp"
-routes: {}
+routes: []
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestFileConfigProvider_Load_TunnelServiceProtoAndRemoteAddr(t *testing.T) {
 	path := filepath.Join(tmp, "prism.yaml")
 
 	if err := os.WriteFile(path, []byte(`
-routes: {}
+routes: []
 
 tunnel:
   client:

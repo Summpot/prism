@@ -13,7 +13,7 @@ func TestFileConfigProvider_Load_TunnelServices_RouteOnlyRejectsRemoteAddr(t *te
 	path := filepath.Join(tmp, "prism.yaml")
 
 	if err := os.WriteFile(path, []byte(`
-routes: {}
+routes: []
 
 tunnel:
   client:
@@ -42,7 +42,7 @@ func TestFileConfigProvider_Load_TunnelServices_RouteOnlyNormalizesRemoteAddrEmp
 	path := filepath.Join(tmp, "prism.yaml")
 
 	if err := os.WriteFile(path, []byte(`
-routes: {}
+routes: []
 
 tunnel:
   client:

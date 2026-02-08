@@ -7,7 +7,7 @@ use tokio::{
     time,
 };
 
-use crate::prism::{protocol, router, telemetry};
+use crate::prism::{protocol, router, telemetry, tunnel};
 
 #[derive(Clone)]
 pub enum TcpHandler {
@@ -38,6 +38,8 @@ pub struct TcpRoutingHandlerOptions {
     pub metrics: telemetry::SharedMetrics,
     pub sessions: telemetry::SharedSessions,
 
+    pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
+
     pub max_header_bytes: usize,
     pub handshake_timeout: Duration,
     pub idle_timeout: Duration,
@@ -50,6 +52,8 @@ pub struct TcpForwardHandlerOptions {
 
     pub metrics: telemetry::SharedMetrics,
     pub sessions: telemetry::SharedSessions,
+
+    pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
 
     pub idle_timeout: Duration,
     pub upstream_dial_timeout: Duration,
@@ -88,8 +92,15 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         return;
     }
 
-    let up = match dial_tcp(&upstream, opts.upstream_dial_timeout).await {
-        Ok(c) => c,
+    let (up, upstream_used) = match dial_upstream(
+        &upstream,
+        None,
+        opts.upstream_dial_timeout,
+        opts.tunnel_manager.as_ref(),
+    )
+    .await
+    {
+        Ok(v) => v,
         Err(err) => {
             tracing::warn!(sid = %sid, client = %client, upstream = %upstream, err = %err, "proxy: forward dial failed");
             let _ = conn.shutdown().await;
@@ -102,7 +113,7 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         id: sid.clone(),
         client,
         host: "".into(),
-        upstream: upstream.clone(),
+        upstream: upstream_used,
         started_at_unix_ms: telemetry::now_unix_ms(),
     });
 
@@ -214,22 +225,20 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     // Dial upstream candidates with failover.
     let mut last_err: Option<anyhow::Error> = None;
     let mut upstream_used = String::new();
-    let mut up_conn: Option<TcpStream> = None;
+    let mut up_conn: Option<tunnel::transport::BoxedStream> = None;
 
     for cand in &res.upstreams {
-        let mut addr = cand.trim().to_string();
-        if addr.starts_with("tunnel:") {
-            last_err = Some(anyhow::anyhow!("tunnel upstreams are not implemented"));
-            continue;
-        }
-
-        if upstream_needs_port(&addr) {
-            addr = format!("{addr}:{default_port}");
-        }
-
-        match dial_tcp(&addr, opts.upstream_dial_timeout).await {
-            Ok(c) => {
-                upstream_used = addr;
+        let addr = cand.trim().to_string();
+        match dial_upstream(
+            &addr,
+            Some(default_port),
+            opts.upstream_dial_timeout,
+            opts.tunnel_manager.as_ref(),
+        )
+        .await
+        {
+            Ok((c, label)) => {
+                upstream_used = label;
                 up_conn = Some(c);
                 break;
             }
@@ -257,7 +266,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     }
 
     // Forward captured prelude upstream unchanged.
-    if let Err(err) = up.write_all(&captured).await {
+    if let Err(err) = (&mut *up).write_all(&captured).await {
         tracing::debug!(sid=%sid, err=%err, "proxy: failed writing prelude to upstream");
         let _ = conn.shutdown().await;
         opts.sessions.remove(&sid);
@@ -280,25 +289,59 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     }
 }
 
-async fn dial_tcp(addr: &str, timeout: Duration) -> anyhow::Result<TcpStream> {
-    if timeout > Duration::from_millis(0) {
-        Ok(time::timeout(timeout, TcpStream::connect(addr))
+async fn dial_tcp_stream(addr: &str, timeout: Duration) -> anyhow::Result<tunnel::transport::BoxedStream> {
+    let c = if timeout > Duration::from_millis(0) {
+        time::timeout(timeout, TcpStream::connect(addr))
             .await
-            .with_context(|| format!("dial timeout {addr}"))??)
+            .with_context(|| format!("dial timeout {addr}"))??
     } else {
-        Ok(TcpStream::connect(addr).await?)
+        TcpStream::connect(addr).await?
+    };
+    Ok(Box::new(c))
+}
+
+async fn dial_upstream(
+    upstream: &str,
+    default_port: Option<u16>,
+    timeout: Duration,
+    tunnel_manager: Option<&Arc<tunnel::manager::Manager>>,
+) -> anyhow::Result<(tunnel::transport::BoxedStream, String)> {
+    let mut addr = upstream.trim().to_string();
+    if addr.is_empty() {
+        anyhow::bail!("empty upstream");
     }
+
+    if let Some(rest) = addr.strip_prefix("tunnel:") {
+        let service = rest.trim();
+        if service.is_empty() {
+            anyhow::bail!("tunnel upstream missing service name");
+        }
+        let mgr = tunnel_manager.context("tunnel upstream requested but tunnel manager is not configured")?;
+        let st = mgr
+            .dial_service_tcp(service)
+            .await
+            .map_err(|e| anyhow::anyhow!("tunnel dial failed: {e}"))?;
+        return Ok((st, format!("tunnel:{service}")));
+    }
+
+    if let Some(p) = default_port {
+        if upstream_needs_port(&addr) {
+            addr = format!("{addr}:{p}");
+        }
+    }
+
+    Ok((dial_tcp_stream(&addr, timeout).await?, addr))
 }
 
 async fn proxy_bidirectional(
     client: &mut TcpStream,
-    mut upstream: TcpStream,
+    mut upstream: tunnel::transport::BoxedStream,
     buffer_size: usize,
     idle_timeout: Duration,
 ) -> anyhow::Result<(u64, u64)> {
     // Apply optional idle timeout by bounding the whole copy operation.
     let copy_fut = async {
-        let (a, b) = tokio::io::copy_bidirectional(client, &mut upstream).await?;
+        let (a, b) = tokio::io::copy_bidirectional(client, &mut *upstream).await?;
         Ok::<(u64, u64), std::io::Error>((a, b))
     };
 
@@ -314,7 +357,7 @@ async fn proxy_bidirectional(
     let _ = buffer_size;
 
     // Best-effort shutdown.
-    let _ = upstream.shutdown().await;
+    let _ = (&mut *upstream).shutdown().await;
     Ok((ingress, egress))
 }
 

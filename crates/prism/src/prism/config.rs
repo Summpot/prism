@@ -1,7 +1,7 @@
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    collections::BTreeMap,
     time::Duration,
 };
 
@@ -719,7 +719,11 @@ impl Config {
                         .trim()
                         .to_string(),
                     path,
-                    function: rp.function.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                    function: rp
+                        .function
+                        .clone()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
                     max_output_len: rp.max_output_len,
                 });
             }
@@ -794,7 +798,11 @@ impl Config {
                             .unwrap_or_default()
                             .trim()
                             .to_string(),
-                        insecure_skip_verify: c.quic.as_ref().map(|q| q.insecure_skip_verify).unwrap_or(false),
+                        insecure_skip_verify: c
+                            .quic
+                            .as_ref()
+                            .map(|q| q.insecure_skip_verify)
+                            .unwrap_or(false),
                     },
                 });
             }

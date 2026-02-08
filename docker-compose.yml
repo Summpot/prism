@@ -1,0 +1,71 @@
+services:
+  prism-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PRISM_CONFIG: /config/prism.toml
+    volumes:
+      - ./deploy/prism/prism.toml:/config/prism.toml:ro
+    ports:
+      - "8080:8080" # admin plane
+      - "7000:7000" # tunnel endpoint
+    depends_on:
+      - vector
+
+  prism-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prism-backend
+
+  vector:
+    image: timberio/vector:0.44.0-alpine
+    volumes:
+      - ./deploy/vector/vector.yaml:/etc/vector/vector.yaml:ro
+    ports:
+      - "4317:4317" # OTLP/gRPC
+      - "4318:4318" # OTLP/HTTP
+    depends_on:
+      - victoriametrics
+      - quickwit
+      - quickwit-init
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    command: ["-storageDataPath=/storage"]
+    volumes:
+      - vmdata:/storage
+    ports:
+      - "8428:8428"
+
+  quickwit:
+    image: quickwit/quickwit:latest
+    command: ["run"]
+    volumes:
+      - qwdata:/quickwit/qwdata
+    ports:
+      - "7280:7280"
+
+  quickwit-init:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      - quickwit
+    volumes:
+      - ./deploy/quickwit/indexes:/configs:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      set -e
+      echo "waiting for quickwit..."
+      until curl -sf http://quickwit:7280/api/v1/version >/dev/null; do sleep 1; done
+      echo "creating quickwit indexes (idempotent)..."
+      curl -sf -XPOST http://quickwit:7280/api/v1/indexes -H 'content-type: application/yaml' --data-binary @/configs/prism-otel-logs.yaml || true
+      curl -sf -XPOST http://quickwit:7280/api/v1/indexes -H 'content-type: application/yaml' --data-binary @/configs/prism-otel-traces.yaml || true
+      echo "quickwit init done"
+
+volumes:
+  vmdata: {}
+  qwdata: {}

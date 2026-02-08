@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-slim AS build
+
+WORKDIR /app
+
+# Enable pnpm via Corepack.
+RUN corepack enable
+
+# Cache deps first.
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile
+
+# Build.
+COPY . ./
+RUN pnpm build
+
+# Runtime image.
+FROM node:22-slim
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3000
+
+# Copy build output (TanStack Start / Nitro typically emits .output).
+COPY --from=build /app/.output /app/.output
+COPY --from=build /app/public /app/public
+
+EXPOSE 3000
+
+CMD ["node", ".output/server/index.mjs"]

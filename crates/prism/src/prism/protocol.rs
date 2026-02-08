@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
 use thiserror::Error;
@@ -225,9 +222,11 @@ fn normalize_builtin_name(name: &str) -> String {
 fn builtin_wasm_bytes(name: &str) -> Option<&'static [u8]> {
     match normalize_builtin_name(name).as_str() {
         "minecraft_handshake" | "minecraft" | "mc" => Some(include_bytes!(
-            "../../internal/protocol/wasm/minecraft_handshake.wasm"
+            "../../../../internal/protocol/wasm/minecraft_handshake.wasm"
         )),
-        "tls_sni" | "sni" | "tls" => Some(include_bytes!("../../internal/protocol/wasm/tls_sni.wasm")),
+        "tls_sni" | "sni" | "tls" => Some(include_bytes!(
+            "../../../../internal/protocol/wasm/tls_sni.wasm"
+        )),
         _ => None,
     }
 }

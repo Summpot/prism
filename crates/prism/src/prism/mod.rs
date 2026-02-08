@@ -6,6 +6,7 @@ pub mod protocol;
 pub mod proxy;
 pub mod router;
 pub mod telemetry;
+pub mod tunnel;
 
 pub async fn run(config_path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     app::run(config_path).await

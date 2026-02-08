@@ -23,6 +23,11 @@ Prism is a lightweight, high-performance reverse proxy with an frp-like tunnel m
    - Avoid unrelated refactors/renames.
    - Don’t reformat unrelated code; only apply formatting that naturally results from touching code (`cargo fmt`, Biome).
 
+4. **Rust dependency hygiene**
+   - Before adding a new Rust dependency (new crate in `Cargo.toml`), check whether `cargo upgrade` is available.
+     - If it exists, run `cargo upgrade` to see whether a newer compatible version is available and prefer the newest reasonable versions.
+     - If it does **not** exist (e.g., `cargo-edit` not installed), **do not install anything**; just skip this step and proceed.
+
 ## Repo map (Rust)
 
 - Rust runtime/daemon: `src/prism/*` and `src/main.rs`

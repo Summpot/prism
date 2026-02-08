@@ -1,0 +1,39 @@
+# Quickwit index for OTLP logs coming from Vector.
+# This index is intentionally permissive (dynamic mapping) to avoid tight coupling
+# to a specific OTLP schema.
+
+version: 0.7
+
+index_id: prism-otel-logs
+
+# Use a dynamic mapping, but make a few common fields explicit.
+doc_mapping:
+  mode: dynamic
+  field_mappings:
+    - name: timestamp
+      type: datetime
+      fast: true
+      input_formats:
+        - rfc3339
+      fast_precision: seconds
+    - name: message
+      type: text
+      tokenizer: default
+      record: position
+      stored: true
+    - name: trace_id
+      type: text
+      tokenizer: raw
+      stored: true
+    - name: span_id
+      type: text
+      tokenizer: raw
+      stored: true
+
+timestamp_field: timestamp
+
+search_settings:
+  default_search_fields: [message]
+
+indexing_settings:
+  commit_timeout_secs: 10

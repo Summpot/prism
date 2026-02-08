@@ -1,41 +1,45 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25-alpine AS build
+# NOTE: Prism's current implementation in this repository is Rust.
+# The previous Go-based Dockerfile has been preserved as `Dockerfile.go`.
+
+FROM rust:1.85-slim-bookworm AS build
 
 WORKDIR /src
 
-RUN apk add --no-cache ca-certificates
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates pkg-config clang \
+    && rm -rf /var/lib/apt/lists/*
 
-# Cache deps first
-COPY go.mod go.sum ./
-RUN go mod download
+# Cache deps first.
+COPY Cargo.toml Cargo.lock ./
+COPY crates/prism/Cargo.toml crates/prism/Cargo.toml
 
-# Copy the rest and build
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo fetch
+
+# Copy the rest and build.
 COPY . ./
 
-ARG TARGETOS
-ARG TARGETARCH
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p prism
 
-# Static binary is ideal for distroless/scratch.
-ENV CGO_ENABLED=0
+FROM debian:bookworm-slim
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    GOOS="${TARGETOS:-$(go env GOOS)}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
-    go build -trimpath -ldflags="-s -w" -o /out/prism ./cmd/prism
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10001 -g nogroup prism
 
-FROM alpine:3.21
-
-RUN apk add --no-cache ca-certificates \
-    && addgroup -S prism \
-    && adduser -S prism -G prism
-
-COPY --from=build /out/prism /usr/local/bin/prism
+COPY --from=build /src/target/release/prism /usr/local/bin/prism
 
 # Prism auto-detects prism.toml > prism.yaml > prism.yml from CWD.
 WORKDIR /config
 
-EXPOSE 25565 8080
+EXPOSE 25565 8080 7000
 
-USER prism:prism
+USER prism
 
 ENTRYPOINT ["/usr/local/bin/prism"]

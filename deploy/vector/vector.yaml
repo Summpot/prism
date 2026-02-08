@@ -1,0 +1,54 @@
+# Vector configuration for the Prism docker-compose stack.
+#
+# Receives OTLP data from Prism and routes:
+# - metrics -> VictoriaMetrics (remote_write)
+# - logs/traces -> Quickwit (NDJSON ingest)
+
+sources:
+  otlp:
+    type: opentelemetry
+    grpc:
+      address: 0.0.0.0:4317
+    http:
+      address: 0.0.0.0:4318
+
+transforms:
+  logs_with_ts:
+    type: remap
+    inputs: [otlp.logs]
+    source: |
+      if !exists(.timestamp) { .timestamp = now() }
+
+  traces_with_ts:
+    type: remap
+    inputs: [otlp.traces]
+    source: |
+      if !exists(.timestamp) { .timestamp = now() }
+
+sinks:
+  victoriametrics:
+    type: prometheus_remote_write
+    inputs: [otlp.metrics]
+    endpoint: http://victoriametrics:8428/api/v1/write
+
+  quickwit_logs:
+    type: http
+    inputs: [logs_with_ts]
+    uri: http://quickwit:7280/api/v1/prism-otel-logs/ingest?commit=auto
+    method: post
+    encoding:
+      codec: ndjson
+    batch:
+      max_events: 1000
+      timeout_secs: 1
+
+  quickwit_traces:
+    type: http
+    inputs: [traces_with_ts]
+    uri: http://quickwit:7280/api/v1/prism-otel-traces/ingest?commit=auto
+    method: post
+    encoding:
+      codec: ndjson
+    batch:
+      max_events: 1000
+      timeout_secs: 1

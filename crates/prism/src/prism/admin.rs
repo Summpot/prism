@@ -1,8 +1,4 @@
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
     extract::State,
@@ -13,12 +9,10 @@ use axum::{
 };
 use serde::Serialize;
 use tokio::sync::watch;
-use tower_http::{
-    cors::CorsLayer,
-    trace::TraceLayer,
-};
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::prism::telemetry;
+use crate::prism::tunnel;
 
 #[derive(Clone)]
 pub struct AdminState {
@@ -26,6 +20,7 @@ pub struct AdminState {
     pub sessions: telemetry::SharedSessions,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
+    pub tunnel: Option<Arc<tunnel::manager::Manager>>,
 }
 
 pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
@@ -35,6 +30,7 @@ pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/conns", get(conns))
+        .route("/tunnel/services", get(tunnel_services))
         .route("/reload", post(reload))
         .route("/config", get(config))
         .with_state(shared)
@@ -65,6 +61,15 @@ async fn metrics(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
 
 async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     let snap = st.sessions.snapshot();
+    (StatusCode::OK, Json(snap))
+}
+
+async fn tunnel_services(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let snap = if let Some(mgr) = &st.tunnel {
+        mgr.snapshot_services().await
+    } else {
+        Vec::new()
+    };
     (StatusCode::OK, Json(snap))
 }
 

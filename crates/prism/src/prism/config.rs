@@ -913,7 +913,8 @@ idle_timeout_ms = 0
 
 "#;
 
-const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# Prism configuration (auto-generated)
+const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# yaml-language-server: $schema=https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
+# Prism configuration (auto-generated)
 #
 # This file was created because Prism could not find a configuration file at the
 # resolved config path.

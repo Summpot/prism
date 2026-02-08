@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=./prism.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
 
 admin_addr: ":8080"
 

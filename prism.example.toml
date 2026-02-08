@@ -1,4 +1,4 @@
-#:schema ./prism.schema.json
+#:schema https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
 admin_addr = ":8080"
 proxy_protocol_v2 = false
 buffer_size = 32768

@@ -370,7 +370,7 @@ The project will strictly adhere to the following testing pyramid:
 
 ### 5.3. End-to-End (E2E) Tests (Optional)
 
-* Spin up a real TCP listener locally and connect with a real TCP client (Go client, not MC client) to verify socket handling, timeouts, and graceful shutdown.
+* Spin up a real TCP listener locally and connect with a real TCP client (for example `nc`, `curl --raw` for TLS SNI testing, or a small Rust test client) to verify socket handling, timeouts, and graceful shutdown.
 
 ---
 
@@ -386,7 +386,7 @@ The project will strictly adhere to the following testing pyramid:
     * CLI flag: `--config /path/to/prism.toml`
     * Environment variable: `PRISM_CONFIG=/path/to/prism.toml`
     * Auto-discovery in the current working directory: `prism.toml` > `prism.yaml` > `prism.yml`
-    * OS-specific default user config path: `${UserConfigDir}/prism/prism.toml` (where `UserConfigDir` comes from `os.UserConfigDir()`)
+    * OS-specific default user config path: `${ProjectConfigDir}/prism.toml` (derived from `directories::ProjectDirs` in Rust)
   * When multiple `prism.*` files are present in a discovery directory, precedence is: `prism.toml` > `prism.yaml` > `prism.yml`.
   * JSON is intentionally not supported because it cannot contain comments and Prism configs are expected to be annotated.
   * If the resolved config file path does not exist, Prism will **create a runnable default config file** at that path and continue starting (default: tunnel server on `:7000/tcp`).
@@ -402,8 +402,8 @@ The project will strictly adhere to the following testing pyramid:
 
 ### 6.2. Buffer Management
 
-* A `BufferPool` interface wraps `sync.Pool`.
-* This facilitates testing memory behavior and ensures the application doesn't leak memory during high concurrency.
+* Prism currently relies on Tokio's `copy_bidirectional` for stream proxying, which uses internal buffering.
+* The config field `buffer_size` is kept as a tuning knob for future work (e.g. switching to a manual copy loop with a reusable `Vec<u8>` buffer pool) but may not affect behavior yet.
 
 ### 6.3. Graceful Shutdown
 

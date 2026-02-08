@@ -38,8 +38,16 @@ pub struct TransportDialOptions {
 #[async_trait]
 pub trait Transport: Send + Sync {
     fn name(&self) -> &'static str;
-    async fn listen(&self, addr: &str, opts: TransportListenOptions) -> anyhow::Result<Box<dyn TransportListener>>;
-    async fn dial(&self, addr: &str, opts: TransportDialOptions) -> anyhow::Result<Arc<dyn TransportSession>>;
+    async fn listen(
+        &self,
+        addr: &str,
+        opts: TransportListenOptions,
+    ) -> anyhow::Result<Box<dyn TransportListener>>;
+    async fn dial(
+        &self,
+        addr: &str,
+        opts: TransportDialOptions,
+    ) -> anyhow::Result<Arc<dyn TransportSession>>;
 }
 
 #[async_trait]
@@ -76,8 +84,8 @@ pub fn default_alpn(next: &[Vec<u8>]) -> Vec<Vec<u8>> {
     vec![b"prism-tunnel".to_vec()]
 }
 
-pub mod tcp;
 pub mod quic;
+pub mod tcp;
 pub mod udp;
 
 pub fn transport_by_name(name: &str) -> anyhow::Result<Arc<dyn Transport>> {

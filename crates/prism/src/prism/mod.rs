@@ -2,6 +2,7 @@ pub mod admin;
 pub mod app;
 pub mod config;
 pub mod logging;
+pub mod net;
 pub mod protocol;
 pub mod proxy;
 pub mod router;

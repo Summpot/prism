@@ -3,7 +3,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use anyhow::Context;
 use tokio::task::JoinSet;
 
-use crate::prism::{admin, config, logging, protocol, proxy, router, telemetry, tunnel};
+use crate::prism::{admin, config, logging, net, protocol, proxy, router, telemetry, tunnel};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let resolved = config::resolve_config_path(config_path)?;
@@ -23,11 +23,13 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let proxy_enabled = !cfg.listeners.is_empty();
     let tunnel_server_enabled = !cfg.tunnel.endpoints.is_empty();
     let tunnel_client_enabled = cfg.tunnel.client.is_some() && !cfg.tunnel.services.is_empty();
-    let admin_enabled =
-        !cfg.admin_addr.trim().is_empty() && (proxy_enabled || tunnel_server_enabled || tunnel_client_enabled);
+    let admin_enabled = !cfg.admin_addr.trim().is_empty()
+        && (proxy_enabled || tunnel_server_enabled || tunnel_client_enabled);
 
     if !proxy_enabled && !tunnel_server_enabled && !tunnel_client_enabled {
-        anyhow::bail!("config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.client+services)");
+        anyhow::bail!(
+            "config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.client+services)"
+        );
     }
 
     tracing::info!(
@@ -58,8 +60,8 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     // Admin server.
     if admin_enabled {
-        let addr: SocketAddr = cfg
-            .admin_addr
+        let admin_addr = net::normalize_bind_addr(&cfg.admin_addr);
+        let addr: SocketAddr = admin_addr
             .parse()
             .with_context(|| format!("invalid admin_addr: {}", cfg.admin_addr))?;
 

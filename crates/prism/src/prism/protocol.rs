@@ -2,7 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
 use thiserror::Error;
-use wasmer::{imports, Instance, Memory, Module, NativeFunc, Pages, Store};
+use wasmer::{Instance, Memory, Module, NativeFunc, Pages, Store, imports};
 use wasmer_compiler_singlepass::Singlepass;
 use wasmer_engine_universal::Universal;
 
@@ -25,7 +25,9 @@ pub trait HostParser: Send + Sync {
 
 pub type SharedHostParser = Arc<dyn HostParser>;
 
-pub fn build_host_parser(parsers: &[config::RoutingParserConfig]) -> anyhow::Result<SharedHostParser> {
+pub fn build_host_parser(
+    parsers: &[config::RoutingParserConfig],
+) -> anyhow::Result<SharedHostParser> {
     let mut out: Vec<SharedHostParser> = Vec::new();
     for p in parsers {
         out.push(Arc::new(WasmHostParser::from_config(p)?) as SharedHostParser);
@@ -39,7 +41,10 @@ pub struct ChainHostParser {
 
 impl ChainHostParser {
     pub fn new(parsers: Vec<SharedHostParser>) -> Self {
-        let parsers = parsers.into_iter().filter(|p| !p.name().is_empty()).collect();
+        let parsers = parsers
+            .into_iter()
+            .filter(|p| !p.name().is_empty())
+            .collect();
         Self { parsers }
     }
 }
@@ -96,7 +101,8 @@ impl WasmHostParser {
                 .with_context(|| format!("protocol: unknown builtin wasm parser {rest:?}"))?
                 .to_vec()
         } else {
-            std::fs::read(Path::new(path)).with_context(|| format!("protocol: read wasm {}", path))?
+            std::fs::read(Path::new(path))
+                .with_context(|| format!("protocol: read wasm {}", path))?
         };
 
         let fn_name = cfg
@@ -130,7 +136,8 @@ impl WasmHostParser {
         let import_object = imports! {};
         // No WASI imports are needed for the builtin parsers.
 
-        let instance = Instance::new(&self.module, &import_object).context("protocol: instantiate wasm")?;
+        let instance =
+            Instance::new(&self.module, &import_object).context("protocol: instantiate wasm")?;
 
         let parse: NativeFunc<i32, i64> = instance
             .exports
@@ -145,10 +152,11 @@ impl WasmHostParser {
             .instantiate()
             .map_err(|e| ParseError::Fatal(e.to_string()))?;
 
-        let memory: &Memory = instance
-            .exports
-            .get_memory("memory")
-            .map_err(|e| ParseError::Fatal(format!("protocol: wasm missing exported memory 'memory': {e}")))?;
+        let memory: &Memory = instance.exports.get_memory("memory").map_err(|e| {
+            ParseError::Fatal(format!(
+                "protocol: wasm missing exported memory 'memory': {e}"
+            ))
+        })?;
 
         // Ensure memory can fit prelude at offset 0.
         let need = prelude.len() as u64;
@@ -219,9 +227,7 @@ impl WasmHostParser {
             *dst = src.get();
         }
 
-        let host = String::from_utf8_lossy(&buf)
-            .trim()
-            .to_ascii_lowercase();
+        let host = String::from_utf8_lossy(&buf).trim().to_ascii_lowercase();
         if host.is_empty() {
             return Err(ParseError::NoMatch);
         }

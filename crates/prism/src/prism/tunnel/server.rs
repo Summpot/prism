@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use crate::prism::tunnel::{
     manager::Manager,
     protocol,
-    transport::{transport_by_name, TransportListenOptions},
+    transport::{TransportListenOptions, transport_by_name},
 };
 
 #[derive(Debug, Clone)]
@@ -36,7 +36,10 @@ impl Server {
         self.opts.manager.clone()
     }
 
-    pub async fn listen_and_serve(&self, ctx: tokio::sync::watch::Receiver<bool>) -> anyhow::Result<()> {
+    pub async fn listen_and_serve(
+        &self,
+        ctx: tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
         let tr = transport_by_name(&self.opts.transport)?;
 
         let ln = tr
@@ -84,9 +87,16 @@ impl Server {
     }
 }
 
-async fn handle_session(mgr: Arc<Manager>, sess: Arc<dyn crate::prism::tunnel::transport::TransportSession>, auth_token: String) -> anyhow::Result<()> {
+async fn handle_session(
+    mgr: Arc<Manager>,
+    sess: Arc<dyn crate::prism::tunnel::transport::TransportSession>,
+    auth_token: String,
+) -> anyhow::Result<()> {
     let cid = mgr.next_client_id("c");
-    let remote = sess.remote_addr().map(|a| a.to_string()).unwrap_or_default();
+    let remote = sess
+        .remote_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
 
     // First stream must be register.
     let mut reg = sess.accept_stream().await?;
@@ -98,7 +108,8 @@ async fn handle_session(mgr: Arc<Manager>, sess: Arc<dyn crate::prism::tunnel::t
         return Ok(());
     }
 
-    mgr.register_client(cid.clone(), sess.clone(), req.services).await?;
+    mgr.register_client(cid.clone(), sess.clone(), req.services)
+        .await?;
     tracing::info!(cid=%cid, client=%remote, "tunnel: client connected");
 
     // Hold an accept loop to detect disconnects and close unexpected streams.
@@ -106,7 +117,8 @@ async fn handle_session(mgr: Arc<Manager>, sess: Arc<dyn crate::prism::tunnel::t
         match sess.accept_stream().await {
             Ok(mut st) => {
                 // Unexpected stream opened by client; close quietly.
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(1), st.shutdown()).await;
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(1), st.shutdown()).await;
             }
             Err(_) => break,
         }

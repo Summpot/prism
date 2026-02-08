@@ -7,7 +7,7 @@ use tokio::{
     time,
 };
 
-use crate::prism::{protocol, router, telemetry, tunnel};
+use crate::prism::{net, protocol, router, telemetry, tunnel};
 
 struct ActiveConnGuard;
 
@@ -74,7 +74,8 @@ pub struct TcpForwardHandlerOptions {
 }
 
 pub async fn serve_tcp(listen_addr: &str, handler: TcpHandler) -> anyhow::Result<()> {
-    let ln = TcpListener::bind(listen_addr)
+    let bind_addr = net::normalize_bind_addr(listen_addr);
+    let ln = TcpListener::bind(bind_addr.as_ref())
         .await
         .with_context(|| format!("bind tcp {listen_addr}"))?;
 
@@ -293,7 +294,10 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     }
 }
 
-async fn dial_tcp_stream(addr: &str, timeout: Duration) -> anyhow::Result<tunnel::transport::BoxedStream> {
+async fn dial_tcp_stream(
+    addr: &str,
+    timeout: Duration,
+) -> anyhow::Result<tunnel::transport::BoxedStream> {
     let c = if timeout > Duration::from_millis(0) {
         time::timeout(timeout, TcpStream::connect(addr))
             .await
@@ -320,7 +324,8 @@ async fn dial_upstream(
         if service.is_empty() {
             anyhow::bail!("tunnel upstream missing service name");
         }
-        let mgr = tunnel_manager.context("tunnel upstream requested but tunnel manager is not configured")?;
+        let mgr = tunnel_manager
+            .context("tunnel upstream requested but tunnel manager is not configured")?;
         let st = mgr
             .dial_service_tcp(service)
             .await

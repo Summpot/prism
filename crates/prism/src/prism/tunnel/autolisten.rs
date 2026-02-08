@@ -12,6 +12,7 @@ use tokio::{
     sync::Mutex,
 };
 
+use crate::prism::net;
 use crate::prism::tunnel::{manager::Manager, protocol};
 
 #[derive(Debug, Clone)]
@@ -70,7 +71,10 @@ impl AutoListener {
         }
     }
 
-    pub async fn run(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> anyhow::Result<()> {
+    pub async fn run(
+        &self,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
         let mut sub = self.mgr.subscribe();
 
         // Initial pass.
@@ -142,7 +146,9 @@ impl AutoListener {
         // Stop removed or changed.
         let keys: Vec<String> = running.keys().cloned().collect();
         for key in keys {
-            let Some(cur) = running.get(&key) else { continue; };
+            let Some(cur) = running.get(&key) else {
+                continue;
+            };
             let want = desired.get(&key);
             let should_keep = want.is_some_and(|w| {
                 w.client_id == cur.desired.client_id
@@ -209,7 +215,8 @@ async fn run_tcp_listener(
     svc: DesiredSvc,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    let ln = TcpListener::bind(&svc.addr)
+    let bind_addr = net::normalize_bind_addr(&svc.addr);
+    let ln = TcpListener::bind(bind_addr.as_ref())
         .await
         .with_context(|| format!("tunnel: auto-listen tcp bind {}", svc.addr))?;
     let local = ln.local_addr().ok();
@@ -268,7 +275,8 @@ async fn run_udp_listener(
     opts: AutoListenOptions,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    let sock = UdpSocket::bind(&svc.addr)
+    let bind_addr = net::normalize_bind_addr(&svc.addr);
+    let sock = UdpSocket::bind(bind_addr.as_ref())
         .await
         .with_context(|| format!("tunnel: auto-listen udp bind {}", svc.addr))?;
     let local = sock.local_addr().ok();
@@ -384,11 +392,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::prism::tunnel::transport::TransportSession for FakeSession {
-        async fn open_stream(&self) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+        async fn open_stream(
+            &self,
+        ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
             anyhow::bail!("not implemented")
         }
 
-        async fn accept_stream(&self) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+        async fn accept_stream(
+            &self,
+        ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
             anyhow::bail!("not implemented")
         }
 

@@ -2,11 +2,13 @@ use std::{net::SocketAddr, sync::Arc};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_kcp::{KcpConfig, KcpListener, KcpStream};
 
+use crate::prism::net;
 use crate::prism::tunnel::transport::{
-    BoxedStream, Transport, TransportDialOptions, TransportListener, TransportListenOptions, TransportSession,
+    BoxedStream, Transport, TransportDialOptions, TransportListenOptions, TransportListener,
+    TransportSession,
 };
 
 /// UDP transport implemented as KCP (reliable UDP) + yamux multiplexing.
@@ -30,8 +32,13 @@ impl Transport for UdpTransport {
         "udp"
     }
 
-    async fn listen(&self, addr: &str, _opts: TransportListenOptions) -> anyhow::Result<Box<dyn TransportListener>> {
-        let bind_addr: SocketAddr = addr.parse()?;
+    async fn listen(
+        &self,
+        addr: &str,
+        _opts: TransportListenOptions,
+    ) -> anyhow::Result<Box<dyn TransportListener>> {
+        let bind_addr = net::normalize_bind_addr(addr);
+        let bind_addr: SocketAddr = bind_addr.parse()?;
         let ln = KcpListener::bind(self.kcp.clone(), bind_addr).await?;
         let local = ln.local_addr().ok();
         Ok(Box::new(UdpTransportListener {
@@ -40,7 +47,11 @@ impl Transport for UdpTransport {
         }))
     }
 
-    async fn dial(&self, addr: &str, _opts: TransportDialOptions) -> anyhow::Result<Arc<dyn TransportSession>> {
+    async fn dial(
+        &self,
+        addr: &str,
+        _opts: TransportDialOptions,
+    ) -> anyhow::Result<Arc<dyn TransportSession>> {
         let remote = resolve_socket_addr(addr).await?;
         let c = KcpStream::connect(&self.kcp, remote).await?;
         Ok(Arc::new(YamuxSession::client(c, Some(remote))))

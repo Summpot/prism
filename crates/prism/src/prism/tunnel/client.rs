@@ -4,7 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::prism::tunnel::{
     protocol::{self, ProxyStreamKind, RegisterRequest, RegisteredService},
-    transport::{transport_by_name, TransportDialOptions},
+    transport::{TransportDialOptions, transport_by_name},
 };
 
 #[derive(Debug, Clone)]
@@ -37,7 +37,9 @@ impl Client {
         let mut map = std::collections::HashMap::new();
         let mut svcs = Vec::new();
         for s in opts.services.drain(..) {
-            let Some(ns) = s.normalize() else { continue; };
+            let Some(ns) = s.normalize() else {
+                continue;
+            };
             if ns.local_addr.trim().is_empty() {
                 continue;
             }
@@ -52,7 +54,10 @@ impl Client {
         })
     }
 
-    pub async fn run(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> anyhow::Result<()> {
+    pub async fn run(
+        &self,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
         if self.opts.server_addr.trim().is_empty() {
             anyhow::bail!("tunnel: client server_addr is required");
         }

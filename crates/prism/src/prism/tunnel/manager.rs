@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::Instant,
 };
@@ -71,7 +71,11 @@ impl Manager {
     }
 
     pub fn next_client_id(&self, prefix: &str) -> String {
-        let p = if prefix.trim().is_empty() { "c" } else { prefix.trim() };
+        let p = if prefix.trim().is_empty() {
+            "c"
+        } else {
+            prefix.trim()
+        };
         let n = self.id_seq.fetch_add(1, Ordering::Relaxed);
         format!("{p}-{n}")
     }
@@ -174,7 +178,11 @@ impl Manager {
         self.dial_service_tcp_inner(None, service).await
     }
 
-    pub async fn dial_service_tcp_from_client(&self, client_id: &str, service: &str) -> Result<BoxedStream, ManagerError> {
+    pub async fn dial_service_tcp_from_client(
+        &self,
+        client_id: &str,
+        service: &str,
+    ) -> Result<BoxedStream, ManagerError> {
         self.dial_service_tcp_inner(Some(client_id), service).await
     }
 
@@ -190,7 +198,11 @@ impl Manager {
         self.dial_service_udp_inner(Some(client_id), service).await
     }
 
-    async fn dial_service_tcp_inner(&self, client_id: Option<&str>, service: &str) -> Result<BoxedStream, ManagerError> {
+    async fn dial_service_tcp_inner(
+        &self,
+        client_id: Option<&str>,
+        service: &str,
+    ) -> Result<BoxedStream, ManagerError> {
         let service = service.trim();
         if service.is_empty() {
             return Err(ManagerError::ServiceNotFound);
@@ -214,14 +226,21 @@ impl Manager {
             cc.sess.clone()
         };
 
-        let mut st = sess.open_stream().await.map_err(|_| ManagerError::ServiceNotFound)?;
+        let mut st = sess
+            .open_stream()
+            .await
+            .map_err(|_| ManagerError::ServiceNotFound)?;
         protocol::write_proxy_stream_header(&mut st, ProxyStreamKind::Tcp, service)
             .await
             .map_err(|_| ManagerError::ServiceNotFound)?;
         Ok(st)
     }
 
-    async fn dial_service_udp_inner(&self, client_id: Option<&str>, service: &str) -> Result<BoxedStream, ManagerError> {
+    async fn dial_service_udp_inner(
+        &self,
+        client_id: Option<&str>,
+        service: &str,
+    ) -> Result<BoxedStream, ManagerError> {
         let service = service.trim();
         if service.is_empty() {
             return Err(ManagerError::ServiceNotFound);
@@ -245,7 +264,10 @@ impl Manager {
             cc.sess.clone()
         };
 
-        let mut st = sess.open_stream().await.map_err(|_| ManagerError::ServiceNotFound)?;
+        let mut st = sess
+            .open_stream()
+            .await
+            .map_err(|_| ManagerError::ServiceNotFound)?;
         protocol::write_proxy_stream_header(&mut st, ProxyStreamKind::Udp, service)
             .await
             .map_err(|_| ManagerError::ServiceNotFound)?;

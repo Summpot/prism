@@ -68,7 +68,10 @@ impl RegisteredService {
     }
 }
 
-pub async fn write_register_request<W: AsyncWrite + Unpin>(w: &mut W, req: &RegisterRequest) -> Result<(), ProtocolError> {
+pub async fn write_register_request<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    req: &RegisterRequest,
+) -> Result<(), ProtocolError> {
     w.write_all(MAGIC_REGISTER).await?;
     w.write_u8(PROTOCOL_V1).await?;
 
@@ -79,7 +82,9 @@ pub async fn write_register_request<W: AsyncWrite + Unpin>(w: &mut W, req: &Regi
     Ok(())
 }
 
-pub async fn read_register_request<R: AsyncRead + Unpin>(r: &mut R) -> Result<RegisterRequest, ProtocolError> {
+pub async fn read_register_request<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<RegisterRequest, ProtocolError> {
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic).await?;
     if &magic != MAGIC_REGISTER {
@@ -116,7 +121,11 @@ pub enum ProxyStreamKind {
     Udp,
 }
 
-pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(w: &mut W, kind: ProxyStreamKind, service: &str) -> Result<(), ProtocolError> {
+pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    kind: ProxyStreamKind,
+    service: &str,
+) -> Result<(), ProtocolError> {
     let service = service.trim();
     if service.is_empty() {
         return Err(ProtocolError::EmptyService);
@@ -131,7 +140,9 @@ pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(w: &mut W, kind: P
     Ok(())
 }
 
-pub async fn read_proxy_stream_header<R: AsyncRead + Unpin>(r: &mut R) -> Result<(ProxyStreamKind, String), ProtocolError> {
+pub async fn read_proxy_stream_header<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<(ProxyStreamKind, String), ProtocolError> {
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic).await?;
 
@@ -163,7 +174,9 @@ async fn write_mc_string<W: AsyncWrite + Unpin>(w: &mut W, s: &str) -> Result<()
     Ok(())
 }
 
-async fn read_mc_string<R: AsyncRead + Unpin>(r: &mut R) -> Result<Cow<'static, str>, ProtocolError> {
+async fn read_mc_string<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<Cow<'static, str>, ProtocolError> {
     let len = read_varint(r).await?;
     if len < 0 {
         return Err(ProtocolError::BadMagic);
@@ -285,7 +298,9 @@ mod tests {
     #[tokio::test]
     async fn proxy_header_roundtrip_trims_service() {
         let (mut a, mut b) = tokio::io::duplex(128);
-        tokio::spawn(async move { write_proxy_stream_header(&mut a, ProxyStreamKind::Tcp, "  svc  ").await });
+        tokio::spawn(async move {
+            write_proxy_stream_header(&mut a, ProxyStreamKind::Tcp, "  svc  ").await
+        });
 
         let (kind, svc) = read_proxy_stream_header(&mut b).await.unwrap();
         assert_eq!(kind, ProxyStreamKind::Tcp);

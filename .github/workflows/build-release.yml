@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -36,10 +36,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+          # NOTE: Do not enable `cache: pnpm` here. actions/setup-node requires
+          # the pnpm executable to already exist on PATH to determine the store
+          # location, and we provision pnpm via Corepack in the next step.
+
+      # actions/setup-node does not install pnpm; Corepack needs to be enabled
+      # and told which pnpm version to activate.
 
       - name: Enable Corepack
-        run: corepack enable
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm --version
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -74,7 +82,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -238,6 +246,9 @@ jobs:
           file: ./Dockerfile
           platforms: linux/${{ matrix.arch }}
           push: true
+          build-args: |
+            RUST_MUSL_IMAGE=${{ matrix.arch == 'arm64' && 'aarch64-musl-stable' || 'x86_64-musl-stable' }}
+            MUSL_TARGET=${{ matrix.arch == 'arm64' && 'aarch64-unknown-linux-musl' || 'x86_64-unknown-linux-musl' }}
           tags: ${{ steps.archtags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=backend-${{ matrix.arch }}

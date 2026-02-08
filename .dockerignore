@@ -4,6 +4,22 @@
 **/*_test.go
 **/*.md
 
+# Rust build artifacts
+target
+**/target
+
+# Node/JS artifacts
+node_modules
+**/node_modules
+.pnpm-store
+**/.pnpm-store
+.output
+**/.output
+.vite
+**/.vite
+.turbo
+**/.turbo
+
 # local/runtime files
 prism.toml
 prism.yaml

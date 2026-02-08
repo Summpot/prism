@@ -3,37 +3,46 @@
 # NOTE: Prism's current implementation in this repository is Rust.
 # The previous Go-based Dockerfile has been preserved as `Dockerfile.go`.
 
-FROM rust:1.85-slim-bookworm AS build
+ARG RUST_MUSL_IMAGE=x86_64-musl-stable
+ARG MUSL_TARGET=x86_64-unknown-linux-musl
 
-WORKDIR /src
+# Build a static musl binary using https://github.com/BlackDex/rust-musl
+FROM docker.io/blackdex/rust-musl:${RUST_MUSL_IMAGE} AS build
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates pkg-config clang \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /home/rust/src
 
 # Cache deps first.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/prism/Cargo.toml crates/prism/Cargo.toml
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+# Cargo requires at least one target file (src/main.rs or src/lib.rs) to exist
+# when parsing a package manifest. Create a tiny placeholder so `cargo fetch`
+# can run before we copy the full source tree.
+RUN mkdir -p crates/prism/src \
+    && printf 'fn main() {}\n' > crates/prism/src/main.rs
+
+RUN --mount=type=cache,target=/home/rust/.cargo/registry \
+    --mount=type=cache,target=/home/rust/src/target \
     cargo fetch
 
 # Copy the rest and build.
 COPY . ./
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release -p prism
+ARG MUSL_TARGET
+RUN --mount=type=cache,target=/home/rust/.cargo/registry \
+    --mount=type=cache,target=/home/rust/src/target \
+    cargo build --release -p prism --target ${MUSL_TARGET} \
+    && cp -f /home/rust/src/target/${MUSL_TARGET}/release/prism /home/rust/prism
 
-FROM debian:bookworm-slim
+FROM alpine:3.20
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -u 10001 -g nogroup prism
+ARG MUSL_TARGET
 
-COPY --from=build /src/target/release/prism /usr/local/bin/prism
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 10001 prism \
+    && adduser -S -D -H -u 10001 -G prism prism
+
+COPY --from=build /home/rust/prism /usr/local/bin/prism
 
 # Prism auto-detects prism.toml > prism.yaml > prism.yml from CWD.
 WORKDIR /config

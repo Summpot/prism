@@ -2,7 +2,7 @@ use std::{io, path::Path};
 
 use anyhow::Context;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::prism::config;
 
@@ -49,9 +49,7 @@ pub fn init(logging: &config::LoggingConfig) -> anyhow::Result<LoggingRuntime> {
         .with(base_fmt)
         .init();
 
-    Ok(LoggingRuntime {
-        _guard: guard,
-    })
+    Ok(LoggingRuntime { _guard: guard })
 }
 
 fn make_writer(

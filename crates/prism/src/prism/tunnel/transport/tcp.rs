@@ -4,7 +4,11 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use tokio::{net::TcpListener, net::TcpStream, sync::mpsc};
 
-use crate::prism::tunnel::transport::{BoxedStream, Transport, TransportDialOptions, TransportListener, TransportListenOptions, TransportSession};
+use crate::prism::net;
+use crate::prism::tunnel::transport::{
+    BoxedStream, Transport, TransportDialOptions, TransportListenOptions, TransportListener,
+    TransportSession,
+};
 
 pub struct TcpTransport;
 
@@ -20,12 +24,21 @@ impl Transport for TcpTransport {
         "tcp"
     }
 
-    async fn listen(&self, addr: &str, _opts: TransportListenOptions) -> anyhow::Result<Box<dyn TransportListener>> {
-        let ln = TcpListener::bind(addr).await?;
+    async fn listen(
+        &self,
+        addr: &str,
+        _opts: TransportListenOptions,
+    ) -> anyhow::Result<Box<dyn TransportListener>> {
+        let bind_addr = net::normalize_bind_addr(addr);
+        let ln = TcpListener::bind(bind_addr.as_ref()).await?;
         Ok(Box::new(TcpTransportListener { ln }))
     }
 
-    async fn dial(&self, addr: &str, _opts: TransportDialOptions) -> anyhow::Result<Arc<dyn TransportSession>> {
+    async fn dial(
+        &self,
+        addr: &str,
+        _opts: TransportDialOptions,
+    ) -> anyhow::Result<Arc<dyn TransportSession>> {
         let c = TcpStream::connect(addr).await?;
         Ok(Arc::new(YamuxSession::client(c)))
     }
@@ -116,7 +129,10 @@ impl TransportSession for YamuxSession {
 
     async fn accept_stream(&self) -> anyhow::Result<BoxedStream> {
         let mut rx = self.incoming.lock().await;
-        let st = rx.recv().await.ok_or_else(|| anyhow::anyhow!("tunnel: session closed"))?;
+        let st = rx
+            .recv()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("tunnel: session closed"))?;
         Ok(Box::new(st))
     }
 

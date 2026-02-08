@@ -5,9 +5,10 @@ use pin_project_lite::pin_project;
 use quinn::{ClientConfig, Connection, Endpoint, ServerConfig, TransportConfig};
 use tokio::sync::mpsc;
 
+use crate::prism::net;
 use crate::prism::tunnel::transport::{
-    default_alpn, BoxedStream, QuicDialOptions, QuicListenOptions, Transport, TransportDialOptions,
-    TransportListener, TransportListenOptions, TransportSession,
+    BoxedStream, QuicDialOptions, QuicListenOptions, Transport, TransportDialOptions,
+    TransportListenOptions, TransportListener, TransportSession, default_alpn,
 };
 
 pub struct QuicTransport;
@@ -24,9 +25,18 @@ impl Transport for QuicTransport {
         "quic"
     }
 
-    async fn listen(&self, addr: &str, opts: TransportListenOptions) -> anyhow::Result<Box<dyn TransportListener>> {
-        let addr: SocketAddr = addr.parse()?;
-        let QuicListenOptions { cert_file, key_file, next_protos } = opts.quic;
+    async fn listen(
+        &self,
+        addr: &str,
+        opts: TransportListenOptions,
+    ) -> anyhow::Result<Box<dyn TransportListener>> {
+        let bind_addr = net::normalize_bind_addr(addr);
+        let addr: SocketAddr = bind_addr.parse()?;
+        let QuicListenOptions {
+            cert_file,
+            key_file,
+            next_protos,
+        } = opts.quic;
 
         let next_protos = default_alpn(&next_protos);
         let (cert_chain, key) = quic_tls::load_or_generate_cert(cert_file, key_file)?;
@@ -45,8 +55,16 @@ impl Transport for QuicTransport {
         Ok(Box::new(QuicTransportListener { endpoint }))
     }
 
-    async fn dial(&self, addr: &str, opts: TransportDialOptions) -> anyhow::Result<Arc<dyn TransportSession>> {
-        let QuicDialOptions { server_name, insecure_skip_verify, next_protos } = opts.quic;
+    async fn dial(
+        &self,
+        addr: &str,
+        opts: TransportDialOptions,
+    ) -> anyhow::Result<Arc<dyn TransportSession>> {
+        let QuicDialOptions {
+            server_name,
+            insecure_skip_verify,
+            next_protos,
+        } = opts.quic;
         let next_protos = default_alpn(&next_protos);
 
         let mut transport_cfg = TransportConfig::default();
@@ -199,7 +217,9 @@ impl tokio::io::AsyncWrite for QuicBiStream {
         use std::task::Poll;
         match self.project().send.poll_write(cx, data) {
             Poll::Ready(Ok(n)) => Poll::Ready(Ok(n)),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -211,7 +231,9 @@ impl tokio::io::AsyncWrite for QuicBiStream {
         use std::task::Poll;
         match self.project().send.poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -223,7 +245,9 @@ impl tokio::io::AsyncWrite for QuicBiStream {
         use std::task::Poll;
         match self.project().send.poll_shutdown(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -247,7 +271,9 @@ mod quic_tls {
 
         if !cert_file.is_empty() || !key_file.is_empty() {
             if cert_file.is_empty() || key_file.is_empty() {
-                anyhow::bail!("tunnel: quic requires both cert_file and key_file (or neither to auto-generate)");
+                anyhow::bail!(
+                    "tunnel: quic requires both cert_file and key_file (or neither to auto-generate)"
+                );
             }
 
             let certs = load_certs(Path::new(&cert_file))?;
@@ -255,7 +281,8 @@ mod quic_tls {
             return Ok((certs, key));
         }
 
-        let rcgen::CertifiedKey { cert, signing_key } = generate_simple_self_signed(["localhost".to_string()])?;
+        let rcgen::CertifiedKey { cert, signing_key } =
+            generate_simple_self_signed(["localhost".to_string()])?;
         let cert_der = cert.der().clone();
         let key_der = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
         Ok((vec![cert_der], key_der))

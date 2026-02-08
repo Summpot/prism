@@ -1,6 +1,6 @@
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::prism::tunnel::protocol::{ProtocolError, MAX_DATAGRAM_BYTES};
+use crate::prism::tunnel::protocol::{MAX_DATAGRAM_BYTES, ProtocolError};
 
 /// Datagram framing over a tunnel stream.
 ///
@@ -45,7 +45,10 @@ where
     }
 
     pub async fn write_datagram(&mut self, payload: &[u8]) -> Result<(), ProtocolError> {
-        let n: u32 = payload.len().try_into().map_err(|_| ProtocolError::PayloadTooLarge(u32::MAX))?;
+        let n: u32 = payload
+            .len()
+            .try_into()
+            .map_err(|_| ProtocolError::PayloadTooLarge(u32::MAX))?;
         if n > MAX_DATAGRAM_BYTES {
             return Err(ProtocolError::PayloadTooLarge(n));
         }

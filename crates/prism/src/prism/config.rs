@@ -33,7 +33,9 @@ impl std::fmt::Display for ConfigPathSource {
     }
 }
 
-pub fn resolve_config_path(explicit_flag_path: Option<PathBuf>) -> anyhow::Result<ResolvedConfigPath> {
+pub fn resolve_config_path(
+    explicit_flag_path: Option<PathBuf>,
+) -> anyhow::Result<ResolvedConfigPath> {
     if let Some(p) = explicit_flag_path {
         let p = normalize_explicit_path(&p)?;
         return Ok(ResolvedConfigPath {
@@ -107,8 +109,8 @@ fn discover_config_path(dir: &Path) -> anyhow::Result<PathBuf> {
 }
 
 fn default_config_path() -> anyhow::Result<PathBuf> {
-    let proj = ProjectDirs::from("com", "summpot", "prism")
-        .context("config: resolve user config dir")?;
+    let proj =
+        ProjectDirs::from("com", "summpot", "prism").context("config: resolve user config dir")?;
     Ok(proj.config_dir().join("prism.toml"))
 }
 
@@ -122,7 +124,10 @@ pub fn ensure_config_file(path: &Path) -> anyhow::Result<bool> {
             if m.is_file() {
                 return Ok(false);
             }
-            anyhow::bail!("config: {} exists but is not a regular file", path.display());
+            anyhow::bail!(
+                "config: {} exists but is not a regular file",
+                path.display()
+            );
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(err).with_context(|| format!("config: stat {}", path.display())),
@@ -470,7 +475,9 @@ impl Config {
             },
             proxy_protocol_v2: fc.proxy_protocol_v2,
             buffer_size: (fc.buffer_size).max(0) as usize,
-            upstream_dial_timeout: Duration::from_millis((fc.upstream_dial_timeout_ms).max(0) as u64),
+            upstream_dial_timeout: Duration::from_millis(
+                (fc.upstream_dial_timeout_ms).max(0) as u64
+            ),
             timeouts: Timeouts {
                 handshake_timeout: Duration::from_millis(
                     fc.timeouts
@@ -571,8 +578,9 @@ impl Config {
                     .trim()
                     .to_ascii_lowercase();
 
-                let cache_ttl = parse_cache_ttl(r.cache_ping_ttl.as_deref(), r.cache_ping_ttl_ms)
-                    .with_context(|| format!("config: routes[{}] invalid cache_ping_ttl", i))?;
+                let cache_ttl =
+                    parse_cache_ttl(r.cache_ping_ttl.as_deref(), r.cache_ping_ttl_ms)
+                        .with_context(|| format!("config: routes[{}] invalid cache_ping_ttl", i))?;
 
                 cfg.routes.push(RouteConfig {
                     host: hosts,
@@ -609,7 +617,9 @@ impl Config {
                 if let Some(t) = &rp.ty {
                     let t = t.trim().to_ascii_lowercase();
                     if !t.is_empty() && t != "wasm" {
-                        anyhow::bail!("config: routing_parsers only supports type=wasm in Rust (got {t})");
+                        anyhow::bail!(
+                            "config: routing_parsers only supports type=wasm in Rust (got {t})"
+                        );
                     }
                 }
 
@@ -619,12 +629,7 @@ impl Config {
                 }
 
                 cfg.routing_parsers.push(RoutingParserConfig {
-                    name: rp
-                        .name
-                        .clone()
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string(),
+                    name: rp.name.clone().unwrap_or_default().trim().to_string(),
                     path,
                     function: rp
                         .function
@@ -696,7 +701,9 @@ impl Config {
                         .unwrap_or_else(|| "tcp".into())
                         .trim()
                         .to_ascii_lowercase(),
-                    dial_timeout: Duration::from_millis(c.dial_timeout_ms.unwrap_or(5000).max(0) as u64),
+                    dial_timeout: Duration::from_millis(
+                        c.dial_timeout_ms.unwrap_or(5000).max(0) as u64
+                    ),
                     quic: QuicClientConfig {
                         server_name: c
                             .quic
@@ -739,7 +746,10 @@ impl Config {
     }
 }
 
-fn parse_cache_ttl(cache_ping_ttl: Option<&str>, cache_ping_ttl_ms: Option<i64>) -> anyhow::Result<Option<Duration>> {
+fn parse_cache_ttl(
+    cache_ping_ttl: Option<&str>,
+    cache_ping_ttl_ms: Option<i64>,
+) -> anyhow::Result<Option<Duration>> {
     // Default matches gate lite: enabled by default for a short TTL.
     let mut ttl = Some(Duration::from_secs(10));
 

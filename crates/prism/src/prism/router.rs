@@ -1,13 +1,13 @@
 use std::{
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
 
 use arc_swap::ArcSwap;
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 use regex::Regex;
 
 use crate::prism::config;
@@ -68,7 +68,8 @@ impl Router {
                 out.push(c);
             }
         }
-        self.compiled.store(Arc::new(CompiledRoutes { routes: out }));
+        self.compiled
+            .store(Arc::new(CompiledRoutes { routes: out }));
     }
 
     pub fn resolve(&self, host: &str) -> Option<Resolution> {

@@ -1,11 +1,11 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
+    Json, Router,
     extract::State,
-    http::{header, HeaderValue, StatusCode},
+    http::{HeaderValue, StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use serde::Serialize;
 use tokio::sync::watch;

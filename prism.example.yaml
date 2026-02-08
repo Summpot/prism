@@ -65,10 +65,12 @@ tunnel:
   #     remote_addr: ":25565" # optional (frp-like). If set, prisms opens this listener automatically.
 
 routing_parsers:
-  - type: "builtin"
+  - type: "wasm"
     name: "minecraft_handshake"
-  - type: "builtin"
+    path: "builtin:minecraft_handshake"
+  - type: "wasm"
     name: "tls_sni"
+    path: "builtin:tls_sni"
 
 timeouts:
   handshake_timeout_ms: 3000

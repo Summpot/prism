@@ -61,12 +61,14 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
   * `no match` (parser does not apply to this stream)
   * fatal error
 
-* **Built-in implementations**:
-  * Minecraft handshake hostname extractor
-  * TLS ClientHello SNI hostname extractor
+* **Bundled implementations (default)**:
+  * Minecraft handshake hostname extractor (shipped as an embedded WASM module)
+  * TLS ClientHello SNI hostname extractor (shipped as an embedded WASM module)
 
 * **Plugin support (WASM)**:
   * Parsers can be loaded from WebAssembly modules to avoid hardcoding parsing logic in Go.
+  * Prism also ships the default parsers as embedded WASM modules, so the default routing
+    behavior uses the same ABI as external plugins.
   * WASM is used only on the connection prelude; the hot path (byte bridging) remains native.
 
 * **Testability**:

@@ -160,8 +160,8 @@ func parseStrategy(s string) strategy {
 // compileWildcardPattern compiles a wildcard host pattern into a regexp.
 //
 // Supported wildcards:
-//  - '*' matches any sequence (including empty) and captures it
-//  - '?' matches any single character and captures it
+//   - '*' matches any sequence (including empty) and captures it
+//   - '?' matches any single character and captures it
 func compileWildcardPattern(pattern string) (*regexp.Regexp, error) {
 	pattern = strings.TrimSpace(strings.ToLower(pattern))
 	if pattern == "" {

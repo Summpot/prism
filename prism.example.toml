@@ -82,12 +82,14 @@ enabled = true
 poll_interval_ms = 1000
 
 [[routing_parsers]]
-type = "builtin"
+type = "wasm"
 name = "minecraft_handshake"
+path = "builtin:minecraft_handshake"
 
 [[routing_parsers]]
-type = "builtin"
+type = "wasm"
 name = "tls_sni"
+path = "builtin:tls_sni"
 
 [timeouts]
 handshake_timeout_ms = 3000

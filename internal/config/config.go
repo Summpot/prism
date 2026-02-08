@@ -667,9 +667,11 @@ func (p *FileConfigProvider) Load(_ context.Context) (*Config, error) {
 	}
 	if len(cfg.RoutingParsers) == 0 {
 		// Default: support Minecraft hostname routing and TLS SNI.
+		// These are implemented as embedded WASM modules and referenced via the
+		// special path scheme builtin:<name>.
 		cfg.RoutingParsers = []RoutingParserConfig{
-			{Type: "builtin", Name: "minecraft_handshake"},
-			{Type: "builtin", Name: "tls_sni"},
+			{Type: "wasm", Name: "minecraft_handshake", Path: "builtin:minecraft_handshake"},
+			{Type: "wasm", Name: "tls_sni", Path: "builtin:tls_sni"},
 		}
 	}
 

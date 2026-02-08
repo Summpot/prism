@@ -44,14 +44,28 @@ func buildHostParser(ctx context.Context, cfg *config.Config) (protocol.HostPars
 				return nil, nil, fmt.Errorf("unknown builtin routing parser %q", pc.Name)
 			}
 		case "wasm":
-			if strings.TrimSpace(pc.Path) == "" {
+			path := strings.TrimSpace(pc.Path)
+			if path == "" {
 				return nil, nil, fmt.Errorf("wasm routing parser missing path")
 			}
-			wp, err := protocol.NewWASMHostParserFromFile(ctx, pc.Path, protocol.WASMHostParserOptions{
-				Name:         pc.Name,
-				FunctionName: pc.Function,
-				MaxOutputLen: uint32(pc.MaxOutputLen),
-			})
+			var (
+				wp  *protocol.WASMHostParser
+				err error
+			)
+			if strings.HasPrefix(strings.ToLower(path), "builtin:") {
+				builtinName := strings.TrimSpace(path[len("builtin:"):])
+				wp, err = protocol.NewBuiltinWASMHostParser(ctx, builtinName, protocol.WASMHostParserOptions{
+					Name:         pc.Name,
+					FunctionName: pc.Function,
+					MaxOutputLen: uint32(pc.MaxOutputLen),
+				})
+			} else {
+				wp, err = protocol.NewWASMHostParserFromFile(ctx, path, protocol.WASMHostParserOptions{
+					Name:         pc.Name,
+					FunctionName: pc.Function,
+					MaxOutputLen: uint32(pc.MaxOutputLen),
+				})
+			}
 			if err != nil {
 				return nil, nil, err
 			}
@@ -77,10 +91,6 @@ func buildHostParser(ctx context.Context, cfg *config.Config) (protocol.HostPars
 		closeFn = nil
 	}
 	return chain, closeFn, nil
-}
-
-func RunPrisms(ctx context.Context, configPath string) error {
-	return RunPrism(ctx, configPath)
 }
 
 func RunPrism(ctx context.Context, configPath string) error {

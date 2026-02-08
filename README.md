@@ -89,6 +89,22 @@ port from the matched listener (default `25565`).
 
 If multiple upstreams are configured, Prism will try them in the order produced by `strategy` and fall back to the next one if dialing fails.
 
+### Routing parsers (WASM)
+
+Prism extracts the routing hostname from the first bytes of each TCP connection using `routing_parsers`.
+
+By default, Prism enables two parsers implemented as **embedded WASM modules**:
+
+- `minecraft_handshake`
+- `tls_sni`
+
+You can reference the embedded modules using the special path scheme `builtin:<name>`:
+
+- `builtin:minecraft_handshake`
+- `builtin:tls_sni`
+
+You can also load your own parser from a `.wasm` file by setting `type="wasm"` and `path` to the file path.
+
 ## Tunnel mode
 
 If your upstream server has **no public IP**, you can run Prism in a “tunnel client” role on the private machine and have it create an outbound tunnel to Prism running in the “server” role.

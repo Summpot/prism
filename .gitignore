@@ -2,3 +2,8 @@
 prism.toml
 prism.yaml
 prism.yml
+*.wasm
+
+# Added by cargo
+
+/target

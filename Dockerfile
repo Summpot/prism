@@ -38,7 +38,7 @@ FROM alpine:3.20
 
 ARG MUSL_TARGET
 
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates su-exec \
     && addgroup -S -g 10001 prism \
     && adduser -S -D -H -u 10001 -G prism prism
 
@@ -48,16 +48,20 @@ RUN mkdir -p /var/lib/prism \
 
 COPY --from=build /home/rust/prism /usr/local/bin/prism
 
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Prism auto-detects prism.toml > prism.yaml > prism.yml from CWD.
 # Use /etc/prism to align with the Linux default config path (/etc/prism/prism.toml).
 WORKDIR /etc/prism
 
-# Prism runs as a non-root user; ensure it can create the default config on first run.
+# Prism runs as a non-root user by default, but bind mounts (especially on Docker Desktop)
+# can cause permission mismatches; the entrypoint will attempt to drop privileges when safe.
 RUN mkdir -p /etc/prism \
     && chown -R prism:prism /etc/prism
 
 EXPOSE 25565 8080 7000
 
-USER prism
+USER root
 
-ENTRYPOINT ["/usr/local/bin/prism"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

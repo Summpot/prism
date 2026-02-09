@@ -173,6 +173,35 @@ docker run --rm \
   ghcr.io/Summpot/prism:latest
 ```
 
+You can also mount a whole config directory (read-write) and let Prism create `/etc/prism/prism.toml` on first start:
+
+```text
+docker run --rm \
+  -p 25565:25565 \
+  -p 8080:8080 \
+  -v "$PWD/config:/etc/prism" \
+  ghcr.io/Summpot/prism:latest
+```
+
+If you mount a directory and hit permission issues (common on bind mounts), you can force the runtime UID/GID:
+
+- `-e PRISM_UID=$(id -u) -e PRISM_GID=$(id -g)`
+
+or run the container with:
+
+- `--user $(id -u):$(id -g)`
+
+If you also want to persist runtime state (for example routing parsers), mount the workdir too:
+
+```text
+docker run --rm \
+  -p 25565:25565 \
+  -p 8080:8080 \
+  -v "$PWD/config:/etc/prism" \
+  -v "$PWD/workdir:/var/lib/prism" \
+  ghcr.io/Summpot/prism:latest
+```
+
 ### Run (Windows PowerShell)
 
 ```text
@@ -183,11 +212,28 @@ docker run --rm `
   ghcr.io/Summpot/prism:latest
 ```
 
+Mount a config directory (read-write):
+
+```text
+docker run --rm `
+  -p 25565:25565 `
+  -p 8080:8080 `
+  -v "${PWD}\config:/etc/prism" `
+  ghcr.io/Summpot/prism:latest
+```
+
+If you also want to persist runtime state (for example routing parsers), mount the workdir too:
+
+```text
+docker run --rm `
+  -p 25565:25565 `
+  -p 8080:8080 `
+  -v "${PWD}\config:/etc/prism" `
+  -v "${PWD}\workdir:/var/lib/prism" `
+  ghcr.io/Summpot/prism:latest
+```
+
 If your config file has a different name/path, pass it explicitly:
-
-- `prism --config /config/myconfig.toml`
-
-If you mount the config into `/etc/prism`, you can also pass it explicitly:
 
 - `prism --config /etc/prism/myconfig.toml`
 

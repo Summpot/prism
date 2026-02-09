@@ -4,9 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      PRISM_CONFIG: /config/prism.toml
+      PRISM_CONFIG: /etc/prism/prism.toml
     volumes:
-      - ./deploy/prism/prism.toml:/config/prism.toml:ro
+      - ./deploy/prism/prism.toml:/etc/prism/prism.toml:ro
     ports:
       - "8080:8080" # admin plane
       - "7000:7000" # tunnel endpoint

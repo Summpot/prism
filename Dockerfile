@@ -49,7 +49,12 @@ RUN mkdir -p /var/lib/prism \
 COPY --from=build /home/rust/prism /usr/local/bin/prism
 
 # Prism auto-detects prism.toml > prism.yaml > prism.yml from CWD.
-WORKDIR /config
+# Use /etc/prism to align with the Linux default config path (/etc/prism/prism.toml).
+WORKDIR /etc/prism
+
+# Prism runs as a non-root user; ensure it can create the default config on first run.
+RUN mkdir -p /etc/prism \
+    && chown -R prism:prism /etc/prism
 
 EXPOSE 25565 8080 7000
 

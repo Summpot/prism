@@ -158,7 +158,7 @@ This repository ships a `Dockerfile`, and the GitHub Actions workflow builds and
 
 - `ghcr.io/<owner>/<repo>` (for example `ghcr.io/Summpot/prism`)
 
-The container image uses `/config` as the working directory. If you mount a config file to `/config/prism.toml` (or `prism.yaml`/`prism.yml`), Prism will auto-discover it without extra flags.
+The container image uses `/etc/prism` as the working directory. If you mount a config file to `/etc/prism/prism.toml` (or `prism.yaml`/`prism.yml`), Prism will auto-discover it without extra flags.
 
 ### Run (Linux/macOS)
 
@@ -169,7 +169,7 @@ The container image uses `/config` as the working directory. If you mount a conf
 docker run --rm \
   -p 25565:25565 \
   -p 8080:8080 \
-  -v "$PWD/prism.toml:/config/prism.toml:ro" \
+  -v "$PWD/prism.toml:/etc/prism/prism.toml:ro" \
   ghcr.io/Summpot/prism:latest
 ```
 
@@ -179,13 +179,17 @@ docker run --rm \
 docker run --rm `
   -p 25565:25565 `
   -p 8080:8080 `
-  -v "${PWD}\prism.toml:/config/prism.toml:ro" `
+  -v "${PWD}\prism.toml:/etc/prism/prism.toml:ro" `
   ghcr.io/Summpot/prism:latest
 ```
 
 If your config file has a different name/path, pass it explicitly:
 
 - `prism --config /config/myconfig.toml`
+
+If you mount the config into `/etc/prism`, you can also pass it explicitly:
+
+- `prism --config /etc/prism/myconfig.toml`
 
 ## Admin API
 

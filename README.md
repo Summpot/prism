@@ -18,7 +18,9 @@ This repo also ships a JSON Schema for config validation and editor/LSP completi
 - Run: `prism --config /path/to/prism.toml`
 - Or set an env var: `PRISM_CONFIG=/path/to/prism.toml prism`
 - Auto-discovery (from the current working directory): `prism.toml` > `prism.yaml` > `prism.yml`
-- Fallback default path (OS-specific): `${ProjectConfigDir}/prism.toml` (derived from Rust's `directories::ProjectDirs`)
+- Fallback default path:
+  - Linux: `/etc/prism/prism.toml`
+  - Other OSes: `${ProjectConfigDir}/prism.toml` (derived from Rust's `directories::ProjectDirs`)
 
 If the resolved config path does not exist, Prism will create a runnable default config file at that path and continue starting.
 
@@ -98,12 +100,9 @@ By default, Prism enables two parsers implemented as **embedded WAT modules** (W
 - `minecraft_handshake`
 - `tls_sni`
 
-You can reference the embedded modules using the special path scheme `builtin:<name>`:
+Prism materializes these builtin parsers into `routing_parser_dir` at startup (if missing), then loads **all** parsers from `.wat` files in that directory.
 
-- `builtin:minecraft_handshake`
-- `builtin:tls_sni`
-
-You can also load your own parser from a `.wat` file by setting `type="wasm"` and `path` to the file path.
+In config, `routing_parsers[].path` is the **basename** of the `.wat` file (for example `minecraft_handshake.wat`).
 
 Prism intentionally **does not load raw `.wasm` binaries** for routing parsers.
 

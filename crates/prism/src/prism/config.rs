@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     time::Duration,
 };
 
@@ -109,9 +109,19 @@ fn discover_config_path(dir: &Path) -> anyhow::Result<PathBuf> {
 }
 
 fn default_config_path() -> anyhow::Result<PathBuf> {
-    let proj =
-        ProjectDirs::from("com", "summpot", "prism").context("config: resolve user config dir")?;
-    Ok(proj.config_dir().join("prism.toml"))
+    // Linux: system-wide default.
+    #[cfg(target_os = "linux")]
+    {
+        return Ok(PathBuf::from("/etc/prism/prism.toml"));
+    }
+
+    // Other OSes: per-user config dir.
+    #[cfg(not(target_os = "linux"))]
+    {
+        let proj = ProjectDirs::from("com", "summpot", "prism")
+            .context("config: resolve user config dir")?;
+        Ok(proj.config_dir().join("prism.toml"))
+    }
 }
 
 pub fn ensure_config_file(path: &Path) -> anyhow::Result<bool> {
@@ -188,7 +198,7 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
         _ => anyhow::bail!("config: unsupported config extension {}", ext),
     };
 
-    Ok(Config::from_file_config(&mut fc)?)
+    Ok(Config::from_file_config(&mut fc, path)?)
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +207,7 @@ pub struct Config {
     pub admin_addr: String,
     pub logging: LoggingConfig,
     pub routes: Vec<RouteConfig>,
+    pub routing_parser_dir: PathBuf,
     pub routing_parsers: Vec<RoutingParserConfig>,
     pub max_header_bytes: usize,
     pub reload: ReloadConfig,
@@ -307,6 +318,8 @@ struct FileConfig {
 
     #[serde(default)]
     routes: Vec<FileRoute>,
+
+    routing_parser_dir: Option<String>,
 
     #[serde(default, rename = "routing_parsers")]
     routing_parsers: Vec<FileRoutingParser>,
@@ -450,7 +463,21 @@ impl StringOrVec {
 }
 
 impl Config {
-    fn from_file_config(fc: &mut FileConfig) -> anyhow::Result<Config> {
+    fn from_file_config(fc: &mut FileConfig, config_path: &Path) -> anyhow::Result<Config> {
+        let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+        let default_routing_parser_dir = config_dir.join("parsers");
+
+        let routing_parser_dir = fc
+            .routing_parser_dir
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .map(|p| if p.is_relative() { config_dir.join(p) } else { p })
+            .unwrap_or(default_routing_parser_dir);
+
+        let routing_parser_dir = normalize_path(routing_parser_dir);
+
         let mut cfg = Config {
             listeners: vec![],
             admin_addr: fc.admin_addr.trim().to_string(),
@@ -461,6 +488,7 @@ impl Config {
                 add_source: false,
             },
             routes: vec![],
+            routing_parser_dir,
             routing_parsers: vec![],
             max_header_bytes: fc.max_header_bytes as i64 as usize,
             reload: ReloadConfig {
@@ -623,14 +651,46 @@ impl Config {
                     }
                 }
 
-                let path = rp.path.clone().unwrap_or_default().trim().to_string();
-                if path.is_empty() {
+                let raw = rp.path.clone().unwrap_or_default().trim().to_string();
+                if raw.is_empty() {
                     anyhow::bail!("config: routing_parsers entry missing path");
                 }
 
+                let basename = raw.trim();
+                if basename.starts_with("builtin:") {
+                    anyhow::bail!(
+                        "config: routing_parsers.path no longer supports builtin:<name>; use a .wat filename in routing_parser_dir instead (got {})",
+                        basename
+                    );
+                }
+
+                let resolved_path = resolve_wat_basename(&cfg.routing_parser_dir, basename)
+                    .with_context(|| {
+                        format!(
+                            "config: invalid routing_parsers.path {:?} (must be a .wat basename)",
+                            basename
+                        )
+                    })?;
+
+                let name = rp
+                    .name
+                    .clone()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let name = if !name.is_empty() {
+                    name
+                } else {
+                    resolved_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("wasm")
+                        .to_string()
+                };
+
                 cfg.routing_parsers.push(RoutingParserConfig {
-                    name: rp.name.clone().unwrap_or_default().trim().to_string(),
-                    path,
+                    name,
+                    path: resolved_path.to_string_lossy().to_string(),
                     function: rp
                         .function
                         .clone()
@@ -641,16 +701,18 @@ impl Config {
             }
         }
         if cfg.routing_parsers.is_empty() {
+            let mc = cfg.routing_parser_dir.join("minecraft_handshake.wat");
+            let tls = cfg.routing_parser_dir.join("tls_sni.wat");
             cfg.routing_parsers = vec![
                 RoutingParserConfig {
                     name: "minecraft_handshake".into(),
-                    path: "builtin:minecraft_handshake".into(),
+                    path: mc.to_string_lossy().to_string(),
                     function: None,
                     max_output_len: None,
                 },
                 RoutingParserConfig {
                     name: "tls_sni".into(),
-                    path: "builtin:tls_sni".into(),
+                    path: tls.to_string_lossy().to_string(),
                     function: None,
                     max_output_len: None,
                 },
@@ -746,6 +808,42 @@ impl Config {
     }
 }
 
+fn normalize_path(p: PathBuf) -> PathBuf {
+    // Pure component-level cleanup (no filesystem access): removes redundant `.` segments.
+    // We intentionally do not resolve `..`.
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        if matches!(c, Component::CurDir) {
+            continue;
+        }
+        out.push(c.as_os_str());
+    }
+    out
+}
+
+fn resolve_wat_basename(dir: &Path, basename: &str) -> anyhow::Result<PathBuf> {
+    let p = Path::new(basename);
+
+    // Ensure the config only references a file basename (no paths, no traversal).
+    let mut comps = p.components();
+    let Some(Component::Normal(name)) = comps.next() else {
+        anyhow::bail!("routing parser path must be a plain filename");
+    };
+    if comps.next().is_some() {
+        anyhow::bail!("routing parser path must be a plain filename (no directories)");
+    }
+
+    // Require .wat to keep configs auditable.
+    let ext_ok = p
+        .extension()
+        .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wat"));
+    if !ext_ok {
+        anyhow::bail!("routing parser filename must end with .wat");
+    }
+
+    Ok(dir.join(name))
+}
+
 fn parse_cache_ttl(
     cache_ping_ttl: Option<&str>,
     cache_ping_ttl_ms: Option<i64>,
@@ -794,6 +892,10 @@ const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubuserco
 
 admin_addr = ":8080"
 
+# Directory to load routing parser .wat files from.
+# Prism will materialize its builtin parsers into this directory at startup (if missing).
+# routing_parser_dir = "./parsers"
+
 [tunnel]
 auth_token = ""
 auto_listen_services = true
@@ -834,6 +936,10 @@ const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# yaml-language-server: $schema=ht
 
 admin_addr: ":8080"
 
+# Directory to load routing parser .wat files from.
+# Prism will materialize its builtin parsers into this directory at startup (if missing).
+# routing_parser_dir: "./parsers"
+
 tunnel:
   auth_token: ""
   auto_listen_services: true
@@ -856,3 +962,65 @@ timeouts:
   idle_timeout_ms: 0
 
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        p.push(format!("prism_cfg_test_{name}_{}_{}", std::process::id(), now));
+        std::fs::create_dir_all(&p).expect("mkdir");
+        p
+    }
+
+    #[test]
+    fn routing_parser_dir_and_basename_resolve() {
+        let dir = temp_dir("resolve");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+routing_parser_dir = "./parsers"
+
+[[routing_parsers]]
+type = "wasm"
+path = "minecraft_handshake.wat"
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert_eq!(cfg.routing_parser_dir, dir.join("parsers"));
+        assert_eq!(
+            cfg.routing_parsers[0].path,
+            dir.join("parsers").join("minecraft_handshake.wat").to_string_lossy()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn routing_parser_path_rejects_directories() {
+        let dir = temp_dir("reject");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+routing_parser_dir = "./parsers"
+
+[[routing_parsers]]
+type = "wasm"
+path = "../oops.wat"
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let err = load_config(&cfg_path).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("basename") || s.contains("filename"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

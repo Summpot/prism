@@ -387,7 +387,9 @@ The project will strictly adhere to the following testing pyramid:
     * CLI flag: `--config /path/to/prism.toml`
     * Environment variable: `PRISM_CONFIG=/path/to/prism.toml`
     * Auto-discovery in the current working directory: `prism.toml` > `prism.yaml` > `prism.yml`
-    * OS-specific default user config path: `${ProjectConfigDir}/prism.toml` (derived from `directories::ProjectDirs` in Rust)
+    * Default path:
+      * Linux: `/etc/prism/prism.toml`
+      * Other OSes: `${ProjectConfigDir}/prism.toml` (derived from `directories::ProjectDirs` in Rust)
   * When multiple `prism.*` files are present in a discovery directory, precedence is: `prism.toml` > `prism.yaml` > `prism.yml`.
   * JSON is intentionally not supported because it cannot contain comments and Prism configs are expected to be annotated.
   * If the resolved config file path does not exist, Prism will **create a runnable default config file** at that path and continue starting (default: tunnel server on `:7000/tcp`).
@@ -427,6 +429,13 @@ Prism's WASM routing header parser interface is intentionally tiny to keep overh
 
 * Prism expects routing parser modules to be provided as **WAT text** (`.wat`).
 * Prism compiles WAT to WASM at runtime (via Wasmer) and intentionally **rejects loading raw `.wasm` binaries**.
+
+### Parser lookup & builtins
+
+* Prism loads routing parser modules from a configurable directory: `routing_parser_dir`.
+  * Relative paths are resolved relative to the config file directory.
+* In configuration, parsers are referenced by the **basename** of the `.wat` file (no directories).
+* Prism ships default parsers as embedded WAT sources and **materializes** them into `routing_parser_dir` at startup (if missing), so builtin and custom parsers share the same file-based loading path.
 
 ### Memory contract
 

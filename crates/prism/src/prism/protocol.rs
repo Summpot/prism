@@ -1,4 +1,8 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use thiserror::Error;
@@ -95,22 +99,22 @@ impl WasmHostParser {
             anyhow::bail!("protocol: wasm routing parser missing path");
         }
 
+        if path.starts_with("builtin:") {
+            anyhow::bail!(
+                "protocol: builtin:<name> routing parsers are no longer supported; use a .wat file path (got {path})"
+            );
+        }
+
         // Prism loads routing parsers from WAT sources (text format) only.
         // We intentionally reject raw .wasm binaries so configs stay reviewable and auditable.
-        let wat_bytes = if let Some(rest) = path.strip_prefix("builtin:") {
-            builtin_wat_bytes(rest.trim())
-                .with_context(|| format!("protocol: unknown builtin wat parser {rest:?}"))?
-                .to_vec()
-        } else {
-            let p = Path::new(path);
-            if p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm")) {
-                anyhow::bail!(
-                    "protocol: loading raw .wasm is disabled; provide a .wat file instead ({})",
-                    p.display()
-                );
-            }
-            std::fs::read(p).with_context(|| format!("protocol: read wat {}", path))?
-        };
+        let p = Path::new(path);
+        if p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm")) {
+            anyhow::bail!(
+                "protocol: loading raw .wasm is disabled; provide a .wat file instead ({})",
+                p.display()
+            );
+        }
+        let wat_bytes = std::fs::read(p).with_context(|| format!("protocol: read wat {}", path))?;
 
         if wat_bytes.starts_with(b"\0asm") {
             anyhow::bail!(
@@ -254,17 +258,44 @@ impl HostParser for WasmHostParser {
     }
 }
 
-fn normalize_builtin_name(name: &str) -> String {
-    name.trim().to_ascii_lowercase().replace('-', "_")
+const BUILTIN_ROUTING_PARSERS: &[(&str, &[u8])] = &[
+    (
+        "minecraft_handshake.wat",
+        include_bytes!("./builtin_parsers/minecraft_handshake.wat"),
+    ),
+    ("tls_sni.wat", include_bytes!("./builtin_parsers/tls_sni.wat")),
+];
+
+pub fn ensure_builtin_routing_parsers(dir: &Path) -> anyhow::Result<()> {
+    if dir.as_os_str().is_empty() {
+        anyhow::bail!("protocol: empty routing parser dir");
+    }
+
+    fs::create_dir_all(dir)
+        .with_context(|| format!("protocol: mkdir routing parser dir {}", dir.display()))?;
+
+    for (name, bytes) in BUILTIN_ROUTING_PARSERS {
+        let path = dir.join(name);
+        write_file_if_missing(&path, bytes)
+            .with_context(|| format!("protocol: write builtin parser {}", path.display()))?;
+    }
+
+    Ok(())
 }
 
-fn builtin_wat_bytes(name: &str) -> Option<&'static [u8]> {
-    match normalize_builtin_name(name).as_str() {
-        "minecraft_handshake" | "minecraft" | "mc" => {
-            Some(include_bytes!("./builtin_parsers/minecraft_handshake.wat"))
+fn write_file_if_missing(path: &Path, data: &[u8]) -> anyhow::Result<()> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut f) => {
+            use std::io::Write;
+            f.write_all(data)?;
+            Ok(())
         }
-        "tls_sni" | "sni" | "tls" => Some(include_bytes!("./builtin_parsers/tls_sni.wat")),
-        _ => None,
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -307,9 +338,13 @@ mod tests {
 
     #[test]
     fn builtin_wat_minecraft_parses() {
+        let dir = temp_test_dir("builtin_wat_minecraft_parses");
+        ensure_builtin_routing_parsers(&dir).expect("materialize builtin parsers");
+
+        let wat = dir.join("minecraft_handshake.wat");
         let cfg = config::RoutingParserConfig {
             name: "minecraft_handshake".into(),
-            path: "builtin:minecraft_handshake".into(),
+            path: wat.to_string_lossy().to_string(),
             function: None,
             max_output_len: None,
         };
@@ -323,5 +358,18 @@ mod tests {
             let err = p.parse(&data[..i]).unwrap_err();
             assert!(matches!(err, ParseError::NeedMoreData));
         }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        p.push(format!("prism_test_{name}_{}_{}", std::process::id(), now));
+        fs::create_dir_all(&p).expect("mkdir temp test dir");
+        p
     }
 }

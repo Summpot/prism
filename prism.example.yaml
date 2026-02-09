@@ -29,6 +29,10 @@ reload:
 
 max_header_bytes: 65536
 
+# Directory to load routing parser .wat files from.
+# Prism will materialize its builtin parsers into this directory at startup (if missing).
+routing_parser_dir: "./parsers"
+
 tunnel:
   auth_token: ""
   # When true, prisms will automatically open server-side listeners for tunnel
@@ -64,10 +68,10 @@ tunnel:
 routing_parsers:
   - type: "wasm"
     name: "minecraft_handshake"
-    path: "builtin:minecraft_handshake"
+    path: "minecraft_handshake.wat"
   - type: "wasm"
     name: "tls_sni"
-    path: "builtin:tls_sni"
+    path: "tls_sni.wat"
 
 timeouts:
   handshake_timeout_ms: 3000

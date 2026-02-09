@@ -20,6 +20,13 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         tracing::warn!(path = %resolved.path.display(), source = %resolved.source, "config: created new config file");
     }
 
+    protocol::ensure_builtin_routing_parsers(&cfg.routing_parser_dir).with_context(|| {
+        format!(
+            "protocol: materialize builtin routing parsers in {}",
+            cfg.routing_parser_dir.display()
+        )
+    })?;
+
     let proxy_enabled = !cfg.listeners.is_empty();
     let tunnel_server_enabled = !cfg.tunnel.endpoints.is_empty();
     let tunnel_client_enabled = cfg.tunnel.client.is_some() && !cfg.tunnel.services.is_empty();
@@ -346,6 +353,11 @@ async fn apply_reload(
             return;
         }
     };
+
+    if let Err(err) = protocol::ensure_builtin_routing_parsers(&cfg.routing_parser_dir) {
+        tracing::warn!(err=%err, dir=%cfg.routing_parser_dir.display(), "reload: materialize builtin routing parsers failed");
+        return;
+    }
 
     // Listener topology changes require restart.
     if !listeners_equal(static_listeners, &cfg.listeners) {

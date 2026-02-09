@@ -1,6 +1,6 @@
 //! Tunnel mode (reverse connection), inspired by frp.
 //!
-//! This module is a Rust port of the existing Go implementation under `internal/tunnel/*`
+//! This module was originally ported from the legacy Go implementation (now removed)
 //! and follows the wire format described in `DESIGN.md` (Tunnel wire protocol v1).
 
 pub mod autolisten;

@@ -95,14 +95,29 @@ impl WasmHostParser {
             anyhow::bail!("protocol: wasm routing parser missing path");
         }
 
-        let wasm_bytes = if let Some(rest) = path.strip_prefix("builtin:") {
-            builtin_wasm_bytes(rest.trim())
-                .with_context(|| format!("protocol: unknown builtin wasm parser {rest:?}"))?
+        // Prism loads routing parsers from WAT sources (text format) only.
+        // We intentionally reject raw .wasm binaries so configs stay reviewable and auditable.
+        let wat_bytes = if let Some(rest) = path.strip_prefix("builtin:") {
+            builtin_wat_bytes(rest.trim())
+                .with_context(|| format!("protocol: unknown builtin wat parser {rest:?}"))?
                 .to_vec()
         } else {
-            std::fs::read(Path::new(path))
-                .with_context(|| format!("protocol: read wasm {}", path))?
+            let p = Path::new(path);
+            if p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm")) {
+                anyhow::bail!(
+                    "protocol: loading raw .wasm is disabled; provide a .wat file instead ({})",
+                    p.display()
+                );
+            }
+            std::fs::read(p).with_context(|| format!("protocol: read wat {}", path))?
         };
+
+        if wat_bytes.starts_with(b"\0asm") {
+            anyhow::bail!(
+                "protocol: expected WAT text input but got a wasm binary (path={})",
+                path
+            );
+        }
 
         let fn_name = cfg
             .function
@@ -122,7 +137,7 @@ impl WasmHostParser {
         // for routing header parsing.
         let engine = Engine::default();
         let store = Store::new(engine.clone());
-        let module = Module::new(&store, wasm_bytes).context("protocol: compile wasm module")?;
+        let module = Module::new(&store, wat_bytes).context("protocol: compile wat module")?;
 
         Ok(Self {
             name,
@@ -243,14 +258,12 @@ fn normalize_builtin_name(name: &str) -> String {
     name.trim().to_ascii_lowercase().replace('-', "_")
 }
 
-fn builtin_wasm_bytes(name: &str) -> Option<&'static [u8]> {
+fn builtin_wat_bytes(name: &str) -> Option<&'static [u8]> {
     match normalize_builtin_name(name).as_str() {
-        "minecraft_handshake" | "minecraft" | "mc" => Some(include_bytes!(
-            "../../../../internal/protocol/wasm/minecraft_handshake.wasm"
-        )),
-        "tls_sni" | "sni" | "tls" => Some(include_bytes!(
-            "../../../../internal/protocol/wasm/tls_sni.wasm"
-        )),
+        "minecraft_handshake" | "minecraft" | "mc" => {
+            Some(include_bytes!("./builtin_parsers/minecraft_handshake.wat"))
+        }
+        "tls_sni" | "sni" | "tls" => Some(include_bytes!("./builtin_parsers/tls_sni.wat")),
         _ => None,
     }
 }
@@ -293,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_wasm_minecraft_parses() {
+    fn builtin_wat_minecraft_parses() {
         let cfg = config::RoutingParserConfig {
             name: "minecraft_handshake".into(),
             path: "builtin:minecraft_handshake".into(),

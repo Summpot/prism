@@ -17,7 +17,7 @@ The system is designed with a **test-first architecture**, ensuring that core lo
 
 * CLI parsing uses **clap**.
 * WebAssembly routing parsers execute via **wasmer** (Singlepass compiler).
-* The default routing parsers (`minecraft_handshake` and `tls_sni`) are shipped as embedded WASM modules that implement the same ABI as third-party parsers and can be replaced at runtime via configuration.
+* The default routing parsers (`minecraft_handshake` and `tls_sni`) are shipped as embedded **WAT** sources (WebAssembly text format) that implement the same ABI as third-party parsers and can be replaced at runtime via configuration. Prism compiles WAT to WASM at runtime and **does not load raw `.wasm` binaries**.
 
 ---
 
@@ -69,14 +69,15 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
 
 * **Implementations**:
   * All routing header parsers are **WASM modules** implementing the ABI described in section 7.
-  * Prism ships two default parsers as embedded WASM modules:
+  * In configuration and on disk, Prism loads these modules from **WAT text** (`.wat`) only.
+  * Prism ships two default parsers as embedded WAT modules:
     * `minecraft_handshake`
     * `tls_sni`
   * These defaults are not "special" at runtime: they can be replaced by providing a different module path in configuration.
 
 * **Plugin support (WASM)**:
   * Parsers can be loaded from WebAssembly modules to avoid hardcoding parsing logic in the host language.
-  * Prism ships the default parsers as embedded WASM modules, so the default routing behavior uses the same ABI as external plugins.
+  * Prism ships the default parsers as embedded WAT modules, so the default routing behavior uses the same ABI as external plugins.
   * WASM is used only on the connection prelude; the hot path (byte bridging) remains native.
 
 * **Testability**:
@@ -421,6 +422,11 @@ The project will strictly adhere to the following testing pyramid:
 ## 7. WASM Routing Parser ABI (v1)
 
 Prism's WASM routing header parser interface is intentionally tiny to keep overhead low.
+
+### Module distribution format
+
+* Prism expects routing parser modules to be provided as **WAT text** (`.wat`).
+* Prism compiles WAT to WASM at runtime (via Wasmer) and intentionally **rejects loading raw `.wasm` binaries**.
 
 ### Memory contract
 

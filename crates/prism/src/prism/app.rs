@@ -51,12 +51,51 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     // Routing stack.
     let host_parser = protocol::build_host_parser(&cfg.routing_parsers)?;
+    let host_parser = Arc::new(tokio::sync::RwLock::new(host_parser));
     let rtr = Arc::new(router::Router::new(cfg.routes.clone()));
 
-    let (reload_tx, _reload_rx) = tokio::sync::watch::channel(telemetry::ReloadSignal::new());
+    let tcp_runtime = Arc::new(tokio::sync::RwLock::new(proxy::TcpRuntimeConfig {
+        max_header_bytes: cfg.max_header_bytes,
+        handshake_timeout: cfg.timeouts.handshake_timeout,
+        idle_timeout: cfg.timeouts.idle_timeout,
+        upstream_dial_timeout: cfg.upstream_dial_timeout,
+        buffer_size: cfg.buffer_size,
+        proxy_protocol_v2: cfg.proxy_protocol_v2,
+    }));
+
+    let (reload_tx, reload_rx) = tokio::sync::watch::channel(telemetry::ReloadSignal::new());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let mut tasks = JoinSet::new();
+
+    // Config reload loop (polling + admin-triggered).
+    {
+        let config_path = resolved.path.clone();
+        let static_listeners = cfg.listeners.clone();
+        let router = rtr.clone();
+        let parser = host_parser.clone();
+        let runtime = tcp_runtime.clone();
+        let mut reload_rx = reload_rx.clone();
+        let mut shutdown = shutdown_rx.clone();
+        let mut enabled = cfg.reload.enabled;
+        let mut poll = cfg.reload.poll_interval;
+
+        tasks.spawn(async move {
+            reload_loop(
+                config_path,
+                static_listeners,
+                router,
+                parser,
+                runtime,
+                &mut reload_rx,
+                &mut shutdown,
+                &mut enabled,
+                &mut poll,
+            )
+            .await;
+            Ok(())
+        });
+    }
 
     // Admin server.
     if admin_enabled {
@@ -90,28 +129,36 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                             router: rtr.clone(),
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
-                            max_header_bytes: cfg.max_header_bytes,
-                            handshake_timeout: cfg.timeouts.handshake_timeout,
-                            idle_timeout: cfg.timeouts.idle_timeout,
-                            upstream_dial_timeout: cfg.upstream_dial_timeout,
-                            buffer_size: cfg.buffer_size,
+                            runtime: tcp_runtime.clone(),
                         })
                     } else {
                         proxy::TcpHandler::forward(proxy::TcpForwardHandlerOptions {
                             upstream,
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
-                            idle_timeout: cfg.timeouts.idle_timeout,
-                            upstream_dial_timeout: cfg.upstream_dial_timeout,
-                            buffer_size: cfg.buffer_size,
+                            runtime: tcp_runtime.clone(),
                         })
                     };
 
                     tasks.spawn(async move { proxy::serve_tcp(&listen_addr, handler).await });
                 }
                 "udp" => {
-                    // TODO: UDP forwarder
-                    tracing::warn!(listen_addr = %l.listen_addr, "udp listener configured but UDP is not implemented yet");
+                    let listen_addr = l.listen_addr.clone();
+                    let upstream = l.upstream.clone();
+
+                    if upstream.trim().is_empty() {
+                        tracing::warn!(listen_addr = %listen_addr, "udp listener missing upstream; skipping");
+                        continue;
+                    }
+
+                    let opts = proxy::UdpForwardOptions {
+                        upstream,
+                        sessions: sessions.clone(),
+                        tunnel_manager: Some(tunnel_manager.clone()),
+                        idle_timeout: cfg.timeouts.idle_timeout,
+                    };
+
+                    tasks.spawn(async move { proxy::serve_udp(&listen_addr, opts).await });
                 }
                 other => {
                     tracing::warn!(listen_addr = %l.listen_addr, protocol = %other, "unsupported listener protocol");
@@ -217,4 +264,145 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn reload_loop(
+    config_path: PathBuf,
+    static_listeners: Vec<config::ProxyListenerConfig>,
+    router: Arc<router::Router>,
+    parser: Arc<tokio::sync::RwLock<protocol::SharedHostParser>>,
+    runtime: Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
+    reload_rx: &mut tokio::sync::watch::Receiver<telemetry::ReloadSignal>,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+    enabled: &mut bool,
+    poll_interval: &mut Duration,
+) {
+    let mut last_sig = file_sig(&config_path).ok();
+
+    loop {
+        let sleep_dur = if *enabled {
+            (*poll_interval).max(Duration::from_millis(200))
+        } else {
+            Duration::from_secs(3600)
+        };
+
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
+            }
+            _ = reload_rx.changed() => {
+                apply_reload(
+                    &config_path,
+                    &static_listeners,
+                    &router,
+                    &parser,
+                    &runtime,
+                    enabled,
+                    poll_interval,
+                ).await;
+                last_sig = file_sig(&config_path).ok();
+            }
+            _ = tokio::time::sleep(sleep_dur) => {
+                if !*enabled {
+                    continue;
+                }
+                let sig = match file_sig(&config_path) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                if last_sig.is_some_and(|prev| prev == sig) {
+                    continue;
+                }
+                apply_reload(
+                    &config_path,
+                    &static_listeners,
+                    &router,
+                    &parser,
+                    &runtime,
+                    enabled,
+                    poll_interval,
+                ).await;
+                last_sig = Some(sig);
+            }
+        }
+    }
+}
+
+async fn apply_reload(
+    config_path: &PathBuf,
+    static_listeners: &[config::ProxyListenerConfig],
+    router: &Arc<router::Router>,
+    parser: &Arc<tokio::sync::RwLock<protocol::SharedHostParser>>,
+    runtime: &Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
+    enabled: &mut bool,
+    poll_interval: &mut Duration,
+) {
+    let cfg = match config::load_config(config_path) {
+        Ok(c) => c,
+        Err(err) => {
+            tracing::warn!(path=%config_path.display(), err=%err, "reload: config load failed");
+            return;
+        }
+    };
+
+    // Listener topology changes require restart.
+    if !listeners_equal(static_listeners, &cfg.listeners) {
+        tracing::warn!("reload: listener topology changed; restart required to apply listener changes");
+    }
+
+    router.update(cfg.routes.clone());
+
+    match protocol::build_host_parser(&cfg.routing_parsers) {
+        Ok(p) => {
+            *parser.write().await = p;
+        }
+        Err(err) => {
+            tracing::warn!(err=%err, "reload: rebuild routing parsers failed");
+        }
+    }
+
+    *runtime.write().await = proxy::TcpRuntimeConfig {
+        max_header_bytes: cfg.max_header_bytes,
+        handshake_timeout: cfg.timeouts.handshake_timeout,
+        idle_timeout: cfg.timeouts.idle_timeout,
+        upstream_dial_timeout: cfg.upstream_dial_timeout,
+        buffer_size: cfg.buffer_size,
+        proxy_protocol_v2: cfg.proxy_protocol_v2,
+    };
+
+    *enabled = cfg.reload.enabled;
+    *poll_interval = cfg.reload.poll_interval;
+
+    tracing::info!("reload: applied");
+}
+
+fn listeners_equal(a: &[config::ProxyListenerConfig], b: &[config::ProxyListenerConfig]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    for (x, y) in a.iter().zip(b.iter()) {
+        if x.listen_addr.trim() != y.listen_addr.trim() {
+            return false;
+        }
+        if x.protocol.trim() != y.protocol.trim() {
+            return false;
+        }
+        if x.upstream.trim() != y.upstream.trim() {
+            return false;
+        }
+    }
+    true
+}
+
+fn file_sig(path: &PathBuf) -> anyhow::Result<(u64, u64)> {
+    let meta = std::fs::metadata(path)?;
+    let len = meta.len();
+    let m = meta
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    Ok((m, len))
 }

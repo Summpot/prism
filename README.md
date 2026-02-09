@@ -93,7 +93,7 @@ If multiple upstreams are configured, Prism will try them in the order produced 
 
 Prism extracts the routing hostname from the first bytes of each TCP connection using `routing_parsers`.
 
-By default, Prism enables two parsers implemented as **embedded WASM modules**:
+By default, Prism enables two parsers implemented as **embedded WAT modules** (WebAssembly text format):
 
 - `minecraft_handshake`
 - `tls_sni`
@@ -103,7 +103,9 @@ You can reference the embedded modules using the special path scheme `builtin:<n
 - `builtin:minecraft_handshake`
 - `builtin:tls_sni`
 
-You can also load your own parser from a `.wasm` file by setting `type="wasm"` and `path` to the file path.
+You can also load your own parser from a `.wat` file by setting `type="wasm"` and `path` to the file path.
+
+Prism intentionally **does not load raw `.wasm` binaries** for routing parsers.
 
 ## Tunnel mode
 

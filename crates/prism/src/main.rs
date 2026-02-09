@@ -1,5 +1,4 @@
 mod prism;
-mod probestack;
 
 use clap::Parser;
 

@@ -434,7 +434,9 @@ Prism's WASM routing header parser interface is intentionally tiny to keep overh
 
 * Prism loads routing parser modules from a configurable directory: `routing_parser_dir`.
   * Relative paths are resolved relative to the config file directory.
-* In configuration, parsers are referenced by the **basename** of the `.wat` file (no directories).
+* In configuration, each route selects one or more parsers via `routes[].parsers`.
+  * Parsers are referenced by **name only** (no extension, no directories).
+  * A parser name `foo` maps to the file `routing_parser_dir/foo.wat`.
 * Prism ships default parsers as embedded WAT sources and **materializes** them into `routing_parser_dir` at startup (if missing), so builtin and custom parsers share the same file-based loading path.
 
 ### Memory contract

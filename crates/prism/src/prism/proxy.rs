@@ -220,7 +220,6 @@ impl TcpHandler {
 }
 
 pub struct TcpRoutingHandlerOptions {
-    pub parser: Arc<tokio::sync::RwLock<protocol::SharedHostParser>>,
     pub router: Arc<router::Router>,
     pub sessions: telemetry::SharedSessions,
 
@@ -377,8 +376,10 @@ impl UdpSession {
     }
 
     fn touch(&self) {
-        self.last_seen_unix_ms
-            .store(telemetry::now_unix_ms(), std::sync::atomic::Ordering::Relaxed);
+        self.last_seen_unix_ms.store(
+            telemetry::now_unix_ms(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     fn last_seen(&self) -> u64 {
@@ -739,7 +740,8 @@ async fn reply_ping_pong(
     buf: &mut Vec<u8>,
     timeout: Duration,
 ) -> anyhow::Result<()> {
-    let Some((raw, pid)) = read_mc_packet_raw_buffered_opt(buf, conn, 64 * 1024, timeout).await? else {
+    let Some((raw, pid)) = read_mc_packet_raw_buffered_opt(buf, conn, 64 * 1024, timeout).await?
+    else {
         return Ok(());
     };
     if pid != 1 {
@@ -794,10 +796,7 @@ async fn try_handle_minecraft_status_cached(
     rt: &TcpRuntimeConfig,
     opts: &TcpRoutingHandlerOptions,
 ) -> bool {
-    let Some(ttl) = res
-        .cache_ping_ttl
-        .filter(|d| *d > Duration::from_millis(0))
-    else {
+    let Some(ttl) = res.cache_ping_ttl.filter(|d| *d > Duration::from_millis(0)) else {
         return false;
     };
 
@@ -976,7 +975,6 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let client = conn.peer_addr().map(|a| a.to_string()).unwrap_or_default();
 
     let rt = { opts.runtime.read().await.clone() };
-    let parser = { opts.parser.read().await.clone() };
 
     let max_header = if rt.max_header_bytes == 0 {
         64 * 1024
@@ -988,27 +986,27 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let mut captured: Vec<u8> = Vec::with_capacity(4096.min(max_header));
     let mut tmp = vec![0u8; 4096];
 
-    let host = {
+    let res = {
         let read_fut = async {
             loop {
                 if captured.len() >= max_header {
-                    break Ok::<String, protocol::ParseError>(String::new());
+                    break Ok::<Option<router::Resolution>, protocol::ParseError>(None);
                 }
                 let n = conn
                     .read(&mut tmp)
                     .await
                     .map_err(|e| protocol::ParseError::Fatal(format!("read failed: {e}")))?;
                 if n == 0 {
-                    break Ok(String::new());
+                    break Ok(None);
                 }
 
                 let need = (max_header - captured.len()).min(n);
                 captured.extend_from_slice(&tmp[..need]);
 
-                match parser.parse(&captured) {
-                    Ok(h) => break Ok(h),
+                match opts.router.resolve_prelude(&captured) {
+                    Ok(Some(r)) => break Ok(Some(r)),
+                    Ok(None) => break Ok(None),
                     Err(protocol::ParseError::NeedMoreData) => continue,
-                    Err(protocol::ParseError::NoMatch) => break Err(protocol::ParseError::NoMatch),
                     Err(e) => break Err(e),
                 }
             }
@@ -1016,9 +1014,9 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
 
         if rt.handshake_timeout > Duration::from_millis(0) {
             match time::timeout(rt.handshake_timeout, read_fut).await {
-                Ok(Ok(h)) => h,
+                Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
-                    tracing::warn!(sid=%sid, client=%client, parser=%parser.name(), err=%e, "proxy: routing header parse failed");
+                    tracing::warn!(sid=%sid, client=%client, err=%e, "proxy: routing header parse failed");
                     let _ = conn.shutdown().await;
                     return;
                 }
@@ -1030,9 +1028,9 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
             }
         } else {
             match read_fut.await {
-                Ok(h) => h,
+                Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!(sid=%sid, client=%client, parser=%parser.name(), err=%e, "proxy: routing header parse failed");
+                    tracing::warn!(sid=%sid, client=%client, err=%e, "proxy: routing header parse failed");
                     let _ = conn.shutdown().await;
                     return;
                 }
@@ -1040,17 +1038,17 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         }
     };
 
-    let host = host.trim().to_ascii_lowercase();
+    let Some(res) = res else {
+        tracing::debug!(sid=%sid, client=%client, "proxy: no route matched prelude");
+        let _ = conn.shutdown().await;
+        return;
+    };
+
+    let host = res.host.trim().to_ascii_lowercase();
     if host.is_empty() {
         let _ = conn.shutdown().await;
         return;
     }
-
-    let Some(res) = opts.router.resolve(&host) else {
-        tracing::debug!(sid=%sid, client=%client, host=%host, "proxy: no route for host");
-        let _ = conn.shutdown().await;
-        return;
-    };
 
     metrics::counter!("prism_route_hits_total", "host" => host.clone()).increment(1);
 
@@ -1456,16 +1454,16 @@ mod tests {
         let proxy_ln = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_addr = proxy_ln.local_addr().unwrap();
 
-        let r = Arc::new(router::Router::new(vec![config::RouteConfig {
+        let route_cfg = config::RouteConfig {
             host: vec!["play.example.com".into()],
             upstreams: vec![backend_addr.to_string()],
+            parsers: vec!["minecraft_handshake".into()],
             strategy: "sequential".into(),
             cache_ping_ttl: Some(Duration::from_secs(5)),
-        }]));
-
+        };
         let parser: protocol::SharedHostParser = Arc::new(MockMinecraftParser);
+        let r = Arc::new(router::Router::new(vec![(route_cfg, parser)]));
         let opts = Arc::new(TcpRoutingHandlerOptions {
-            parser: Arc::new(tokio::sync::RwLock::new(parser)),
             router: r,
             sessions: Arc::new(telemetry::SessionRegistry::new()),
             tunnel_manager: None,
@@ -1498,16 +1496,14 @@ mod tests {
             c.write_all(&handshake).await.unwrap();
             c.write_all(&status_req).await.unwrap();
 
-            let (_raw, pid) =
-                read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
-                    .await
-                    .unwrap();
+            let (_raw, pid) = read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
+                .await
+                .unwrap();
             assert_eq!(pid, 0);
             c.write_all(&ping1).await.unwrap();
-            let (_raw, pid) =
-                read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
-                    .await
-                    .unwrap();
+            let (_raw, pid) = read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
+                .await
+                .unwrap();
             assert_eq!(pid, 1);
         }
 
@@ -1519,16 +1515,14 @@ mod tests {
             c.write_all(&handshake).await.unwrap();
             c.write_all(&status_req).await.unwrap();
 
-            let (_raw, pid) =
-                read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
-                    .await
-                    .unwrap();
+            let (_raw, pid) = read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
+                .await
+                .unwrap();
             assert_eq!(pid, 0);
             c.write_all(&ping2).await.unwrap();
-            let (_raw, pid) =
-                read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
-                    .await
-                    .unwrap();
+            let (_raw, pid) = read_mc_packet_raw_stream(&mut c, 512 * 1024, Duration::from_secs(2))
+                .await
+                .unwrap();
             assert_eq!(pid, 1);
         }
 

@@ -1,14 +1,14 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anyhow::Context;
+use std::sync::Mutex;
 use thiserror::Error;
 use wasmer::{Engine, Instance, Memory, Module, Pages, Store, TypedFunction, imports};
-
-use crate::prism::config;
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -27,14 +27,59 @@ pub trait HostParser: Send + Sync {
 
 pub type SharedHostParser = Arc<dyn HostParser>;
 
-pub fn build_host_parser(
-    parsers: &[config::RoutingParserConfig],
-) -> anyhow::Result<SharedHostParser> {
-    let mut out: Vec<SharedHostParser> = Vec::new();
-    for p in parsers {
-        out.push(Arc::new(WasmHostParser::from_config(p)?) as SharedHostParser);
+pub trait ParserProvider: Send + Sync {
+    fn get(&self, name: &str) -> anyhow::Result<SharedHostParser>;
+
+    fn chain(&self, names: &[String]) -> anyhow::Result<SharedHostParser> {
+        let mut out: Vec<SharedHostParser> = Vec::with_capacity(names.len());
+        for n in names {
+            out.push(self.get(n)?);
+        }
+        Ok(Arc::new(ChainHostParser::new(out)))
     }
-    Ok(Arc::new(ChainHostParser::new(out)))
+}
+
+pub struct FsWasmParserProvider {
+    dir: PathBuf,
+    cache: Mutex<HashMap<String, SharedHostParser>>,
+}
+
+impl FsWasmParserProvider {
+    pub fn new(dir: PathBuf) -> Self {
+        Self {
+            dir,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn wat_path_for(&self, name: &str) -> PathBuf {
+        self.dir.join(format!("{name}.wat"))
+    }
+}
+
+impl ParserProvider for FsWasmParserProvider {
+    fn get(&self, name: &str) -> anyhow::Result<SharedHostParser> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("protocol: empty parser name");
+        }
+
+        // Fast path: cache hit.
+        if let Ok(guard) = self.cache.lock() {
+            if let Some(p) = guard.get(name) {
+                return Ok(p.clone());
+            }
+        }
+
+        let wat_path = self.wat_path_for(name);
+        let parser = Arc::new(WasmHostParser::from_wat_path(name, &wat_path)?) as SharedHostParser;
+
+        if let Ok(mut guard) = self.cache.lock() {
+            guard.insert(name.to_string(), parser.clone());
+        }
+
+        Ok(parser)
+    }
 }
 
 pub struct ChainHostParser {
@@ -93,47 +138,40 @@ pub struct WasmHostParser {
 }
 
 impl WasmHostParser {
-    pub fn from_config(cfg: &config::RoutingParserConfig) -> anyhow::Result<Self> {
-        let path = cfg.path.trim();
-        if path.is_empty() {
-            anyhow::bail!("protocol: wasm routing parser missing path");
+    pub fn from_wat_path(name: &str, path: &Path) -> anyhow::Result<Self> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("protocol: empty wasm routing parser name");
         }
-
-        if path.starts_with("builtin:") {
-            anyhow::bail!(
-                "protocol: builtin:<name> routing parsers are no longer supported; use a .wat file path (got {path})"
-            );
+        if path.as_os_str().is_empty() {
+            anyhow::bail!("protocol: empty wasm routing parser path");
         }
 
         // Prism loads routing parsers from WAT sources (text format) only.
         // We intentionally reject raw .wasm binaries so configs stay reviewable and auditable.
-        let p = Path::new(path);
-        if p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm")) {
+        if path
+            .extension()
+            .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm"))
+        {
             anyhow::bail!(
                 "protocol: loading raw .wasm is disabled; provide a .wat file instead ({})",
-                p.display()
+                path.display()
             );
         }
-        let wat_bytes = std::fs::read(p).with_context(|| format!("protocol: read wat {}", path))?;
+
+        let wat_bytes = std::fs::read(path)
+            .with_context(|| format!("protocol: read wat {}", path.display()))?;
 
         if wat_bytes.starts_with(b"\0asm") {
             anyhow::bail!(
                 "protocol: expected WAT text input but got a wasm binary (path={})",
-                path
+                path.display()
             );
         }
 
-        let fn_name = cfg
-            .function
-            .clone()
-            .unwrap_or_else(|| "prism_parse".to_string());
-        let name = if !cfg.name.trim().is_empty() {
-            cfg.name.trim().to_string()
-        } else {
-            format!("wasm:{path}")
-        };
-
-        let max_output_len = cfg.max_output_len.unwrap_or(255).max(1);
+        let fn_name = "prism_parse".to_string();
+        let name = name.to_string();
+        let max_output_len = 255;
 
         // One engine per parser keeps plugin isolation simple.
         // Compiler/backend selection is delegated to Wasmer (via Cargo features on the `wasmer` crate).
@@ -145,7 +183,7 @@ impl WasmHostParser {
 
         Ok(Self {
             name,
-            path_hint: path.to_string(),
+            path_hint: path.display().to_string(),
             fn_name,
             max_output_len,
             engine,
@@ -263,7 +301,10 @@ const BUILTIN_ROUTING_PARSERS: &[(&str, &[u8])] = &[
         "minecraft_handshake.wat",
         include_bytes!("./builtin_parsers/minecraft_handshake.wat"),
     ),
-    ("tls_sni.wat", include_bytes!("./builtin_parsers/tls_sni.wat")),
+    (
+        "tls_sni.wat",
+        include_bytes!("./builtin_parsers/tls_sni.wat"),
+    ),
 ];
 
 pub fn ensure_builtin_routing_parsers(dir: &Path) -> anyhow::Result<()> {
@@ -342,13 +383,7 @@ mod tests {
         ensure_builtin_routing_parsers(&dir).expect("materialize builtin parsers");
 
         let wat = dir.join("minecraft_handshake.wat");
-        let cfg = config::RoutingParserConfig {
-            name: "minecraft_handshake".into(),
-            path: wat.to_string_lossy().to_string(),
-            function: None,
-            max_output_len: None,
-        };
-        let p = WasmHostParser::from_config(&cfg).expect("parser");
+        let p = WasmHostParser::from_wat_path("minecraft_handshake", &wat).expect("parser");
 
         let data = build_mc_handshake("Play.Example.Com", 25565, 763, 1);
         let host = p.parse(&data).expect("parse");

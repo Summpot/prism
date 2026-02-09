@@ -11,31 +11,32 @@ use rand::{RngExt, rng};
 use regex::Regex;
 
 use crate::prism::config;
+use crate::prism::protocol::{ParseError, SharedHostParser};
 
 #[derive(Debug, Clone)]
 pub struct Resolution {
+    pub host: String,
     pub upstreams: Vec<String>,
     pub cache_ping_ttl: Option<Duration>,
     pub matched_host: String,
 }
 
-#[derive(Debug)]
 pub struct Router {
     compiled: ArcSwap<CompiledRoutes>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct CompiledRoutes {
     routes: Vec<CompiledRoute>,
 }
 
-#[derive(Debug)]
 struct CompiledRoute {
     patterns: Vec<CompiledPattern>,
     upstreams: Vec<String>,
     strategy: Strategy,
     cache_ping_ttl: Option<Duration>,
     rr: AtomicU64,
+    parser: SharedHostParser,
 }
 
 #[derive(Debug)]
@@ -53,7 +54,7 @@ enum Strategy {
 }
 
 impl Router {
-    pub fn new(routes: Vec<config::RouteConfig>) -> Self {
+    pub fn new(routes: Vec<(config::RouteConfig, SharedHostParser)>) -> Self {
         let r = Self {
             compiled: ArcSwap::from_pointee(CompiledRoutes::default()),
         };
@@ -61,15 +62,52 @@ impl Router {
         r
     }
 
-    pub fn update(&self, routes: Vec<config::RouteConfig>) {
+    pub fn update(&self, routes: Vec<(config::RouteConfig, SharedHostParser)>) {
         let mut out = Vec::new();
-        for rt in routes {
-            if let Ok(c) = compile_route(&rt) {
+        for (rt, parser) in routes {
+            if let Ok(c) = compile_route(&rt, parser) {
                 out.push(c);
             }
         }
         self.compiled
             .store(Arc::new(CompiledRoutes { routes: out }));
+    }
+
+    /// Resolve an incoming connection by repeatedly trying each route's configured parser chain.
+    ///
+    /// Returns:
+    /// - Ok(Some(resolution)) when a route parses and matches
+    /// - Ok(None) when no routes can match this prelude (and no route needs more data)
+    /// - Err(NeedMoreData) when at least one route needs more bytes to decide
+    pub fn resolve_prelude(&self, prelude: &[u8]) -> Result<Option<Resolution>, ParseError> {
+        let cr = self.compiled.load();
+        if cr.routes.is_empty() {
+            return Ok(None);
+        }
+
+        let mut need_more = false;
+        for rt in &cr.routes {
+            match rt.parser.parse(prelude) {
+                Ok(host) => {
+                    if let Some(res) = resolve_route_for_host(rt, &host) {
+                        return Ok(Some(res));
+                    }
+                }
+                Err(ParseError::NeedMoreData) => {
+                    need_more = true;
+                }
+                Err(ParseError::NoMatch) => {}
+                Err(ParseError::Fatal(_)) => {
+                    // Treat per-route parser failures as non-matches so other routes can still win.
+                }
+            }
+        }
+
+        if need_more {
+            Err(ParseError::NeedMoreData)
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn resolve(&self, host: &str) -> Option<Resolution> {
@@ -84,23 +122,8 @@ impl Router {
         }
 
         for rt in &cr.routes {
-            for p in &rt.patterns {
-                let (matched, groups) = match_host(&host, p);
-                if !matched {
-                    continue;
-                }
-
-                let mut candidates = Vec::with_capacity(rt.upstreams.len());
-                for u in &rt.upstreams {
-                    candidates.push(substitute_params(u, &groups));
-                }
-                let candidates = order_candidates(rt, candidates);
-
-                return Some(Resolution {
-                    upstreams: candidates,
-                    cache_ping_ttl: rt.cache_ping_ttl,
-                    matched_host: p.pattern.clone(),
-                });
+            if let Some(res) = resolve_route_for_host(rt, &host) {
+                return Some(res);
             }
         }
 
@@ -108,7 +131,10 @@ impl Router {
     }
 }
 
-fn compile_route(rt: &config::RouteConfig) -> anyhow::Result<CompiledRoute> {
+fn compile_route(
+    rt: &config::RouteConfig,
+    parser: SharedHostParser,
+) -> anyhow::Result<CompiledRoute> {
     let mut patterns = Vec::new();
     for h in &rt.host {
         let h = h.trim().to_ascii_lowercase();
@@ -151,7 +177,37 @@ fn compile_route(rt: &config::RouteConfig) -> anyhow::Result<CompiledRoute> {
         strategy: parse_strategy(&rt.strategy),
         cache_ping_ttl: rt.cache_ping_ttl,
         rr: AtomicU64::new(0),
+        parser,
     })
+}
+
+fn resolve_route_for_host(rt: &CompiledRoute, host: &str) -> Option<Resolution> {
+    let host = host.trim().to_ascii_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+
+    for p in &rt.patterns {
+        let (matched, groups) = match_host(&host, p);
+        if !matched {
+            continue;
+        }
+
+        let mut candidates = Vec::with_capacity(rt.upstreams.len());
+        for u in &rt.upstreams {
+            candidates.push(substitute_params(u, &groups));
+        }
+        let candidates = order_candidates(rt, candidates);
+
+        return Some(Resolution {
+            host: host.to_string(),
+            upstreams: candidates,
+            cache_ping_ttl: rt.cache_ping_ttl,
+            matched_host: p.pattern.clone(),
+        });
+    }
+
+    None
 }
 
 fn parse_strategy(s: &str) -> Strategy {
@@ -278,16 +334,32 @@ fn rotate(mut in_vec: Vec<String>, start: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prism::protocol;
+    use std::sync::Arc;
 
     #[test]
     fn wildcard_substitution() {
         let cfg = config::RouteConfig {
             host: vec!["*.labs.example.com".into()],
             upstreams: vec!["$1.backend:25565".into()],
+            parsers: vec!["tls_sni".into()],
             strategy: "sequential".into(),
             cache_ping_ttl: Some(Duration::from_secs(1)),
         };
-        let r = Router::new(vec![cfg]);
+
+        struct NoMatchParser;
+        impl protocol::HostParser for NoMatchParser {
+            fn name(&self) -> &str {
+                "test"
+            }
+
+            fn parse(&self, _prelude: &[u8]) -> Result<String, protocol::ParseError> {
+                Err(protocol::ParseError::NoMatch)
+            }
+        }
+
+        let parser = Arc::new(NoMatchParser) as protocol::SharedHostParser;
+        let r = Router::new(vec![(cfg, parser)]);
         let res = r.resolve("play.labs.example.com").expect("match");
         assert_eq!(res.upstreams[0], "play.backend:25565");
     }

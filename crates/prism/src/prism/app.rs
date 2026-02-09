@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use anyhow::Context;
 use tokio::task::JoinSet;
 
+use crate::prism::protocol::ParserProvider;
 use crate::prism::{admin, config, logging, net, protocol, proxy, router, telemetry, tunnel};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
@@ -57,9 +58,8 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
 
     // Routing stack.
-    let host_parser = protocol::build_host_parser(&cfg.routing_parsers)?;
-    let host_parser = Arc::new(tokio::sync::RwLock::new(host_parser));
-    let rtr = Arc::new(router::Router::new(cfg.routes.clone()));
+    let routes_with_parsers = build_routes_with_parsers(&cfg)?;
+    let rtr = Arc::new(router::Router::new(routes_with_parsers));
 
     let tcp_runtime = Arc::new(tokio::sync::RwLock::new(proxy::TcpRuntimeConfig {
         max_header_bytes: cfg.max_header_bytes,
@@ -80,7 +80,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         let config_path = resolved.path.clone();
         let static_listeners = cfg.listeners.clone();
         let router = rtr.clone();
-        let parser = host_parser.clone();
         let runtime = tcp_runtime.clone();
         let mut reload_rx = reload_rx.clone();
         let mut shutdown = shutdown_rx.clone();
@@ -92,7 +91,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                 config_path,
                 static_listeners,
                 router,
-                parser,
                 runtime,
                 &mut reload_rx,
                 &mut shutdown,
@@ -132,7 +130,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
                     let handler = if upstream.trim().is_empty() {
                         proxy::TcpHandler::routing(proxy::TcpRoutingHandlerOptions {
-                            parser: host_parser.clone(),
                             router: rtr.clone(),
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
@@ -277,7 +274,6 @@ async fn reload_loop(
     config_path: PathBuf,
     static_listeners: Vec<config::ProxyListenerConfig>,
     router: Arc<router::Router>,
-    parser: Arc<tokio::sync::RwLock<protocol::SharedHostParser>>,
     runtime: Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
     reload_rx: &mut tokio::sync::watch::Receiver<telemetry::ReloadSignal>,
     shutdown: &mut tokio::sync::watch::Receiver<bool>,
@@ -304,7 +300,6 @@ async fn reload_loop(
                     &config_path,
                     &static_listeners,
                     &router,
-                    &parser,
                     &runtime,
                     enabled,
                     poll_interval,
@@ -326,7 +321,6 @@ async fn reload_loop(
                     &config_path,
                     &static_listeners,
                     &router,
-                    &parser,
                     &runtime,
                     enabled,
                     poll_interval,
@@ -341,7 +335,6 @@ async fn apply_reload(
     config_path: &PathBuf,
     static_listeners: &[config::ProxyListenerConfig],
     router: &Arc<router::Router>,
-    parser: &Arc<tokio::sync::RwLock<protocol::SharedHostParser>>,
     runtime: &Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
     enabled: &mut bool,
     poll_interval: &mut Duration,
@@ -361,17 +354,18 @@ async fn apply_reload(
 
     // Listener topology changes require restart.
     if !listeners_equal(static_listeners, &cfg.listeners) {
-        tracing::warn!("reload: listener topology changed; restart required to apply listener changes");
+        tracing::warn!(
+            "reload: listener topology changed; restart required to apply listener changes"
+        );
     }
 
-    router.update(cfg.routes.clone());
-
-    match protocol::build_host_parser(&cfg.routing_parsers) {
-        Ok(p) => {
-            *parser.write().await = p;
+    match build_routes_with_parsers(&cfg) {
+        Ok(routes_with_parsers) => {
+            router.update(routes_with_parsers);
         }
         Err(err) => {
-            tracing::warn!(err=%err, "reload: rebuild routing parsers failed");
+            tracing::warn!(err=%err, "reload: rebuild per-route parsers failed");
+            return;
         }
     }
 
@@ -388,6 +382,20 @@ async fn apply_reload(
     *poll_interval = cfg.reload.poll_interval;
 
     tracing::info!("reload: applied");
+}
+
+fn build_routes_with_parsers(
+    cfg: &config::Config,
+) -> anyhow::Result<Vec<(config::RouteConfig, protocol::SharedHostParser)>> {
+    let provider = protocol::FsWasmParserProvider::new(cfg.routing_parser_dir.clone());
+    let mut out = Vec::with_capacity(cfg.routes.len());
+    for (i, r) in cfg.routes.iter().enumerate() {
+        let chain = provider
+            .chain(&r.parsers)
+            .with_context(|| format!("route[{}] build parser chain", i))?;
+        out.push((r.clone(), chain));
+    }
+    Ok(out)
 }
 
 fn listeners_equal(a: &[config::ProxyListenerConfig], b: &[config::ProxyListenerConfig]) -> bool {

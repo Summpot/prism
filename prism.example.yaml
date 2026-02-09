@@ -65,14 +65,6 @@ tunnel:
   #     route_only: true # optional. If true, only reachable via routes (tunnel:home-mc).
   #     remote_addr: ":25565" # optional (frp-like). If set, prisms opens this listener automatically.
 
-routing_parsers:
-  - type: "wasm"
-    name: "minecraft_handshake"
-    path: "minecraft_handshake.wat"
-  - type: "wasm"
-    name: "tls_sni"
-    path: "tls_sni.wat"
-
 timeouts:
   handshake_timeout_ms: 3000
   idle_timeout_ms: 0
@@ -80,6 +72,7 @@ timeouts:
 routes:
   - host: "play.example.com"
     upstream: "127.0.0.1:25566"
+    parsers: ["minecraft_handshake"]
 
   # Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
   # using $1, $2, ... (see DESIGN.md for details).
@@ -89,6 +82,8 @@ routes:
       - "127.0.0.1:25568"
     strategy: "round-robin"
     cache_ping_ttl: "60s"
+    parsers: ["minecraft_handshake"]
 
   - host: "home.example.com"
     upstream: "tunnel:home-mc"
+    parsers: ["minecraft_handshake"]

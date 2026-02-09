@@ -80,15 +80,8 @@ add_source = false
 enabled = true
 poll_interval_ms = 1000
 
-[[routing_parsers]]
-type = "wasm"
-name = "minecraft_handshake"
-path = "minecraft_handshake.wat"
-
-[[routing_parsers]]
-type = "wasm"
-name = "tls_sni"
-path = "tls_sni.wat"
+# Each route can specify one or more routing parsers (by name).
+# If omitted, Prism defaults to: ["minecraft_handshake", "tls_sni"].
 
 [timeouts]
 handshake_timeout_ms = 3000
@@ -97,6 +90,7 @@ idle_timeout_ms = 0
 [[routes]]
 host = "play.example.com"
 upstream = "127.0.0.1:25566"
+parsers = ["minecraft_handshake"]
 
 # Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
 # using $1, $2, ... (see DESIGN.md for details).
@@ -105,7 +99,9 @@ host = "*.labs.example.com"
 upstreams = ["127.0.0.1:25567", "127.0.0.1:25568"]
 strategy = "round-robin"
 cache_ping_ttl = "60s"
+parsers = ["minecraft_handshake"]
 
 [[routes]]
 host = "home.example.com"
 upstream = "tunnel:home-mc"
+parsers = ["minecraft_handshake"]

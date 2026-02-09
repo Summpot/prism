@@ -208,7 +208,6 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub routes: Vec<RouteConfig>,
     pub routing_parser_dir: PathBuf,
-    pub routing_parsers: Vec<RoutingParserConfig>,
     pub max_header_bytes: usize,
     pub reload: ReloadConfig,
     pub proxy_protocol_v2: bool,
@@ -249,16 +248,9 @@ pub struct LoggingConfig {
 pub struct RouteConfig {
     pub host: Vec<String>,
     pub upstreams: Vec<String>,
+    pub parsers: Vec<String>,
     pub strategy: String,
     pub cache_ping_ttl: Option<Duration>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RoutingParserConfig {
-    pub name: String,
-    pub path: String,
-    pub function: Option<String>,
-    pub max_output_len: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -307,6 +299,7 @@ pub struct TunnelServiceConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileConfig {
     #[serde(default)]
     listeners: Vec<FileProxyListener>,
@@ -320,9 +313,6 @@ struct FileConfig {
     routes: Vec<FileRoute>,
 
     routing_parser_dir: Option<String>,
-
-    #[serde(default, rename = "routing_parsers")]
-    routing_parsers: Vec<FileRoutingParser>,
 
     #[serde(default)]
     max_header_bytes: i64,
@@ -375,6 +365,7 @@ struct FileTimeouts {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileRoute {
     host: Option<StringOrVec>,
     hosts: Option<StringOrVec>,
@@ -383,20 +374,12 @@ struct FileRoute {
     backend: Option<StringOrVec>,
     backends: Option<StringOrVec>,
 
+    parsers: Option<StringOrVec>,
+
     strategy: Option<String>,
 
     cache_ping_ttl: Option<String>,
     cache_ping_ttl_ms: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FileRoutingParser {
-    #[serde(rename = "type")]
-    ty: Option<String>,
-    name: Option<String>,
-    path: Option<String>,
-    function: Option<String>,
-    max_output_len: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -473,7 +456,13 @@ impl Config {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
-            .map(|p| if p.is_relative() { config_dir.join(p) } else { p })
+            .map(|p| {
+                if p.is_relative() {
+                    config_dir.join(p)
+                } else {
+                    p
+                }
+            })
             .unwrap_or(default_routing_parser_dir);
 
         let routing_parser_dir = normalize_path(routing_parser_dir);
@@ -489,7 +478,6 @@ impl Config {
             },
             routes: vec![],
             routing_parser_dir,
-            routing_parsers: vec![],
             max_header_bytes: fc.max_header_bytes as i64 as usize,
             reload: ReloadConfig {
                 enabled: fc.reload.as_ref().map(|r| r.enabled).unwrap_or(true),
@@ -610,9 +598,24 @@ impl Config {
                     parse_cache_ttl(r.cache_ping_ttl.as_deref(), r.cache_ping_ttl_ms)
                         .with_context(|| format!("config: routes[{}] invalid cache_ping_ttl", i))?;
 
+                let mut parsers: Vec<String> =
+                    r.parsers.clone().map(|p| p.into_vec()).unwrap_or_default();
+
+                if parsers.is_empty() {
+                    // Default: try both built-in parsers.
+                    parsers = vec!["minecraft_handshake".into(), "tls_sni".into()];
+                }
+
+                let parsers = parsers
+                    .into_iter()
+                    .map(|s| normalize_parser_ref(&s))
+                    .collect::<anyhow::Result<Vec<_>>>()
+                    .with_context(|| format!("config: routes[{}] invalid parsers", i))?;
+
                 cfg.routes.push(RouteConfig {
                     host: hosts,
                     upstreams,
+                    parsers,
                     strategy,
                     cache_ping_ttl: cache_ttl,
                 });
@@ -637,86 +640,6 @@ impl Config {
                 }
             }
             cfg.logging.add_source = l.add_source;
-        }
-
-        // --- Routing parsers ---
-        if !fc.routing_parsers.is_empty() {
-            for rp in &fc.routing_parsers {
-                if let Some(t) = &rp.ty {
-                    let t = t.trim().to_ascii_lowercase();
-                    if !t.is_empty() && t != "wasm" {
-                        anyhow::bail!(
-                            "config: routing_parsers only supports type=wasm in Rust (got {t})"
-                        );
-                    }
-                }
-
-                let raw = rp.path.clone().unwrap_or_default().trim().to_string();
-                if raw.is_empty() {
-                    anyhow::bail!("config: routing_parsers entry missing path");
-                }
-
-                let basename = raw.trim();
-                if basename.starts_with("builtin:") {
-                    anyhow::bail!(
-                        "config: routing_parsers.path no longer supports builtin:<name>; use a .wat filename in routing_parser_dir instead (got {})",
-                        basename
-                    );
-                }
-
-                let resolved_path = resolve_wat_basename(&cfg.routing_parser_dir, basename)
-                    .with_context(|| {
-                        format!(
-                            "config: invalid routing_parsers.path {:?} (must be a .wat basename)",
-                            basename
-                        )
-                    })?;
-
-                let name = rp
-                    .name
-                    .clone()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                let name = if !name.is_empty() {
-                    name
-                } else {
-                    resolved_path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("wasm")
-                        .to_string()
-                };
-
-                cfg.routing_parsers.push(RoutingParserConfig {
-                    name,
-                    path: resolved_path.to_string_lossy().to_string(),
-                    function: rp
-                        .function
-                        .clone()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty()),
-                    max_output_len: rp.max_output_len,
-                });
-            }
-        }
-        if cfg.routing_parsers.is_empty() {
-            let mc = cfg.routing_parser_dir.join("minecraft_handshake.wat");
-            let tls = cfg.routing_parser_dir.join("tls_sni.wat");
-            cfg.routing_parsers = vec![
-                RoutingParserConfig {
-                    name: "minecraft_handshake".into(),
-                    path: mc.to_string_lossy().to_string(),
-                    function: None,
-                    max_output_len: None,
-                },
-                RoutingParserConfig {
-                    name: "tls_sni".into(),
-                    path: tls.to_string_lossy().to_string(),
-                    function: None,
-                    max_output_len: None,
-                },
-            ];
         }
 
         // --- Tunnel ---
@@ -821,27 +744,28 @@ fn normalize_path(p: PathBuf) -> PathBuf {
     out
 }
 
-fn resolve_wat_basename(dir: &Path, basename: &str) -> anyhow::Result<PathBuf> {
-    let p = Path::new(basename);
+fn normalize_parser_ref(s: &str) -> anyhow::Result<String> {
+    // Configs refer to parsers by name only (no paths/extensions).
+    // Normalization:
+    // - trim
+    // - lowercase
+    // - treat '-' as '_'
+    // Validation:
+    // - no path separators
+    // - no '.' and no extension
+    let mut out = s.trim().to_ascii_lowercase();
+    out = out.replace('-', "_");
 
-    // Ensure the config only references a file basename (no paths, no traversal).
-    let mut comps = p.components();
-    let Some(Component::Normal(name)) = comps.next() else {
-        anyhow::bail!("routing parser path must be a plain filename");
-    };
-    if comps.next().is_some() {
-        anyhow::bail!("routing parser path must be a plain filename (no directories)");
+    if out.is_empty() {
+        anyhow::bail!("empty parser name");
     }
-
-    // Require .wat to keep configs auditable.
-    let ext_ok = p
-        .extension()
-        .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wat"));
-    if !ext_ok {
-        anyhow::bail!("routing parser filename must end with .wat");
+    if out.contains('/') || out.contains('\\') {
+        anyhow::bail!("parser name must not contain path separators");
     }
-
-    Ok(dir.join(name))
+    if out.contains('.') {
+        anyhow::bail!("parser name must not contain '.' or file extensions");
+    }
+    Ok(out)
 }
 
 fn parse_cache_ttl(
@@ -973,53 +897,75 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        p.push(format!("prism_cfg_test_{name}_{}_{}", std::process::id(), now));
+        p.push(format!(
+            "prism_cfg_test_{name}_{}_{}",
+            std::process::id(),
+            now
+        ));
         std::fs::create_dir_all(&p).expect("mkdir");
         p
     }
 
     #[test]
-    fn routing_parser_dir_and_basename_resolve() {
+    fn routing_parser_dir_and_route_default_parsers() {
         let dir = temp_dir("resolve");
         let cfg_path = dir.join("prism.toml");
 
         let toml = r#"
 routing_parser_dir = "./parsers"
 
-[[routing_parsers]]
-type = "wasm"
-path = "minecraft_handshake.wat"
+[[routes]]
+host = "example.com"
+upstreams = ["127.0.0.1:1234"]
 "#;
 
         std::fs::write(&cfg_path, toml).expect("write");
 
         let cfg = load_config(&cfg_path).expect("load_config");
         assert_eq!(cfg.routing_parser_dir, dir.join("parsers"));
+        assert_eq!(cfg.routes.len(), 1);
         assert_eq!(
-            cfg.routing_parsers[0].path,
-            dir.join("parsers").join("minecraft_handshake.wat").to_string_lossy()
+            cfg.routes[0].parsers,
+            vec!["minecraft_handshake".to_string(), "tls_sni".to_string()]
         );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn routing_parser_path_rejects_directories() {
+    fn route_parsers_normalize_and_reject_extensions() {
         let dir = temp_dir("reject");
         let cfg_path = dir.join("prism.toml");
 
         let toml = r#"
 routing_parser_dir = "./parsers"
 
-[[routing_parsers]]
-type = "wasm"
-path = "../oops.wat"
+[[routes]]
+host = "example.com"
+upstreams = ["127.0.0.1:1234"]
+parsers = ["TLS-SNI", "minecraft-handshake"]
 "#;
 
         std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert_eq!(
+            cfg.routes[0].parsers,
+            vec!["tls_sni".to_string(), "minecraft_handshake".to_string()]
+        );
+
+        let toml_bad = r#"
+routing_parser_dir = "./parsers"
+
+[[routes]]
+host = "example.com"
+upstreams = ["127.0.0.1:1234"]
+parsers = ["minecraft_handshake.wat"]
+"#;
+
+        std::fs::write(&cfg_path, toml_bad).expect("write");
         let err = load_config(&cfg_path).unwrap_err();
         let s = err.to_string();
-        assert!(s.contains("basename") || s.contains("filename"));
+        assert!(s.contains("invalid parsers") || s.contains("parser name"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

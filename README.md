@@ -93,16 +93,21 @@ If multiple upstreams are configured, Prism will try them in the order produced 
 
 ### Routing parsers (WASM)
 
-Prism extracts the routing hostname from the first bytes of each TCP connection using `routing_parsers`.
+Prism extracts the routing hostname from the first bytes of each TCP connection using per-route parser chains.
 
 By default, Prism enables two parsers implemented as **embedded WAT modules** (WebAssembly text format):
 
 - `minecraft_handshake`
 - `tls_sni`
 
-Prism materializes these builtin parsers into `routing_parser_dir` at startup (if missing), then loads **all** parsers from `.wat` files in that directory.
+Prism materializes these builtin parsers into `routing_parser_dir` at startup (if missing), then loads the `.wat` files referenced by your routes.
 
-In config, `routing_parsers[].path` is the **basename** of the `.wat` file (for example `minecraft_handshake.wat`).
+In config, each route can specify `parsers` as a string or list of strings (parser **names** only):
+
+- `parsers = ["minecraft_handshake"]` -> loads `routing_parser_dir/minecraft_handshake.wat`
+- `parsers = ["tls_sni"]` -> loads `routing_parser_dir/tls_sni.wat`
+
+If `parsers` is omitted, Prism defaults to trying both builtin parsers in order: `["minecraft_handshake", "tls_sni"]`.
 
 Prism intentionally **does not load raw `.wasm` binaries** for routing parsers.
 

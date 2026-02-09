@@ -41,11 +41,6 @@
         ]
       ]
     },
-    "routing_parsers": {
-      "type": "array",
-      "description": "Controls how Prism extracts the routing hostname from the first bytes of the stream.",
-      "items": { "$ref": "#/$defs/routingParser" }
-    },
     "routing_parser_dir": {
       "type": "string",
       "description": "Directory to load routing parser .wat files from. Prism will write its builtin parsers into this directory at startup if they are missing. Relative paths are resolved relative to the config file directory.",
@@ -165,34 +160,7 @@
         }
       }
     },
-    "routingParser": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "Parser type. In Rust, only type=\"wasm\" is supported (WASM module loaded from WAT text)."
-        },
-        "name": {
-          "type": "string",
-          "description": "Parser name (e.g. minecraft_handshake, tls_sni)."
-        },
-        "path": {
-          "type": "string",
-          "description": "Routing parser module filename (basename only). Prism loads routing parsers from WAT text (.wat) only; this must be a .wat filename located in routing_parser_dir (for example: minecraft_handshake.wat)."
-        },
-        "function": {
-          "type": "string",
-          "description": "Optional exported function name (defaults to prism_parse)."
-        },
-        "max_output_len": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Maximum output length from a parser.",
-          "examples": [255]
-        }
-      }
-    },
+    
     "reload": {
       "type": "object",
       "additionalProperties": false,
@@ -384,6 +352,10 @@
         "backends": {
           "$ref": "#/$defs/stringOrStrings",
           "description": "Alias of upstreams (gate-lite compatible naming)."
+        },
+        "parsers": {
+          "$ref": "#/$defs/stringOrStrings",
+          "description": "Ordered routing parser names to try for this route (name only; do not include .wat). Defaults to [minecraft_handshake, tls_sni]."
         },
         "strategy": {
           "type": "string",

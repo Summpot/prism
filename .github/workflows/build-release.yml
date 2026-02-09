@@ -17,7 +17,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        if: matrix.variant != 'musl'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
@@ -51,7 +50,7 @@ jobs:
         run: pnpm build
 
   rust-binaries:
-    name: rust binaries (${{ matrix.os }}/${{ matrix.arch }}${{ matrix.variant && format(' {0}', matrix.variant) || '' }})
+    name: rust binaries (${{ matrix.os }}/${{ matrix.arch }} / ${{ matrix.target }})
     needs: test-rust
     strategy:
       fail-fast: false
@@ -60,59 +59,59 @@ jobs:
           - os: linux
             arch: amd64
             runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
           - os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
           - os: linux
             arch: amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            variant: musl
             container: ghcr.io/blackdex/rust-musl:x86_64-musl-stable
           - os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            variant: musl
             container: ghcr.io/blackdex/rust-musl:aarch64-musl-stable
           - os: darwin
             arch: amd64
             runner: macos-15-intel
+            target: x86_64-apple-darwin
           - os: darwin
             arch: arm64
             runner: macos-latest
+            target: aarch64-apple-darwin
           - os: windows
             arch: amd64
             runner: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
+        if: ${{ !matrix.container }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-binaries-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.variant || 'native' }}
+          shared-key: rust-binaries-${{ matrix.target }}
 
       - name: Build (release) (unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${{ matrix.target }}" ]]; then
-            cargo build --release -p prism --target "${{ matrix.target }}"
-          else
-            cargo build --release -p prism
-          fi
+          cargo build --release -p prism --target "${{ matrix.target }}"
 
       - name: Build (release) (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo build --release -p prism
+          cargo build --release -p prism --target "${{ matrix.target }}"
 
       - name: Package (unix)
         if: runner.os != 'Windows'
@@ -132,21 +131,12 @@ jobs:
           OS="${{ matrix.os }}"
           ARCH="${{ matrix.arch }}"
 
-          VARIANT="${{ matrix.variant }}"
-          SUFFIX=""
-          if [[ -n "${VARIANT}" ]]; then
-            SUFFIX="_${VARIANT}"
-          fi
-
-          BASENAME="prism_${VERSION}_${OS}_${ARCH}${SUFFIX}"
+          TARGET="${{ matrix.target }}"
+          BASENAME="prism_${VERSION}_${TARGET}"
           TMPDIR="${OUTDIR}/${BASENAME}"
           mkdir -p "${TMPDIR}"
 
-          BIN="target/release/prism"
-          if [[ -n "${{ matrix.target }}" ]]; then
-            BIN="target/${{ matrix.target }}/release/prism"
-          fi
-          cp -v "${BIN}" "${TMPDIR}/prism"
+          cp -v "target/${TARGET}/release/prism" "${TMPDIR}/prism"
 
           tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
           rm -rf "${TMPDIR}"
@@ -167,17 +157,12 @@ jobs:
           $os = "${{ matrix.os }}"
           $arch = "${{ matrix.arch }}"
 
-          $variant = "${{ matrix.variant }}"
-          $suffix = ""
-          if ($variant) {
-            $suffix = "_$variant"
-          }
-
-          $basename = "prism_${version}_${os}_${arch}$suffix"
+          $target = "${{ matrix.target }}"
+          $basename = "prism_${version}_${target}"
           $tmpdir = Join-Path $outdir $basename
           New-Item -ItemType Directory -Force -Path $tmpdir | Out-Null
 
-          Copy-Item -Force -Path "target/release/prism.exe" -Destination (Join-Path $tmpdir "prism.exe")
+          Copy-Item -Force -Path "target/$target/release/prism.exe" -Destination (Join-Path $tmpdir "prism.exe")
 
           Compress-Archive -Path $tmpdir -DestinationPath (Join-Path $outdir "$basename.zip") -Force
           Remove-Item -Recurse -Force $tmpdir
@@ -185,7 +170,7 @@ jobs:
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prism-rust-binaries-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) || '' }}
+          name: prism-rust-binaries-${{ matrix.target }}
           path: dist/*
 
   release:

@@ -1,13 +1,21 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::Path, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use tokio::task::JoinSet;
 
 use crate::prism::protocol::ParserProvider;
-use crate::prism::{admin, config, logging, net, protocol, proxy, router, telemetry, tunnel};
+use crate::prism::{
+    admin, config, logging, net, protocol, proxy, router, runtime_paths, telemetry, tunnel,
+};
 
-pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
+pub async fn run(
+    config_path: Option<PathBuf>,
+    workdir: Option<PathBuf>,
+    routing_parser_dir: Option<PathBuf>,
+) -> anyhow::Result<()> {
     let resolved = config::resolve_config_path(config_path)?;
+
+    let paths = runtime_paths::resolve_runtime_paths(workdir, routing_parser_dir)?;
 
     let created = config::ensure_config_file(&resolved.path)?;
 
@@ -21,10 +29,10 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         tracing::warn!(path = %resolved.path.display(), source = %resolved.source, "config: created new config file");
     }
 
-    protocol::ensure_builtin_routing_parsers(&cfg.routing_parser_dir).with_context(|| {
+    protocol::ensure_builtin_routing_parsers(&paths.routing_parser_dir).with_context(|| {
         format!(
             "protocol: materialize builtin routing parsers in {}",
-            cfg.routing_parser_dir.display()
+            paths.routing_parser_dir.display()
         )
     })?;
 
@@ -42,6 +50,8 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     tracing::info!(
         config = %resolved.path.display(),
+        workdir = %paths.workdir.display(),
+        routing_parser_dir = %paths.routing_parser_dir.display(),
         proxy_enabled,
         tunnel_server_enabled,
         tunnel_client_enabled,
@@ -58,7 +68,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
 
     // Routing stack.
-    let routes_with_parsers = build_routes_with_parsers(&cfg)?;
+    let routes_with_parsers = build_routes_with_parsers(&cfg, &paths.routing_parser_dir)?;
     let rtr = Arc::new(router::Router::new(routes_with_parsers));
 
     let tcp_runtime = Arc::new(tokio::sync::RwLock::new(proxy::TcpRuntimeConfig {
@@ -81,6 +91,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         let static_listeners = cfg.listeners.clone();
         let router = rtr.clone();
         let runtime = tcp_runtime.clone();
+        let routing_parser_dir = paths.routing_parser_dir.clone();
         let mut reload_rx = reload_rx.clone();
         let mut shutdown = shutdown_rx.clone();
         let mut enabled = cfg.reload.enabled;
@@ -90,6 +101,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             reload_loop(
                 config_path,
                 static_listeners,
+                routing_parser_dir,
                 router,
                 runtime,
                 &mut reload_rx,
@@ -273,6 +285,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 async fn reload_loop(
     config_path: PathBuf,
     static_listeners: Vec<config::ProxyListenerConfig>,
+    routing_parser_dir: PathBuf,
     router: Arc<router::Router>,
     runtime: Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
     reload_rx: &mut tokio::sync::watch::Receiver<telemetry::ReloadSignal>,
@@ -299,6 +312,7 @@ async fn reload_loop(
                 apply_reload(
                     &config_path,
                     &static_listeners,
+                    &routing_parser_dir,
                     &router,
                     &runtime,
                     enabled,
@@ -320,6 +334,7 @@ async fn reload_loop(
                 apply_reload(
                     &config_path,
                     &static_listeners,
+                    &routing_parser_dir,
                     &router,
                     &runtime,
                     enabled,
@@ -334,6 +349,7 @@ async fn reload_loop(
 async fn apply_reload(
     config_path: &PathBuf,
     static_listeners: &[config::ProxyListenerConfig],
+    routing_parser_dir: &Path,
     router: &Arc<router::Router>,
     runtime: &Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
     enabled: &mut bool,
@@ -347,8 +363,8 @@ async fn apply_reload(
         }
     };
 
-    if let Err(err) = protocol::ensure_builtin_routing_parsers(&cfg.routing_parser_dir) {
-        tracing::warn!(err=%err, dir=%cfg.routing_parser_dir.display(), "reload: materialize builtin routing parsers failed");
+    if let Err(err) = protocol::ensure_builtin_routing_parsers(routing_parser_dir) {
+        tracing::warn!(err=%err, dir=%routing_parser_dir.display(), "reload: materialize builtin routing parsers failed");
         return;
     }
 
@@ -359,7 +375,7 @@ async fn apply_reload(
         );
     }
 
-    match build_routes_with_parsers(&cfg) {
+    match build_routes_with_parsers(&cfg, routing_parser_dir) {
         Ok(routes_with_parsers) => {
             router.update(routes_with_parsers);
         }
@@ -386,8 +402,9 @@ async fn apply_reload(
 
 fn build_routes_with_parsers(
     cfg: &config::Config,
+    routing_parser_dir: &Path,
 ) -> anyhow::Result<Vec<(config::RouteConfig, protocol::SharedHostParser)>> {
-    let provider = protocol::FsWasmParserProvider::new(cfg.routing_parser_dir.clone());
+    let provider = protocol::FsWasmParserProvider::new(routing_parser_dir.to_path_buf());
     let mut out = Vec::with_capacity(cfg.routes.len());
     for (i, r) in cfg.routes.iter().enumerate() {
         let chain = provider

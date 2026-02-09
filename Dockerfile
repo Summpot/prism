@@ -42,6 +42,10 @@ RUN apk add --no-cache ca-certificates \
     && addgroup -S -g 10001 prism \
     && adduser -S -D -H -u 10001 -G prism prism
 
+# Default workdir on Linux is /var/lib/prism. Ensure the non-root user can write there.
+RUN mkdir -p /var/lib/prism \
+    && chown -R prism:prism /var/lib/prism
+
 COPY --from=build /home/rust/prism /usr/local/bin/prism
 
 # Prism auto-detects prism.toml > prism.yaml > prism.yml from CWD.

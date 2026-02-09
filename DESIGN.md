@@ -393,6 +393,15 @@ The project will strictly adhere to the following testing pyramid:
   * When multiple `prism.*` files are present in a discovery directory, precedence is: `prism.toml` > `prism.yaml` > `prism.yml`.
   * JSON is intentionally not supported because it cannot contain comments and Prism configs are expected to be annotated.
   * If the resolved config file path does not exist, Prism will **create a runnable default config file** at that path and continue starting (default: tunnel server on `:7000/tcp`).
+
+* **Runtime working directory**:
+  * Prism uses a work directory for runtime state (for example routing parser modules).
+  * Resolution precedence (highest first):
+    * CLI flag: `--workdir /path/to/workdir`
+    * Environment variable: `PRISM_WORKDIR=/path/to/workdir`
+    * Default:
+      * Linux: `/var/lib/prism`
+      * Other OSes: `${ProjectDataDir}` (derived from `directories::ProjectDirs` in Rust)
 * **Zero-downtime config reload**:
   * Prism can reload configuration without stopping the TCP listener.
   * Existing sessions continue with the configuration snapshot they started with.
@@ -432,12 +441,16 @@ Prism's WASM routing header parser interface is intentionally tiny to keep overh
 
 ### Parser lookup & builtins
 
-* Prism loads routing parser modules from a configurable directory: `routing_parser_dir`.
-  * Relative paths are resolved relative to the config file directory.
+* Prism loads routing parser modules from a configurable directory.
+  * Resolution precedence (highest first):
+    * CLI flag: `--routing-parser-dir /path/to/parsers`
+    * Environment variable: `PRISM_ROUTING_PARSER_DIR=/path/to/parsers`
+    * Default: `$PRISM_WORKDIR/parsers`
+  * If a provided parser dir path is relative, it is resolved relative to `$PRISM_WORKDIR`.
 * In configuration, each route selects one or more parsers via `routes[].parsers`.
   * Parsers are referenced by **name only** (no extension, no directories).
-  * A parser name `foo` maps to the file `routing_parser_dir/foo.wat`.
-* Prism ships default parsers as embedded WAT sources and **materializes** them into `routing_parser_dir` at startup (if missing), so builtin and custom parsers share the same file-based loading path.
+  * A parser name `foo` maps to the file `<routing_parser_dir>/foo.wat`.
+* Prism ships default parsers as embedded WAT sources and **materializes** them into the routing parser directory at startup (if missing), so builtin and custom parsers share the same file-based loading path.
 
 ### Memory contract
 

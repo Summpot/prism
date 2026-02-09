@@ -22,6 +22,14 @@ This repo also ships a JSON Schema for config validation and editor/LSP completi
   - Linux: `/etc/prism/prism.toml`
   - Other OSes: `${ProjectConfigDir}/prism.toml` (derived from Rust's `directories::ProjectDirs`)
 
+Prism also uses a work directory for runtime state (for example routing parser modules):
+
+- CLI flag: `--workdir /path/to/workdir`
+- Environment variable: `PRISM_WORKDIR=/path/to/workdir`
+- Default:
+  - Linux: `/var/lib/prism`
+  - Other OSes: per-user data dir (derived from Rust's `directories::ProjectDirs`)
+
 If the resolved config path does not exist, Prism will create a runnable default config file at that path and continue starting.
 
 The auto-generated default config starts Prism in **tunnel server** mode (frp-like): it listens on `:7000/tcp` and waits for tunnel clients to connect and register services.
@@ -100,12 +108,18 @@ By default, Prism enables two parsers implemented as **embedded WAT modules** (W
 - `minecraft_handshake`
 - `tls_sni`
 
-Prism materializes these builtin parsers into `routing_parser_dir` at startup (if missing), then loads the `.wat` files referenced by your routes.
+Prism materializes these builtin parsers into the routing parser directory at startup (if missing), then loads the `.wat` files referenced by your routes.
+
+The routing parser directory is configured via:
+
+- CLI flag: `--routing-parser-dir /path/to/parsers`
+- Environment variable: `PRISM_ROUTING_PARSER_DIR=/path/to/parsers`
+- Default: `$PRISM_WORKDIR/parsers`
 
 In config, each route can specify `parsers` as a string or list of strings (parser **names** only):
 
-- `parsers = ["minecraft_handshake"]` -> loads `routing_parser_dir/minecraft_handshake.wat`
-- `parsers = ["tls_sni"]` -> loads `routing_parser_dir/tls_sni.wat`
+- `parsers = ["minecraft_handshake"]` -> loads `<routing_parser_dir>/minecraft_handshake.wat`
+- `parsers = ["tls_sni"]` -> loads `<routing_parser_dir>/tls_sni.wat`
 
 If `parsers` is omitted, Prism defaults to trying both builtin parsers in order: `["minecraft_handshake", "tls_sni"]`.
 

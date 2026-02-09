@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -207,7 +207,6 @@ pub struct Config {
     pub admin_addr: String,
     pub logging: LoggingConfig,
     pub routes: Vec<RouteConfig>,
-    pub routing_parser_dir: PathBuf,
     pub max_header_bytes: usize,
     pub reload: ReloadConfig,
     pub proxy_protocol_v2: bool,
@@ -311,8 +310,6 @@ struct FileConfig {
 
     #[serde(default)]
     routes: Vec<FileRoute>,
-
-    routing_parser_dir: Option<String>,
 
     #[serde(default)]
     max_header_bytes: i64,
@@ -446,27 +443,7 @@ impl StringOrVec {
 }
 
 impl Config {
-    fn from_file_config(fc: &mut FileConfig, config_path: &Path) -> anyhow::Result<Config> {
-        let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-        let default_routing_parser_dir = config_dir.join("parsers");
-
-        let routing_parser_dir = fc
-            .routing_parser_dir
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .map(|p| {
-                if p.is_relative() {
-                    config_dir.join(p)
-                } else {
-                    p
-                }
-            })
-            .unwrap_or(default_routing_parser_dir);
-
-        let routing_parser_dir = normalize_path(routing_parser_dir);
-
+    fn from_file_config(fc: &mut FileConfig, _config_path: &Path) -> anyhow::Result<Config> {
         let mut cfg = Config {
             listeners: vec![],
             admin_addr: fc.admin_addr.trim().to_string(),
@@ -477,7 +454,6 @@ impl Config {
                 add_source: false,
             },
             routes: vec![],
-            routing_parser_dir,
             max_header_bytes: fc.max_header_bytes as i64 as usize,
             reload: ReloadConfig {
                 enabled: fc.reload.as_ref().map(|r| r.enabled).unwrap_or(true),
@@ -731,19 +707,6 @@ impl Config {
     }
 }
 
-fn normalize_path(p: PathBuf) -> PathBuf {
-    // Pure component-level cleanup (no filesystem access): removes redundant `.` segments.
-    // We intentionally do not resolve `..`.
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        if matches!(c, Component::CurDir) {
-            continue;
-        }
-        out.push(c.as_os_str());
-    }
-    out
-}
-
 fn normalize_parser_ref(s: &str) -> anyhow::Result<String> {
     // Configs refer to parsers by name only (no paths/extensions).
     // Normalization:
@@ -816,10 +779,6 @@ const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubuserco
 
 admin_addr = ":8080"
 
-# Directory to load routing parser .wat files from.
-# Prism will materialize its builtin parsers into this directory at startup (if missing).
-# routing_parser_dir = "./parsers"
-
 [tunnel]
 auth_token = ""
 auto_listen_services = true
@@ -859,10 +818,6 @@ const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# yaml-language-server: $schema=ht
 # on the server side.
 
 admin_addr: ":8080"
-
-# Directory to load routing parser .wat files from.
-# Prism will materialize its builtin parsers into this directory at startup (if missing).
-# routing_parser_dir: "./parsers"
 
 tunnel:
   auth_token: ""
@@ -907,13 +862,11 @@ mod tests {
     }
 
     #[test]
-    fn routing_parser_dir_and_route_default_parsers() {
+    fn route_default_parsers() {
         let dir = temp_dir("resolve");
         let cfg_path = dir.join("prism.toml");
 
         let toml = r#"
-routing_parser_dir = "./parsers"
-
 [[routes]]
 host = "example.com"
 upstreams = ["127.0.0.1:1234"]
@@ -922,7 +875,6 @@ upstreams = ["127.0.0.1:1234"]
         std::fs::write(&cfg_path, toml).expect("write");
 
         let cfg = load_config(&cfg_path).expect("load_config");
-        assert_eq!(cfg.routing_parser_dir, dir.join("parsers"));
         assert_eq!(cfg.routes.len(), 1);
         assert_eq!(
             cfg.routes[0].parsers,
@@ -938,8 +890,6 @@ upstreams = ["127.0.0.1:1234"]
         let cfg_path = dir.join("prism.toml");
 
         let toml = r#"
-routing_parser_dir = "./parsers"
-
 [[routes]]
 host = "example.com"
 upstreams = ["127.0.0.1:1234"]
@@ -954,8 +904,6 @@ parsers = ["TLS-SNI", "minecraft-handshake"]
         );
 
         let toml_bad = r#"
-routing_parser_dir = "./parsers"
-
 [[routes]]
 host = "example.com"
 upstreams = ["127.0.0.1:1234"]
@@ -966,6 +914,30 @@ parsers = ["minecraft_handshake.wat"]
         let err = load_config(&cfg_path).unwrap_err();
         let s = err.to_string();
         assert!(s.contains("invalid parsers") || s.contains("parser name"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reject_legacy_routing_parser_dir_field() {
+        let dir = temp_dir("legacy");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+routing_parser_dir = "./parsers"
+
+[[routes]]
+host = "example.com"
+upstreams = ["127.0.0.1:1234"]
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let err = load_config(&cfg_path).unwrap_err();
+        let msg = format!("{err:#}").to_ascii_lowercase();
+        assert!(
+            msg.contains("routing_parser_dir"),
+            "expected error mentioning routing_parser_dir, got: {msg}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

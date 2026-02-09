@@ -29,10 +29,6 @@ reload:
 
 max_header_bytes: 65536
 
-# Directory to load routing parser .wat files from.
-# Prism will materialize its builtin parsers into this directory at startup (if missing).
-routing_parser_dir: "./parsers"
-
 tunnel:
   auth_token: ""
   # When true, prisms will automatically open server-side listeners for tunnel

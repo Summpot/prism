@@ -27,12 +27,27 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "2.0"
-tokio = { version = "1.49", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "signal", "sync"] }
+tokio = { version = "1.49", features = [
+    "macros",
+    "rt-multi-thread",
+    "net",
+    "io-util",
+    "time",
+    "signal",
+    "sync",
+] }
 tokio_kcp = "0.9"
 toml = "0.9"
 tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-wasmer = { version = "7.0", features = ["singlepass", "wat"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "json",
+] }
+wasmer = { version = "7.0", default-features = false, features = [
+    "singlepass",
+    "wat",
+] }
 tokio-yamux = "0.3"

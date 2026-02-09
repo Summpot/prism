@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
+        if: matrix.variant != 'musl'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
@@ -36,12 +37,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          # NOTE: Do not enable `cache: pnpm` here. actions/setup-node requires
-          # the pnpm executable to already exist on PATH to determine the store
-          # location, and we provision pnpm via Corepack in the next step.
-
-      # actions/setup-node does not install pnpm; Corepack needs to be enabled
-      # and told which pnpm version to activate.
 
       - name: Enable Corepack
         run: |
@@ -56,7 +51,7 @@ jobs:
         run: pnpm build
 
   rust-binaries:
-    name: rust binaries (${{ matrix.os }}/${{ matrix.arch }})
+    name: rust binaries (${{ matrix.os }}/${{ matrix.arch }}${{ matrix.variant && format(' {0}', matrix.variant) || '' }})
     needs: test-rust
     strategy:
       fail-fast: false
@@ -68,16 +63,29 @@ jobs:
           - os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            variant: musl
+            container: ghcr.io/blackdex/rust-musl:x86_64-musl-stable
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            variant: musl
+            container: ghcr.io/blackdex/rust-musl:aarch64-musl-stable
           - os: darwin
             arch: amd64
-            runner: macos-13
+            runner: macos-15-intel
           - os: darwin
             arch: arm64
-            runner: macos-14
+            runner: macos-latest
           - os: windows
             arch: amd64
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v4
 
@@ -87,10 +95,24 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-binaries-${{ matrix.os }}-${{ matrix.arch }}
+          shared-key: rust-binaries-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.variant || 'native' }}
 
-      - name: Build (release)
-        run: cargo build --release -p prism
+      - name: Build (release) (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ matrix.target }}" ]]; then
+            cargo build --release -p prism --target "${{ matrix.target }}"
+          else
+            cargo build --release -p prism
+          fi
+
+      - name: Build (release) (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release -p prism
 
       - name: Package (unix)
         if: runner.os != 'Windows'
@@ -110,11 +132,21 @@ jobs:
           OS="${{ matrix.os }}"
           ARCH="${{ matrix.arch }}"
 
-          BASENAME="prism_${VERSION}_${OS}_${ARCH}"
+          VARIANT="${{ matrix.variant }}"
+          SUFFIX=""
+          if [[ -n "${VARIANT}" ]]; then
+            SUFFIX="_${VARIANT}"
+          fi
+
+          BASENAME="prism_${VERSION}_${OS}_${ARCH}${SUFFIX}"
           TMPDIR="${OUTDIR}/${BASENAME}"
           mkdir -p "${TMPDIR}"
 
-          cp -v target/release/prism "${TMPDIR}/prism"
+          BIN="target/release/prism"
+          if [[ -n "${{ matrix.target }}" ]]; then
+            BIN="target/${{ matrix.target }}/release/prism"
+          fi
+          cp -v "${BIN}" "${TMPDIR}/prism"
 
           tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
           rm -rf "${TMPDIR}"
@@ -135,7 +167,13 @@ jobs:
           $os = "${{ matrix.os }}"
           $arch = "${{ matrix.arch }}"
 
-          $basename = "prism_${version}_${os}_${arch}"
+          $variant = "${{ matrix.variant }}"
+          $suffix = ""
+          if ($variant) {
+            $suffix = "_$variant"
+          }
+
+          $basename = "prism_${version}_${os}_${arch}$suffix"
           $tmpdir = Join-Path $outdir $basename
           New-Item -ItemType Directory -Force -Path $tmpdir | Out-Null
 
@@ -147,7 +185,7 @@ jobs:
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prism-rust-binaries-${{ matrix.os }}-${{ matrix.arch }}
+          name: prism-rust-binaries-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) || '' }}
           path: dist/*
 
   release:

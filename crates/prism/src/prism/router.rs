@@ -7,7 +7,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use rand::{Rng, rng};
+use rand::{RngExt, rng};
 use regex::Regex;
 
 use crate::prism::config;

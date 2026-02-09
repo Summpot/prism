@@ -2,9 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
 use thiserror::Error;
-use wasmer::{Instance, Memory, Module, NativeFunc, Pages, Store, imports};
-use wasmer_compiler_singlepass::Singlepass;
-use wasmer_engine_universal::Universal;
+use wasmer::{Engine, Instance, Memory, Module, Pages, Store, TypedFunction, imports};
 
 use crate::prism::config;
 
@@ -86,6 +84,7 @@ pub struct WasmHostParser {
     path_hint: String,
     fn_name: String,
     max_output_len: u32,
+    engine: Engine,
     module: Module,
 }
 
@@ -118,9 +117,11 @@ impl WasmHostParser {
         let max_output_len = cfg.max_output_len.unwrap_or(255).max(1);
 
         // One engine per parser keeps plugin isolation simple.
-        // Use Wasmer's Singlepass compiler: lower compilation latency is ideal for routing header parsing.
-        let engine = Universal::new(Singlepass::default()).engine();
-        let store = Store::new(&engine);
+        // Compiler/backend selection is delegated to Wasmer (via Cargo features on the `wasmer` crate).
+        // We currently enable `singlepass` in Cargo.toml because lower compilation latency is ideal
+        // for routing header parsing.
+        let engine = Engine::default();
+        let store = Store::new(engine.clone());
         let module = Module::new(&store, wasm_bytes).context("protocol: compile wasm module")?;
 
         Ok(Self {
@@ -128,63 +129,57 @@ impl WasmHostParser {
             path_hint: path.to_string(),
             fn_name,
             max_output_len,
+            engine,
             module,
         })
     }
 
-    fn instantiate(&self) -> anyhow::Result<(Instance, NativeFunc<i32, i64>)> {
+    fn instantiate(&self) -> anyhow::Result<(Store, Instance, Memory, TypedFunction<i32, i64>)> {
+        let mut store = Store::new(self.engine.clone());
         let import_object = imports! {};
         // No WASI imports are needed for the builtin parsers.
 
-        let instance =
-            Instance::new(&self.module, &import_object).context("protocol: instantiate wasm")?;
+        let instance = Instance::new(&mut store, &self.module, &import_object)
+            .context("protocol: instantiate wasm")?;
 
-        let parse: NativeFunc<i32, i64> = instance
+        let parse: TypedFunction<i32, i64> = instance
             .exports
-            .get_native_function(&self.fn_name)
+            .get_typed_function(&store, &self.fn_name)
             .with_context(|| format!("protocol: wasm missing export {:?}", self.fn_name))?;
 
-        Ok((instance, parse))
+        let memory = instance
+            .exports
+            .get_memory("memory")
+            .map_err(|e| anyhow::anyhow!("protocol: wasm missing exported memory 'memory': {e}"))?
+            .clone();
+
+        Ok((store, instance, memory, parse))
     }
 
     fn parse_impl(&self, prelude: &[u8]) -> Result<String, ParseError> {
-        let (instance, parse) = self
+        let (mut store, _instance, memory, parse) = self
             .instantiate()
             .map_err(|e| ParseError::Fatal(e.to_string()))?;
 
-        let memory: &Memory = instance.exports.get_memory("memory").map_err(|e| {
-            ParseError::Fatal(format!(
-                "protocol: wasm missing exported memory 'memory': {e}"
-            ))
-        })?;
-
         // Ensure memory can fit prelude at offset 0.
         let need = prelude.len() as u64;
-        let mem_size = memory.data_size() as u64;
+        let mem_size = memory.view(&store).data_size();
         if need > mem_size {
             let delta = need - mem_size;
             let pages_needed = (delta + 65535) / 65536;
             memory
-                .grow(Pages(pages_needed as u32))
+                .grow(&mut store, Pages(pages_needed as u32))
                 .map_err(|e| ParseError::Fatal(format!("wasm memory grow failed: {e}")))?;
         }
 
         if !prelude.is_empty() {
-            let view = memory.view::<u8>();
-            if prelude.len() > view.len() {
-                return Err(ParseError::Fatal(format!(
-                    "wasm memory too small after grow (have {}, need {})",
-                    view.len(),
-                    prelude.len()
-                )));
-            }
-            for (i, b) in prelude.iter().copied().enumerate() {
-                view[i].set(b);
-            }
+            let view = memory.view(&store);
+            view.write(0, prelude)
+                .map_err(|e| ParseError::Fatal(format!("wasm memory write failed: {e}")))?;
         }
 
         let out = parse
-            .call(prelude.len() as i32)
+            .call(&mut store, prelude.len() as i32)
             .map_err(|e| ParseError::Fatal(format!("wasm parse call failed: {e}")))?;
 
         if out == 0 {
@@ -212,20 +207,19 @@ impl WasmHostParser {
             .checked_add(len_usize)
             .ok_or_else(|| ParseError::Fatal("wasm output range overflow".into()))?;
 
-        let view = memory.view::<u8>();
-        if end > view.len() {
+        let view = memory.view(&store);
+        if end as u64 > view.data_size() {
             return Err(ParseError::Fatal(format!(
                 "wasm output out of bounds (ptr={}, len={}, mem={})",
                 ptr,
                 len,
-                view.len()
+                view.data_size()
             )));
         }
 
         let mut buf = vec![0u8; len_usize];
-        for (dst, src) in buf.iter_mut().zip(view[start..end].iter()) {
-            *dst = src.get();
-        }
+        view.read(start as u64, &mut buf)
+            .map_err(|e| ParseError::Fatal(format!("wasm memory read failed: {e}")))?;
 
         let host = String::from_utf8_lossy(&buf).trim().to_ascii_lowercase();
         if host.is_empty() {

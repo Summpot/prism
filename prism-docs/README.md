@@ -40,7 +40,7 @@ The default language is English.
 
 This repo includes a GitHub Actions workflow that builds `prism-docs` and deploys it to Cloudflare Pages.
 
-The workflow uses `cloudflare/wrangler-action` and will **auto-create** the Pages project if it does not exist yet.
+The workflow runs `wrangler` directly (via `pnpm dlx wrangler@3`) and will **auto-create** the Pages project if it does not exist yet.
 
 You need to configure these repository secrets:
 

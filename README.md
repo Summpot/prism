@@ -114,7 +114,7 @@ The routing parser directory is configured via:
 
 - CLI flag: `--routing-parser-dir /path/to/parsers`
 - Environment variable: `PRISM_ROUTING_PARSER_DIR=/path/to/parsers`
-- Default: `$PRISM_WORKDIR/parsers`
+- Default: `<config_dir>/parsers` (Linux default: `/etc/prism/parsers`)
 
 In config, each route can specify `parsers` as a string or list of strings (parser **names** only):
 

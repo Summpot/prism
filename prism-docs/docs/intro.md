@@ -2,46 +2,27 @@
 sidebar_position: 1
 ---
 
-# Tutorial Intro
+# Prism
 
-Let's discover **Docusaurus in less than 5 minutes**.
+Prism is a lightweight, high-performance TCP reverse proxy and tunnel (frp-like) focused on Minecraft-style hostname routing.
 
-## Getting Started
+It accepts a public TCP connection (commonly `:25565`), extracts the target hostname from the first bytes of the stream (Minecraft handshake / TLS SNI / WASM routing parsers), and forwards to the selected upstream.
 
-Get started by **creating a new site**.
+## What you'll find here
 
-Or **try Docusaurus immediately** with **[docusaurus.new](https://docusaurus.new)**.
+- **Tutorials / guides**: how to run Prism, configure routing, and use tunnel mode.
+- **Configuration reference**: every config field explained with examples.
+- **Admin API reference**: endpoints for health, metrics, connections, and reload.
 
-### What you'll need
+## Quick links
 
-- [Node.js](https://nodejs.org/en/download/) version 20.0 or above:
-  - When installing Node.js, you are recommended to check all checkboxes related to dependencies.
+- Start here: **Getting started → Quickstart**
+- Configure: **Reference → Configuration**
+- Operate: **Reference → Admin API**
 
-## Generate a new site
+## Supported config formats
 
-Generate a new Docusaurus site using the **classic template**.
+- TOML: `prism.toml`
+- YAML: `prism.yaml` / `prism.yml`
 
-The classic template will automatically be added to your project after you run the command:
-
-```bash
-npm init docusaurus@latest my-website classic
-```
-
-You can type this command into Command Prompt, Powershell, Terminal, or any other integrated terminal of your code editor.
-
-The command also installs all necessary dependencies you need to run Docusaurus.
-
-## Start your site
-
-Run the development server:
-
-```bash
-cd my-website
-npm run start
-```
-
-The `cd` command changes the directory you're working with. In order to work with your newly created Docusaurus site, you'll need to navigate the terminal there.
-
-The `npm run start` command builds your website locally and serves it through a development server, ready for you to view at http://localhost:3000/.
-
-Open `docs/intro.md` (this page) and edit some lines: the site **reloads automatically** and displays your changes.
+Prism can auto-discover these from the current working directory, or you can pass a config path via `--config` / `PRISM_CONFIG`.

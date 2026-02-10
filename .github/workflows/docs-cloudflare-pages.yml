@@ -1,0 +1,55 @@
+name: docs-cloudflare-pages
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - prism-docs/**
+      - .github/workflows/docs-cloudflare-pages.yml
+  pull_request:
+    paths:
+      - prism-docs/**
+      - .github/workflows/docs-cloudflare-pages.yml
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write
+
+concurrency:
+  group: prism-docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm --version
+
+      - name: Install deps (prism-docs)
+        run: pnpm -C prism-docs install --frozen-lockfile
+
+      - name: Build (prism-docs)
+        run: pnpm -C prism-docs build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: prism-docs
+          directory: prism-docs/build
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
+          productionBranch: ${{ github.event.repository.default_branch }}

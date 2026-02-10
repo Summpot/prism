@@ -1,41 +1,48 @@
-# Website
+# prism-docs
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+This is the Prism documentation site, built with [Docusaurus](https://docusaurus.io/).
 
-## Installation
+## Requirements
 
-```bash
-yarn
+- Node.js >= 20
+- pnpm (recommended via Corepack)
+
+## Install
+
+```text
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm install --frozen-lockfile
 ```
 
-## Local Development
+## Local development
 
-```bash
-yarn start
+```text
+pnpm start
 ```
-
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
 
 ## Build
 
-```bash
-yarn build
+```text
+pnpm build
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+This produces a static site in `build/`.
 
-## Deployment
+## i18n
 
-Using SSH:
+The default language is English.
 
-```bash
-USE_SSH=true yarn deploy
-```
+- English docs: `docs/`
+- Simplified Chinese docs: `i18n/zh-CN/docusaurus-plugin-content-docs/current/`
 
-Not using SSH:
+## Deployment (Cloudflare Pages)
 
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
+This repo includes a GitHub Actions workflow that builds `prism-docs` and deploys it to Cloudflare Pages.
 
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+You need to configure these repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+And you must create a Cloudflare Pages project (default name in the workflow: `prism-docs`).

@@ -15,7 +15,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let resolved = config::resolve_config_path(config_path)?;
 
-    let paths = runtime_paths::resolve_runtime_paths(workdir, routing_parser_dir)?;
+    let paths = runtime_paths::resolve_runtime_paths(workdir, &resolved.path, routing_parser_dir)?;
 
     let created = config::ensure_config_file(&resolved.path)?;
 

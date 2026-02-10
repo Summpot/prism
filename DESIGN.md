@@ -445,8 +445,8 @@ Prism's WASM routing header parser interface is intentionally tiny to keep overh
   * Resolution precedence (highest first):
     * CLI flag: `--routing-parser-dir /path/to/parsers`
     * Environment variable: `PRISM_ROUTING_PARSER_DIR=/path/to/parsers`
-    * Default: `$PRISM_WORKDIR/parsers`
-  * If a provided parser dir path is relative, it is resolved relative to `$PRISM_WORKDIR`.
+    * Default: `<config_dir>/parsers` (Linux default: `/etc/prism/parsers`)
+  * If a provided parser dir path is relative, it is resolved relative to `<config_dir>`.
 * In configuration, each route selects one or more parsers via `routes[].parsers`.
   * Parsers are referenced by **name only** (no extension, no directories).
   * A parser name `foo` maps to the file `<routing_parser_dir>/foo.wat`.

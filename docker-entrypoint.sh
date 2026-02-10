@@ -7,7 +7,7 @@ PRISM_BIN="/usr/local/bin/prism"
 DEFAULT_CONFIG_PATH="/etc/prism/prism.toml"
 DEFAULT_WORKDIR="/var/lib/prism"
 
-CONFIG_PATH="${PRISM_CONFIG:-}" 
+CONFIG_PATH="${PRISM_CONFIG:-}"
 WORKDIR_PATH="${PRISM_WORKDIR:-}"
 PARSER_DIR_PATH="${PRISM_ROUTING_PARSER_DIR:-}"
 
@@ -53,23 +53,23 @@ if [ -z "$CONFIG_PATH" ]; then
   CONFIG_PATH="$DEFAULT_CONFIG_PATH"
 fi
 
+CONFIG_DIR="$(dirname "$CONFIG_PATH")"
+
 if [ -z "$WORKDIR_PATH" ]; then
   WORKDIR_PATH="$DEFAULT_WORKDIR"
 fi
 
 if [ -z "$PARSER_DIR_PATH" ]; then
-  PARSER_DIR_PATH="$WORKDIR_PATH/parsers"
+  PARSER_DIR_PATH="$CONFIG_DIR/parsers"
 fi
 
 # Keep semantics aligned with Prism:
 # - PRISM_WORKDIR / --workdir relative paths are resolved against CWD.
-# - PRISM_ROUTING_PARSER_DIR / --routing-parser-dir relative paths are resolved against workdir.
+# - PRISM_ROUTING_PARSER_DIR / --routing-parser-dir relative paths are resolved against config dir.
 case "$PARSER_DIR_PATH" in
   /*) ;;
-  *) PARSER_DIR_PATH="$WORKDIR_PATH/$PARSER_DIR_PATH" ;;
+  *) PARSER_DIR_PATH="$CONFIG_DIR/$PARSER_DIR_PATH" ;;
 esac
-
-CONFIG_DIR="$(dirname "$CONFIG_PATH")"
 
 pick_uid_gid() {
   # Explicit override.

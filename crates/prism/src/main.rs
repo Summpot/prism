@@ -17,7 +17,7 @@ struct Cli {
     #[arg(long, env = "PRISM_WORKDIR")]
     workdir: Option<std::path::PathBuf>,
 
-    /// Directory to load routing parser .wat files from. Defaults to "$PRISM_WORKDIR/parsers".
+    /// Directory to load routing parser .wat files from. Defaults to "<config_dir>/parsers" (Linux default: /etc/prism/parsers).
     #[arg(long, env = "PRISM_ROUTING_PARSER_DIR")]
     routing_parser_dir: Option<std::path::PathBuf>,
 }

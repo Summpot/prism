@@ -40,9 +40,15 @@ The default language is English.
 
 This repo includes a GitHub Actions workflow that builds `prism-docs` and deploys it to Cloudflare Pages.
 
+The workflow uses `cloudflare/wrangler-action` and will **auto-create** the Pages project if it does not exist yet.
+
 You need to configure these repository secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-And you must create a Cloudflare Pages project (default name in the workflow: `prism-docs`).
+The workflow will create the Cloudflare Pages project automatically if it does not exist yet.
+
+- Default project name: `prism-docs` (change it in `.github/workflows/docs-cloudflare-pages.yml` if needed)
+
+Note: for pull requests from forks, GitHub does not provide secrets to workflows, so the workflow will build but skip deployment.

@@ -278,7 +278,25 @@ impl WasmHostParser {
         view.read(start as u64, &mut buf)
             .map_err(|e| ParseError::Fatal(format!("wasm memory read failed: {e}")))?;
 
-        let host = String::from_utf8_lossy(&buf).trim().to_ascii_lowercase();
+        let mut host = String::from_utf8_lossy(&buf).into_owned();
+
+        // Per-parser output normalization.
+        // Some protocols (notably Minecraft) overload the "server address" string with
+        // additional metadata separated by NUL bytes, and some clients include a ":port".
+        // Routes are matched against hostnames, so normalize these cases.
+        if self.name == "minecraft_handshake" {
+            if let Some((left, _)) = host.split_once('\0') {
+                host = left.to_string();
+            }
+            // Common in the wild: "host:port" in server_address.
+            if !host.starts_with('[') {
+                if let Some((left, _)) = host.split_once(':') {
+                    host = left.to_string();
+                }
+            }
+        }
+
+        let host = host.trim().to_ascii_lowercase();
         if host.is_empty() {
             return Err(ParseError::NoMatch);
         }
@@ -386,6 +404,17 @@ mod tests {
         let p = WasmHostParser::from_wat_path("minecraft_handshake", &wat).expect("parser");
 
         let data = build_mc_handshake("Play.Example.Com", 25565, 763, 1);
+        let host = p.parse(&data).expect("parse");
+        assert_eq!(host, "play.example.com");
+
+        // Minecraft server address strings are sometimes overloaded with NUL-separated metadata
+        // (Forge, proxy forwarding info, etc.). Ensure we route by hostname only.
+        let data = build_mc_handshake("play.example.com\u{0000}FML\u{0000}", 25565, 763, 1);
+        let host = p.parse(&data).expect("parse");
+        assert_eq!(host, "play.example.com");
+
+        // Some clients send an embedded ":port" in the address string.
+        let data = build_mc_handshake("play.example.com:25565", 25565, 763, 1);
         let host = p.parse(&data).expect("parse");
         assert_eq!(host, "play.example.com");
 

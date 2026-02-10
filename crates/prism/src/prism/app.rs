@@ -129,7 +129,8 @@ pub async fn run(
             tunnel: Some(tunnel_manager.clone()),
         };
 
-        tasks.spawn(async move { admin::serve(addr, admin_state).await });
+        let shutdown = shutdown_rx.clone();
+        tasks.spawn(async move { admin::serve_with_shutdown(addr, admin_state, shutdown).await });
     }
 
     // Proxy listeners.
@@ -139,6 +140,7 @@ pub async fn run(
                 "tcp" => {
                     let listen_addr = l.listen_addr.clone();
                     let upstream = l.upstream.clone();
+                    let shutdown = shutdown_rx.clone();
 
                     let handler = if upstream.trim().is_empty() {
                         proxy::TcpHandler::routing(proxy::TcpRoutingHandlerOptions {
@@ -156,11 +158,14 @@ pub async fn run(
                         })
                     };
 
-                    tasks.spawn(async move { proxy::serve_tcp(&listen_addr, handler).await });
+                    tasks.spawn(async move {
+                        proxy::serve_tcp_with_shutdown(&listen_addr, handler, shutdown).await
+                    });
                 }
                 "udp" => {
                     let listen_addr = l.listen_addr.clone();
                     let upstream = l.upstream.clone();
+                    let shutdown = shutdown_rx.clone();
 
                     if upstream.trim().is_empty() {
                         tracing::warn!(listen_addr = %listen_addr, "udp listener missing upstream; skipping");
@@ -174,7 +179,9 @@ pub async fn run(
                         idle_timeout: cfg.timeouts.idle_timeout,
                     };
 
-                    tasks.spawn(async move { proxy::serve_udp(&listen_addr, opts).await });
+                    tasks.spawn(async move {
+                        proxy::serve_udp_with_shutdown(&listen_addr, opts, shutdown).await
+                    });
                 }
                 other => {
                     tracing::warn!(listen_addr = %l.listen_addr, protocol = %other, "unsupported listener protocol");
@@ -244,10 +251,10 @@ pub async fn run(
         tasks.spawn(async move { client.run(shutdown).await });
     }
 
-    // Wait for shutdown signal.
+    // Wait for shutdown signal (Ctrl-C / SIGTERM) or unexpected task termination.
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("shutdown: ctrl-c");
+        _ = shutdown_signal() => {
+            tracing::info!("shutdown: signal");
             let _ = shutdown_tx.send(true);
         }
         res = tasks.join_next() => {
@@ -264,22 +271,41 @@ pub async fn run(
         }
     }
 
-    // Give tasks a moment to shut down gracefully.
-    let deadline = tokio::time::sleep(Duration::from_secs(2));
-    tokio::pin!(deadline);
-    loop {
-        tokio::select! {
-            biased;
-            _ = &mut deadline => break,
-            res = tasks.join_next() => {
-                if res.is_none() {
-                    break;
-                }
-            }
+    // Drain tasks: exit as soon as they complete; only enforce a timeout if something hangs.
+    let drain = async {
+        while let Some(_res) = tasks.join_next().await {
+            // Best-effort: tasks are expected to observe shutdown; ignore errors during teardown.
         }
+    };
+
+    // Hard cap so `docker stop` doesn't stall indefinitely.
+    let drain_timeout = Duration::from_secs(5);
+    if tokio::time::timeout(drain_timeout, drain).await.is_err() {
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
     }
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    // Ctrl-C works cross-platform.
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 async fn reload_loop(

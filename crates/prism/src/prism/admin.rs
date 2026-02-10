@@ -24,6 +24,18 @@ pub struct AdminState {
 }
 
 pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
+    // Backwards-compatible entrypoint: run until process shutdown.
+    let (tx, rx) = watch::channel(false);
+    // Keep sender alive for the duration of the server.
+    let _tx = tx;
+    serve_with_shutdown(addr, state, rx).await
+}
+
+pub async fn serve_with_shutdown(
+    addr: SocketAddr,
+    state: AdminState,
+    shutdown: watch::Receiver<bool>,
+) -> anyhow::Result<()> {
     let shared = Arc::new(state);
 
     let app = Router::new()
@@ -40,9 +52,22 @@ pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
     tracing::info!(admin_addr = %addr, "admin: listening");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(wait_shutdown(shutdown))
+        .await?;
 
     Ok(())
+}
+
+async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
+    if *shutdown.borrow() {
+        return;
+    }
+    while shutdown.changed().await.is_ok() {
+        if *shutdown.borrow() {
+            break;
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

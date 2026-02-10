@@ -248,6 +248,18 @@ pub struct TcpRuntimeConfig {
 }
 
 pub async fn serve_tcp(listen_addr: &str, handler: TcpHandler) -> anyhow::Result<()> {
+    // Backwards-compatible entrypoint: run until process shutdown.
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    // Keep sender alive for the lifetime of the listener.
+    let _tx = tx;
+    serve_tcp_with_shutdown(listen_addr, handler, rx).await
+}
+
+pub async fn serve_tcp_with_shutdown(
+    listen_addr: &str,
+    handler: TcpHandler,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) -> anyhow::Result<()> {
     let bind_addr = net::normalize_bind_addr(listen_addr);
     let ln = TcpListener::bind(bind_addr.as_ref())
         .await
@@ -256,16 +268,27 @@ pub async fn serve_tcp(listen_addr: &str, handler: TcpHandler) -> anyhow::Result
     tracing::info!(listen_addr = %listen_addr, "tcp: listening");
 
     loop {
-        let (conn, peer) = ln.accept().await?;
-        let h = handler.clone();
-
-        tokio::spawn(async move {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(client = %peer, "tcp: accepted");
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
             }
-            h.handle(conn).await;
-        });
+            res = ln.accept() => {
+                let (conn, peer) = res?;
+                let h = handler.clone();
+
+                tokio::spawn(async move {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(client = %peer, "tcp: accepted");
+                    }
+                    h.handle(conn).await;
+                });
+            }
+        }
     }
+
+    Ok(())
 }
 
 pub struct UdpForwardOptions {
@@ -276,6 +299,18 @@ pub struct UdpForwardOptions {
 }
 
 pub async fn serve_udp(listen_addr: &str, opts: UdpForwardOptions) -> anyhow::Result<()> {
+    // Backwards-compatible entrypoint: run until process shutdown.
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    // Keep sender alive for the lifetime of the listener.
+    let _tx = tx;
+    serve_udp_with_shutdown(listen_addr, opts, rx).await
+}
+
+pub async fn serve_udp_with_shutdown(
+    listen_addr: &str,
+    opts: UdpForwardOptions,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) -> anyhow::Result<()> {
     let bind_addr = net::normalize_bind_addr(listen_addr);
     let sock = UdpSocket::bind(bind_addr.as_ref())
         .await
@@ -288,54 +323,66 @@ pub async fn serve_udp(listen_addr: &str, opts: UdpForwardOptions) -> anyhow::Re
 
     if opts.idle_timeout > Duration::from_millis(0) {
         let sessions = sessions.clone();
+        let shutdown2 = shutdown.clone();
         tokio::spawn(async move {
-            udp_sweep_loop(sessions, opts.idle_timeout).await;
+            udp_sweep_loop(sessions, opts.idle_timeout, shutdown2).await;
         });
     }
 
     let mut buf = vec![0u8; 64 * 1024];
     loop {
-        let (n, src) = sock.recv_from(&mut buf).await?;
-        if n == 0 {
-            continue;
-        }
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
+            }
+            res = sock.recv_from(&mut buf) => {
+                let (n, src) = res?;
+                if n == 0 {
+                    continue;
+                }
 
-        let payload = buf[..n].to_vec();
+                let payload = buf[..n].to_vec();
 
-        let mut sess = sessions
-            .get(&src)
-            .map(|s| s.value().clone())
-            .unwrap_or_else(|| {
-                let s = Arc::new(UdpSession::new(
-                    telemetry::new_session_id(),
-                    src,
-                    opts.upstream.clone(),
-                    sock.clone(),
-                    opts.sessions.clone(),
-                    opts.tunnel_manager.clone(),
-                ));
-                sessions.insert(src, s.clone());
-                s
-            });
+                let mut sess = sessions
+                    .get(&src)
+                    .map(|s| s.value().clone())
+                    .unwrap_or_else(|| {
+                        let s = Arc::new(UdpSession::new(
+                            telemetry::new_session_id(),
+                            src,
+                            opts.upstream.clone(),
+                            sock.clone(),
+                            opts.sessions.clone(),
+                            opts.tunnel_manager.clone(),
+                        ));
+                        sessions.insert(src, s.clone());
+                        s
+                    });
 
-        sess.touch();
+                sess.touch();
 
-        if sess.tx.try_send(payload).is_err() {
-            // Session is likely closed or congested; recreate once.
-            let _ = sessions.remove(&src);
-            sess = Arc::new(UdpSession::new(
-                telemetry::new_session_id(),
-                src,
-                opts.upstream.clone(),
-                sock.clone(),
-                opts.sessions.clone(),
-                opts.tunnel_manager.clone(),
-            ));
-            sessions.insert(src, sess.clone());
-            // Best-effort re-send.
-            let _ = sess.tx.try_send(buf[..n].to_vec());
+                if sess.tx.try_send(payload).is_err() {
+                    // Session is likely closed or congested; recreate once.
+                    let _ = sessions.remove(&src);
+                    sess = Arc::new(UdpSession::new(
+                        telemetry::new_session_id(),
+                        src,
+                        opts.upstream.clone(),
+                        sock.clone(),
+                        opts.sessions.clone(),
+                        opts.tunnel_manager.clone(),
+                    ));
+                    sessions.insert(src, sess.clone());
+                    // Best-effort re-send.
+                    let _ = sess.tx.try_send(buf[..n].to_vec());
+                }
+            }
         }
     }
+
+    Ok(())
 }
 
 struct UdpSession {
@@ -483,10 +530,19 @@ async fn udp_session_loop(
 async fn udp_sweep_loop(
     sessions: Arc<DashMap<std::net::SocketAddr, Arc<UdpSession>>>,
     idle_timeout: Duration,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
-        tick.tick().await;
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
+            }
+            _ = tick.tick() => {}
+        }
+
         if idle_timeout <= Duration::from_millis(0) {
             continue;
         }

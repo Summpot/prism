@@ -30,7 +30,9 @@ fn resolve_workdir(flag_or_env: Option<PathBuf>) -> anyhow::Result<PathBuf> {
                 anyhow::bail!("workdir: empty path");
             }
             if p.is_relative() {
-                std::env::current_dir().context("workdir: resolve cwd")?.join(p)
+                std::env::current_dir()
+                    .context("workdir: resolve cwd")?
+                    .join(p)
             } else {
                 p
             }
@@ -45,7 +47,10 @@ fn resolve_workdir(flag_or_env: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     Ok(wd)
 }
 
-fn resolve_routing_parser_dir(config_dir: &Path, flag_or_env: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+fn resolve_routing_parser_dir(
+    config_dir: &Path,
+    flag_or_env: Option<PathBuf>,
+) -> anyhow::Result<PathBuf> {
     let mut p = match flag_or_env {
         Some(p) => {
             if p.as_os_str().is_empty() {

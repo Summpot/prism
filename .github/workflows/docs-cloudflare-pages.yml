@@ -6,6 +6,11 @@ on:
     paths:
       - prism-docs/**
       - .github/workflows/docs-cloudflare-pages.yml
+  pull_request:
+    branches: [main, master]
+    paths:
+      - prism-docs/**
+      - .github/workflows/docs-cloudflare-pages.yml
 
 permissions:
   contents: read
@@ -39,36 +44,50 @@ jobs:
       - name: Build (prism-docs)
         run: pnpm -C prism-docs build
 
+      - name: Check Cloudflare credentials
+        id: cloudflare
+        run: |
+          if [ -n "${CLOUDFLARE_API_TOKEN}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       # Deploy only when Cloudflare credentials are available.
       # For PRs from forks, secrets are not available, so we skip deploy.
-      - name: Deploy to Cloudflare Pages (auto-create project)
+      - name: Deploy to Cloudflare Pages (auto-create project) [push]
+        if: github.event_name == 'push' && steps.cloudflare.outputs.ok == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          preCommands: |
-            set -eu
-
-            PROJECT_NAME="prism-docs"
-            PRODUCTION_BRANCH="${{ github.event.repository.default_branch }}"
-
-            echo "Ensuring Cloudflare Pages project exists: ${PROJECT_NAME} (production branch: ${PRODUCTION_BRANCH})"
-
-            # Create is idempotent-ish: it fails if the project already exists.
-            # Treat "already exists" as success; everything else should fail.
-            LOG_FILE="/tmp/pages-project-create.log"
-            if wrangler pages project create "${PROJECT_NAME}" --production-branch "${PRODUCTION_BRANCH}" >"${LOG_FILE}" 2>&1; then
-              cat "${LOG_FILE}"
-              echo "Created Pages project: ${PROJECT_NAME}"
-            else
-              cat "${LOG_FILE}" >&2
-              if grep -qi "already exists" "${LOG_FILE}"; then
-                echo "Pages project already exists: ${PROJECT_NAME}"
-              else
-                echo "Failed to create Pages project: ${PROJECT_NAME}" >&2
-                exit 1
-              fi
-            fi
+          # NOTE: wrangler-action executes preCommands line-by-line in /bin/sh.
+          # Keep this as a single shell command (no multi-line `if/fi`, no variables spanning lines).
+          preCommands: >
+            echo "Ensuring Cloudflare Pages project exists: prism-docs (production branch: ${{ github.event.repository.default_branch }})";
+            LOG_FILE=/tmp/pages-project-create.log;
+            wrangler pages project create prism-docs --production-branch ${{ github.event.repository.default_branch }} >"$LOG_FILE" 2>&1
+            || (cat "$LOG_FILE" >&2; grep -qi "already exists" "$LOG_FILE")
           command: |
-            pages deploy prism-docs/build --project-name=prism-docs --branch=${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
+            pages deploy prism-docs/build --project-name=prism-docs --branch=${{ github.ref_name }}
+
+      - name: Deploy to Cloudflare Pages (auto-create project) [pull_request]
+        if: github.event_name == 'pull_request' && steps.cloudflare.outputs.ok == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          # NOTE: wrangler-action executes preCommands line-by-line in /bin/sh.
+          # Keep this as a single shell command (no multi-line `if/fi`, no variables spanning lines).
+          preCommands: >
+            echo "Ensuring Cloudflare Pages project exists: prism-docs (production branch: ${{ github.event.repository.default_branch }})";
+            LOG_FILE=/tmp/pages-project-create.log;
+            wrangler pages project create prism-docs --production-branch ${{ github.event.repository.default_branch }} >"$LOG_FILE" 2>&1
+            || (cat "$LOG_FILE" >&2; grep -qi "already exists" "$LOG_FILE")
+          command: |
+            pages deploy prism-docs/build --project-name=prism-docs --branch=pr-${{ github.event.number }}

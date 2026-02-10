@@ -36,7 +36,7 @@ auto_listen_services = true
 
 [[tunnel.endpoints]]
 listen_addr = ":7000"
-transport = "tcp" # tcp | udp | quic
+transport = "tcp"     # tcp | udp | quic
 
 [[tunnel.endpoints]]
 listen_addr = ":7001"

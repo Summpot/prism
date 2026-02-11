@@ -30,7 +30,12 @@ pub enum MiddlewarePhase {
 #[derive(Debug, Clone)]
 pub struct MiddlewareCtx {
     pub phase: MiddlewarePhase,
-    /// The selected upstream address label (after any default port fill), if available.
+    /// The selected upstream label (after any default port fill) for rewrite.
+    ///
+    /// For direct upstreams this is typically a dial address like `host:port`.
+    /// For tunnel upstreams (`tunnel:<service>`), Prism may pass a configured/advertised
+    /// masquerade host (see `tunnel.services[].masquerade_host`) so rewrite middlewares can
+    /// chain multiple Prism instances.
     pub selected_upstream: Option<String>,
 }
 

@@ -234,6 +234,7 @@ pub async fn run(
                 local_addr: s.local_addr.clone(),
                 route_only: s.route_only,
                 remote_addr: s.remote_addr.clone(),
+                masquerade_host: s.masquerade_host.clone(),
             })
             .collect::<Vec<_>>();
 

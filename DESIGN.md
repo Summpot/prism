@@ -241,8 +241,9 @@ Service fields:
 * `local_addr: string` (used by tunnel client to dial the local backend)
 * `route_only: bool` (when true, the service is only reachable via `tunnel:<name>` routing)
 * `remote_addr: string` (optional; requests server-side auto-listen exposure; ignored when `route_only=true`)
+* `masquerade_host: string` (optional; if set, the proxy layer may pass this value as `selected_upstream` to rewrite middlewares when routing to `tunnel:<name>`. Supports `$1`, `$2`, ... substitutions from the matched route wildcard capture groups.)
 
-Implementations should normalize the request (trim whitespace, lowercase `proto`, and force `remote_addr=""` when `route_only=true`).
+Implementations should normalize the request (trim whitespace, lowercase `proto`, lowercase+trim `masquerade_host`, and force `remote_addr=""` when `route_only=true`).
 
 **Proxy stream (server → client, one stream per proxied session)**
 

@@ -17,6 +17,7 @@ pub struct Resolution {
     pub host: String,
     pub upstreams: Vec<String>,
     pub matched_host: String,
+    pub captures: Vec<String>,
     pub middleware: SharedMiddlewareChain,
     pub prelude_override: Option<Vec<u8>>,
 }
@@ -205,6 +206,7 @@ fn resolve_route_for_host(rt: &CompiledRoute, host: &str) -> Option<Resolution> 
             host: host.to_string(),
             upstreams: candidates,
             matched_host: p.pattern.clone(),
+            captures: groups,
             middleware: rt.middleware.clone(),
             prelude_override: None,
         });
@@ -287,7 +289,7 @@ fn match_host(host: &str, p: &CompiledPattern) -> (bool, Vec<String>) {
     (true, groups)
 }
 
-fn substitute_params(template: &str, groups: &[String]) -> String {
+pub(crate) fn substitute_params(template: &str, groups: &[String]) -> String {
     if template.is_empty() || groups.is_empty() {
         return template.to_string();
     }

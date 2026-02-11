@@ -411,7 +411,7 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
 
     let rt = { opts.runtime.read().await.clone() };
 
-    let (up, upstream_used) = match dial_upstream(
+    let (up, upstream_used, _tunnel_masquerade_host) = match dial_upstream(
         &upstream,
         None,
         rt.upstream_dial_timeout,
@@ -540,6 +540,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         upstreams,
         middleware,
         prelude_override,
+        captures,
         ..
     } = res;
 
@@ -557,6 +558,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let mut last_err: Option<anyhow::Error> = None;
     let mut upstream_used = String::new();
     let mut up_conn: Option<tunnel::transport::BoxedStream> = None;
+    let mut tunnel_masquerade_host: Option<String> = None;
 
     for cand in &upstreams {
         let addr = cand.trim().to_string();
@@ -568,9 +570,10 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         )
         .await
         {
-            Ok((c, label)) => {
+            Ok((c, label, masq)) => {
                 upstream_used = label;
                 up_conn = Some(c);
+                tunnel_masquerade_host = masq;
                 break;
             }
             Err(err) => last_err = Some(err),
@@ -598,7 +601,20 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     // Apply any middleware prelude overrides from parse phase, then allow a rewrite pass based on
     // the selected upstream.
     let mut prelude = prelude_override.unwrap_or(captured);
-    if let Some(rw) = middleware.rewrite(&prelude, &upstream_used) {
+
+    let selected_for_rewrite = if let Some(tpl) = tunnel_masquerade_host.as_ref() {
+        let v = router::substitute_params(tpl, &captures);
+        let v = v.trim().to_ascii_lowercase();
+        if v.is_empty() {
+            upstream_used.clone()
+        } else {
+            v
+        }
+    } else {
+        upstream_used.clone()
+    };
+
+    if let Some(rw) = middleware.rewrite(&prelude, &selected_for_rewrite) {
         prelude = rw;
     }
 
@@ -653,7 +669,7 @@ async fn dial_upstream(
     default_port: Option<u16>,
     timeout: Duration,
     tunnel_manager: Option<&Arc<tunnel::manager::Manager>>,
-) -> anyhow::Result<(tunnel::transport::BoxedStream, String)> {
+) -> anyhow::Result<(tunnel::transport::BoxedStream, String, Option<String>)> {
     let mut addr = upstream.trim().to_string();
     if addr.is_empty() {
         anyhow::bail!("empty upstream");
@@ -666,11 +682,15 @@ async fn dial_upstream(
         }
         let mgr = tunnel_manager
             .context("tunnel upstream requested but tunnel manager is not configured")?;
-        let st = mgr
-            .dial_service_tcp(service)
+        let (st, svc) = mgr
+            .dial_service_tcp_with_meta(service)
             .await
             .map_err(|e| anyhow::anyhow!("tunnel dial failed: {e}"))?;
-        return Ok((st, format!("tunnel:{service}")));
+
+        let masq = svc.masquerade_host.trim().to_string();
+        let masq = if masq.is_empty() { None } else { Some(masq) };
+
+        return Ok((st, format!("tunnel:{service}"), masq));
     }
 
     if let Some(p) = default_port {
@@ -679,7 +699,7 @@ async fn dial_upstream(
         }
     }
 
-    Ok((dial_tcp_stream(&addr, timeout).await?, addr))
+    Ok((dial_tcp_stream(&addr, timeout).await?, addr, None))
 }
 
 async fn proxy_bidirectional(

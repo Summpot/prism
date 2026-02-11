@@ -60,6 +60,8 @@ tunnel:
   #     local_addr: "127.0.0.1:25565"
   #     route_only: true # optional. If true, only reachable via routes (tunnel:home-mc).
   #     remote_addr: ":25565" # optional (frp-like). If set, prisms opens this listener automatically.
+  #     masquerade_host: "" # optional. Used as selected_upstream for rewrite middlewares when routing to tunnel:home-mc.
+  #     # Supports $1, $2... substitutions from route wildcard capture groups.
 
 timeouts:
   handshake_timeout_ms: 3000

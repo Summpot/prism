@@ -294,6 +294,10 @@ pub struct TunnelServiceConfig {
     pub local_addr: String,
     pub route_only: bool,
     pub remote_addr: String,
+    /// Optional host label used for rewrite middlewares when this service is dialed as
+    /// an upstream (tunnel:<service>). This supports $1, $2... substitutions from route
+    /// wildcard captures.
+    pub masquerade_host: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +427,7 @@ struct FileTunnelService {
     #[serde(default)]
     route_only: bool,
     remote_addr: Option<String>,
+    masquerade_host: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -697,6 +702,12 @@ impl Config {
                         local_addr: s.local_addr.trim().to_string(),
                         route_only: s.route_only,
                         remote_addr: s.remote_addr.clone().unwrap_or_default().trim().to_string(),
+                        masquerade_host: s
+                            .masquerade_host
+                            .clone()
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
                     });
                 }
             }

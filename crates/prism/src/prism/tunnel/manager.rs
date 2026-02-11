@@ -175,6 +175,14 @@ impl Manager {
     }
 
     pub async fn dial_service_tcp(&self, service: &str) -> Result<BoxedStream, ManagerError> {
+        let (st, _svc) = self.dial_service_tcp_inner(None, service).await?;
+        Ok(st)
+    }
+
+    pub async fn dial_service_tcp_with_meta(
+        &self,
+        service: &str,
+    ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
         self.dial_service_tcp_inner(None, service).await
     }
 
@@ -183,6 +191,17 @@ impl Manager {
         client_id: &str,
         service: &str,
     ) -> Result<BoxedStream, ManagerError> {
+        let (st, _svc) = self
+            .dial_service_tcp_inner(Some(client_id), service)
+            .await?;
+        Ok(st)
+    }
+
+    pub async fn dial_service_tcp_from_client_with_meta(
+        &self,
+        client_id: &str,
+        service: &str,
+    ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
         self.dial_service_tcp_inner(Some(client_id), service).await
     }
 
@@ -202,13 +221,13 @@ impl Manager {
         &self,
         client_id: Option<&str>,
         service: &str,
-    ) -> Result<BoxedStream, ManagerError> {
+    ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
         let service = service.trim();
         if service.is_empty() {
             return Err(ManagerError::ServiceNotFound);
         }
 
-        let sess: Arc<dyn TransportSession> = {
+        let (sess, svc): (Arc<dyn TransportSession>, RegisteredService) = {
             let st = self.state.read().await;
             let cid = if let Some(pinned) = client_id {
                 pinned.trim().to_string()
@@ -220,10 +239,12 @@ impl Manager {
             };
 
             let cc = st.clients.get(&cid).ok_or(ManagerError::ServiceNotFound)?;
-            if !cc.services.contains_key(service) {
-                return Err(ManagerError::ServiceNotFound);
-            }
-            cc.sess.clone()
+            let svc = cc
+                .services
+                .get(service)
+                .cloned()
+                .ok_or(ManagerError::ServiceNotFound)?;
+            (cc.sess.clone(), svc)
         };
 
         let mut st = sess
@@ -233,7 +254,7 @@ impl Manager {
         protocol::write_proxy_stream_header(&mut st, ProxyStreamKind::Tcp, service)
             .await
             .map_err(|_| ManagerError::ServiceNotFound)?;
-        Ok(st)
+        Ok((st, svc))
     }
 
     async fn dial_service_udp_inner(

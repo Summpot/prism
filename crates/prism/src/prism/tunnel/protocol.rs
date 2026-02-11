@@ -47,6 +47,10 @@ pub struct RegisteredService {
     pub route_only: bool,
     #[serde(default)]
     pub remote_addr: String,
+    /// Optional host label for rewrite middlewares when this service is dialed as an upstream
+    /// (tunnel:<service>). This supports $1, $2... substitutions from route wildcard captures.
+    #[serde(default)]
+    pub masquerade_host: String,
 }
 
 impl RegisteredService {
@@ -61,6 +65,7 @@ impl RegisteredService {
         }
         self.local_addr = self.local_addr.trim().to_string();
         self.remote_addr = self.remote_addr.trim().to_string();
+        self.masquerade_host = self.masquerade_host.trim().to_ascii_lowercase();
         if self.route_only {
             self.remote_addr.clear();
         }
@@ -239,6 +244,7 @@ mod tests {
                     local_addr: " 127.0.0.1:25565 ".into(),
                     route_only: false,
                     remote_addr: " 127.0.0.1:0 ".into(),
+                    masquerade_host: "  $1.edge.internal  ".into(),
                 },
                 RegisteredService {
                     name: "   ".into(),
@@ -246,6 +252,7 @@ mod tests {
                     local_addr: "x".into(),
                     route_only: false,
                     remote_addr: "".into(),
+                    masquerade_host: "".into(),
                 },
                 RegisteredService {
                     name: "svc2".into(),
@@ -253,6 +260,7 @@ mod tests {
                     local_addr: " 127.0.0.1:19132 ".into(),
                     route_only: true,
                     remote_addr: "127.0.0.1:9999".into(),
+                    masquerade_host: "svc2.internal".into(),
                 },
             ],
         };
@@ -269,12 +277,14 @@ mod tests {
         assert_eq!(got.services[0].proto, "tcp");
         assert_eq!(got.services[0].local_addr, "127.0.0.1:25565");
         assert_eq!(got.services[0].remote_addr, "127.0.0.1:0");
+        assert_eq!(got.services[0].masquerade_host, "$1.edge.internal");
 
         assert_eq!(got.services[1].name, "svc2");
         assert_eq!(got.services[1].proto, "udp");
         assert_eq!(got.services[1].route_only, true);
         // route_only clears remote_addr
         assert_eq!(got.services[1].remote_addr, "");
+        assert_eq!(got.services[1].masquerade_host, "svc2.internal");
     }
 
     #[tokio::test]

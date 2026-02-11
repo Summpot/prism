@@ -306,6 +306,12 @@
           "type": "string",
           "description": "Optional server-side listener request (frp-like). Must not be set when route_only=true.",
           "examples": [":25565", ""]
+        },
+        "masquerade_host": {
+          "type": "string",
+          "description": "Optional host label used by rewrite middlewares when this service is dialed as an upstream (tunnel:<service>). Supports $1, $2... substitutions from route wildcard capture groups.",
+          "default": "",
+          "examples": ["edge.internal", "$1.edge.internal", "edge.internal:25565", ""]
         }
       },
       "allOf": [

@@ -30,7 +30,12 @@ pub async fn run(
     }
 
     let created_mws = middleware::materialize_default_middlewares(&paths.middleware_dir)
-        .with_context(|| format!("materialize middlewares: {}", paths.middleware_dir.display()))?;
+        .with_context(|| {
+            format!(
+                "materialize middlewares: {}",
+                paths.middleware_dir.display()
+            )
+        })?;
     if !created_mws.is_empty() {
         tracing::info!(
             middleware_dir = %paths.middleware_dir.display(),

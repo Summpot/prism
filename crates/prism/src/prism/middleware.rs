@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Context;
 use thiserror::Error;
-use wasmer::{imports, Engine, Instance, Memory, Module, Pages, Store, TypedFunction};
+use wasmer::{Engine, Instance, Memory, Module, Pages, Store, TypedFunction, imports};
 
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
@@ -65,7 +65,11 @@ pub struct MiddlewareOutput {
 
 pub trait Middleware: Send + Sync {
     fn name(&self) -> &str;
-    fn apply(&self, prelude: &[u8], ctx: &MiddlewareCtx) -> Result<MiddlewareOutput, MiddlewareError>;
+    fn apply(
+        &self,
+        prelude: &[u8],
+        ctx: &MiddlewareCtx,
+    ) -> Result<MiddlewareOutput, MiddlewareError>;
 }
 
 pub type SharedMiddleware = Arc<dyn Middleware>;
@@ -239,13 +243,6 @@ const DEFAULT_MIDDLEWARES: &[(&str, &str)] = &[
             "/../../middlewares/tls_sni.wat"
         )),
     ),
-    (
-        "host_to_upstream",
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../middlewares/host_to_upstream.wat"
-        )),
-    ),
 ];
 
 /// Ensure the middleware directory exists and contains Prism's default WAT middlewares.
@@ -285,8 +282,7 @@ pub fn materialize_default_middlewares(dir: &Path) -> anyhow::Result<Vec<PathBuf
                 continue;
             }
             Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("middleware: create {}", path.display()));
+                return Err(err).with_context(|| format!("middleware: create {}", path.display()));
             }
         }
     }
@@ -348,12 +344,7 @@ impl WasmMiddleware {
 
     fn instantiate(
         &self,
-    ) -> anyhow::Result<(
-        Store,
-        Instance,
-        Memory,
-        TypedFunction<(i32, i32), i64>,
-    )> {
+    ) -> anyhow::Result<(Store, Instance, Memory, TypedFunction<(i32, i32), i64>)> {
         let mut store = Store::new(self.engine.clone());
         let import_object = imports! {};
 
@@ -436,10 +427,9 @@ impl WasmMiddleware {
         }
 
         if !prelude.is_empty() {
-            memory
-                .view(&store)
-                .write(0, prelude)
-                .map_err(|e| MiddlewareError::Fatal(format!("wasm memory write prelude failed: {e}")))?;
+            memory.view(&store).write(0, prelude).map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm memory write prelude failed: {e}"))
+            })?;
         }
 
         if !upstream.is_empty() {
@@ -463,8 +453,8 @@ impl WasmMiddleware {
             .write(ctx_ptr as u64, &ctx_buf)
             .map_err(|e| MiddlewareError::Fatal(format!("wasm memory write ctx failed: {e}")))?;
 
-            let out = run
-                .call(&mut store, prelude.len() as i32, ctx_ptr as i32)
+        let out = run
+            .call(&mut store, prelude.len() as i32, ctx_ptr as i32)
             .map_err(|e| MiddlewareError::Fatal(format!("wasm middleware call failed: {e}")))?;
 
         if out == 0 {
@@ -550,7 +540,11 @@ impl Middleware for WasmMiddleware {
         &self.name
     }
 
-    fn apply(&self, prelude: &[u8], ctx: &MiddlewareCtx) -> Result<MiddlewareOutput, MiddlewareError> {
+    fn apply(
+        &self,
+        prelude: &[u8],
+        ctx: &MiddlewareCtx,
+    ) -> Result<MiddlewareOutput, MiddlewareError> {
         self.apply_impl(prelude, ctx)
     }
 }
@@ -566,7 +560,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        p.push(format!("prism_mw_test_{name}_{}_{}", std::process::id(), now));
+        p.push(format!(
+            "prism_mw_test_{name}_{}_{}",
+            std::process::id(),
+            now
+        ));
         fs::create_dir_all(&p).expect("mkdir");
         p
     }
@@ -626,10 +624,12 @@ mod tests {
 
     #[test]
     fn repo_sample_middlewares_compile() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
         let dir = root.join("middlewares");
 
-        for name in ["minecraft_handshake", "tls_sni", "host_to_upstream"] {
+        for name in ["minecraft_handshake", "tls_sni"] {
             let wat_path = dir.join(format!("{name}.wat"));
             assert!(
                 wat_path.exists(),
@@ -661,5 +661,201 @@ mod tests {
         assert_eq!(now, "(module)\n");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn push_varint(mut v: u32, out: &mut Vec<u8>) {
+        loop {
+            let mut b = (v & 0x7f) as u8;
+            v >>= 7;
+            if v != 0 {
+                b |= 0x80;
+            }
+            out.push(b);
+            if v == 0 {
+                break;
+            }
+        }
+    }
+
+    fn mc_handshake_prelude(host: &str, port: u16) -> Vec<u8> {
+        // Minecraft handshake packet (status/login):
+        // packet_len VarInt
+        // packet_id VarInt (0)
+        // protocol_version VarInt (use 47)
+        // server_address String (VarInt len + bytes)
+        // server_port u16be
+        // next_state VarInt (1)
+        let mut pkt = Vec::new();
+        push_varint(0, &mut pkt); // packet id
+        push_varint(47, &mut pkt);
+        push_varint(host.len() as u32, &mut pkt);
+        pkt.extend_from_slice(host.as_bytes());
+        pkt.extend_from_slice(&port.to_be_bytes());
+        push_varint(1, &mut pkt);
+
+        let mut out = Vec::new();
+        push_varint(pkt.len() as u32, &mut out);
+        out.extend_from_slice(&pkt);
+        out
+    }
+
+    fn read_varint(bytes: &[u8], mut i: usize) -> Option<(u32, usize)> {
+        let mut res: u32 = 0;
+        let mut shift: u32 = 0;
+        loop {
+            let b = *bytes.get(i)?;
+            i += 1;
+            res |= ((b & 0x7f) as u32) << shift;
+            if (b & 0x80) == 0 {
+                return Some((res, i));
+            }
+            shift += 7;
+            if shift > 28 {
+                return None;
+            }
+        }
+    }
+
+    fn mc_handshake_extract_port(prelude: &[u8]) -> Option<u16> {
+        let (pkt_len, mut i) = read_varint(prelude, 0)?;
+        let end = i.checked_add(pkt_len as usize)?;
+        if end > prelude.len() {
+            return None;
+        }
+
+        let (_pid, ni) = read_varint(prelude, i)?;
+        i = ni;
+        let (_proto, ni) = read_varint(prelude, i)?;
+        i = ni;
+        let (addr_len, ni) = read_varint(prelude, i)?;
+        i = ni;
+        i = i.checked_add(addr_len as usize)?;
+        if i + 2 > end {
+            return None;
+        }
+        let port = u16::from_be_bytes([prelude[i], prelude[i + 1]]);
+        Some(port)
+    }
+
+    fn tls_client_hello_prelude(host: &str) -> Vec<u8> {
+        // Minimal TLS record containing a single ClientHello with a single SNI hostname.
+        let host_bytes = host.as_bytes();
+        let name_len = host_bytes.len();
+
+        let sni_list_len = 1 + 2 + name_len; // name_type + name_len + name
+        let sni_ext_data_len = 2 + sni_list_len; // list_len + list
+        let sni_ext_len = sni_ext_data_len;
+        let ext_total = 4 + sni_ext_len; // ext_type + ext_len + ext_data
+
+        let client_hello_len = 2 + 32 + // legacy_version + random
+            1 + 0 + // session id
+            2 + 2 + // cipher_suites len + one suite
+            1 + 1 + // compression methods
+            2 + ext_total; // extensions total + extensions
+
+        let handshake_len = client_hello_len;
+        let record_len = 4 + handshake_len; // handshake header + body
+
+        let mut out = Vec::with_capacity(5 + record_len);
+
+        // TLS record header
+        out.push(22); // handshake
+        out.push(0x03);
+        out.push(0x01);
+        out.extend_from_slice(&(record_len as u16).to_be_bytes());
+
+        // Handshake header
+        out.push(1); // ClientHello
+        out.push(((handshake_len >> 16) & 0xff) as u8);
+        out.push(((handshake_len >> 8) & 0xff) as u8);
+        out.push((handshake_len & 0xff) as u8);
+
+        // ClientHello body
+        out.extend_from_slice(&[0x03, 0x03]); // legacy_version
+        out.extend_from_slice(&[0u8; 32]); // random
+
+        out.push(0); // session id len
+
+        out.extend_from_slice(&(2u16).to_be_bytes());
+        out.extend_from_slice(&[0x00, 0x2f]); // TLS_RSA_WITH_AES_128_CBC_SHA
+
+        out.push(1); // compression methods len
+        out.push(0); // null compression
+
+        out.extend_from_slice(&(ext_total as u16).to_be_bytes());
+
+        // SNI extension
+        out.extend_from_slice(&(0u16).to_be_bytes());
+        out.extend_from_slice(&(sni_ext_len as u16).to_be_bytes());
+        out.extend_from_slice(&(sni_list_len as u16).to_be_bytes());
+        out.push(0); // host_name
+        out.extend_from_slice(&(name_len as u16).to_be_bytes());
+        out.extend_from_slice(host_bytes);
+
+        out
+    }
+
+    #[test]
+    fn minecraft_handshake_rewrite_uses_host_only_and_sets_port() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let dir = root.join("middlewares");
+
+        let mc = WasmMiddleware::from_wat_path(
+            "minecraft_handshake",
+            &dir.join("minecraft_handshake.wat"),
+        )
+        .expect("compile minecraft_handshake");
+
+        let prelude = mc_handshake_prelude("play.example.com", 25565);
+
+        let rw = mc
+            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:25566"))
+            .expect("rewrite")
+            .rewrite
+            .expect("expected rewrite bytes");
+
+        let out = mc
+            .apply(&rw, &MiddlewareCtx::parse())
+            .expect("parse rewritten")
+            .host
+            .expect("host");
+
+        assert_eq!(out, "backend.local");
+        assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
+    }
+
+    #[test]
+    fn tls_sni_rewrite_uses_upstream_host_only() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let dir = root.join("middlewares");
+
+        let tls = WasmMiddleware::from_wat_path("tls_sni", &dir.join("tls_sni.wat"))
+            .expect("compile tls_sni");
+
+        let prelude = tls_client_hello_prelude("orig.example.com");
+
+        let parsed = tls
+            .apply(&prelude, &MiddlewareCtx::parse())
+            .expect("parse")
+            .host
+            .expect("host");
+        assert_eq!(parsed, "orig.example.com");
+
+        let rw = tls
+            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:443"))
+            .expect("rewrite")
+            .rewrite
+            .expect("expected rewrite bytes");
+
+        let parsed2 = tls
+            .apply(&rw, &MiddlewareCtx::parse())
+            .expect("parse rewritten")
+            .host
+            .expect("host");
+        assert_eq!(parsed2, "backend.local");
     }
 }

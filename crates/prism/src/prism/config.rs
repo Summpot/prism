@@ -379,7 +379,6 @@ struct FileRoute {
     parsers: Option<StringOrVec>,
 
     strategy: Option<String>,
-
 }
 
 #[derive(Debug, Deserialize)]

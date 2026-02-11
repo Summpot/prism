@@ -1,8 +1,6 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
 use arc_swap::ArcSwap;
@@ -79,10 +77,7 @@ impl Router {
     /// - Ok(Some(resolution)) when a route parses and matches
     /// - Ok(None) when no routes can match this prelude (and no route needs more data)
     /// - Err(NeedMoreData) when at least one route needs more bytes to decide
-    pub fn resolve_prelude(
-        &self,
-        prelude: &[u8],
-    ) -> Result<Option<Resolution>, MiddlewareError> {
+    pub fn resolve_prelude(&self, prelude: &[u8]) -> Result<Option<Resolution>, MiddlewareError> {
         let cr = self.compiled.load();
         if cr.routes.is_empty() {
             return Ok(None);
@@ -359,7 +354,8 @@ mod tests {
             fn parse(
                 &self,
                 _prelude: &[u8],
-            ) -> Result<(String, Option<Vec<u8>>), crate::prism::middleware::MiddlewareError> {
+            ) -> Result<(String, Option<Vec<u8>>), crate::prism::middleware::MiddlewareError>
+            {
                 Err(crate::prism::middleware::MiddlewareError::NoMatch)
             }
 

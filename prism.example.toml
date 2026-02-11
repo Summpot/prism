@@ -78,6 +78,8 @@ poll_interval_ms = 1000
 
 # Each route must specify one or more routing middlewares (by name).
 # Middlewares are loaded from "<config_dir>/middlewares/<name>.wat" by default.
+# Prism will also materialize a few default/reference middlewares into that directory on startup
+# (only if the files do not already exist).
 
 [timeouts]
 handshake_timeout_ms = 3000

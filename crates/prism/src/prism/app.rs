@@ -29,6 +29,16 @@ pub async fn run(
         tracing::warn!(path = %resolved.path.display(), source = %resolved.source, "config: created new config file");
     }
 
+    let created_mws = middleware::materialize_default_middlewares(&paths.middleware_dir)
+        .with_context(|| format!("materialize middlewares: {}", paths.middleware_dir.display()))?;
+    if !created_mws.is_empty() {
+        tracing::info!(
+            middleware_dir = %paths.middleware_dir.display(),
+            created = created_mws.len(),
+            "middleware: materialized default middlewares"
+        );
+    }
+
     let proxy_enabled = !cfg.listeners.is_empty();
     let tunnel_server_enabled = !cfg.tunnel.endpoints.is_empty();
     let tunnel_client_enabled = cfg.tunnel.client.is_some() && !cfg.tunnel.services.is_empty();
@@ -381,6 +391,14 @@ async fn apply_reload(
             return;
         }
     };
+
+    if let Err(err) = middleware::materialize_default_middlewares(middleware_dir) {
+        tracing::warn!(
+            middleware_dir = %middleware_dir.display(),
+            err = %err,
+            "reload: failed to materialize default middlewares"
+        );
+    }
 
     // Listener topology changes require restart.
     if !listeners_equal(static_listeners, &cfg.listeners) {

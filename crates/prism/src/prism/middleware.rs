@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -216,6 +217,76 @@ impl MiddlewareProvider for FsWasmMiddlewareProvider {
 
         Ok(mw)
     }
+}
+
+const DEFAULT_MIDDLEWARES: &[(&str, &str)] = &[
+    (
+        "minecraft_handshake",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../middlewares/minecraft_handshake.wat"
+        )),
+    ),
+    (
+        "tls_sni",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../middlewares/tls_sni.wat"
+        )),
+    ),
+    (
+        "host_to_upstream",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../middlewares/host_to_upstream.wat"
+        )),
+    ),
+];
+
+/// Ensure the middleware directory exists and contains Prism's default WAT middlewares.
+///
+/// This is intended to match the historical behavior of materializing built-in parsers:
+/// on startup, Prism writes a few reference middlewares into the configured directory
+/// **if they do not already exist**.
+pub fn materialize_default_middlewares(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    if dir.as_os_str().is_empty() {
+        anyhow::bail!("middleware: empty middleware_dir");
+    }
+
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("middleware: create dir {}", dir.display()))?;
+
+    let mut created = Vec::new();
+
+    for (name, wat) in DEFAULT_MIDDLEWARES {
+        let path = dir.join(format!("{name}.wat"));
+        if path.exists() {
+            continue;
+        }
+
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                f.write_all(wat.as_bytes()).with_context(|| {
+                    format!("middleware: write default {} to {}", name, path.display())
+                })?;
+                created.push(path);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Racy create: another thread/process created it.
+                continue;
+            }
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("middleware: create {}", path.display()));
+            }
+        }
+    }
+
+    Ok(created)
 }
 
 pub struct WasmMiddleware {
@@ -563,5 +634,27 @@ mod tests {
             WasmMiddleware::from_wat_path(name, &wat_path)
                 .unwrap_or_else(|e| panic!("failed to compile {name}.wat: {e:#}"));
         }
+    }
+
+    #[test]
+    fn materialize_default_middlewares_is_idempotent_and_non_destructive() {
+        let dir = temp_test_dir("materialize_defaults");
+
+        // First run should create the default files.
+        let created = materialize_default_middlewares(&dir).expect("materialize");
+        assert!(!created.is_empty(), "expected some files to be created");
+
+        // Second run should not create anything.
+        let created2 = materialize_default_middlewares(&dir).expect("materialize 2");
+        assert!(created2.is_empty(), "expected no new files on second run");
+
+        // Ensure we do not overwrite user-edited content.
+        let custom = dir.join("minecraft_handshake.wat");
+        fs::write(&custom, "(module)\n").expect("write custom");
+        let _ = materialize_default_middlewares(&dir).expect("materialize 3");
+        let now = fs::read_to_string(&custom).expect("read custom");
+        assert_eq!(now, "(module)\n");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

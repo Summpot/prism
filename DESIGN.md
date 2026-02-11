@@ -78,6 +78,14 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
   * Prism loads these modules from **WAT text** (`.wat`) only.
   * Protocol-specific parsing/rewrite logic lives **only** in wasm; the Rust side is a framework that loads and invokes wasm middlewares.
 
+* **Default middlewares (materialized on startup)**:
+  * To match the historical behavior of built-in parsers, Prism ships a small set of **reference WAT middlewares** and writes them into the configured middleware directory on startup **if the files do not already exist**.
+  * By default this directory is `<config_dir>/middlewares/`.
+  * Current defaults:
+    * `minecraft_handshake.wat`: parse Minecraft handshake and extract `host`.
+    * `tls_sni.wat`: parse TLS ClientHello and extract SNI `host`.
+    * `host_to_upstream.wat`: rewrite-only helper for chaining (see notes in repo / examples).
+
 * **Testability**:
   * Since middleware is driven by deterministic byte slices, unit tests can validate parsing and rewrites without real sockets.
 

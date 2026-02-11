@@ -19,24 +19,26 @@
     "logging": { "$ref": "#/$defs/logging" },
     "routes": {
       "type": "array",
-      "description": "Ordered hostname routes. Routes are matched in order; each route can target one or more upstreams and can cache Minecraft status (ping) responses.",
+      "description": "Ordered hostname routes. Routes are matched in order; each route targets one or more upstreams. TCP hostname extraction and optional prelude rewrites are provided by per-route wasm middlewares.",
       "items": { "$ref": "#/$defs/route" },
       "default": [],
       "examples": [
         [
           {
             "host": "play.example.com",
-            "upstream": "127.0.0.1:25566"
+            "upstream": "127.0.0.1:25566",
+            "middlewares": ["minecraft_handshake"]
           },
           {
             "host": "*.labs.example.com",
             "upstreams": ["127.0.0.1:25567", "127.0.0.1:25568"],
             "strategy": "round-robin",
-            "cache_ping_ttl": "60s"
+            "middlewares": ["minecraft_handshake"]
           },
           {
             "host": "home.example.com",
-            "upstream": "tunnel:home-mc"
+            "upstream": "tunnel:home-mc",
+            "middlewares": ["minecraft_handshake"]
           }
         ]
       ]
@@ -348,32 +350,36 @@
           "$ref": "#/$defs/stringOrStrings",
           "description": "Alias of upstreams (gate-lite compatible naming)."
         },
+        "middlewares": {
+          "$ref": "#/$defs/stringOrStrings",
+          "description": "Ordered wasm middleware names to apply for this route (name only; do not include .wat). Middlewares can parse hostnames and can optionally rewrite the captured prelude before proxying upstream."
+        },
         "parsers": {
           "$ref": "#/$defs/stringOrStrings",
-          "description": "Ordered routing parser names to try for this route (name only; do not include .wat). Defaults to [minecraft_handshake, tls_sni]."
+          "description": "Deprecated alias of middlewares (kept for backward compatibility)."
         },
         "strategy": {
           "type": "string",
           "description": "Load balancing strategy when multiple upstreams are configured.",
           "enum": ["sequential", "random", "round-robin"],
           "default": "sequential"
-        },
-        "cache_ping_ttl": {
-          "type": "string",
-          "description": "Minecraft status (ping) cache TTL (Go duration string like '60s'). Use '-1' to disable.",
-          "examples": ["10s", "60s", "-1"]
-        },
-        "cache_ping_ttl_ms": {
-          "type": "integer",
-          "description": "Minecraft status (ping) cache TTL in milliseconds. Use -1 to disable.",
-          "examples": [10000, 60000, -1]
         }
       },
-      "anyOf": [
-        { "required": ["upstream"] },
-        { "required": ["upstreams"] },
-        { "required": ["backend"] },
-        { "required": ["backends"] }
+      "allOf": [
+        {
+          "anyOf": [
+            { "required": ["upstream"] },
+            { "required": ["upstreams"] },
+            { "required": ["backend"] },
+            { "required": ["backends"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["middlewares"] },
+            { "required": ["parsers"] }
+          ]
+        }
       ]
     }
   }

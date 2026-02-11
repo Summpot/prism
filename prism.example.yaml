@@ -68,7 +68,7 @@ timeouts:
 routes:
   - host: "play.example.com"
     upstream: "127.0.0.1:25566"
-    parsers: ["minecraft_handshake"]
+    middlewares: ["minecraft_handshake"]
 
   # Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
   # using $1, $2, ... (see DESIGN.md for details).
@@ -77,9 +77,8 @@ routes:
       - "127.0.0.1:25567"
       - "127.0.0.1:25568"
     strategy: "round-robin"
-    cache_ping_ttl: "60s"
-    parsers: ["minecraft_handshake"]
+    middlewares: ["minecraft_handshake"]
 
   - host: "home.example.com"
     upstream: "tunnel:home-mc"
-    parsers: ["minecraft_handshake"]
+    middlewares: ["minecraft_handshake"]

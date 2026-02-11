@@ -16,8 +16,8 @@ The system is designed with a **test-first architecture**, ensuring that core lo
 **Implementation note (current codebase):** Prism is implemented in **Rust**.
 
 * CLI parsing uses **clap**.
-* WebAssembly routing parsers execute via **wasmer** (Singlepass compiler).
-* The default routing parsers (`minecraft_handshake` and `tls_sni`) are shipped as embedded **WAT** sources (WebAssembly text format) that implement the same ABI as third-party parsers and can be replaced at runtime via configuration. Prism compiles WAT to WASM at runtime and **does not load raw `.wasm` binaries**.
+* WebAssembly routing middlewares execute via **wasmer**.
+* Routing middlewares are provided as **WAT** sources (WebAssembly text format, `.wat`) and loaded at runtime. Prism compiles WAT to WASM at runtime and intentionally **does not load raw `.wasm` binaries**.
 
 ---
 
@@ -54,34 +54,32 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
 
 ### 3.2. `SessionHandler` (Orchestrator)
 
-* **Responsibility**: Manages the lifecycle of a single client connection. It does not contain business logic but orchestrates calls to the Parser, Router, and Proxy components.
+* **Responsibility**: Manages the lifecycle of a single client connection. It does not contain business logic but orchestrates calls to the Middleware, Router, and Proxy components.
 * **Cancellation/Timeouts**: Owns the per-connection cancellation scope and applies configured timeouts (handshake, idle, dial). In Rust this is modeled via task cancellation and `tokio::time::timeout` (and may use a cancellation token internally).
 
-### 3.3. `RoutingHeaderParser` (Pure Logic, Pluggable)
+### 3.3. `RoutingMiddleware` (Pure Logic, Pluggable)
 
-* **Responsibility**: Extracts a routing hostname from the first bytes of a TCP stream.
+* **Responsibility**: Extracts a routing hostname from the first bytes of a TCP stream and can optionally **rewrite** the captured prelude before proxying upstream.
 * **Design**: Stateless per call; no direct dependency on `net.Conn`.
-* **Input**: `[]byte` (captured initial bytes).
-* **Output**: `(host string, error)` where errors are classified as:
+* **Input**:
+  * `[]byte` (captured initial bytes)
+  * a small context struct that indicates the middleware phase (`parse` or `rewrite`) and (for rewrite) the selected upstream
+* **Output**: `(host?, rewrite?, error)` where errors are classified as:
   * `need more data` (caller should read more bytes)
-  * `no match` (parser does not apply to this stream)
+  * `no match` (middleware does not apply to this stream)
   * fatal error
 
-* **Implementations**:
-  * All routing header parsers are **WASM modules** implementing the ABI described in section 7.
-  * In configuration and on disk, Prism loads these modules from **WAT text** (`.wat`) only.
-  * Prism ships two default parsers as embedded WAT modules:
-    * `minecraft_handshake`
-    * `tls_sni`
-  * These defaults are not "special" at runtime: they can be replaced by providing a different module path in configuration.
+* **Two phases**:
+  * **Parse**: middleware returns a `host` (and optionally a rewritten prelude). The router uses the returned host for matching.
+  * **Rewrite**: after the proxy selects an upstream, middleware can return a rewritten prelude based on `selected_upstream`.
 
-* **Plugin support (WASM)**:
-  * Parsers can be loaded from WebAssembly modules to avoid hardcoding parsing logic in the host language.
-  * Prism ships the default parsers as embedded WAT modules, so the default routing behavior uses the same ABI as external plugins.
-  * WASM is used only on the connection prelude; the hot path (byte bridging) remains native.
+* **Implementations**:
+  * All routing middlewares are **WASM modules** implementing the ABI described in section 7.
+  * Prism loads these modules from **WAT text** (`.wat`) only.
+  * Protocol-specific parsing/rewrite logic lives **only** in wasm; the Rust side is a framework that loads and invokes wasm middlewares.
 
 * **Testability**:
-  * Since parsing is `[]byte` -> `host`, unit tests can provide deterministic byte slices.
+  * Since middleware is driven by deterministic byte slices, unit tests can validate parsing and rewrites without real sockets.
 
 
 
@@ -105,12 +103,8 @@ Prism can run multiple listeners at once (different ports and/or protocols). Eac
 
 * **Upstream address format**:
   * Upstream targets are treated as TCP dial addresses (e.g. `host:port`, `ip:port`, `[ipv6]:port`).
-  * A port may be omitted (e.g. `backend.example.com`), in which case the proxy prefers the port from a Minecraft handshake when available and otherwise falls back to the listener port.
+  * A port may be omitted (e.g. `backend.example.com`), in which case the proxy falls back to the listener port.
   * Tunnel upstreams use the prefix `tunnel:` (for example `tunnel:home-mc`). In this case the target is **not** treated as a TCP dial address; it is resolved via the tunnel registry maintained by the tunnel server.
-
-* **Optional protocol-aware fast paths**:
-  * For Minecraft status (ping) traffic, Prism may serve a cached status response for a route when configured to do so (TTL-based).
-  * The cache is keyed by upstream + protocol version and uses request coalescing to avoid stampedes under concurrent pings.
 
 
 * **Testability**:
@@ -395,7 +389,7 @@ The project will strictly adhere to the following testing pyramid:
   * If the resolved config file path does not exist, Prism will **create a runnable default config file** at that path and continue starting (default: tunnel server on `:7000/tcp`).
 
 * **Runtime working directory**:
-  * Prism uses a work directory for runtime state (for example routing parser modules).
+  * Prism uses a work directory for runtime state (for example middleware modules).
   * Resolution precedence (highest first):
     * CLI flag: `--workdir /path/to/workdir`
     * Environment variable: `PRISM_WORKDIR=/path/to/workdir`
@@ -406,7 +400,7 @@ The project will strictly adhere to the following testing pyramid:
   * Prism can reload configuration without stopping the TCP listener.
   * Existing sessions continue with the configuration snapshot they started with.
   * New connections use the latest configuration snapshot.
-  * Not all fields can be reloaded safely (e.g., listen address/admin address require a restart); reloadable fields include routes, timeouts, dial timeouts, buffer sizing and header parser selection.
+  * Not all fields can be reloaded safely (e.g., listen address/admin address require a restart); reloadable fields include routes, timeouts, dial timeouts, buffer sizing and middleware selection.
 
 * **Logging reload semantics**:
   * `logging.level` is reloadable.
@@ -430,46 +424,75 @@ The project will strictly adhere to the following testing pyramid:
 
 ---
 
-## 7. WASM Routing Parser ABI (v1)
+## 7. WASM Routing Middleware ABI (v1)
 
-Prism's WASM routing header parser interface is intentionally tiny to keep overhead low.
+Prism's WASM routing middleware interface is intentionally small to keep overhead low.
 
 ### Module distribution format
 
-* Prism expects routing parser modules to be provided as **WAT text** (`.wat`).
+* Prism expects middleware modules to be provided as **WAT text** (`.wat`).
 * Prism compiles WAT to WASM at runtime (via Wasmer) and intentionally **rejects loading raw `.wasm` binaries**.
 
-### Parser lookup & builtins
+### Middleware lookup
 
-* Prism loads routing parser modules from a configurable directory.
+* Prism loads middleware modules from a configurable directory.
   * Resolution precedence (highest first):
-    * CLI flag: `--routing-parser-dir /path/to/parsers`
-    * Environment variable: `PRISM_ROUTING_PARSER_DIR=/path/to/parsers`
-    * Default: `<config_dir>/parsers` (Linux default: `/etc/prism/parsers`)
-  * If a provided parser dir path is relative, it is resolved relative to `<config_dir>`.
-* In configuration, each route selects one or more parsers via `routes[].parsers`.
-  * Parsers are referenced by **name only** (no extension, no directories).
-  * A parser name `foo` maps to the file `<routing_parser_dir>/foo.wat`.
-* Prism ships default parsers as embedded WAT sources and **materializes** them into the routing parser directory at startup (if missing), so builtin and custom parsers share the same file-based loading path.
+    * CLI flag: `--middleware-dir /path/to/middlewares`
+    * Environment variable: `PRISM_MIDDLEWARE_DIR=/path/to/middlewares`
+    * Default: `<config_dir>/middlewares` (Linux default: `/etc/prism/middlewares`)
+  * If a provided middleware dir path is relative, it is resolved relative to `<config_dir>`.
+* In configuration, each route selects one or more middlewares via `routes[].middlewares`.
+  * Middlewares are referenced by **name only** (no extension, no directories).
+  * A middleware name `foo` maps to the file `<middleware_dir>/foo.wat`.
+  * Legacy alias: `routes[].parsers` is accepted as a deprecated alias of `routes[].middlewares`.
 
 ### Memory contract
 
 * Module must export linear memory as `memory`.
 * Prism writes the captured prelude bytes into module memory starting at offset `0`.
+* Prism also writes a small context struct into module memory and passes its pointer to the exported function.
 
 ### Exported function
 
 Module must export:
 
-* `prism_parse(input_len: i32) -> i64`
+* `prism_mw_run(input_len: i32, ctx_ptr: i32) -> i64`
 
 Return values:
 
 * `0`  : need more data
-* `1`  : no match (this parser does not apply)
-* `-1` : fatal parse error
-* otherwise: packed `(ptr,len)` pointing at the hostname bytes in module memory:
+* `1`  : no match (this middleware does not apply)
+* `-1` : fatal middleware error
+* otherwise: packed `(ptr,len)` pointing at an output buffer in module memory:
   * lower 32 bits: `ptr` (u32)
   * upper 32 bits: `len` (u32)
 
-The hostname bytes must remain valid until the next call to `prism_parse` on the same module instance.
+### Context struct (v1)
+
+At `ctx_ptr`, Prism writes a little-endian struct:
+
+* `u32 version` (currently `1`)
+* `u32 phase` (`0` = parse, `1` = rewrite)
+* `u32 upstream_ptr` (pointer to selected upstream string; `0` when not available)
+* `u32 upstream_len` (byte length of selected upstream string)
+
+In **parse** phase, `upstream_ptr/upstream_len` are empty.
+In **rewrite** phase, `upstream_ptr/upstream_len` contain the final selected upstream label (after default port fill).
+
+### Output struct (v1)
+
+At the returned `(ptr,len)` location, Prism expects at least 16 bytes encoding a little-endian struct:
+
+* `u32 host_ptr`
+* `u32 host_len`
+* `u32 rewrite_ptr`
+* `u32 rewrite_len`
+
+Semantics:
+
+* If `host_len > 0`, Prism reads `host_len` bytes at `host_ptr` as the routing host.
+* If `rewrite_len > 0`, Prism reads `rewrite_len` bytes at `rewrite_ptr` as a **replacement buffer** for the captured prelude.
+  * In parse phase, this rewritten prelude is carried along with the route resolution and can be forwarded upstream.
+  * In rewrite phase, this rewritten prelude is applied just before writing the prelude to the selected upstream.
+
+The referenced bytes must remain valid until the next call on the same module instance.

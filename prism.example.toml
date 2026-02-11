@@ -7,7 +7,7 @@ max_header_bytes = 65536
 
 # Public-facing proxy listeners (multi-port / multi-protocol).
 #
-# TCP listeners can run in hostname-routing mode (Minecraft handshake / TLS SNI)
+# TCP listeners can run in hostname-routing mode (host extraction via wasm middlewares)
 # or in fixed forwarding mode.
 # UDP listeners run in fixed forwarding mode.
 
@@ -76,8 +76,8 @@ add_source = false
 enabled = true
 poll_interval_ms = 1000
 
-# Each route can specify one or more routing parsers (by name).
-# If omitted, Prism defaults to: ["minecraft_handshake", "tls_sni"].
+# Each route must specify one or more routing middlewares (by name).
+# Middlewares are loaded from "<config_dir>/middlewares/<name>.wat" by default.
 
 [timeouts]
 handshake_timeout_ms = 3000
@@ -86,7 +86,7 @@ idle_timeout_ms = 0
 [[routes]]
 host = "play.example.com"
 upstream = "127.0.0.1:25566"
-parsers = ["minecraft_handshake"]
+middlewares = ["minecraft_handshake"]
 
 # Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
 # using $1, $2, ... (see DESIGN.md for details).
@@ -94,10 +94,9 @@ parsers = ["minecraft_handshake"]
 host = "*.labs.example.com"
 upstreams = ["127.0.0.1:25567", "127.0.0.1:25568"]
 strategy = "round-robin"
-cache_ping_ttl = "60s"
-parsers = ["minecraft_handshake"]
+middlewares = ["minecraft_handshake"]
 
 [[routes]]
 host = "home.example.com"
 upstream = "tunnel:home-mc"
-parsers = ["minecraft_handshake"]
+middlewares = ["minecraft_handshake"]

@@ -6,20 +6,20 @@ use directories::ProjectDirs;
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
     pub workdir: PathBuf,
-    pub routing_parser_dir: PathBuf,
+    pub middleware_dir: PathBuf,
 }
 
 pub fn resolve_runtime_paths(
     workdir: Option<PathBuf>,
     config_path: &Path,
-    routing_parser_dir: Option<PathBuf>,
+    middleware_dir: Option<PathBuf>,
 ) -> anyhow::Result<RuntimePaths> {
     let workdir = resolve_workdir(workdir)?;
     let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let routing_parser_dir = resolve_routing_parser_dir(config_dir, routing_parser_dir)?;
+    let middleware_dir = resolve_middleware_dir(config_dir, middleware_dir)?;
     Ok(RuntimePaths {
         workdir,
-        routing_parser_dir,
+        middleware_dir,
     })
 }
 
@@ -47,14 +47,14 @@ fn resolve_workdir(flag_or_env: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     Ok(wd)
 }
 
-fn resolve_routing_parser_dir(
+fn resolve_middleware_dir(
     config_dir: &Path,
     flag_or_env: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
     let mut p = match flag_or_env {
         Some(p) => {
             if p.as_os_str().is_empty() {
-                anyhow::bail!("routing parser dir: empty path");
+                anyhow::bail!("middleware dir: empty path");
             }
             if p.is_relative() {
                 config_dir.join(p)
@@ -62,12 +62,12 @@ fn resolve_routing_parser_dir(
                 p
             }
         }
-        None => config_dir.join("parsers"),
+        None => config_dir.join("middlewares"),
     };
 
     p = normalize_path(p);
     if p.as_os_str().is_empty() {
-        anyhow::bail!("routing parser dir: empty path");
+        anyhow::bail!("middleware dir: empty path");
     }
     Ok(p)
 }
@@ -106,16 +106,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn routing_parser_dir_defaults_to_config_dir_parsers() {
+    fn middleware_dir_defaults_to_config_dir_middlewares() {
         let cd = PathBuf::from("C:/tmp/prism_cfg");
-        let rp = resolve_routing_parser_dir(&cd, None).expect("resolve");
-        assert_eq!(rp, cd.join("parsers"));
+        let rp = resolve_middleware_dir(&cd, None).expect("resolve");
+        assert_eq!(rp, cd.join("middlewares"));
     }
 
     #[test]
-    fn routing_parser_dir_relative_is_under_config_dir() {
+    fn middleware_dir_relative_is_under_config_dir() {
         let cd = PathBuf::from("C:/tmp/prism_cfg");
-        let rp = resolve_routing_parser_dir(&cd, Some(PathBuf::from("./p"))).expect("resolve");
+        let rp = resolve_middleware_dir(&cd, Some(PathBuf::from("./p"))).expect("resolve");
         assert_eq!(rp, cd.join("p"));
     }
 }

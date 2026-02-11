@@ -247,9 +247,8 @@ pub struct LoggingConfig {
 pub struct RouteConfig {
     pub host: Vec<String>,
     pub upstreams: Vec<String>,
-    pub parsers: Vec<String>,
+    pub middlewares: Vec<String>,
     pub strategy: String,
-    pub cache_ping_ttl: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -371,12 +370,12 @@ struct FileRoute {
     backend: Option<StringOrVec>,
     backends: Option<StringOrVec>,
 
+    middlewares: Option<StringOrVec>,
+    // Back-compat alias (deprecated): `parsers`.
     parsers: Option<StringOrVec>,
 
     strategy: Option<String>,
 
-    cache_ping_ttl: Option<String>,
-    cache_ping_ttl_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -570,30 +569,33 @@ impl Config {
                     .trim()
                     .to_ascii_lowercase();
 
-                let cache_ttl =
-                    parse_cache_ttl(r.cache_ping_ttl.as_deref(), r.cache_ping_ttl_ms)
-                        .with_context(|| format!("config: routes[{}] invalid cache_ping_ttl", i))?;
+                // Middleware chain (required for hostname-routing routes).
+                // Prefer `middlewares`, but accept legacy `parsers` as an alias.
+                let mut middlewares: Vec<String> = r
+                    .middlewares
+                    .clone()
+                    .or_else(|| r.parsers.clone())
+                    .map(|m| m.into_vec())
+                    .unwrap_or_default();
 
-                let mut parsers: Vec<String> =
-                    r.parsers.clone().map(|p| p.into_vec()).unwrap_or_default();
-
-                if parsers.is_empty() {
-                    // Default: try both built-in parsers.
-                    parsers = vec!["minecraft_handshake".into(), "tls_sni".into()];
-                }
-
-                let parsers = parsers
+                middlewares = middlewares
                     .into_iter()
-                    .map(|s| normalize_parser_ref(&s))
+                    .map(|s| normalize_middleware_ref(&s))
                     .collect::<anyhow::Result<Vec<_>>>()
-                    .with_context(|| format!("config: routes[{}] invalid parsers", i))?;
+                    .with_context(|| format!("config: routes[{}] invalid middlewares", i))?;
+
+                if middlewares.is_empty() {
+                    anyhow::bail!(
+                        "config: routes[{}] missing middlewares (set routes[].middlewares)",
+                        i
+                    );
+                }
 
                 cfg.routes.push(RouteConfig {
                     host: hosts,
                     upstreams,
-                    parsers,
+                    middlewares,
                     strategy,
-                    cache_ping_ttl: cache_ttl,
                 });
             }
         }
@@ -707,8 +709,8 @@ impl Config {
     }
 }
 
-fn normalize_parser_ref(s: &str) -> anyhow::Result<String> {
-    // Configs refer to parsers by name only (no paths/extensions).
+fn normalize_middleware_ref(s: &str) -> anyhow::Result<String> {
+    // Configs refer to middleware modules by name only (no paths/extensions).
     // Normalization:
     // - trim
     // - lowercase
@@ -720,47 +722,15 @@ fn normalize_parser_ref(s: &str) -> anyhow::Result<String> {
     out = out.replace('-', "_");
 
     if out.is_empty() {
-        anyhow::bail!("empty parser name");
+        anyhow::bail!("empty middleware name");
     }
     if out.contains('/') || out.contains('\\') {
-        anyhow::bail!("parser name must not contain path separators");
+        anyhow::bail!("middleware name must not contain path separators");
     }
     if out.contains('.') {
-        anyhow::bail!("parser name must not contain '.' or file extensions");
+        anyhow::bail!("middleware name must not contain '.' or file extensions");
     }
     Ok(out)
-}
-
-fn parse_cache_ttl(
-    cache_ping_ttl: Option<&str>,
-    cache_ping_ttl_ms: Option<i64>,
-) -> anyhow::Result<Option<Duration>> {
-    // Default matches gate lite: enabled by default for a short TTL.
-    let mut ttl = Some(Duration::from_secs(10));
-
-    if let Some(s) = cache_ping_ttl {
-        let st = s.trim();
-        if !st.is_empty() {
-            if st == "-1" {
-                ttl = None;
-            } else {
-                let d = humantime::parse_duration(st)?;
-                if d.as_nanos() == 0 {
-                    ttl = Some(Duration::from_secs(0));
-                } else {
-                    ttl = Some(d);
-                }
-            }
-        }
-    } else if let Some(ms) = cache_ping_ttl_ms {
-        if ms < 0 {
-            ttl = None;
-        } else {
-            ttl = Some(Duration::from_millis(ms as u64));
-        }
-    }
-
-    Ok(ttl)
 }
 
 const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
@@ -862,8 +832,8 @@ mod tests {
     }
 
     #[test]
-    fn route_default_parsers() {
-        let dir = temp_dir("resolve");
+    fn route_middlewares_required() {
+        let dir = temp_dir("mw_required");
         let cfg_path = dir.join("prism.toml");
 
         let toml = r#"
@@ -873,19 +843,15 @@ upstreams = ["127.0.0.1:1234"]
 "#;
 
         std::fs::write(&cfg_path, toml).expect("write");
-
-        let cfg = load_config(&cfg_path).expect("load_config");
-        assert_eq!(cfg.routes.len(), 1);
-        assert_eq!(
-            cfg.routes[0].parsers,
-            vec!["minecraft_handshake".to_string(), "tls_sni".to_string()]
-        );
+        let err = load_config(&cfg_path).unwrap_err();
+        let s = err.to_string().to_ascii_lowercase();
+        assert!(s.contains("missing middlewares"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn route_parsers_normalize_and_reject_extensions() {
+    fn route_middlewares_normalize_and_reject_extensions() {
         let dir = temp_dir("reject");
         let cfg_path = dir.join("prism.toml");
 
@@ -893,27 +859,46 @@ upstreams = ["127.0.0.1:1234"]
 [[routes]]
 host = "example.com"
 upstreams = ["127.0.0.1:1234"]
-parsers = ["TLS-SNI", "minecraft-handshake"]
+middlewares = ["Foo-Bar", "baz_qux"]
 "#;
 
         std::fs::write(&cfg_path, toml).expect("write");
         let cfg = load_config(&cfg_path).expect("load_config");
         assert_eq!(
-            cfg.routes[0].parsers,
-            vec!["tls_sni".to_string(), "minecraft_handshake".to_string()]
+            cfg.routes[0].middlewares,
+            vec!["foo_bar".to_string(), "baz_qux".to_string()]
         );
 
         let toml_bad = r#"
 [[routes]]
 host = "example.com"
 upstreams = ["127.0.0.1:1234"]
-parsers = ["minecraft_handshake.wat"]
+middlewares = ["bad.wat"]
 "#;
 
         std::fs::write(&cfg_path, toml_bad).expect("write");
         let err = load_config(&cfg_path).unwrap_err();
         let s = err.to_string();
-        assert!(s.contains("invalid parsers") || s.contains("parser name"));
+        assert!(s.contains("invalid middlewares") || s.to_ascii_lowercase().contains("middleware"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_parsers_alias_still_works() {
+        let dir = temp_dir("legacy_parsers_alias");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+[[routes]]
+host = "example.com"
+upstreams = ["127.0.0.1:1234"]
+parsers = ["Foo-Bar"]
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert_eq!(cfg.routes[0].middlewares, vec!["foo_bar".to_string()]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

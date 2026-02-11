@@ -3,7 +3,6 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
 };
 
 use arc_swap::ArcSwap;
@@ -11,14 +10,15 @@ use rand::{RngExt, rng};
 use regex::Regex;
 
 use crate::prism::config;
-use crate::prism::protocol::{ParseError, SharedHostParser};
+use crate::prism::middleware::{MiddlewareError, SharedMiddlewareChain};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Resolution {
     pub host: String,
     pub upstreams: Vec<String>,
-    pub cache_ping_ttl: Option<Duration>,
     pub matched_host: String,
+    pub middleware: SharedMiddlewareChain,
+    pub prelude_override: Option<Vec<u8>>,
 }
 
 pub struct Router {
@@ -34,9 +34,8 @@ struct CompiledRoute {
     patterns: Vec<CompiledPattern>,
     upstreams: Vec<String>,
     strategy: Strategy,
-    cache_ping_ttl: Option<Duration>,
     rr: AtomicU64,
-    parser: SharedHostParser,
+    middleware: SharedMiddlewareChain,
 }
 
 #[derive(Debug)]
@@ -54,7 +53,7 @@ enum Strategy {
 }
 
 impl Router {
-    pub fn new(routes: Vec<(config::RouteConfig, SharedHostParser)>) -> Self {
+    pub fn new(routes: Vec<(config::RouteConfig, SharedMiddlewareChain)>) -> Self {
         let r = Self {
             compiled: ArcSwap::from_pointee(CompiledRoutes::default()),
         };
@@ -62,10 +61,10 @@ impl Router {
         r
     }
 
-    pub fn update(&self, routes: Vec<(config::RouteConfig, SharedHostParser)>) {
+    pub fn update(&self, routes: Vec<(config::RouteConfig, SharedMiddlewareChain)>) {
         let mut out = Vec::new();
-        for (rt, parser) in routes {
-            if let Ok(c) = compile_route(&rt, parser) {
+        for (rt, middleware) in routes {
+            if let Ok(c) = compile_route(&rt, middleware) {
                 out.push(c);
             }
         }
@@ -79,7 +78,10 @@ impl Router {
     /// - Ok(Some(resolution)) when a route parses and matches
     /// - Ok(None) when no routes can match this prelude (and no route needs more data)
     /// - Err(NeedMoreData) when at least one route needs more bytes to decide
-    pub fn resolve_prelude(&self, prelude: &[u8]) -> Result<Option<Resolution>, ParseError> {
+    pub fn resolve_prelude(
+        &self,
+        prelude: &[u8],
+    ) -> Result<Option<Resolution>, MiddlewareError> {
         let cr = self.compiled.load();
         if cr.routes.is_empty() {
             return Ok(None);
@@ -87,24 +89,25 @@ impl Router {
 
         let mut need_more = false;
         for rt in &cr.routes {
-            match rt.parser.parse(prelude) {
-                Ok(host) => {
-                    if let Some(res) = resolve_route_for_host(rt, &host) {
+            match rt.middleware.parse(prelude) {
+                Ok((host, prelude_override)) => {
+                    if let Some(mut res) = resolve_route_for_host(rt, &host) {
+                        res.prelude_override = prelude_override;
                         return Ok(Some(res));
                     }
                 }
-                Err(ParseError::NeedMoreData) => {
+                Err(MiddlewareError::NeedMoreData) => {
                     need_more = true;
                 }
-                Err(ParseError::NoMatch) => {}
-                Err(ParseError::Fatal(_)) => {
-                    // Treat per-route parser failures as non-matches so other routes can still win.
+                Err(MiddlewareError::NoMatch) => {}
+                Err(MiddlewareError::Fatal(_)) => {
+                    // Treat per-route middleware failures as non-matches so other routes can still win.
                 }
             }
         }
 
         if need_more {
-            Err(ParseError::NeedMoreData)
+            Err(MiddlewareError::NeedMoreData)
         } else {
             Ok(None)
         }
@@ -133,7 +136,7 @@ impl Router {
 
 fn compile_route(
     rt: &config::RouteConfig,
-    parser: SharedHostParser,
+    middleware: SharedMiddlewareChain,
 ) -> anyhow::Result<CompiledRoute> {
     let mut patterns = Vec::new();
     for h in &rt.host {
@@ -175,9 +178,8 @@ fn compile_route(
         patterns,
         upstreams,
         strategy: parse_strategy(&rt.strategy),
-        cache_ping_ttl: rt.cache_ping_ttl,
         rr: AtomicU64::new(0),
-        parser,
+        middleware,
     })
 }
 
@@ -202,8 +204,9 @@ fn resolve_route_for_host(rt: &CompiledRoute, host: &str) -> Option<Resolution> 
         return Some(Resolution {
             host: host.to_string(),
             upstreams: candidates,
-            cache_ping_ttl: rt.cache_ping_ttl,
             matched_host: p.pattern.clone(),
+            middleware: rt.middleware.clone(),
+            prelude_override: None,
         });
     }
 
@@ -334,7 +337,6 @@ fn rotate(mut in_vec: Vec<String>, start: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prism::protocol;
     use std::sync::Arc;
 
     #[test]
@@ -342,24 +344,30 @@ mod tests {
         let cfg = config::RouteConfig {
             host: vec!["*.labs.example.com".into()],
             upstreams: vec!["$1.backend:25565".into()],
-            parsers: vec!["tls_sni".into()],
             strategy: "sequential".into(),
-            cache_ping_ttl: Some(Duration::from_secs(1)),
+            middlewares: vec!["noop".into()],
         };
 
-        struct NoMatchParser;
-        impl protocol::HostParser for NoMatchParser {
+        struct NoopChain;
+        impl crate::prism::middleware::MiddlewareChain for NoopChain {
             fn name(&self) -> &str {
-                "test"
+                "noop"
             }
 
-            fn parse(&self, _prelude: &[u8]) -> Result<String, protocol::ParseError> {
-                Err(protocol::ParseError::NoMatch)
+            fn parse(
+                &self,
+                _prelude: &[u8],
+            ) -> Result<(String, Option<Vec<u8>>), crate::prism::middleware::MiddlewareError> {
+                Err(crate::prism::middleware::MiddlewareError::NoMatch)
+            }
+
+            fn rewrite(&self, _prelude: &[u8], _selected_upstream: &str) -> Option<Vec<u8>> {
+                None
             }
         }
 
-        let parser = Arc::new(NoMatchParser) as protocol::SharedHostParser;
-        let r = Router::new(vec![(cfg, parser)]);
+        let chain = Arc::new(NoopChain) as crate::prism::middleware::SharedMiddlewareChain;
+        let r = Router::new(vec![(cfg, chain)]);
         let res = r.resolve("play.labs.example.com").expect("match");
         assert_eq!(res.upstreams[0], "play.backend:25565");
     }

@@ -39,7 +39,7 @@ impl Transport for UdpTransport {
     ) -> anyhow::Result<Box<dyn TransportListener>> {
         let bind_addr = net::normalize_bind_addr(addr);
         let bind_addr: SocketAddr = bind_addr.parse()?;
-        let ln = KcpListener::bind(self.kcp.clone(), bind_addr).await?;
+        let ln = KcpListener::bind(self.kcp, bind_addr).await?;
         let local = ln.local_addr().ok();
         Ok(Box::new(UdpTransportListener {
             ln: Mutex::new(ln),
@@ -85,6 +85,7 @@ struct YamuxSession {
     control: Mutex<tokio_yamux::Control>,
     incoming: Mutex<mpsc::Receiver<tokio_yamux::StreamHandle>>,
     remote: Option<SocketAddr>,
+    #[allow(dead_code)]
     local: Option<SocketAddr>,
     task: tokio::task::JoinHandle<()>,
 }

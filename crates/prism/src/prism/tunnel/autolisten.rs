@@ -157,12 +157,12 @@ impl AutoListener {
                     && w.addr == cur.desired.addr
             });
 
-            if !should_keep {
-                if let Some(old) = running.remove(&key) {
-                    let _ = old.stop.send(true);
-                    old.task.abort();
-                    tracing::info!(key=%key, "tunnel: stopped auto-listen");
-                }
+            if !should_keep
+                && let Some(old) = running.remove(&key)
+            {
+                let _ = old.stop.send(true);
+                old.task.abort();
+                tracing::info!(key=%key, "tunnel: stopped auto-listen");
             }
         }
 
@@ -259,7 +259,7 @@ async fn handle_tcp_conn(
 
     let _ = tokio::io::copy_bidirectional(c, &mut *st).await;
     let _ = c.shutdown().await;
-    let _ = (&mut *st).shutdown().await;
+    let _ = (*st).shutdown().await;
     Ok(())
 }
 
@@ -316,7 +316,7 @@ async fn run_udp_listener(
                     continue;
                 }
 
-                if !flows.contains_key(&peer) {
+                if let std::collections::hash_map::Entry::Vacant(e) = flows.entry(peer) {
                     let st = mgr
                         .dial_service_udp_from_client(&svc.client_id, &svc.name)
                         .await
@@ -352,8 +352,7 @@ async fn run_udp_listener(
                         }
                     });
 
-                    flows.insert(
-                        peer,
+                    e.insert(
                         UdpFlow {
                             wr: Mutex::new(wr),
                             task,

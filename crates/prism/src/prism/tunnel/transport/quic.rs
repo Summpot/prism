@@ -139,14 +139,9 @@ impl QuicSession {
         let (tx, rx) = mpsc::channel(64);
         let c = conn.clone();
         let task = tokio::spawn(async move {
-            loop {
-                match c.accept_bi().await {
-                    Ok(st) => {
-                        if tx.send(st).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
+            while let Ok(st) = c.accept_bi().await {
+                if tx.send(st).await.is_err() {
+                    break;
                 }
             }
         });
@@ -217,9 +212,7 @@ impl tokio::io::AsyncWrite for QuicBiStream {
         use std::task::Poll;
         match self.project().send.poll_write(cx, data) {
             Poll::Ready(Ok(n)) => Poll::Ready(Ok(n)),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -231,9 +224,7 @@ impl tokio::io::AsyncWrite for QuicBiStream {
         use std::task::Poll;
         match self.project().send.poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -245,9 +236,7 @@ impl tokio::io::AsyncWrite for QuicBiStream {
         use std::task::Poll;
         match self.project().send.poll_shutdown(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -292,10 +281,7 @@ mod quic_tls {
         let data = fs::read(path)?;
         let mut rd = std::io::Cursor::new(&data);
         let certs = rustls_pemfile::certs(&mut rd)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|c| CertificateDer::from(c))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(certs)
     }
 

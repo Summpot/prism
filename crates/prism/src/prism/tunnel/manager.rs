@@ -29,7 +29,6 @@ pub struct ServiceSnapshot {
 }
 
 struct ClientConn {
-    id: String,
     sess: Arc<dyn TransportSession>,
     services: HashMap<String, RegisteredService>,
     remote: String,
@@ -91,7 +90,6 @@ impl Manager {
         }
 
         let mut cc = ClientConn {
-            id: id.clone(),
             sess,
             services: HashMap::new(),
             remote: String::new(),
@@ -169,11 +167,13 @@ impl Manager {
         out
     }
 
+    #[allow(dead_code)]
     pub async fn has_service(&self, service: &str) -> bool {
         let st = self.state.read().await;
         st.primary.contains_key(service.trim())
     }
 
+    #[allow(dead_code)]
     pub async fn dial_service_tcp(&self, service: &str) -> Result<BoxedStream, ManagerError> {
         let (st, _svc) = self.dial_service_tcp_inner(None, service).await?;
         Ok(st)
@@ -197,6 +197,7 @@ impl Manager {
         Ok(st)
     }
 
+    #[allow(dead_code)]
     pub async fn dial_service_tcp_from_client_with_meta(
         &self,
         client_id: &str,

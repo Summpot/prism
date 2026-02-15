@@ -16,6 +16,7 @@ impl<RW> DatagramConn<RW> {
         Self { inner }
     }
 
+    #[allow(dead_code)]
     pub fn into_inner(self) -> RW {
         self.inner
     }

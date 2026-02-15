@@ -281,7 +281,7 @@ mod tests {
 
         assert_eq!(got.services[1].name, "svc2");
         assert_eq!(got.services[1].proto, "udp");
-        assert_eq!(got.services[1].route_only, true);
+        assert!(got.services[1].route_only);
         // route_only clears remote_addr
         assert_eq!(got.services[1].remote_addr, "");
         assert_eq!(got.services[1].masquerade_host, "svc2.internal");

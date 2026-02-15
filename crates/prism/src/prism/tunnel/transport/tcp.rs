@@ -69,6 +69,7 @@ struct YamuxSession {
     control: tokio::sync::Mutex<tokio_yamux::Control>,
     incoming: tokio::sync::Mutex<mpsc::Receiver<tokio_yamux::StreamHandle>>,
     remote: Option<SocketAddr>,
+    #[allow(dead_code)]
     local: Option<SocketAddr>,
     task: tokio::task::JoinHandle<()>,
 }

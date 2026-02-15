@@ -317,6 +317,7 @@ async fn shutdown_signal() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn reload_loop(
     config_path: PathBuf,
     static_listeners: Vec<config::ProxyListenerConfig>,
@@ -382,7 +383,7 @@ async fn reload_loop(
 }
 
 async fn apply_reload(
-    config_path: &PathBuf,
+    config_path: &Path,
     static_listeners: &[config::ProxyListenerConfig],
     middleware_dir: &Path,
     router: &Arc<router::Router>,
@@ -471,7 +472,7 @@ fn listeners_equal(a: &[config::ProxyListenerConfig], b: &[config::ProxyListener
     true
 }
 
-fn file_sig(path: &PathBuf) -> anyhow::Result<(u64, u64)> {
+fn file_sig(path: &Path) -> anyhow::Result<(u64, u64)> {
     let meta = std::fs::metadata(path)?;
     let len = meta.len();
     let m = meta

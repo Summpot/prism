@@ -61,11 +61,11 @@ fn make_writer(
         "discard" => Ok(tracing_appender::non_blocking(io::sink())),
         other => {
             let p = Path::new(other);
-            if let Some(parent) = p.parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)
-                        .with_context(|| format!("logging: mkdir {}", parent.display()))?;
-                }
+            if let Some(parent) = p.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("logging: mkdir {}", parent.display()))?;
             }
             let file = std::fs::OpenOptions::new()
                 .create(true)

@@ -9,6 +9,8 @@ use anyhow::Context;
 use thiserror::Error;
 use wasmer::{Engine, Instance, Memory, Module, Pages, Store, TypedFunction, imports};
 
+type WasmInstanceParts = (Store, Instance, Memory, TypedFunction<(i32, i32), i64>);
+
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
     #[error("need more data")]
@@ -89,6 +91,7 @@ pub trait MiddlewareProvider: Send + Sync {
 pub type SharedMiddlewareChain = Arc<dyn MiddlewareChain>;
 
 pub trait MiddlewareChain: Send + Sync {
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 
     /// Apply middleware chain in parse mode.
@@ -211,10 +214,10 @@ impl MiddlewareProvider for FsWasmMiddlewareProvider {
             anyhow::bail!("middleware: empty name");
         }
 
-        if let Ok(guard) = self.cache.lock() {
-            if let Some(m) = guard.get(name) {
-                return Ok(m.clone());
-            }
+        if let Ok(guard) = self.cache.lock()
+            && let Some(m) = guard.get(name)
+        {
+            return Ok(m.clone());
         }
 
         let wat_path = self.wat_path_for(name);
@@ -342,9 +345,7 @@ impl WasmMiddleware {
         })
     }
 
-    fn instantiate(
-        &self,
-    ) -> anyhow::Result<(Store, Instance, Memory, TypedFunction<(i32, i32), i64>)> {
+    fn instantiate(&self) -> anyhow::Result<WasmInstanceParts> {
         let mut store = Store::new(self.engine.clone());
         let import_object = imports! {};
 
@@ -410,7 +411,7 @@ impl WasmMiddleware {
         let mut mem_size = memory.view(&store).data_size();
         if need > mem_size {
             let delta = need - mem_size;
-            let pages_needed = (delta + 65535) / 65536;
+            let pages_needed = delta.div_ceil(65536);
             memory
                 .grow(&mut store, Pages(pages_needed as u32))
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
@@ -420,7 +421,7 @@ impl WasmMiddleware {
         // Always ensure a few pages so fixed-offset middlewares can place output safely.
         // (Rewrite outputs may be larger than the ctx struct region; wasm itself can't grow memory.)
         if mem_size < 4 * 65536 {
-            let pages = ((4 * 65536 - mem_size) + 65535) / 65536;
+            let pages = (4 * 65536 - mem_size).div_ceil(65536);
             memory
                 .grow(&mut store, Pages(pages as u32))
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
@@ -748,7 +749,7 @@ mod tests {
         let ext_total = 4 + sni_ext_len; // ext_type + ext_len + ext_data
 
         let client_hello_len = 2 + 32 + // legacy_version + random
-            1 + 0 + // session id
+            1 + // session id len (empty)
             2 + 2 + // cipher_suites len + one suite
             1 + 1 + // compression methods
             2 + ext_total; // extensions total + extensions

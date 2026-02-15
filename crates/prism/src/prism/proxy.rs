@@ -78,6 +78,7 @@ pub struct TcpRuntimeConfig {
     pub proxy_protocol_v2: bool,
 }
 
+#[allow(dead_code)]
 pub async fn serve_tcp(listen_addr: &str, handler: TcpHandler) -> anyhow::Result<()> {
     // Backwards-compatible entrypoint: run until process shutdown.
     let (tx, rx) = tokio::sync::watch::channel(false);
@@ -129,6 +130,7 @@ pub struct UdpForwardOptions {
     pub idle_timeout: Duration,
 }
 
+#[allow(dead_code)]
 pub async fn serve_udp(listen_addr: &str, opts: UdpForwardOptions) -> anyhow::Result<()> {
     // Backwards-compatible entrypoint: run until process shutdown.
     let (tx, rx) = tokio::sync::watch::channel(false);
@@ -284,10 +286,10 @@ impl UdpSession {
         tokio::spawn(async move {
             let res = udp_session_loop(sock, src, upstream, tunnel_manager, rx).await;
             sessions.remove(&sid);
-            if let Err(err) = res {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(sid=%sid, err=%err, "udp: session ended");
-                }
+            if let Err(err) = res
+                && tracing::enabled!(tracing::Level::DEBUG)
+            {
+                tracing::debug!(sid=%sid, err=%err, "udp: session ended");
             }
         });
     }
@@ -436,13 +438,13 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
     });
 
     let mut up = up;
-    if rt.proxy_protocol_v2 {
-        if let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await {
-            tracing::warn!(sid = %sid, client = %client, upstream = %upstream_used, err = %err, "proxy: proxy_protocol_v2 write failed");
-            let _ = conn.shutdown().await;
-            opts.sessions.remove(&sid);
-            return;
-        }
+    if rt.proxy_protocol_v2
+        && let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await
+    {
+        tracing::warn!(sid = %sid, client = %client, upstream = %upstream_used, err = %err, "proxy: proxy_protocol_v2 write failed");
+        let _ = conn.shutdown().await;
+        opts.sessions.remove(&sid);
+        return;
     }
 
     let res = proxy_bidirectional(&mut conn, up, rt.buffer_size, rt.idle_timeout).await;
@@ -619,16 +621,16 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     }
 
     // Forward captured prelude upstream.
-    if rt.proxy_protocol_v2 {
-        if let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await {
-            tracing::warn!(sid=%sid, err=%err, "proxy: proxy_protocol_v2 write failed");
-            let _ = conn.shutdown().await;
-            opts.sessions.remove(&sid);
-            return;
-        }
+    if rt.proxy_protocol_v2
+        && let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await
+    {
+        tracing::warn!(sid=%sid, err=%err, "proxy: proxy_protocol_v2 write failed");
+        let _ = conn.shutdown().await;
+        opts.sessions.remove(&sid);
+        return;
     }
 
-    if let Err(err) = (&mut *up).write_all(&prelude).await {
+    if let Err(err) = (*up).write_all(&prelude).await {
         tracing::debug!(sid=%sid, err=%err, "proxy: failed writing prelude to upstream");
         let _ = conn.shutdown().await;
         opts.sessions.remove(&sid);
@@ -693,10 +695,10 @@ async fn dial_upstream(
         return Ok((st, format!("tunnel:{service}"), masq));
     }
 
-    if let Some(p) = default_port {
-        if upstream_needs_port(&addr) {
-            addr = format!("{addr}:{p}");
-        }
+    if let Some(p) = default_port
+        && upstream_needs_port(&addr)
+    {
+        addr = format!("{addr}:{p}");
     }
 
     Ok((dial_tcp_stream(&addr, timeout).await?, addr, None))
@@ -726,7 +728,7 @@ async fn proxy_bidirectional(
     let _ = buffer_size;
 
     // Best-effort shutdown.
-    let _ = (&mut *upstream).shutdown().await;
+    let _ = (*upstream).shutdown().await;
     Ok((ingress, egress))
 }
 

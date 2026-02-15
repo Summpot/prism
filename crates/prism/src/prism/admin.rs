@@ -23,6 +23,7 @@ pub struct AdminState {
     pub tunnel: Option<Arc<tunnel::manager::Manager>>,
 }
 
+#[allow(dead_code)]
 pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
     // Backwards-compatible entrypoint: run until process shutdown.
     let (tx, rx) = watch::channel(false);

@@ -32,6 +32,7 @@ impl Server {
         Ok(Self { opts })
     }
 
+    #[allow(dead_code)]
     pub fn manager(&self) -> Arc<Manager> {
         self.opts.manager.clone()
     }
@@ -113,15 +114,9 @@ async fn handle_session(
     tracing::info!(cid=%cid, client=%remote, "tunnel: client connected");
 
     // Hold an accept loop to detect disconnects and close unexpected streams.
-    loop {
-        match sess.accept_stream().await {
-            Ok(mut st) => {
-                // Unexpected stream opened by client; close quietly.
-                let _ =
-                    tokio::time::timeout(std::time::Duration::from_secs(1), st.shutdown()).await;
-            }
-            Err(_) => break,
-        }
+    while let Ok(mut st) = sess.accept_stream().await {
+        // Unexpected stream opened by client; close quietly.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), st.shutdown()).await;
     }
 
     mgr.unregister_client(&cid).await;

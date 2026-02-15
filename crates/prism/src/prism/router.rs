@@ -14,6 +14,7 @@ use crate::prism::middleware::{MiddlewareError, SharedMiddlewareChain};
 pub struct Resolution {
     pub host: String,
     pub upstreams: Vec<String>,
+    #[allow(dead_code)]
     pub matched_host: String,
     pub captures: Vec<String>,
     pub middleware: SharedMiddlewareChain,
@@ -109,6 +110,7 @@ impl Router {
         }
     }
 
+    #[allow(dead_code)]
     pub fn resolve(&self, host: &str) -> Option<Resolution> {
         let cr = self.compiled.load();
         if cr.routes.is_empty() {
@@ -327,7 +329,7 @@ fn rotate(mut in_vec: Vec<String>, start: usize) -> Vec<String> {
 
     let mut out = Vec::with_capacity(n);
     out.extend(in_vec.drain(start..));
-    out.extend(in_vec.into_iter());
+    out.extend(in_vec);
     out
 }
 

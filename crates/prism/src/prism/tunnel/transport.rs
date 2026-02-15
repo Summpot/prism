@@ -53,6 +53,7 @@ pub trait Transport: Send + Sync {
 #[async_trait]
 pub trait TransportListener: Send + Sync {
     async fn accept(&self) -> anyhow::Result<Arc<dyn TransportSession>>;
+    #[allow(dead_code)]
     fn local_addr(&self) -> Option<SocketAddr>;
     async fn close(&self) -> anyhow::Result<()>;
 }
@@ -63,6 +64,7 @@ pub trait TransportSession: Send + Sync {
     async fn accept_stream(&self) -> anyhow::Result<BoxedStream>;
     async fn close(&self);
     fn remote_addr(&self) -> Option<SocketAddr>;
+    #[allow(dead_code)]
     fn local_addr(&self) -> Option<SocketAddr>;
 }
 

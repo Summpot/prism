@@ -46,14 +46,14 @@ pub fn resolve_config_path(
 
     // clap already maps PRISM_CONFIG into the flag value when unset, but keep the design's precedence
     // clear by treating it as "env" when present.
-    if let Some(p) = std::env::var_os("PRISM_CONFIG") {
-        if !p.is_empty() {
-            let p = normalize_explicit_path(Path::new(&p))?;
-            return Ok(ResolvedConfigPath {
-                path: p,
-                source: ConfigPathSource::Env,
-            });
-        }
+    if let Some(p) = std::env::var_os("PRISM_CONFIG")
+        && !p.is_empty()
+    {
+        let p = normalize_explicit_path(Path::new(&p))?;
+        return Ok(ResolvedConfigPath {
+            path: p,
+            source: ConfigPathSource::Env,
+        });
     }
 
     if let Ok(p) = discover_config_path(Path::new(".")) {
@@ -99,10 +99,10 @@ fn discover_config_path(dir: &Path) -> anyhow::Result<PathBuf> {
     let candidates = ["prism.toml", "prism.yaml", "prism.yml"];
     for c in candidates {
         let p = dir.join(c);
-        if let Ok(m) = fs::metadata(&p) {
-            if m.is_file() {
-                return Ok(p);
-            }
+        if let Ok(m) = fs::metadata(&p)
+            && m.is_file()
+        {
+            return Ok(p);
         }
     }
     anyhow::bail!("config: no prism.* found")
@@ -145,11 +145,11 @@ pub fn ensure_config_file(path: &Path) -> anyhow::Result<bool> {
 
     let tmpl = default_config_template_for_path(path)?;
 
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("config: mkdir {}", parent.display()))?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("config: mkdir {}", parent.display()))?;
     }
 
     // Create once (O_EXCL equivalent).
@@ -198,7 +198,7 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
         _ => anyhow::bail!("config: unsupported config extension {}", ext),
     };
 
-    Ok(Config::from_file_config(&mut fc, path)?)
+    Config::from_file_config(&mut fc, path)
 }
 
 #[derive(Debug, Clone)]
@@ -457,7 +457,7 @@ impl Config {
                 add_source: false,
             },
             routes: vec![],
-            max_header_bytes: fc.max_header_bytes as i64 as usize,
+            max_header_bytes: fc.max_header_bytes as usize,
             reload: ReloadConfig {
                 enabled: fc.reload.as_ref().map(|r| r.enabled).unwrap_or(true),
                 poll_interval: Duration::from_millis(
@@ -523,29 +523,29 @@ impl Config {
                 if let Some(h) = r.host.clone() {
                     hosts.extend(h.into_vec());
                 }
-                if hosts.is_empty() {
-                    if let Some(h) = r.hosts.clone() {
-                        hosts.extend(h.into_vec());
-                    }
+                if hosts.is_empty()
+                    && let Some(h) = r.hosts.clone()
+                {
+                    hosts.extend(h.into_vec());
                 }
                 let mut upstreams: Vec<String> = vec![];
                 if let Some(u) = r.upstreams.clone() {
                     upstreams.extend(u.into_vec());
                 }
-                if upstreams.is_empty() {
-                    if let Some(u) = r.upstream.clone() {
-                        upstreams.extend(u.into_vec());
-                    }
+                if upstreams.is_empty()
+                    && let Some(u) = r.upstream.clone()
+                {
+                    upstreams.extend(u.into_vec());
                 }
-                if upstreams.is_empty() {
-                    if let Some(u) = r.backends.clone() {
-                        upstreams.extend(u.into_vec());
-                    }
+                if upstreams.is_empty()
+                    && let Some(u) = r.backends.clone()
+                {
+                    upstreams.extend(u.into_vec());
                 }
-                if upstreams.is_empty() {
-                    if let Some(u) = r.backend.clone() {
-                        upstreams.extend(u.into_vec());
-                    }
+                if upstreams.is_empty()
+                    && let Some(u) = r.backend.clone()
+                {
+                    upstreams.extend(u.into_vec());
                 }
 
                 let hosts: Vec<String> = hosts
@@ -606,20 +606,20 @@ impl Config {
 
         // --- Logging ---
         if let Some(l) = &fc.logging {
-            if let Some(level) = &l.level {
-                if !level.trim().is_empty() {
-                    cfg.logging.level = level.trim().to_string();
-                }
+            if let Some(level) = &l.level
+                && !level.trim().is_empty()
+            {
+                cfg.logging.level = level.trim().to_string();
             }
-            if let Some(fmt) = &l.format {
-                if !fmt.trim().is_empty() {
-                    cfg.logging.format = fmt.trim().to_string();
-                }
+            if let Some(fmt) = &l.format
+                && !fmt.trim().is_empty()
+            {
+                cfg.logging.format = fmt.trim().to_string();
             }
-            if let Some(out) = &l.output {
-                if !out.trim().is_empty() {
-                    cfg.logging.output = out.trim().to_string();
-                }
+            if let Some(out) = &l.output
+                && !out.trim().is_empty()
+            {
+                cfg.logging.output = out.trim().to_string();
             }
             cfg.logging.add_source = l.add_source;
         }

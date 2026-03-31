@@ -32,9 +32,7 @@ export function createEmptyManagedConfig(): ManagedConfigDocument {
 	};
 }
 
-export function normalizeManagedRoute(
-	route: ManagedRouteDocument,
-): ManagedRouteDocument {
+export function normalizeManagedRoute(route: ManagedRouteDocument): ManagedRouteDocument {
 	return {
 		hosts: trimList(route.hosts),
 		upstreams: trimList(route.upstreams),
@@ -72,9 +70,7 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 			remote_addr: service.remote_addr.trim(),
 			masquerade_host: service.masquerade_host.trim(),
 		}))
-		.filter(
-			(service) => service.name || service.local_addr || service.remote_addr,
-		);
+		.filter((service) => service.name || service.local_addr || service.remote_addr);
 
 	const client = tunnel.client?.server_addr.trim()
 		? {
@@ -99,9 +95,7 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 	};
 }
 
-export function normalizeManagedConfig(
-	doc: ManagedConfigDocument,
-): ManagedConfigDocument {
+export function normalizeManagedConfig(doc: ManagedConfigDocument): ManagedConfigDocument {
 	return {
 		listeners: doc.listeners
 			.map((listener) => ({
@@ -110,19 +104,14 @@ export function normalizeManagedConfig(
 				upstream: listener.upstream.trim(),
 			}))
 			.filter((listener) => listener.listen_addr || listener.upstream),
-		routes: doc.routes
-			.map(normalizeManagedRoute)
-			.filter((route) => route.hosts.length > 0),
+		routes: doc.routes.map(normalizeManagedRoute).filter((route) => route.hosts.length > 0),
 		max_header_bytes: Math.max(0, doc.max_header_bytes || 0),
 		proxy_protocol_v2: Boolean(doc.proxy_protocol_v2),
 		buffer_size: Math.max(0, doc.buffer_size || 0),
 		upstream_dial_timeout_ms: Math.max(0, doc.upstream_dial_timeout_ms || 0),
 		timeouts: doc.timeouts
 			? {
-					handshake_timeout_ms: Math.max(
-						0,
-						doc.timeouts.handshake_timeout_ms || 0,
-					),
+					handshake_timeout_ms: Math.max(0, doc.timeouts.handshake_timeout_ms || 0),
 					idle_timeout_ms: Math.max(0, doc.timeouts.idle_timeout_ms || 0),
 				}
 			: undefined,
@@ -130,9 +119,7 @@ export function normalizeManagedConfig(
 	};
 }
 
-export function validateManagedConfig(
-	doc: ManagedConfigDocument,
-): ConfigIssue[] {
+export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[] {
 	const normalized = normalizeManagedConfig(doc);
 	const issues: ConfigIssue[] = [];
 

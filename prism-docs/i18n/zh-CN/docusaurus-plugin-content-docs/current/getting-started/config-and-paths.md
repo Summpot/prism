@@ -31,7 +31,7 @@ Prism 可以自动发现配置文件，也可以显式指定。
 
 ## 工作目录（workdir）
 
-Prism 使用 *workdir* 保存运行时状态。
+Prism 使用 _workdir_ 保存运行时状态。
 
 - CLI：`--workdir /path/to/workdir`
 - 环境变量：`PRISM_WORKDIR=/path/to/workdir`

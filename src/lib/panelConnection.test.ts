@@ -23,9 +23,7 @@ function createStorage(): StorageLike {
 
 describe("panelConnection", () => {
 	it("normalizes trailing slashes from base URLs", () => {
-		expect(normalizeBaseUrl(" http://127.0.0.1:8080/// ")).toBe(
-			"http://127.0.0.1:8080",
-		);
+		expect(normalizeBaseUrl(" http://127.0.0.1:8080/// ")).toBe("http://127.0.0.1:8080");
 	});
 
 	it("persists and restores a valid connection", () => {

@@ -31,7 +31,7 @@ If the resolved config path does **not** exist, Prism will create a runnable def
 
 ## Work directory
 
-Prism uses a *work directory* for runtime state.
+Prism uses a _work directory_ for runtime state.
 
 - CLI flag: `--workdir /path/to/workdir`
 - Environment: `PRISM_WORKDIR=/path/to/workdir`

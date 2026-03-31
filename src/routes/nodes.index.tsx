@@ -27,9 +27,7 @@ function NodesIndexPage() {
 				setNodes(response);
 			})
 			.catch((nextError) => {
-				setError(
-					nextError instanceof Error ? nextError.message : String(nextError),
-				);
+				setError(nextError instanceof Error ? nextError.message : String(nextError));
 			})
 			.finally(() => {
 				setLoading(false);
@@ -45,9 +43,7 @@ function NodesIndexPage() {
 	}
 
 	if (!connection) {
-		return (
-			<StateCard label="Connect the panel to a management node before browsing workers." />
-		);
+		return <StateCard label="Connect the panel to a management node before browsing workers." />;
 	}
 
 	return (
@@ -58,13 +54,10 @@ function NodesIndexPage() {
 						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
 							Managed nodes
 						</div>
-						<h1 className="mt-3 text-4xl font-semibold text-white">
-							Prism worker inventory
-						</h1>
+						<h1 className="mt-3 text-4xl font-semibold text-white">Prism worker inventory</h1>
 						<p className="mt-3 max-w-3xl text-base leading-7 text-slate-400">
-							Track whether nodes are syncing actively or waiting for passive
-							access, spot revision drift, and jump straight into the structured
-							config editor for any worker.
+							Track whether nodes are syncing actively or waiting for passive access, spot revision
+							drift, and jump straight into the structured config editor for any worker.
 						</p>
 					</div>
 					<div className="flex items-center gap-3">
@@ -74,9 +67,7 @@ function NodesIndexPage() {
 							disabled={loading}
 							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
 						>
-							<RefreshCw
-								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-							/>
+							<RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
 							Refresh
 						</button>
 						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
@@ -110,14 +101,9 @@ function NodesIndexPage() {
 					>
 						<div className="flex items-start justify-between gap-4">
 							<div>
-								<div className="text-xl font-semibold text-white">
-									{node.node_id}
-								</div>
+								<div className="text-xl font-semibold text-white">{node.node_id}</div>
 								<div className="mt-2 text-sm text-slate-400">
-									Mode{" "}
-									<span className="text-cyan-200">
-										{node.connection_mode ?? "unknown"}
-									</span>
+									Mode <span className="text-cyan-200">{node.connection_mode ?? "unknown"}</span>
 								</div>
 							</div>
 							<div
@@ -129,14 +115,8 @@ function NodesIndexPage() {
 						<div className="mt-5 grid gap-3 sm:grid-cols-2">
 							<Value label="Desired revision" value={node.desired_revision} />
 							<Value label="Applied revision" value={node.applied_revision} />
-							<Value
-								label="Last seen"
-								value={formatTime(node.last_seen_unix_ms)}
-							/>
-							<Value
-								label="Apply error"
-								value={node.last_apply_error || "none"}
-							/>
+							<Value label="Last seen" value={formatTime(node.last_seen_unix_ms)} />
+							<Value label="Apply error" value={node.last_apply_error || "none"} />
 						</div>
 					</Link>
 				))}
@@ -152,9 +132,7 @@ function NodesIndexPage() {
 function Value({ label, value }: { label: string; value: string | number }) {
 	return (
 		<div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-				{label}
-			</div>
+			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</div>
 			<div className="mt-2 text-sm font-medium text-white">{value}</div>
 		</div>
 	);

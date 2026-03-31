@@ -24,10 +24,7 @@ import {
 	normalizeManagedConfig,
 	validateManagedConfig,
 } from "@/lib/managedConfig";
-import type {
-	ManagedConfigDocument,
-	ManagedTunnelDocument,
-} from "@/lib/managementApi";
+import type { ManagedConfigDocument, ManagedTunnelDocument } from "@/lib/managementApi";
 
 function Card({
 	title,
@@ -50,9 +47,7 @@ function Card({
 						</div>
 						<h2 className="text-lg font-semibold">{title}</h2>
 					</div>
-					<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-						{description}
-					</p>
+					<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{description}</p>
 				</div>
 			</div>
 			<div className="mt-6">{children}</div>
@@ -150,10 +145,7 @@ export function ManagedConfigEditor({
 	const addListener = () => {
 		setDraft((current) => ({
 			...current,
-			listeners: [
-				...current.listeners,
-				{ listen_addr: "", protocol: "tcp", upstream: "" },
-			],
+			listeners: [...current.listeners, { listen_addr: "", protocol: "tcp", upstream: "" }],
 		}));
 	};
 
@@ -188,10 +180,7 @@ export function ManagedConfigEditor({
 			>
 				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 					<label className="space-y-2">
-						<SectionLabel
-							title="Max header bytes"
-							hint="TCP routing prelude cap"
-						/>
+						<SectionLabel title="Max header bytes" hint="TCP routing prelude cap" />
 						<input
 							type="number"
 							value={draft.max_header_bytes}
@@ -256,10 +245,7 @@ export function ManagedConfigEditor({
 			>
 				<div className="grid gap-4 md:grid-cols-2">
 					<label className="space-y-2">
-						<SectionLabel
-							title="Handshake timeout (ms)"
-							hint="TCP prelude capture timeout"
-						/>
+						<SectionLabel title="Handshake timeout (ms)" hint="TCP prelude capture timeout" />
 						<input
 							type="number"
 							value={draft.timeouts?.handshake_timeout_ms ?? 0}
@@ -289,8 +275,7 @@ export function ManagedConfigEditor({
 									...current,
 									timeouts: {
 										...current.timeouts,
-										handshake_timeout_ms:
-											current.timeouts?.handshake_timeout_ms ?? 0,
+										handshake_timeout_ms: current.timeouts?.handshake_timeout_ms ?? 0,
 										idle_timeout_ms: Number(event.target.value),
 									},
 								}))
@@ -314,31 +299,19 @@ export function ManagedConfigEditor({
 						>
 							<div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr,1.6fr,auto]">
 								<label className="space-y-2">
-									<SectionLabel
-										title="Listen address"
-										hint="Examples: :25565 or 127.0.0.1:8081"
-									/>
+									<SectionLabel title="Listen address" hint="Examples: :25565 or 127.0.0.1:8081" />
 									<input
 										value={listener.listen_addr}
-										onChange={(event) =>
-											updateListener(index, "listen_addr", event.target.value)
-										}
+										onChange={(event) => updateListener(index, "listen_addr", event.target.value)}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`listeners.${index}.listen_addr`]}
-									/>
+									<FieldError messages={issueMap[`listeners.${index}.listen_addr`]} />
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Protocol"
-										hint="TCP routing or UDP forwarding"
-									/>
+									<SectionLabel title="Protocol" hint="TCP routing or UDP forwarding" />
 									<select
 										value={listener.protocol}
-										onChange={(event) =>
-											updateListener(index, "protocol", event.target.value)
-										}
+										onChange={(event) => updateListener(index, "protocol", event.target.value)}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									>
 										<option value="tcp">tcp</option>
@@ -346,20 +319,13 @@ export function ManagedConfigEditor({
 									</select>
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Upstream"
-										hint="Leave empty for TCP hostname-routing"
-									/>
+									<SectionLabel title="Upstream" hint="Leave empty for TCP hostname-routing" />
 									<input
 										value={listener.upstream}
-										onChange={(event) =>
-											updateListener(index, "upstream", event.target.value)
-										}
+										onChange={(event) => updateListener(index, "upstream", event.target.value)}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`listeners.${index}.upstream`]}
-									/>
+									<FieldError messages={issueMap[`listeners.${index}.upstream`]} />
 								</label>
 								<div className="flex items-end">
 									<button
@@ -367,9 +333,7 @@ export function ManagedConfigEditor({
 										onClick={() =>
 											setDraft((current) => ({
 												...current,
-												listeners: current.listeners.filter(
-													(_, i) => i !== index,
-												),
+												listeners: current.listeners.filter((_, i) => i !== index),
 											}))
 										}
 										className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm font-medium text-red-200 transition hover:border-red-400/40 hover:bg-red-400/16"
@@ -406,53 +370,34 @@ export function ManagedConfigEditor({
 						>
 							<div className="grid gap-4 xl:grid-cols-2">
 								<label className="space-y-2">
-									<SectionLabel
-										title="Hosts"
-										hint="One hostname or pattern per line"
-									/>
+									<SectionLabel title="Hosts" hint="One hostname or pattern per line" />
 									<textarea
 										value={route.hosts.join("\n")}
-										onChange={(event) =>
-											updateRoute(index, "hosts", event.target.value)
-										}
+										onChange={(event) => updateRoute(index, "hosts", event.target.value)}
 										rows={4}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
 									<FieldError messages={issueMap[`routes.${index}.hosts`]} />
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Upstreams"
-										hint="One upstream per line"
-									/>
+									<SectionLabel title="Upstreams" hint="One upstream per line" />
 									<textarea
 										value={route.upstreams.join("\n")}
-										onChange={(event) =>
-											updateRoute(index, "upstreams", event.target.value)
-										}
+										onChange={(event) => updateRoute(index, "upstreams", event.target.value)}
 										rows={4}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`routes.${index}.upstreams`]}
-									/>
+									<FieldError messages={issueMap[`routes.${index}.upstreams`]} />
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Middlewares"
-										hint="One middleware name per line"
-									/>
+									<SectionLabel title="Middlewares" hint="One middleware name per line" />
 									<textarea
 										value={route.middlewares.join("\n")}
-										onChange={(event) =>
-											updateRoute(index, "middlewares", event.target.value)
-										}
+										onChange={(event) => updateRoute(index, "middlewares", event.target.value)}
 										rows={4}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`routes.${index}.middlewares`]}
-									/>
+									<FieldError messages={issueMap[`routes.${index}.middlewares`]} />
 								</label>
 								<div className="space-y-4">
 									<label className="space-y-2">
@@ -462,9 +407,7 @@ export function ManagedConfigEditor({
 										/>
 										<select
 											value={route.strategy}
-											onChange={(event) =>
-												updateRoute(index, "strategy", event.target.value)
-											}
+											onChange={(event) => updateRoute(index, "strategy", event.target.value)}
 											className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 										>
 											<option value="sequential">sequential</option>
@@ -526,8 +469,8 @@ export function ManagedConfigEditor({
 				) : null}
 				{issues.length > 0 ? (
 					<div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-sm text-amber-100">
-						Fix {issues.length} validation issue{issues.length === 1 ? "" : "s"}{" "}
-						before saving this revision.
+						Fix {issues.length} validation issue{issues.length === 1 ? "" : "s"} before saving this
+						revision.
 					</div>
 				) : null}
 				<button
@@ -565,8 +508,8 @@ function TunnelSection({
 							<h2 className="text-lg font-semibold">Tunnel</h2>
 						</div>
 						<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-							Enable reverse tunnel mode for this worker to register services or
-							expose tunnel endpoints.
+							Enable reverse tunnel mode for this worker to register services or expose tunnel
+							endpoints.
 						</p>
 					</div>
 					<button
@@ -596,10 +539,7 @@ function TunnelSection({
 				<div className="flex items-end justify-between gap-4">
 					<div className="grid flex-1 gap-4 md:grid-cols-2">
 						<label className="space-y-2">
-							<SectionLabel
-								title="Auth token"
-								hint="Shared secret for tunnel authentication"
-							/>
+							<SectionLabel title="Auth token" hint="Shared secret for tunnel authentication" />
 							<input
 								type="password"
 								value={tunnel.auth_token}
@@ -644,10 +584,7 @@ function TunnelSection({
 						>
 							<div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr,auto]">
 								<label className="space-y-2">
-									<SectionLabel
-										title="Listen address"
-										hint="e.g. :7000 or 0.0.0.0:7000"
-									/>
+									<SectionLabel title="Listen address" hint="e.g. :7000 or 0.0.0.0:7000" />
 									<input
 										value={endpoint.listen_addr}
 										onChange={(e) => {
@@ -662,10 +599,7 @@ function TunnelSection({
 									/>
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Transport"
-										hint="tcp, udp (KCP), or quic"
-									/>
+									<SectionLabel title="Transport" hint="tcp, udp (KCP), or quic" />
 									<select
 										value={endpoint.transport}
 										onChange={(e) => {
@@ -687,9 +621,7 @@ function TunnelSection({
 									<button
 										type="button"
 										onClick={() => {
-											const endpoints = tunnel.endpoints.filter(
-												(_, i) => i !== index,
-											);
+											const endpoints = tunnel.endpoints.filter((_, i) => i !== index);
 											updateTunnel({ endpoints });
 										}}
 										className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm font-medium text-red-200 transition hover:border-red-400/40 hover:bg-red-400/16"
@@ -724,10 +656,7 @@ function TunnelSection({
 										/>
 									</label>
 									<label className="space-y-2">
-										<SectionLabel
-											title="QUIC key file"
-											hint="Path to TLS private key"
-										/>
+										<SectionLabel title="QUIC key file" hint="Path to TLS private key" />
 										<input
 											value={endpoint.quic?.key_file ?? ""}
 											onChange={(e) => {
@@ -772,10 +701,7 @@ function TunnelSection({
 						<div className="rounded-3xl border border-white/8 bg-white/3 p-5">
 							<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 								<label className="space-y-2">
-									<SectionLabel
-										title="Server address"
-										hint="e.g. server.example.com:7000"
-									/>
+									<SectionLabel title="Server address" hint="e.g. server.example.com:7000" />
 									<input
 										value={tunnel.client.server_addr}
 										onChange={(e) =>
@@ -791,10 +717,7 @@ function TunnelSection({
 									/>
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Transport"
-										hint="tcp, udp (KCP), or quic"
-									/>
+									<SectionLabel title="Transport" hint="tcp, udp (KCP), or quic" />
 									<select
 										value={tunnel.client.transport}
 										onChange={(e) =>
@@ -847,10 +770,7 @@ function TunnelSection({
 							{tunnel.client.transport === "quic" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
 									<label className="space-y-2">
-										<SectionLabel
-											title="QUIC server name"
-											hint="TLS SNI for QUIC handshake"
-										/>
+										<SectionLabel title="QUIC server name" hint="TLS SNI for QUIC handshake" />
 										<input
 											value={tunnel.client.quic?.server_name ?? ""}
 											onChange={(e) =>
@@ -861,8 +781,7 @@ function TunnelSection({
 														quic: {
 															server_name: e.target.value,
 															insecure_skip_verify:
-																tunnel.client.quic?.insecure_skip_verify ??
-																false,
+																tunnel.client.quic?.insecure_skip_verify ?? false,
 														},
 													},
 												})
@@ -873,17 +792,14 @@ function TunnelSection({
 									<label className="flex items-end gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
 										<input
 											type="checkbox"
-											checked={
-												tunnel.client.quic?.insecure_skip_verify ?? false
-											}
+											checked={tunnel.client.quic?.insecure_skip_verify ?? false}
 											onChange={(e) =>
 												tunnel.client &&
 												updateTunnel({
 													client: {
 														...tunnel.client,
 														quic: {
-															server_name:
-																tunnel.client.quic?.server_name ?? "",
+															server_name: tunnel.client.quic?.server_name ?? "",
 															insecure_skip_verify: e.target.checked,
 														},
 													},
@@ -899,9 +815,7 @@ function TunnelSection({
 					) : (
 						<button
 							type="button"
-							onClick={() =>
-								updateTunnel({ client: createEmptyTunnelClient() })
-							}
+							onClick={() => updateTunnel({ client: createEmptyTunnelClient() })}
 							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
 						>
 							<Globe className="h-4 w-4" />
@@ -912,10 +826,7 @@ function TunnelSection({
 
 				{/* Services */}
 				<div className="space-y-3">
-					<SectionLabel
-						title="Services"
-						hint="Services to register on the tunnel server"
-					/>
+					<SectionLabel title="Services" hint="Services to register on the tunnel server" />
 					{tunnel.services.map((service, index) => (
 						<div
 							key={`svc-${service.name || index}`}
@@ -936,9 +847,7 @@ function TunnelSection({
 										}}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`tunnel.services.${index}.name`]}
-									/>
+									<FieldError messages={issueMap[`tunnel.services.${index}.name`]} />
 								</label>
 								<label className="space-y-2">
 									<SectionLabel title="Protocol" hint="tcp or udp" />
@@ -959,10 +868,7 @@ function TunnelSection({
 									</select>
 								</label>
 								<label className="space-y-2">
-									<SectionLabel
-										title="Local address"
-										hint="Backend addr behind this tunnel"
-									/>
+									<SectionLabel title="Local address" hint="Backend addr behind this tunnel" />
 									<input
 										value={service.local_addr}
 										onChange={(e) => {
@@ -975,9 +881,7 @@ function TunnelSection({
 										}}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`tunnel.services.${index}.local_addr`]}
-									/>
+									<FieldError messages={issueMap[`tunnel.services.${index}.local_addr`]} />
 								</label>
 								<label className="space-y-2">
 									<SectionLabel
@@ -996,9 +900,7 @@ function TunnelSection({
 										}}
 										className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
 									/>
-									<FieldError
-										messages={issueMap[`tunnel.services.${index}.remote_addr`]}
-									/>
+									<FieldError messages={issueMap[`tunnel.services.${index}.remote_addr`]} />
 								</label>
 								<label className="space-y-2">
 									<SectionLabel
@@ -1038,9 +940,7 @@ function TunnelSection({
 									<button
 										type="button"
 										onClick={() => {
-											const services = tunnel.services.filter(
-												(_, i) => i !== index,
-											);
+											const services = tunnel.services.filter((_, i) => i !== index);
 											updateTunnel({ services });
 										}}
 										className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm font-medium text-red-200 transition hover:border-red-400/40 hover:bg-red-400/16"

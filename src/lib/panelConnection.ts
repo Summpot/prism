@@ -15,24 +15,18 @@ export function normalizeBaseUrl(value: string) {
 	return value.trim().replace(/\/+$/, "");
 }
 
-export function normalizePanelConnection(
-	value: PanelConnection,
-): PanelConnection {
+export function normalizePanelConnection(value: PanelConnection): PanelConnection {
 	return {
 		baseUrl: normalizeBaseUrl(value.baseUrl),
 		token: value.token.trim(),
 	};
 }
 
-export function isValidPanelConnection(
-	value: PanelConnection | null,
-): value is PanelConnection {
+export function isValidPanelConnection(value: PanelConnection | null): value is PanelConnection {
 	return Boolean(value?.baseUrl && value.token);
 }
 
-export function loadPanelConnection(
-	storage: StorageLike,
-): PanelConnection | null {
+export function loadPanelConnection(storage: StorageLike): PanelConnection | null {
 	const raw = storage.getItem(PANEL_CONNECTION_STORAGE_KEY);
 	if (!raw) {
 		return null;
@@ -57,10 +51,7 @@ export function loadPanelConnection(
 	}
 }
 
-export function persistPanelConnection(
-	storage: StorageLike,
-	value: PanelConnection,
-) {
+export function persistPanelConnection(storage: StorageLike, value: PanelConnection) {
 	const normalized = normalizePanelConnection(value);
 	storage.setItem(PANEL_CONNECTION_STORAGE_KEY, JSON.stringify(normalized));
 	return normalized;

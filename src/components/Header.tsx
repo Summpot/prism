@@ -74,15 +74,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 						<Network className="h-6 w-6" />
 					</div>
 					<div>
-						<p className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
-							Prism
-						</p>
+						<p className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">Prism</p>
 						<h1 className="text-2xl font-semibold text-white">Control Plane</h1>
 					</div>
 				</div>
 				<p className="mt-4 text-sm leading-6 text-slate-400">
-					Operate standalone management nodes, inspect worker state, and edit
-					structured Prism configs without dropping into raw files.
+					Operate standalone management nodes, inspect worker state, and edit structured Prism
+					configs without dropping into raw files.
 				</p>
 			</div>
 
@@ -128,9 +126,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 				<div className="mt-auto rounded-3xl border border-white/8 bg-gradient-to-br from-slate-900 to-slate-950 p-4 text-sm text-slate-400">
 					<div className="font-medium text-white">Current route</div>
-					<div className="mt-2 break-all text-cyan-200/85">
-						{location.pathname}
-					</div>
+					<div className="mt-2 break-all text-cyan-200/85">{location.pathname}</div>
 				</div>
 			</nav>
 		</>
@@ -152,9 +148,7 @@ export default function Header() {
 					<Menu className="h-6 w-6" />
 				</button>
 				<Network className="h-5 w-5 text-cyan-300" />
-				<span className="text-sm font-semibold text-white">
-					Prism Control Plane
-				</span>
+				<span className="text-sm font-semibold text-white">Prism Control Plane</span>
 			</div>
 
 			{/* Mobile drawer overlay */}

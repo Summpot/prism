@@ -19,7 +19,7 @@ Health check.
 Response:
 
 ```json
-{"ok":true}
+{ "ok": true }
 ```
 
 ### `GET /metrics`
@@ -43,7 +43,7 @@ JSON snapshot of registered tunnel services (empty list if tunnel is disabled).
 Returns the resolved config file path:
 
 ```json
-{"path":"/etc/prism/prism.toml"}
+{ "path": "/etc/prism/prism.toml" }
 ```
 
 ### `POST /reload`
@@ -53,7 +53,7 @@ Trigger an on-demand config reload.
 Response:
 
 ```json
-{"seq":123}
+{ "seq": 123 }
 ```
 
 ## Examples

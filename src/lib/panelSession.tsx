@@ -14,15 +14,9 @@ interface PanelSessionContextValue {
 	clearConnection: () => void;
 }
 
-const PanelSessionContext = createContext<PanelSessionContextValue | null>(
-	null,
-);
+const PanelSessionContext = createContext<PanelSessionContextValue | null>(null);
 
-export function PanelSessionProvider({
-	children,
-}: {
-	children: React.ReactNode;
-}) {
+export function PanelSessionProvider({ children }: { children: React.ReactNode }) {
 	const [connection, setConnection] = useState<PanelConnection | null>(null);
 	const [ready, setReady] = useState(false);
 
@@ -55,11 +49,7 @@ export function PanelSessionProvider({
 		[connection, ready],
 	);
 
-	return (
-		<PanelSessionContext.Provider value={value}>
-			{children}
-		</PanelSessionContext.Provider>
-	);
+	return <PanelSessionContext.Provider value={value}>{children}</PanelSessionContext.Provider>;
 }
 
 export function usePanelSession() {

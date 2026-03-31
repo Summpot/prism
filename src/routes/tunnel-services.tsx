@@ -29,9 +29,7 @@ function TunnelServicesPage() {
 				setServices(response);
 			})
 			.catch((nextError) => {
-				setError(
-					nextError instanceof Error ? nextError.message : String(nextError),
-				);
+				setError(nextError instanceof Error ? nextError.message : String(nextError));
 			})
 			.finally(() => {
 				setLoading(false);
@@ -60,13 +58,11 @@ function TunnelServicesPage() {
 						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
 							Tunnel plane
 						</div>
-						<h1 className="mt-3 text-4xl font-semibold text-white">
-							Registered tunnel services
-						</h1>
+						<h1 className="mt-3 text-4xl font-semibold text-white">Registered tunnel services</h1>
 						<p className="mt-3 max-w-3xl text-base leading-7 text-slate-400">
-							Services registered by tunnel clients through the reverse-tunnel
-							session protocol. Primary owners handle routing traffic; secondary
-							registrations wait as failover candidates.
+							Services registered by tunnel clients through the reverse-tunnel session protocol.
+							Primary owners handle routing traffic; secondary registrations wait as failover
+							candidates.
 						</p>
 					</div>
 					<div className="flex items-center gap-3">
@@ -76,9 +72,7 @@ function TunnelServicesPage() {
 							disabled={loading}
 							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
 						>
-							<RefreshCw
-								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-							/>
+							<RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
 							Refresh
 						</button>
 						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
@@ -115,15 +109,10 @@ function TunnelServicesPage() {
 								<div>
 									<div className="flex items-center gap-2">
 										<Unplug className="h-5 w-5 text-cyan-300" />
-										<div className="text-xl font-semibold text-white">
-											{snapshot.service.name}
-										</div>
+										<div className="text-xl font-semibold text-white">{snapshot.service.name}</div>
 									</div>
 									<div className="mt-2 text-sm text-slate-400">
-										Client{" "}
-										<span className="font-mono text-cyan-200/85">
-											{snapshot.client_id}
-										</span>
+										Client <span className="font-mono text-cyan-200/85">{snapshot.client_id}</span>
 									</div>
 								</div>
 								<div className="flex items-center gap-2">
@@ -146,20 +135,11 @@ function TunnelServicesPage() {
 
 							<div className="mt-5 grid gap-3 sm:grid-cols-2">
 								<InfoValue label="Protocol" value={snapshot.service.proto} />
-								<InfoValue
-									label="Local addr"
-									value={snapshot.service.local_addr || "—"}
-								/>
-								<InfoValue
-									label="Remote addr"
-									value={snapshot.service.remote_addr || "—"}
-								/>
+								<InfoValue label="Local addr" value={snapshot.service.local_addr || "—"} />
+								<InfoValue label="Remote addr" value={snapshot.service.remote_addr || "—"} />
 								<InfoValue label="Remote peer" value={snapshot.remote} />
 								{snapshot.service.masquerade_host ? (
-									<InfoValue
-										label="Masquerade host"
-										value={snapshot.service.masquerade_host}
-									/>
+									<InfoValue label="Masquerade host" value={snapshot.service.masquerade_host} />
 								) : null}
 							</div>
 						</div>
@@ -168,9 +148,8 @@ function TunnelServicesPage() {
 			) : !loading ? (
 				<div className="rounded-3xl border border-dashed border-white/10 bg-white/3 px-6 py-10 text-center text-sm text-slate-400">
 					<Shield className="mx-auto mb-3 h-8 w-8 text-slate-500" />
-					No tunnel services registered. Tunnel clients will appear here when
-					they connect and register services through the tunnel session
-					protocol.
+					No tunnel services registered. Tunnel clients will appear here when they connect and
+					register services through the tunnel session protocol.
 				</div>
 			) : null}
 		</div>
@@ -180,9 +159,7 @@ function TunnelServicesPage() {
 function InfoValue({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-				{label}
-			</div>
+			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</div>
 			<div className="mt-2 text-sm font-medium text-white">{value}</div>
 		</div>
 	);

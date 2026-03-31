@@ -45,9 +45,7 @@ function DashboardPage() {
 				setNodes(nextNodes);
 			})
 			.catch((nextError) => {
-				setError(
-					nextError instanceof Error ? nextError.message : String(nextError),
-				);
+				setError(nextError instanceof Error ? nextError.message : String(nextError));
 			})
 			.finally(() => {
 				setLoading(false);
@@ -98,18 +96,15 @@ function DashboardPage() {
 							Operational visibility for every Prism worker.
 						</h1>
 						<p className="mt-4 max-w-2xl text-base leading-7 text-slate-400 md:text-lg">
-							This panel treats the management node as the source of truth,
-							shows active versus passive worker connectivity, and lets you edit
-							managed listener and route revisions visually instead of
-							hand-editing files.
+							This panel treats the management node as the source of truth, shows active versus
+							passive worker connectivity, and lets you edit managed listener and route revisions
+							visually instead of hand-editing files.
 						</p>
 					</div>
 
 					<div className="rounded-3xl border border-white/8 bg-white/4 px-5 py-4 text-sm text-slate-300">
 						<div className="font-medium text-white">Connected endpoint</div>
-						<div className="mt-2 break-all text-cyan-200/85">
-							{connection.baseUrl}
-						</div>
+						<div className="mt-2 break-all text-cyan-200/85">{connection.baseUrl}</div>
 						<div className="mt-3 flex flex-wrap gap-2">
 							<button
 								type="button"
@@ -117,9 +112,7 @@ function DashboardPage() {
 								disabled={loading}
 								className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
 							>
-								<RefreshCw
-									className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
-								/>
+								<RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
 								Refresh
 							</button>
 							<button
@@ -128,9 +121,7 @@ function DashboardPage() {
 								disabled={reloading}
 								className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition hover:border-amber-400/30 hover:bg-amber-400/10 disabled:opacity-50"
 							>
-								<RotateCcw
-									className={`h-3 w-3 ${reloading ? "animate-spin" : ""}`}
-								/>
+								<RotateCcw className={`h-3 w-3 ${reloading ? "animate-spin" : ""}`} />
 								Reload config
 							</button>
 						</div>
@@ -192,8 +183,7 @@ function DashboardPage() {
 					<div>
 						<h2 className="text-2xl font-semibold text-white">Node fleet</h2>
 						<p className="mt-2 text-sm leading-6 text-slate-400">
-							Worker health, revision drift, and restart pressure across your
-							managed Prism estate.
+							Worker health, revision drift, and restart pressure across your managed Prism estate.
 						</p>
 					</div>
 					<Link
@@ -209,13 +199,11 @@ function DashboardPage() {
 					{loading ? (
 						<LoadingState label="Loading management inventory…" />
 					) : nodes.length > 0 ? (
-						nodes
-							.slice(0, 4)
-							.map((node) => <NodeCard key={node.node_id} node={node} />)
+						nodes.slice(0, 4).map((node) => <NodeCard key={node.node_id} node={node} />)
 					) : (
 						<div className="rounded-3xl border border-dashed border-white/10 bg-white/3 px-6 py-10 text-sm text-slate-400">
-							No workers have enrolled yet. Connect one through the worker
-							bootstrap config, then return here.
+							No workers have enrolled yet. Connect one through the worker bootstrap config, then
+							return here.
 						</div>
 					)}
 				</div>
@@ -261,10 +249,7 @@ function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
 				<div>
 					<div className="text-lg font-semibold text-white">{node.node_id}</div>
 					<div className="mt-2 text-sm text-slate-400">
-						Mode:{" "}
-						<span className="text-cyan-200">
-							{node.connection_mode ?? "unknown"}
-						</span>
+						Mode: <span className="text-cyan-200">{node.connection_mode ?? "unknown"}</span>
 					</div>
 				</div>
 				<div
@@ -281,18 +266,10 @@ function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
 	);
 }
 
-function StatusMini({
-	label,
-	value,
-}: {
-	label: string;
-	value: string | number;
-}) {
+function StatusMini({ label, value }: { label: string; value: string | number }) {
 	return (
 		<div className="rounded-2xl border border-white/8 bg-slate-950/70 px-4 py-3">
-			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-				{label}
-			</div>
+			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</div>
 			<div className="mt-2 text-xl font-semibold text-white">{value}</div>
 		</div>
 	);
@@ -313,13 +290,10 @@ function ConnectState() {
 				<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-300">
 					<PlugPanel />
 				</div>
-				<h1 className="mt-6 text-3xl font-semibold text-white">
-					Connect to a management node
-				</h1>
+				<h1 className="mt-6 text-3xl font-semibold text-white">Connect to a management node</h1>
 				<p className="mt-4 text-base leading-7 text-slate-400">
-					The panel is deployable on its own, so it needs a management API base
-					URL and a panel bearer token before it can render node inventory or
-					edit managed revisions.
+					The panel is deployable on its own, so it needs a management API base URL and a panel
+					bearer token before it can render node inventory or edit managed revisions.
 				</p>
 				<Link
 					to="/login"

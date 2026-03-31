@@ -45,9 +45,7 @@ function NodeDetailPage() {
 				setData(response);
 			})
 			.catch((nextError) => {
-				setError(
-					nextError instanceof Error ? nextError.message : String(nextError),
-				);
+				setError(nextError instanceof Error ? nextError.message : String(nextError));
 			})
 			.finally(() => {
 				setLoading(false);
@@ -66,16 +64,10 @@ function NodeDetailPage() {
 		setSaving(true);
 		setSaveError(null);
 		try {
-			const response = await updateManagedNodeConfig(
-				connection,
-				params.nodeId,
-				desiredConfig,
-			);
+			const response = await updateManagedNodeConfig(connection, params.nodeId, desiredConfig);
 			setData(response);
 		} catch (nextError) {
-			setSaveError(
-				nextError instanceof Error ? nextError.message : String(nextError),
-			);
+			setSaveError(nextError instanceof Error ? nextError.message : String(nextError));
 		} finally {
 			setSaving(false);
 		}
@@ -86,9 +78,7 @@ function NodeDetailPage() {
 	}
 
 	if (!connection) {
-		return (
-			<StateCard label="Connect the panel to a management node before opening node detail." />
-		);
+		return <StateCard label="Connect the panel to a management node before opening node detail." />;
 	}
 
 	if (loading) {
@@ -137,12 +127,10 @@ function NodeDetailPage() {
 						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
 							Node detail
 						</div>
-						<h1 className="mt-3 text-4xl font-semibold text-white">
-							{node.node_id}
-						</h1>
+						<h1 className="mt-3 text-4xl font-semibold text-white">{node.node_id}</h1>
 						<p className="mt-3 max-w-3xl text-base leading-7 text-slate-400">
-							Review desired versus applied revisions, inspect restart pressure,
-							and edit the next structured config revision for this worker.
+							Review desired versus applied revisions, inspect restart pressure, and edit the next
+							structured config revision for this worker.
 						</p>
 					</div>
 
@@ -160,9 +148,7 @@ function NodeDetailPage() {
 							disabled={loading}
 							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
 						>
-							<RefreshCw
-								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-							/>
+							<RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
 							Refresh
 						</button>
 					</div>
@@ -207,9 +193,7 @@ function NodeDetailPage() {
 			{node.last_apply_error ? (
 				<section className="rounded-3xl border border-red-400/20 bg-red-400/8 p-5 text-sm text-red-100">
 					<div className="font-semibold">Last apply error</div>
-					<div className="mt-2 whitespace-pre-wrap break-all">
-						{node.last_apply_error}
-					</div>
+					<div className="mt-2 whitespace-pre-wrap break-all">{node.last_apply_error}</div>
 				</section>
 			) : null}
 

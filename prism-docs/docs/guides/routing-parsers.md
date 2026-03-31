@@ -14,7 +14,7 @@ Prism ships two built-in parsers:
 - `minecraft_handshake`
 - `tls_sni`
 
-At startup, Prism **materializes** (writes) the built-in `.wat` modules into the routing parser directory *if they are missing*.
+At startup, Prism **materializes** (writes) the built-in `.wat` modules into the routing parser directory _if they are missing_.
 
 ## Where parsers live
 

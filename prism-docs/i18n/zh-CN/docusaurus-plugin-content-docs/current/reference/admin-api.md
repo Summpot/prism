@@ -19,7 +19,7 @@ Prism 提供可选的管理 HTTP 服务，由 `admin_addr` 控制。
 返回：
 
 ```json
-{"ok":true}
+{ "ok": true }
 ```
 
 ### `GET /metrics`
@@ -41,7 +41,7 @@ Prometheus 文本格式指标。
 返回当前解析到的配置文件路径：
 
 ```json
-{"path":"/etc/prism/prism.toml"}
+{ "path": "/etc/prism/prism.toml" }
 ```
 
 ### `POST /reload`
@@ -51,7 +51,7 @@ Prometheus 文本格式指标。
 返回：
 
 ```json
-{"seq":123}
+{ "seq": 123 }
 ```
 
 ## 示例

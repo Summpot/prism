@@ -379,8 +379,8 @@ The repository ships `prism.schema.json` for config validation and completion.
 
 ```json
 {
-  "toml.schemas": {
-    "./prism.schema.json": ["prism.toml", "**/prism.toml"]
-  }
+	"toml.schemas": {
+		"./prism.schema.json": ["prism.toml", "**/prism.toml"]
+	}
 }
 ```

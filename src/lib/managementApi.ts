@@ -167,10 +167,7 @@ export function getManagedNode(connection: PanelConnection, nodeId: string) {
 	);
 }
 
-export function getManagedNodeConfig(
-	connection: PanelConnection,
-	nodeId: string,
-) {
+export function getManagedNodeConfig(connection: PanelConnection, nodeId: string) {
 	return apiRequest<ManagedNodeConfigResponse>(
 		connection,
 		`/managed/nodes/${encodeURIComponent(nodeId)}/config`,

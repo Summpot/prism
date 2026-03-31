@@ -29,9 +29,7 @@ function ConnectionsPage() {
 				setConns(response);
 			})
 			.catch((nextError) => {
-				setError(
-					nextError instanceof Error ? nextError.message : String(nextError),
-				);
+				setError(nextError instanceof Error ? nextError.message : String(nextError));
 			})
 			.finally(() => {
 				setLoading(false);
@@ -47,9 +45,7 @@ function ConnectionsPage() {
 	}
 
 	if (!connection) {
-		return (
-			<StateCard label="Connect the panel to a management node before viewing connections." />
-		);
+		return <StateCard label="Connect the panel to a management node before viewing connections." />;
 	}
 
 	return (
@@ -60,12 +56,10 @@ function ConnectionsPage() {
 						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
 							Proxy plane
 						</div>
-						<h1 className="mt-3 text-4xl font-semibold text-white">
-							Active connections
-						</h1>
+						<h1 className="mt-3 text-4xl font-semibold text-white">Active connections</h1>
 						<p className="mt-3 max-w-3xl text-base leading-7 text-slate-400">
-							Live snapshot of TCP/UDP sessions currently held open by the proxy
-							plane. Each row represents a client-to-upstream connection pair.
+							Live snapshot of TCP/UDP sessions currently held open by the proxy plane. Each row
+							represents a client-to-upstream connection pair.
 						</p>
 					</div>
 					<div className="flex items-center gap-3">
@@ -75,9 +69,7 @@ function ConnectionsPage() {
 							disabled={loading}
 							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
 						>
-							<RefreshCw
-								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-							/>
+							<RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
 							Refresh
 						</button>
 						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
@@ -120,13 +112,9 @@ function ConnectionsPage() {
 							<tbody className="divide-y divide-white/5">
 								{conns.map((conn) => (
 									<tr key={conn.id} className="transition hover:bg-white/3">
-										<td className="px-5 py-4 font-mono text-cyan-200/85">
-											{conn.client}
-										</td>
+										<td className="px-5 py-4 font-mono text-cyan-200/85">{conn.client}</td>
 										<td className="px-5 py-4 text-white">{conn.host || "—"}</td>
-										<td className="px-5 py-4 font-mono text-slate-300">
-											{conn.upstream}
-										</td>
+										<td className="px-5 py-4 font-mono text-slate-300">{conn.upstream}</td>
 										<td className="px-5 py-4 text-slate-400">
 											{formatTime(conn.started_at_unix_ms)}
 										</td>
@@ -144,21 +132,13 @@ function ConnectionsPage() {
 							<div key={conn.id} className="space-y-3 px-5 py-4">
 								<div className="flex items-center gap-2">
 									<Wifi className="h-4 w-4 text-cyan-300" />
-									<span className="font-mono text-sm text-cyan-200/85">
-										{conn.client}
-									</span>
+									<span className="font-mono text-sm text-cyan-200/85">{conn.client}</span>
 								</div>
 								<div className="grid grid-cols-2 gap-3">
 									<MiniValue label="Host" value={conn.host || "—"} />
 									<MiniValue label="Upstream" value={conn.upstream} />
-									<MiniValue
-										label="Started"
-										value={formatTime(conn.started_at_unix_ms)}
-									/>
-									<MiniValue
-										label="Duration"
-										value={formatDuration(conn.started_at_unix_ms)}
-									/>
+									<MiniValue label="Started" value={formatTime(conn.started_at_unix_ms)} />
+									<MiniValue label="Duration" value={formatDuration(conn.started_at_unix_ms)} />
 								</div>
 							</div>
 						))}
@@ -176,9 +156,7 @@ function ConnectionsPage() {
 function MiniValue({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="rounded-xl border border-white/8 bg-white/4 px-3 py-2">
-			<div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-				{label}
-			</div>
+			<div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{label}</div>
 			<div className="mt-1 truncate text-xs text-white">{value}</div>
 		</div>
 	);

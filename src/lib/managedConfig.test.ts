@@ -20,12 +20,8 @@ describe("managedConfig helpers", () => {
 		];
 
 		const issues = validateManagedConfig(doc);
-		expect(issues.some((issue) => issue.path === "listeners.0.upstream")).toBe(
-			true,
-		);
-		expect(issues.some((issue) => issue.path === "routes.0.middlewares")).toBe(
-			true,
-		);
+		expect(issues.some((issue) => issue.path === "listeners.0.upstream")).toBe(true);
+		expect(issues.some((issue) => issue.path === "routes.0.middlewares")).toBe(true);
 	});
 
 	it("normalizes whitespace and middleware aliases", () => {

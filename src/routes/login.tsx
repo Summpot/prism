@@ -10,9 +10,7 @@ export const Route = createFileRoute("/login")({ component: LoginPage });
 function LoginPage() {
 	const navigate = useNavigate();
 	const { connection, saveConnection } = usePanelSession();
-	const [baseUrl, setBaseUrl] = useState(
-		connection?.baseUrl ?? "http://127.0.0.1:8080",
-	);
+	const [baseUrl, setBaseUrl] = useState(connection?.baseUrl ?? "http://127.0.0.1:8080");
 	const [token, setToken] = useState(connection?.token ?? "");
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -28,9 +26,7 @@ function LoginPage() {
 			saveConnection(nextConnection);
 			navigate({ to: "/" });
 		} catch (nextError) {
-			setError(
-				nextError instanceof Error ? nextError.message : String(nextError),
-			);
+			setError(nextError instanceof Error ? nextError.message : String(nextError));
 		} finally {
 			setSubmitting(false);
 		}
@@ -54,17 +50,14 @@ function LoginPage() {
 				</div>
 
 				<p className="mt-6 text-base leading-7 text-slate-400">
-					Because the panel can be deployed separately, it authenticates
-					directly against the management API with a base URL and bearer token.
-					The connection is stored locally in your browser and can be cleared at
-					any time.
+					Because the panel can be deployed separately, it authenticates directly against the
+					management API with a base URL and bearer token. The connection is stored locally in your
+					browser and can be cleared at any time.
 				</p>
 
 				<form onSubmit={connect} className="mt-8 space-y-5">
 					<label className="block space-y-2">
-						<span className="text-sm font-medium text-white">
-							Management API base URL
-						</span>
+						<span className="text-sm font-medium text-white">Management API base URL</span>
 						<input
 							value={baseUrl}
 							onChange={(event) => setBaseUrl(event.target.value)}
@@ -73,9 +66,7 @@ function LoginPage() {
 						/>
 					</label>
 					<label className="block space-y-2">
-						<span className="text-sm font-medium text-white">
-							Panel bearer token
-						</span>
+						<span className="text-sm font-medium text-white">Panel bearer token</span>
 						<input
 							value={token}
 							onChange={(event) => setToken(event.target.value)}

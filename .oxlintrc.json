@@ -1,0 +1,38 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"categories": {
+		"correctness": "error",
+		"suspicious": "warn"
+	},
+	"plugins": ["react", "typescript", "jsx-a11y", "unicorn"],
+	"rules": {
+		"react/react-in-jsx-scope": "off",
+		"react/jsx-props-no-spreading": "off",
+		"unicorn/filename-case": "off",
+		"unicorn/no-null": "off",
+		"jsx-a11y/anchor-is-valid": "off",
+		"jsx-a11y/click-events-have-key-events": "off",
+		"jsx-a11y/no-static-element-interactions": "off"
+	},
+	"ignorePatterns": [
+		"**/routeTree.gen.ts",
+		"**/styles.css",
+		"**/target/**",
+		"**/.output/**",
+		"**/node_modules/**",
+		"**/prism-docs/**"
+	],
+	"env": {
+		"browser": true
+	},
+	"settings": {
+		"react": {
+			"linkComponents": [{ "name": "Link", "linkAttribute": "to" }]
+		},
+		"jsx-a11y": {
+			"components": {
+				"Link": "a"
+			}
+		}
+	}
+}

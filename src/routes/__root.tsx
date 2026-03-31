@@ -1,9 +1,4 @@
-import {
-	createRootRoute,
-	HeadContent,
-	Outlet,
-	Scripts,
-} from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 
 import Header from "@/components/Header";
 import { PanelSessionProvider } from "@/lib/panelSession";

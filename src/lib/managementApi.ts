@@ -89,6 +89,34 @@ export interface ManagementStatusResponse {
 	node_count: number;
 }
 
+export interface SessionInfo {
+	id: string;
+	client: string;
+	host: string;
+	upstream: string;
+	started_at_unix_ms: number;
+}
+
+export interface RegisteredService {
+	name: string;
+	proto: string;
+	local_addr: string;
+	route_only: boolean;
+	remote_addr: string;
+	masquerade_host: string;
+}
+
+export interface ServiceSnapshot {
+	service: RegisteredService;
+	client_id: string;
+	remote: string;
+	primary: boolean;
+}
+
+export interface ReloadResponse {
+	seq: number;
+}
+
 export class ManagementApiError extends Error {
 	status: number;
 
@@ -162,4 +190,18 @@ export function updateManagedNodeConfig(
 			body: JSON.stringify({ desired_config: desiredConfig }),
 		},
 	);
+}
+
+export function getConnections(connection: PanelConnection) {
+	return apiRequest<SessionInfo[]>(connection, "/conns");
+}
+
+export function getTunnelServices(connection: PanelConnection) {
+	return apiRequest<ServiceSnapshot[]>(connection, "/tunnel/services");
+}
+
+export function triggerReload(connection: PanelConnection) {
+	return apiRequest<ReloadResponse>(connection, "/reload", {
+		method: "POST",
+	});
 }

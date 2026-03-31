@@ -4,15 +4,17 @@ import {
 	ArrowRight,
 	CheckCircle2,
 	RefreshCw,
+	RotateCcw,
 	ServerCog,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
 	getManagedNodes,
 	getManagementStatus,
 	type ManagedNodeSnapshot,
 	type ManagementStatusResponse,
+	triggerReload,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 
@@ -24,44 +26,54 @@ function DashboardPage() {
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
+	const [reloading, setReloading] = useState(false);
+	const [reloadResult, setReloadResult] = useState<string | null>(null);
 
-	useEffect(() => {
+	const fetchData = useCallback(() => {
 		if (!connection) {
 			setStatus(null);
 			setNodes([]);
 			return;
 		}
 
-		let cancelled = false;
 		setLoading(true);
 		setError(null);
 
 		Promise.all([getManagementStatus(connection), getManagedNodes(connection)])
 			.then(([nextStatus, nextNodes]) => {
-				if (cancelled) {
-					return;
-				}
-
 				setStatus(nextStatus);
 				setNodes(nextNodes);
 			})
 			.catch((nextError) => {
-				if (!cancelled) {
-					setError(
-						nextError instanceof Error ? nextError.message : String(nextError),
-					);
-				}
+				setError(
+					nextError instanceof Error ? nextError.message : String(nextError),
+				);
 			})
 			.finally(() => {
-				if (!cancelled) {
-					setLoading(false);
-				}
+				setLoading(false);
 			});
-
-		return () => {
-			cancelled = true;
-		};
 	}, [connection]);
+
+	useEffect(() => {
+		fetchData();
+	}, [fetchData]);
+
+	const handleReload = async () => {
+		if (!connection) return;
+		setReloading(true);
+		setReloadResult(null);
+		try {
+			const response = await triggerReload(connection);
+			setReloadResult(`Reload signal sent (seq ${response.seq})`);
+			fetchData();
+		} catch (nextError) {
+			setReloadResult(
+				`Reload failed: ${nextError instanceof Error ? nextError.message : String(nextError)}`,
+			);
+		} finally {
+			setReloading(false);
+		}
+	};
 
 	if (!ready) {
 		return <LoadingState label="Restoring Prism panel session…" />;
@@ -98,13 +110,56 @@ function DashboardPage() {
 						<div className="mt-2 break-all text-cyan-200/85">
 							{connection.baseUrl}
 						</div>
+						<div className="mt-3 flex flex-wrap gap-2">
+							<button
+								type="button"
+								onClick={fetchData}
+								disabled={loading}
+								className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
+							>
+								<RefreshCw
+									className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
+								/>
+								Refresh
+							</button>
+							<button
+								type="button"
+								onClick={handleReload}
+								disabled={reloading}
+								className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition hover:border-amber-400/30 hover:bg-amber-400/10 disabled:opacity-50"
+							>
+								<RotateCcw
+									className={`h-3 w-3 ${reloading ? "animate-spin" : ""}`}
+								/>
+								Reload config
+							</button>
+						</div>
 					</div>
 				</div>
 			</section>
 
+			{reloadResult ? (
+				<div
+					className={`rounded-3xl border px-5 py-4 text-sm ${
+						reloadResult.startsWith("Reload failed")
+							? "border-red-400/20 bg-red-400/8 text-red-100"
+							: "border-emerald-400/20 bg-emerald-400/8 text-emerald-100"
+					}`}
+				>
+					{reloadResult}
+				</div>
+			) : null}
+
 			{error ? (
-				<div className="rounded-3xl border border-red-400/20 bg-red-400/8 px-5 py-4 text-sm text-red-100">
-					{error}
+				<div className="flex items-center justify-between rounded-3xl border border-red-400/20 bg-red-400/8 px-5 py-4 text-sm text-red-100">
+					<span>{error}</span>
+					<button
+						type="button"
+						onClick={fetchData}
+						className="rounded-xl border border-red-400/30 px-3 py-1.5 text-xs font-medium transition hover:bg-red-400/15"
+					>
+						Retry
+					</button>
 				</div>
 			) : null}
 

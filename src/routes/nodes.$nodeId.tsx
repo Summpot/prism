@@ -1,11 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	AlertTriangle,
+	ArrowLeft,
 	CircleSlash,
 	RefreshCcw,
+	RefreshCw,
 	ServerCog,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ManagedConfigEditor } from "@/components/ManagedConfigEditor";
 import {
@@ -29,39 +31,32 @@ function NodeDetailPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
-	useEffect(() => {
+	const fetchData = useCallback(() => {
 		if (!connection) {
 			setData(null);
 			return;
 		}
 
-		let cancelled = false;
 		setLoading(true);
 		setError(null);
 
 		getManagedNodeConfig(connection, params.nodeId)
 			.then((response) => {
-				if (!cancelled) {
-					setData(response);
-				}
+				setData(response);
 			})
 			.catch((nextError) => {
-				if (!cancelled) {
-					setError(
-						nextError instanceof Error ? nextError.message : String(nextError),
-					);
-				}
+				setError(
+					nextError instanceof Error ? nextError.message : String(nextError),
+				);
 			})
 			.finally(() => {
-				if (!cancelled) {
-					setLoading(false);
-				}
+				setLoading(false);
 			});
-
-		return () => {
-			cancelled = true;
-		};
 	}, [connection, params.nodeId]);
+
+	useEffect(() => {
+		fetchData();
+	}, [fetchData]);
 
 	const saveConfig = async (desiredConfig: ManagedConfigDocument) => {
 		if (!connection) {
@@ -101,13 +96,41 @@ function NodeDetailPage() {
 	}
 
 	if (error || !data) {
-		return <StateCard label={error || "Node not found."} />;
+		return (
+			<div className="space-y-4">
+				<Link
+					to="/nodes"
+					className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
+				>
+					<ArrowLeft className="h-4 w-4" />
+					Back to nodes
+				</Link>
+				<div className="flex items-center justify-between rounded-3xl border border-red-400/20 bg-red-400/8 px-5 py-4 text-sm text-red-100">
+					<span>{error || "Node not found."}</span>
+					<button
+						type="button"
+						onClick={fetchData}
+						className="rounded-xl border border-red-400/30 px-3 py-1.5 text-xs font-medium transition hover:bg-red-400/15"
+					>
+						Retry
+					</button>
+				</div>
+			</div>
+		);
 	}
 
 	const { node } = data;
 
 	return (
 		<div className="space-y-6">
+			<Link
+				to="/nodes"
+				className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
+			>
+				<ArrowLeft className="h-4 w-4" />
+				Back to nodes
+			</Link>
+
 			<section className="rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 md:p-8">
 				<div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
 					<div>
@@ -123,12 +146,25 @@ function NodeDetailPage() {
 						</p>
 					</div>
 
-					<div
-						className={`rounded-3xl border px-4 py-3 text-sm ${node.pending_restart ? "border-amber-400/25 bg-amber-400/8 text-amber-100" : "border-emerald-400/25 bg-emerald-400/8 text-emerald-100"}`}
-					>
-						{node.pending_restart
-							? "Restart required before this worker is fully converged."
-							: "Worker has no restart-required drift."}
+					<div className="flex flex-col items-end gap-3">
+						<div
+							className={`rounded-3xl border px-4 py-3 text-sm ${node.pending_restart ? "border-amber-400/25 bg-amber-400/8 text-amber-100" : "border-emerald-400/25 bg-emerald-400/8 text-emerald-100"}`}
+						>
+							{node.pending_restart
+								? "Restart required before this worker is fully converged."
+								: "Worker has no restart-required drift."}
+						</div>
+						<button
+							type="button"
+							onClick={fetchData}
+							disabled={loading}
+							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
+						>
+							<RefreshCw
+								className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+							/>
+							Refresh
+						</button>
 					</div>
 				</div>
 			</section>

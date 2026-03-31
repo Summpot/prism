@@ -1,7 +1,10 @@
 import type {
 	ManagedConfigDocument,
 	ManagedRouteDocument,
+	ManagedTunnelClientDocument,
 	ManagedTunnelDocument,
+	ManagedTunnelEndpointDocument,
+	ManagedTunnelServiceDocument,
 } from "@/lib/managementApi";
 
 export interface ConfigIssue {
@@ -199,4 +202,38 @@ export function formatIssuesByPath(issues: ConfigIssue[]) {
 		acc[issue.path] = [...(acc[issue.path] ?? []), issue.message];
 		return acc;
 	}, {});
+}
+
+export function createEmptyTunnel(): ManagedTunnelDocument {
+	return {
+		auth_token: "",
+		auto_listen_services: false,
+		endpoints: [],
+		client: null,
+		services: [],
+	};
+}
+
+export function createEmptyTunnelEndpoint(): ManagedTunnelEndpointDocument {
+	return { listen_addr: "", transport: "tcp", quic: null };
+}
+
+export function createEmptyTunnelService(): ManagedTunnelServiceDocument {
+	return {
+		name: "",
+		proto: "tcp",
+		local_addr: "",
+		route_only: false,
+		remote_addr: "",
+		masquerade_host: "",
+	};
+}
+
+export function createEmptyTunnelClient(): ManagedTunnelClientDocument {
+	return {
+		server_addr: "",
+		transport: "tcp",
+		dial_timeout_ms: 5000,
+		quic: null,
+	};
 }

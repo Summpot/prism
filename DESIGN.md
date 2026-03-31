@@ -1,506 +1,641 @@
-# Technical Design Document: Prism
+# Prism Design
 
-## 1. Executive Summary
+This document describes the **current Rust implementation** in this repository.
 
-Prism is a lightweight, high-performance reverse proxy designed primarily for the Minecraft protocol.
+It is intentionally implementation-grounded. If the code changes in a way that affects public behavior, this document should change with it.
 
-* For **TCP**, Prism can multiplex incoming traffic from one or more listening ports to multiple backend servers based on a hostname found in the connection's initial bytes (Minecraft handshake or TLS SNI).
-* For **UDP**, Prism can expose one or more listening ports and forward datagrams to an upstream (directly or via tunnel). This enables proxying UDP-based games (for example, Bedrock-like protocols) where hostname-based routing is not available.
+## 1. Scope
 
-Prism can also operate in a **reverse-connection ("tunnel")** mode similar to frp: a tunnel client running on a private network establishes an outbound connection to a tunnel server. When a route targets a tunnel service, Prism forwards the incoming TCP session over that existing reverse connection, allowing access to backends that have no public IP.
+Prism is a single-binary reverse proxy with an frp-like tunnel mode.
 
-While Minecraft handshake parsing is the primary use-case, Prism also supports extracting hostnames from standard TLS SNI so the same routing stack can be reused for other TCP frontends.
+The implementation currently supports:
 
-The system is designed with a **test-first architecture**, ensuring that core logic (protocol parsing, routing, traffic shaping) can be verified via unit tests without requiring active network sockets or running Minecraft server instances.
+- TCP listeners in **hostname-routing** mode or **fixed-forward** mode
+- UDP listeners in **fixed-forward** mode
+- Per-route WebAssembly text middlewares (`.wat`) for parse and rewrite behavior
+- Reverse tunnels over **TCP**, **KCP-over-UDP**, and **QUIC**
+- An HTTP admin API for health, metrics, connection snapshots, reload signals, tunnel service snapshots, and managed control-plane APIs
 
-**Implementation note (current codebase):** Prism is implemented in **Rust**.
+The repository also contains a TanStack frontend under `src/`, and that frontend now acts as a Prism management panel for the authenticated `/managed/*` API surface.
 
-* CLI parsing uses **clap**.
-* WebAssembly routing middlewares execute via **wasmer**.
-* Routing middlewares are provided as **WAT** sources (WebAssembly text format, `.wat`) and loaded at runtime. Prism compiles WAT to WASM at runtime and intentionally **does not load raw `.wasm` binaries**.
+## 2. Repository map
 
----
+- Runtime entrypoint: `crates/prism/src/main.rs`
+- Runtime orchestration: `crates/prism/src/prism/app.rs`
+- Configuration loading: `crates/prism/src/prism/config.rs`
+- Runtime path resolution: `crates/prism/src/prism/runtime_paths.rs`
+- Routing: `crates/prism/src/prism/router.rs`
+- Middleware runtime: `crates/prism/src/prism/middleware.rs`
+- Proxy plane: `crates/prism/src/prism/proxy.rs`
+- Tunnel mode: `crates/prism/src/prism/tunnel/*`
+- Admin API: `crates/prism/src/prism/admin.rs`
+- Telemetry: `crates/prism/src/prism/telemetry.rs`
+- Logging: `crates/prism/src/prism/logging.rs`
 
-## 2. Architecture Overview
+## 3. Startup and role enablement
 
-The system follows a **Layered Architecture**. Each layer communicates with the next via defined interfaces, allowing for easy mocking and stubbing during testing.
+### 3.1 CLI inputs
 
-### High-Level Data Flow
+The Prism binary accepts three top-level runtime path inputs:
 
-1. **Transport Layer**: Accepts raw TCP connections and/or UDP datagrams.
-2. **Header Parsing Layer**: Reads/peeks the initial bytes to extract a routing hostname.
-3. **Routing Layer**: Resolves the destination address based on the extracted hostname.
-4. **(Optional) Tunnel Layer**: If the resolved upstream is a tunnel service, opens a tunneled stream to the registered tunnel client instead of dialing a direct upstream address.
-5. **Proxy Layer**: Establishes the upstream connection (direct TCP or tunneled stream) and pipes data between client and server.
+- `--config` / `PRISM_CONFIG`
+- `--workdir` / `PRISM_WORKDIR`
+- `--middleware-dir` / `PRISM_MIDDLEWARE_DIR`
 
----
+### 3.2 Config path resolution
 
-## 3. Core Component Design
+Config lookup order is:
 
-### 3.1. `Listener` (Transport Layer)
+1. explicit `--config`
+2. `PRISM_CONFIG`
+3. current-working-directory auto-discovery:
+   - `prism.toml`
+   - `prism.yaml`
+   - `prism.yml`
+4. OS default path:
+   - Linux: `/etc/prism/prism.toml`
+   - Other OSes: the per-user config dir from `directories::ProjectDirs`
 
-* **Responsibility**:
-  * **TCP**: accepts connections (e.g. `tokio::net::TcpListener`) and spawns a `SessionHandler` for each.
-  * **UDP**: reads datagrams (e.g. `tokio::net::UdpSocket`) and hands them to a packet handler which maintains lightweight per-client sessions.
-* **Testability**:
-* The `Listener` accepts a `ConnectionHandler` interface.
-* This allows integration tests to simulate a flood of connections without spawning real goroutines for the entire logic stack.
+If the resolved config file does not exist, Prism creates a runnable default config and keeps starting. The generated default config enables a tunnel server on `:7000` and an admin server on `:8080`.
 
-**Multi-listener**:
+### 3.3 Runtime paths
 
-Prism can run multiple listeners at once (different ports and/or protocols). Each listener is configured independently (e.g., TCP hostname-routing on `:25565` and UDP forwarding on `:19132`).
+Prism resolves two additional runtime paths:
 
+- **workdir**
+  - Linux default: `/var/lib/prism`
+  - other OSes: per-user data dir from `directories::ProjectDirs`
+- **middleware_dir**
+  - default: `<config_dir>/middlewares`
+  - relative values are resolved relative to the config directory
 
+At startup, Prism materializes built-in middleware files into `middleware_dir` if they do not already exist.
 
-### 3.2. `SessionHandler` (Orchestrator)
+### 3.4 Runtime roles
 
-* **Responsibility**: Manages the lifecycle of a single client connection. It does not contain business logic but orchestrates calls to the Middleware, Router, and Proxy components.
-* **Cancellation/Timeouts**: Owns the per-connection cancellation scope and applies configured timeouts (handshake, idle, dial). In Rust this is modeled via task cancellation and `tokio::time::timeout` (and may use a cancellation token internally).
+Prism supports three explicit runtime roles:
 
-### 3.3. `RoutingMiddleware` (Pure Logic, Pluggable)
+- `role = standalone` (default)
+- `role = management`
+- `role = worker`
 
-* **Responsibility**: Extracts a routing hostname from the first bytes of a TCP stream and can optionally **rewrite** the captured prelude before proxying upstream.
-* **Design**: Stateless per call; no direct dependency on `net.Conn`.
-* **Input**:
-  * `[]byte` (captured initial bytes)
-  * a small context struct that indicates the middleware phase (`parse` or `rewrite`) and (for rewrite) the selected upstream
-* **Output**: `(host?, rewrite?, error)` where errors are classified as:
-  * `need more data` (caller should read more bytes)
-  * `no match` (middleware does not apply to this stream)
-  * fatal error
+Role-specific enablement rules:
 
-* **Two phases**:
-  * **Parse**: middleware returns a `host` (and optionally a rewritten prelude). The router uses the returned host for matching.
-  * **Rewrite**: after the proxy selects an upstream, middleware can return a rewritten prelude based on `selected_upstream`.
+- **Standalone** preserves the traditional behavior: proxy/tunnel roles are inferred from `listeners`, `tunnel.endpoints`, and `tunnel.client + tunnel.services`
+- **Management** may run with **no proxy or tunnel workload** as long as `admin_addr` is set and `managed.management` is configured
+- **Worker** may run with **no local traffic workload** as long as `admin_addr` is set and `managed.worker` is configured
+- **Admin role** is enabled when `admin_addr` is non-empty and either a traditional runtime role is enabled or `role` is `management` / `worker`
 
-* **Implementations**:
-  * All routing middlewares are **WASM modules** implementing the ABI described in section 7.
-  * Prism loads these modules from **WAT text** (`.wat`) only.
-  * Protocol-specific parsing/rewrite logic lives **only** in wasm; the Rust side is a framework that loads and invokes wasm middlewares.
+Important current behavior: **routes alone do not create listeners**. If you want Prism to accept public proxy traffic, you must configure `listeners` explicitly.
 
-* **Default middlewares (materialized on startup)**:
-  * To match the historical behavior of built-in parsers, Prism ships a small set of **reference WAT middlewares** and writes them into the configured middleware directory on startup **if the files do not already exist**.
-  * By default this directory is `<config_dir>/middlewares/`.
-  * Current defaults:
-    * `minecraft_handshake.wat`: parse Minecraft handshake and extract `host`; on rewrite phase, rewrite the handshake host (and, when possible, the port) to `selected_upstream`.
-    * `tls_sni.wat`: parse TLS ClientHello and extract SNI `host`; on rewrite phase, rewrite the SNI hostname to the `selected_upstream` host (port stripped).
+If no runtime role is enabled, Prism exits with an error instead of running a partial process.
 
-* **Testability**:
-  * Since middleware is driven by deterministic byte slices, unit tests can validate parsing and rewrites without real sockets.
+## 4. Configuration model
 
+### 4.1 Supported file formats
 
+Prism supports:
 
+- TOML
+- YAML (`.yaml`, `.yml`)
 
+JSON is not supported as a runtime config format.
 
-### 3.4. `Router` (Routing Layer)
+### 4.2 Role and managed bootstrap
 
-* **Responsibility**: Maps a hostname string to an upstream address.
-* **Design**:
-  * Routes are an **ordered list**; the router checks them in order and the **first match wins**.
-    * Operationally: put more specific patterns earlier.
-  * Host patterns support exact matches and glob-like wildcards:
-    * `*` matches any string (captured as a group)
-    * `?` matches any single character (captured as a group)
-  * Wildcard patterns produce capture groups which can be substituted into upstream templates using `$1`, `$2`, ...
-  * A single route can target **one or more upstreams**.
-    * When multiple upstreams are configured, a simple load-balancing strategy chooses the candidate order (for example `sequential`, `random`, `round-robin`).
-    * The proxy layer performs **dial failover** by trying upstreams in that order until one succeeds.
-  * Thread-safe reads; atomic updates.
-  * Route tables can be updated at runtime as part of config hot-reload.
+New top-level config fields:
 
-* **Upstream address format**:
-  * Upstream targets are treated as TCP dial addresses (e.g. `host:port`, `ip:port`, `[ipv6]:port`).
-  * A port may be omitted (e.g. `backend.example.com`), in which case the proxy falls back to the listener port.
-  * Tunnel upstreams use the prefix `tunnel:` (for example `tunnel:home-mc`). In this case the target is **not** treated as a TCP dial address; it is resolved via the tunnel registry maintained by the tunnel server.
+- `role = standalone | management | worker`
+- `managed.management`
+- `managed.worker`
 
+`managed.management` fields:
 
-* **Testability**:
-  * Defined as an interface `UpstreamResolver`.
-  * Tests can inject a `MockRouter` that returns deterministic results, decoupling routing logic from configuration file parsing.
+- `state_file`
+- `panel_token`
+- `worker_token`
 
+`managed.worker` fields:
 
+- `node_id`
+- `management_url`
+- `auth_token`
+- `connection_mode = active | passive`
+- `sync_interval_ms`
+- `agent_url`
 
-### 3.5. `UpstreamDialer` (Network Abstraction)
+Current managed semantics:
 
-* **Responsibility**: Establishes the connection to the backend Minecraft server.
-  * In tunnel mode, the dialer may return a stream backed by a multiplexed tunnel channel instead of a direct TCP socket.
-* **Testability**:
-* Instead of calling `net.Dial` directly, the proxy uses a `Dialer` interface.
-* **Mocking**: In tests, a `MockDialer` can return a `net.Pipe()`. This connects the "client" side of the test directly to a "mock backend" in memory, allowing end-to-end traffic simulation without real TCP overhead.
+- the **management** role is the only writable source of truth for managed runtime config
+- a **worker** keeps bootstrap identity and auth in the local file, but desired runtime config is tracked separately as structured managed state
+- active workers dial the management node and exchange desired/applied revision state
+- passive workers expose authenticated local agent endpoints; management-side passive orchestration is intentionally minimal in this slice
 
+### 4.3 Listeners
 
+Each listener has:
 
-### 3.6. `ProxyBridge` (Data Layer)
+- `listen_addr`
+- `protocol = tcp | udp`
+- optional `upstream`
 
-* **Responsibility**: Handles the bidirectional byte copying between Client and Upstream.
-* **Features**:
-* **PROXY Protocol v2 Injection**: Inserts the IP preservation header before the first byte of upstream traffic.
-* **Buffer Pooling**: Uses a shared interface for buffer acquisition to reduce GC pressure.
+Current listener behavior:
 
+- **TCP + empty upstream** → hostname-routing mode
+- **TCP + non-empty upstream** → fixed-forward mode
+- **UDP + non-empty upstream** → fixed-forward mode
 
-* **Testability**:
-* Logic operates on `io.ReadWriter`, not `net.TCPConn`.
-* Unit tests can verify that the PROXY Protocol header is correctly prepended by inspecting the write buffer of the mock upstream.
+UDP listeners without an upstream are skipped with a warning.
 
+`":PORT"` syntax is accepted in config and normalized to `0.0.0.0:PORT` before bind.
 
+### 4.4 Routes
 
----
+Routes are compiled into an ordered routing table.
 
-## 8. Tunnel mode (reverse connection)
+Accepted fields:
 
-Tunnel mode is inspired by frp, but implemented with a much smaller surface area.
+- `host` / `hosts`
+- `upstream` / `upstreams`
+- `backend` / `backends` (compatibility aliases)
+- `middlewares`
+- `parsers` (deprecated alias of `middlewares`)
+- `strategy`
 
-Prism is a single binary (`prism`) that can run one or both roles depending on configuration:
+Normalization rules:
 
-* **Proxy server role**: runs one or more proxy listeners (`listeners`) and (optionally) the admin plane (`admin_addr`).
-* **Tunnel server role**: runs one or more tunnel endpoints (`tunnel.endpoints`) and maintains a registry of registered services.
-* **Tunnel client role**: runs a tunnel client loop (`tunnel.client`) that dials a remote tunnel server over an outbound connection, registers one or more services (`tunnel.services`), and forwards tunneled streams to local TCP backends.
+- hosts are lowercased and trimmed
+- empty hosts are rejected
+- upstream values are trimmed and empty values are rejected
+- middleware names are lowercased, trimmed, and `-` is normalized to `_`
 
-Role enablement is inferred from configuration:
+Current requirement: **routing routes must declare at least one middleware**. Prism does not auto-insert a default middleware chain when `middlewares` is omitted.
 
-* Proxy server role is enabled when `listeners` has one or more entries (or when `routes` is non-empty, in which case a default TCP listener on `:25565` is added).
-* Tunnel server role is enabled when `tunnel.endpoints` has one or more entries.
-* Tunnel client role is enabled when `tunnel.client.server_addr` is set and `tunnel.services` is non-empty.
+### 4.5 Tunnel config
 
-### 8.2. Tunnel registry and routing
+Tunnel config is split across:
 
-* The tunnel client registers one or more **services**.
-  * At minimum: `name -> local_addr` (used by the client role to dial a local backend).
-  * Optionally: a service can request a **remote listener** (protocol + listen address) to be opened on the server side (`remote_addr`).
-  * Optionally: a service can be marked `route_only=true` to indicate it should only be used as a routing target (`tunnel:<service>`) and never exposed as a server-side listener.
-* The tunnel server maintains an in-memory registry mapping `service name -> active client session`.
-* A route whose upstream is `tunnel:<service>` is forwarded through the active client session that registered that service.
+- `tunnel.auth_token`
+- `tunnel.auto_listen_services`
+- `tunnel.endpoints[]`
+- `tunnel.client`
+- `tunnel.services[]`
 
-Service name conflicts:
+Registered services carry:
 
-* If multiple tunnel clients register the same service `name`, Prism keeps the **first** active registrant as the routing target for `tunnel:<service>`.
-* Later registrations with the same `name` do **not** override routing. They can still be exposed by **port** via `remote_addr` + auto-listen.
+- `name`
+- `proto`
+- `local_addr`
+- `route_only`
+- `remote_addr`
+- `masquerade_host`
 
-### 8.2.1. frp-like "auto listen" for services
+Normalization rules:
 
-When enabled on the tunnel server role, Prism will automatically open server-side listeners for any registered services that specify a remote listen address.
+- empty service names are rejected
+- `proto` defaults to `tcp`
+- `route_only = true` clears `remote_addr`
+- `masquerade_host` is trimmed and lowercased
 
-Services marked `route_only=true` are excluded from auto-listen (and `remote_addr` is ignored/invalid for them).
+### 4.6 Runtime knobs
 
-This matches frp-style behavior:
+Other important config fields:
 
-* A service can be exposed by **port** (TCP/UDP) without requiring a hostname route.
-* If a service has no matching entry in `routes`, it can still be reachable through its configured remote listener.
+- `admin_addr`
+- `max_header_bytes`
+- `proxy_protocol_v2`
+- `buffer_size`
+- `upstream_dial_timeout_ms`
+- `timeouts.handshake_timeout_ms`
+- `timeouts.idle_timeout_ms`
+- `reload.enabled`
+- `reload.poll_interval_ms`
+- `logging.level`
+- `logging.format`
+- `logging.output`
+- `logging.add_source`
 
-Notes / limitations:
+Current note: `buffer_size` is preserved as a config knob, but stream proxying still uses `tokio::io::copy_bidirectional`, so the setting does **not** currently tune the actual copy buffer size.
 
-* For **UDP over tunnel**, Prism forwards datagrams over a framed stream inside the tunnel session.
-* UDP forwarding does **not** preserve the original client IP/port at the backend (the backend sees the tunnel client's source address), similar to typical UDP reverse-proxying constraints.
+### 4.7 Managed config document
 
-### 8.3. Transport protocols (server <-> client)
+The managed control plane stores a structured runtime document instead of raw TOML/YAML text.
 
-The tunnel link between the client role and the server role supports multiple transport protocols:
+The document currently mirrors the main runtime fields for:
 
-* `tcp`: a single TCP connection with stream multiplexing.
-* `udp`: a reliable UDP-based connection (KCP) with stream multiplexing.
-* `quic`: QUIC with native stream multiplexing.
+- `listeners`
+- `routes`
+- runtime knobs (`max_header_bytes`, `proxy_protocol_v2`, `buffer_size`, `upstream_dial_timeout_ms`, `timeouts.*`)
+- `tunnel`
 
-Only the tunnel **transport** is affected by this choice; the Prism data plane remains a TCP listener.
+Current managed apply model:
 
-To support multiple transports simultaneously (similar to frp's server), Prism can run multiple tunnel endpoints at the same time via `tunnel.endpoints`.
+- the panel edits this structured document
+- the management node validates it through the same normalization path as file config loading
+- workers track `desired_revision` and `applied_revision`
+- restart-required changes are surfaced explicitly instead of being claimed as hot-reloadable
 
-### 8.4. Multiplexing model
+## 5. Proxy plane
 
-* One long-lived tunnel connection is established from the client role to the server role.
-* Within that connection, multiple independent streams are opened:
-  * a short control stream used for registration
-  * one stream per proxied TCP session
+### 5.1 TCP fixed-forward mode
 
-### 8.5. Authentication
+When a TCP listener has a non-empty `upstream`, Prism:
 
-Tunnel mode supports a shared secret token. The tunnel client must present the token during registration; otherwise the tunnel server rejects the tunnel connection.
+1. accepts the client connection
+2. dials the configured upstream
+3. optionally writes a PROXY protocol v2 header first
+4. proxies bytes bidirectionally until completion or timeout
 
-### 8.6. Tunnel wire protocol (v1)
+If the upstream starts with `tunnel:`, Prism resolves it through the tunnel manager instead of dialing TCP directly.
 
-Prism's tunnel protocol is intentionally small and compatible across implementations.
+### 5.2 TCP hostname-routing mode
 
-**Register stream (client → server, first stream in a session)**
+When a TCP listener has an empty `upstream`, Prism enters routing mode.
 
-* The first stream opened on a tunnel session is the **register** stream.
-* Header:
-  * 4 bytes ASCII magic: `PRRG` ("Prism Reverse Register")
-  * 1 byte version: `0x01`
-  * 4 bytes big-endian length $N$
-  * $N$ bytes JSON payload (cap: 1 MiB)
+Current flow:
 
-Payload (JSON):
+1. Accept the client connection.
+2. Capture bytes from the stream until one of the following happens:
+   - a route matches
+   - no route can match
+   - `max_header_bytes` is reached
+   - `handshake_timeout` fires
+3. For each route, run the route's middleware chain in **parse** mode against the captured prelude.
+4. If middleware extracts a host, match that host against the route's configured patterns.
+5. On the first matching route, expand upstream templates using wildcard captures.
+6. Order upstream candidates using `strategy`.
+7. Dial candidates with failover until one succeeds.
+8. Apply any parse-phase prelude override.
+9. Run the middleware chain in **rewrite** mode using the selected upstream label.
+10. Optionally write a PROXY protocol v2 header.
+11. Write the final prelude to the upstream and switch to full bidirectional proxying.
 
-* `token: string` (optional shared secret)
-* `services: []service`
+If no route matches, Prism closes the connection.
 
-Service fields:
+### 5.2.1 Route matching
 
-* `name: string`
-* `proto: "tcp" | "udp"` (defaults to `tcp`)
-* `local_addr: string` (used by tunnel client to dial the local backend)
-* `route_only: bool` (when true, the service is only reachable via `tunnel:<name>` routing)
-* `remote_addr: string` (optional; requests server-side auto-listen exposure; ignored when `route_only=true`)
-* `masquerade_host: string` (optional; if set, the proxy layer may pass this value as `selected_upstream` to rewrite middlewares when routing to `tunnel:<name>`. Supports `$1`, `$2`, ... substitutions from the matched route wildcard capture groups.)
+Routes are checked in order and **first match wins**.
 
-Implementations should normalize the request (trim whitespace, lowercase `proto`, lowercase+trim `masquerade_host`, and force `remote_addr=""` when `route_only=true`).
+Pattern support:
 
-**Proxy stream (server → client, one stream per proxied session)**
+- exact match
+- `*` wildcard → captures any string
+- `?` wildcard → captures one character
 
-The tunnel server opens a new stream to the client for each proxied session.
+Captured wildcard groups are available to upstream templates as `$1`, `$2`, and so on.
 
-Header:
+### 5.2.2 Upstream ordering
 
-* 4 bytes ASCII magic:
-  * `PRPX` for TCP streams ("Prism Reverse Proxy")
-  * `PRPU` for UDP streams
-* 1 byte version: `0x01`
-* Service name encoded as a Minecraft-style string: VarInt length + UTF-8 bytes
+Supported strategies:
+
+- `sequential`
+- `random`
+- `round-robin`
+
+Ordering selects the candidate order. Actual network failover still happens in the proxy layer, which dials candidates one by one until a connection succeeds.
+
+### 5.2.3 Default port filling
+
+Direct upstreams may omit the port. When that happens, Prism fills the port from the listener that accepted the connection.
+
+### 5.2.4 Masquerade host for tunnel rewrites
+
+When the selected upstream is `tunnel:<service>`, Prism may use `tunnel.services[].masquerade_host` as the label passed into middleware rewrite mode.
+
+This allows rewrite-capable middleware to emit a host/port label that is different from the internal `tunnel:<service>` target and supports chained or branded edge deployments.
+
+### 5.3 UDP fixed-forward mode
+
+UDP listeners currently support fixed forwarding only.
+
+Current behavior:
+
+- Prism maintains lightweight per-client UDP sessions
+- each UDP client flow gets its own forwarding task
+- optional idle timeout cleanup is applied per UDP flow
+
+Forwarding targets can be:
+
+- a direct UDP socket
+- a tunnel service via `tunnel:<service>`
+
+UDP listeners do **not** perform hostname routing.
+
+### 5.4 Timeouts and connection lifetime
+
+Current timeout behavior:
+
+- `timeouts.handshake_timeout_ms` bounds TCP prelude capture in routing mode
+- `timeouts.idle_timeout_ms` bounds the lifetime of the bidirectional copy operation
+- `upstream_dial_timeout_ms` bounds upstream dial attempts
+
+For UDP listeners, idle timeout is used to reap inactive per-client flows.
+
+### 5.5 PROXY protocol v2
+
+When `proxy_protocol_v2 = true`, Prism prepends a PROXY protocol v2 header on TCP upstream connections before writing any proxied prelude bytes.
+
+This is supported for both fixed-forward and routing TCP paths.
+
+## 6. Middleware model
+
+### 6.1 Distribution format
+
+Prism only loads middleware from **WAT text** files (`.wat`).
+
+Current non-goal: Prism intentionally rejects raw `.wasm` binaries.
+
+### 6.2 Built-in middlewares
+
+The repository currently ships two built-in reference middlewares:
+
+- `minecraft_handshake`
+- `tls_sni`
+
+On startup and reload, Prism writes these files into the resolved `middleware_dir` if they do not already exist.
+
+### 6.3 Middleware phases
+
+Middleware is run in two phases:
+
+- **Parse**
+  - input: captured prelude bytes
+  - output: optional host and optional prelude override
+- **Rewrite**
+  - input: chosen upstream label plus the current prelude buffer
+  - output: optional rewritten prelude
+
+The middleware chain is fail-soft:
+
+- `NeedMoreData` means Prism should keep reading
+- `NoMatch` means that middleware or route does not apply
+- fatal middleware errors are treated as route-level non-matches so other routes can still win
+
+### 6.4 Middleware ABI (v1)
+
+Each middleware module must export:
+
+- linear memory as `memory`
+- function `prism_mw_run(input_len: i32, ctx_ptr: i32) -> i64`
+
+Current return contract:
+
+- `0` → need more data
+- `1` → no match
+- `-1` → fatal middleware error
+- otherwise → packed `(ptr, len)` pointing to an output struct in module memory
+
+Current context struct written by Prism:
+
+- `u32 version`
+- `u32 phase` (`0 = parse`, `1 = rewrite`)
+- `u32 upstream_ptr`
+- `u32 upstream_len`
+
+Current output struct expected by Prism:
+
+- `u32 host_ptr`
+- `u32 host_len`
+- `u32 rewrite_ptr`
+- `u32 rewrite_len`
+
+If `host_len > 0`, Prism reads a routing host.
+If `rewrite_len > 0`, Prism reads replacement prelude bytes.
+
+## 7. Tunnel mode
+
+### 7.1 Core model
+
+Tunnel mode is a reverse-connection model:
+
+- a **server-side Prism** accepts tunnel sessions on one or more endpoints
+- a **client-side Prism** dials out to the server and registers services
+- each proxied TCP or UDP session is carried over a multiplexed substream inside that tunnel session
+
+### 7.2 Transport implementations
+
+Current transport implementations are:
+
+- **tcp** → TCP transport with yamux stream multiplexing
+- **udp** → KCP (reliable UDP) transport with yamux stream multiplexing
+- **quic** → QUIC bidirectional streams over UDP
+
+QUIC endpoints support either:
+
+- explicit `cert_file` + `key_file`
+- auto-generated self-signed certificate when both are empty
+
+### 7.3 Registration protocol
+
+The first stream opened on a tunnel session is the register stream.
+
+Current register header:
+
+- 4-byte magic: `PRRG`
+- 1-byte protocol version: `0x01`
+- 4-byte length
+- JSON payload
+
+Current JSON payload fields:
+
+- `token`
+- `services[]`
+
+The server validates the shared token if `tunnel.auth_token` is non-empty.
+
+### 7.4 Proxy stream protocol
+
+For each proxied session, the server opens a fresh substream to the client.
+
+Current proxy stream headers:
+
+- `PRPX` for TCP
+- `PRPU` for UDP
+- version byte `0x01`
+- service name encoded as a Minecraft-style VarInt string
 
 After the header:
 
-* **TCP**: raw byte stream (the proxy simply bridges bytes).
-* **UDP**: datagram framing over a stream:
-  * each datagram is `u32be length` + `payload`
-  * per-datagram cap: 1 MiB
+- TCP carries raw stream bytes
+- UDP carries framed datagrams as `u32be length + payload`
 
-## 4. Admin & Telemetry Module
+Maximum register payload and datagram frame size are both currently capped at **1 MiB**.
 
-This module runs a separate HTTP server to provide observability. It interacts with the core components via thread-safe data stores.
+### 7.5 Service ownership semantics
 
-### 4.1. Metrics
+Tunnel services are tracked by the tunnel manager.
 
-Prism publishes metrics using the Rust [`metrics`](https://crates.io/crates/metrics) facade.
+Current behavior:
 
-* **Export format**: Prometheus text exposition.
-* **Collection model**: pull-based scraping.
+- the **first active registrant** for a given service name becomes the routing owner
+- later clients registering the same service name do not replace that owner
+- when the owner disconnects, Prism promotes the **oldest remaining active client** for that service
 
-Prism exposes metrics via the admin plane at:
+This means:
 
-* `GET /metrics` (Prometheus format)
+- `tunnel:<service>` routing is stable while the primary remains connected
+- later duplicate registrations may still be used for auto-listen exposure by client/service identity
 
-Typical deployment:
+### 7.6 Auto-listen for services
 
-* Prism logs are written to stdout/stderr.
-* Vector (or another log shipper) captures container stdout and forwards to a log store (for example Quickwit).
-* VictoriaMetrics (or Prometheus) scrapes `GET /metrics` directly.
+When `tunnel.auto_listen_services = true`, Prism watches the registered service set and opens server-side listeners for services that declare `remote_addr`.
 
-Tracked metrics (names are subject to change, but intent is stable):
+Current rules:
 
-* `prism_active_connections` (gauge)
-* `prism_connections_total` (counter)
-* `prism_bytes_ingress_total` / `prism_bytes_egress_total` (counters)
-* `prism_route_hits_total{host="..."}` (counter)
+- `route_only = true` excludes a service from auto-listen
+- auto-listen is keyed by `client_id/service`
+- TCP and UDP auto-listen are both supported
+- UDP auto-listen maintains per-peer flow state with idle timeout cleanup
 
+### 7.7 UDP tunnel limitation
 
+UDP forwarded through a tunnel is transported correctly, but Prism does **not** preserve the original client IP/port at the backend.
 
-### 4.2. `AdminServer`
+The backend sees traffic as originating from the Prism instance that terminates the tunnel flow.
 
-* **Responsibility**: Exposes health, metrics, and operational snapshots.
-* **Endpoints**:
-* `GET /health`: Returns 200 OK if the listener is up.
-* `GET /metrics`: Returns Prometheus text exposition.
-* `GET /conns`: Returns a snapshot list of current active sessions (Client IP -> Target Host).
-* `POST /reload`: Triggers a configuration reload and atomically swaps the snapshot used for new connections.
-* `GET /tunnel/services`: Returns a snapshot of currently registered tunnel services (when tunnel server role is enabled).
+## 8. Admin API, telemetry, and frontend status
 
+### 8.1 Admin API
 
+The admin API is implemented with Axum and exposes:
 
-### 4.3. Logging
+- `GET /health`
+- `GET /metrics`
+- `GET /conns`
+- `GET /tunnel/services`
+- `GET /config`
+- `POST /reload`
+- `GET /managed/status`
+- `GET /managed/nodes`
+- `GET /managed/nodes/{node_id}`
+- `GET /managed/nodes/{node_id}/config`
+- `PUT /managed/nodes/{node_id}/config`
+- `POST /managed/worker/sync`
+- `GET /managed/worker/status`
+- `PUT /managed/worker/config`
 
-Prism uses Rust structured logging (`tracing` + `tracing-subscriber`).
+Current endpoint behavior:
 
-**Goals**:
+- `/health` returns `{ "ok": true }`
+- `/metrics` returns Prometheus text exposition
+- `/conns` returns the current session snapshot
+- `/tunnel/services` returns `[]` if no tunnel manager is configured
+- `/config` returns the resolved config path
+- `/reload` increments and broadcasts a reload sequence number on a watch channel
+- `/managed/status` returns the management state path and node count
+- `/managed/nodes*` exposes node inventory and desired config snapshots for the panel
+- `/managed/worker/sync` is the active worker heartbeat + desired-config sync path
+- `/managed/worker/status` and `/managed/worker/config` are worker-agent endpoints used for worker-local inspection/apply
 
-* Make debugging and postmortem analysis practical (why was a connection dropped? which upstream was chosen?).
-* Keep the hot path fast by default (no per-connection logs at `info` level).
-* Produce machine-readable logs by default.
+Current operational note: the reload endpoint is **best-effort**. It still returns success even if there are no active receivers.
 
-Prism intentionally does **not** export OpenTelemetry data and does **not** collect distributed traces.
+### 8.2 Admin security posture
 
-**Design**:
+Current implementation details:
 
-* A process-wide logger is constructed at startup from `config.logging`.
-* Output format is `json` by default, with an optional `text` mode for local debugging.
-* Log level is runtime-adjustable on config reload; changing output/format/source reporting may require restart.
-* Log records should be structured with consistent keys where relevant:
-  * `sid`: session identifier (process-unique)
-  * `client`: client remote address
-  * `host`: routed hostname
-  * `upstream`: upstream address
-  * `err`: error value
+- the admin router applies `CorsLayer::permissive()`
+- the admin router applies `TraceLayer::new_for_http()`
+- legacy read endpoints remain unauthenticated
+- `/reload` requires bearer auth when panel or worker auth is configured
+- management panel endpoints require the configured `panel_token`
+- worker sync / worker-agent endpoints require the configured worker auth token
 
-**Implementation guidance (logging on the hot path)**:
+Any deployment that needs tighter admin-plane security should still scope CORS and network exposure externally; the current implementation authenticates writes but does not yet ship origin allowlisting or multi-user auth.
 
-* Avoid per-connection logs at `info` by default; prefer `debug` for per-session details.
-* When building non-trivial fields, guard with `tracing::enabled!(Level::DEBUG)` to avoid allocations when disabled.
-* Do not log raw captured handshake bytes at `info`/`warn`. If needed for deep debugging, log only lengths/counts or keep raw data behind `debug` with an explicit justification.
+### 8.3 Metrics
 
-**No in-process log storage**:
+Prometheus export is installed through the `metrics` facade.
 
-* Prism does **not** maintain an in-memory log ring buffer.
-* Prism does **not** provide a "tail logs" endpoint backed by process memory.
+Metrics currently emitted by the proxy path include:
 
-**External log pipelines**:
+- `prism_active_connections`
+- `prism_connections_total`
+- `prism_bytes_ingress_total`
+- `prism_bytes_egress_total`
+- `prism_route_hits_total{host="..."}`
 
-* Prism writes logs to stdout/stderr (JSON by default).
-* A log shipper (for example Vector) captures stdout and forwards logs to your backend.
+### 8.4 Managed persistence and frontend status
 
-### 4.4. Log viewing in the frontend
+Management persistence lives in JSON files under the Prism workdir:
 
-The Prism frontend does not read logs from Prism's process memory.
+- management role: `managed.management.state_file` (default `managed-state.json`)
+- worker role: `managed-worker-state.json`
 
-* The UI can link to (or embed) an external observability UI configured by the user.
-* Optionally, the UI can query the user's log backend directly if that backend provides an HTTP query API and is reachable from the browser environment.
+The repository root frontend under `src/` now provides a Prism panel that:
 
+- stores the management base URL + panel bearer token in browser storage
+- shows dashboard and node inventory views
+- shows desired/applied revision state per node
+- edits managed config documents through a structured visual editor rather than raw file text
 
+## 9. Reload, shutdown, and reliability boundaries
 
----
+### 9.1 Reload behavior
 
-## 5. Testability Strategy
+Prism runs a polling reload loop that watches the config file signature and also listens for manual reload signals.
 
-The project will strictly adhere to the following testing pyramid:
+Current reload behavior:
 
-### 5.1. Unit Tests (Logic Verification)
+- reloads the parsed route set
+- rebuilds middleware chains
+- refreshes TCP runtime knobs (`max_header_bytes`, timeouts, dial timeout, buffer_size, proxy_protocol_v2`)
+- updates reload-loop enablement and poll interval
+- worker active sync can hot-apply the same runtime-updatable fields from a managed config document
 
-* **Parser Tests**: Use "Table-Driven Tests" with various raw byte inputs (valid handshake, partial packet, malformed varint) to verify the `ProtocolParser` extracts the correct hostname.
-* **Router Tests**: Verify wildcard matching logic (e.g., ensuring `*.example.com` matches `play.example.com`).
-* **Proxy Protocol Tests**: Verify the binary encoding of the PROXY v2 header matches the spec exactly.
+Current restart-required behavior:
 
-### 5.2. Integration Tests (Component Interaction)
+- listener topology changes are detected but not applied live
+- admin bind changes are not applied live
+- tunnel endpoint changes are not applied live
+- logging configuration is not reinitialized on reload
+- managed worker applies mark these differences as `pending_restart` and preserve restart reasons in worker/management state
 
-* **Mock Network Test**: Use an in-memory duplex stream (for example `tokio::io::DuplexStream`) to simulate a client connecting to Prism, and Prism connecting to a backend. Send a handshake message into the client side and verify it arrives at the backend side.
-* **Hot Reload Test**: Start the router, resolve a host, modify the underlying config source, trigger reload, and verify the host resolves to a new address.
+### 9.2 Graceful shutdown
 
-### 5.3. End-to-End (E2E) Tests (Optional)
+Prism listens for:
 
-* Spin up a real TCP listener locally and connect with a real TCP client (for example `nc`, `curl --raw` for TLS SNI testing, or a small Rust test client) to verify socket handling, timeouts, and graceful shutdown.
+- `Ctrl-C`
+- `SIGTERM` on Unix
 
----
+On shutdown it:
 
-## 6. Configuration & Reliability
+1. broadcasts a shutdown signal
+2. lets long-lived tasks observe that signal and exit
+3. drains running tasks
+4. applies a hard timeout before aborting any task that still hangs
 
-### 6.1. Configuration Model
+## 10. Logging
 
-* The configuration is defined as a Rust struct (Serde-deserializable).
-* A `ConfigProvider` interface loads this struct. This allows the config to be loaded from a file (Production) or a static string/struct (Testing).
-* **Config file formats & naming**:
-  * Prism supports **TOML** and **YAML** configuration files.
-  * **Config path resolution** (highest precedence first):
-    * CLI flag: `--config /path/to/prism.toml`
-    * Environment variable: `PRISM_CONFIG=/path/to/prism.toml`
-    * Auto-discovery in the current working directory: `prism.toml` > `prism.yaml` > `prism.yml`
-    * Default path:
-      * Linux: `/etc/prism/prism.toml`
-      * Other OSes: `${ProjectConfigDir}/prism.toml` (derived from `directories::ProjectDirs` in Rust)
-  * When multiple `prism.*` files are present in a discovery directory, precedence is: `prism.toml` > `prism.yaml` > `prism.yml`.
-  * JSON is intentionally not supported because it cannot contain comments and Prism configs are expected to be annotated.
-  * If the resolved config file path does not exist, Prism will **create a runnable default config file** at that path and continue starting (default: tunnel server on `:7000/tcp`).
+Logging is based on `tracing` and `tracing-subscriber`.
 
-* **Runtime working directory**:
-  * Prism uses a work directory for runtime state (for example middleware modules).
-  * Resolution precedence (highest first):
-    * CLI flag: `--workdir /path/to/workdir`
-    * Environment variable: `PRISM_WORKDIR=/path/to/workdir`
-    * Default:
-      * Linux: `/var/lib/prism`
-      * Other OSes: `${ProjectDataDir}` (derived from `directories::ProjectDirs` in Rust)
-* **Zero-downtime config reload**:
-  * Prism can reload configuration without stopping the TCP listener.
-  * Existing sessions continue with the configuration snapshot they started with.
-  * New connections use the latest configuration snapshot.
-  * Not all fields can be reloaded safely (e.g., listen address/admin address require a restart); reloadable fields include routes, timeouts, dial timeouts, buffer sizing and middleware selection.
+Supported output settings today:
 
-* **Logging reload semantics**:
-  * `logging.level` is reloadable.
-  * `logging.format`, `logging.output`, `logging.add_source` may require restart depending on the sink implementation.
+- `stderr`
+- `stdout`
+- `discard`
+- append to a file path
 
-### 6.2. Buffer Management
+Supported formats today:
 
-* Prism currently relies on Tokio's `copy_bidirectional` for stream proxying, which uses internal buffering.
-* The config field `buffer_size` is kept as a tuning knob for future work (e.g. switching to a manual copy loop with a reusable `Vec<u8>` buffer pool) but may not affect behavior yet.
+- `json`
+- `text`
 
-### 6.3. Graceful Shutdown
+Current design boundary:
 
-* The application will listen for `SIGINT`/`SIGTERM`.
-* Upon signal:
+- Prism logs to process outputs or a configured file
+- Prism does not expose an in-memory log tail endpoint
+- Prism does not include built-in distributed tracing export
 
-    1. Close the `Listener` (stop accepting new connections).
-    2. Wait for existing `SessionHandlers` to finish (with a hard timeout context).
-    3. Flush final metrics.
+## 11. Current limitations and explicit non-goals
 
+The following are true in the current implementation and should be documented as such:
 
-
----
-
-## 7. WASM Routing Middleware ABI (v1)
-
-Prism's WASM routing middleware interface is intentionally small to keep overhead low.
-
-### Module distribution format
-
-* Prism expects middleware modules to be provided as **WAT text** (`.wat`).
-* Prism compiles WAT to WASM at runtime (via Wasmer) and intentionally **rejects loading raw `.wasm` binaries**.
-
-### Middleware lookup
-
-* Prism loads middleware modules from a configurable directory.
-  * Resolution precedence (highest first):
-    * CLI flag: `--middleware-dir /path/to/middlewares`
-    * Environment variable: `PRISM_MIDDLEWARE_DIR=/path/to/middlewares`
-    * Default: `<config_dir>/middlewares` (Linux default: `/etc/prism/middlewares`)
-  * If a provided middleware dir path is relative, it is resolved relative to `<config_dir>`.
-* In configuration, each route selects one or more middlewares via `routes[].middlewares`.
-  * Middlewares are referenced by **name only** (no extension, no directories).
-  * A middleware name `foo` maps to the file `<middleware_dir>/foo.wat`.
-  * Legacy alias: `routes[].parsers` is accepted as a deprecated alias of `routes[].middlewares`.
-
-### Memory contract
-
-* Module must export linear memory as `memory`.
-* Prism writes the captured prelude bytes into module memory starting at offset `0`.
-* Prism also writes a small context struct into module memory and passes its pointer to the exported function.
-
-### Exported function
-
-Module must export:
-
-* `prism_mw_run(input_len: i32, ctx_ptr: i32) -> i64`
-
-Return values:
-
-* `0`  : need more data
-* `1`  : no match (this middleware does not apply)
-* `-1` : fatal middleware error
-* otherwise: packed `(ptr,len)` pointing at an output buffer in module memory:
-  * lower 32 bits: `ptr` (u32)
-  * upper 32 bits: `len` (u32)
-
-### Context struct (v1)
-
-At `ctx_ptr`, Prism writes a little-endian struct:
-
-* `u32 version` (currently `1`)
-* `u32 phase` (`0` = parse, `1` = rewrite)
-* `u32 upstream_ptr` (pointer to selected upstream string; `0` when not available)
-* `u32 upstream_len` (byte length of selected upstream string)
-
-In **parse** phase, `upstream_ptr/upstream_len` are empty.
-In **rewrite** phase, `upstream_ptr/upstream_len` contain the final selected upstream label (after default port fill).
-
-### Output struct (v1)
-
-At the returned `(ptr,len)` location, Prism expects at least 16 bytes encoding a little-endian struct:
-
-* `u32 host_ptr`
-* `u32 host_len`
-* `u32 rewrite_ptr`
-* `u32 rewrite_len`
-
-Semantics:
-
-* If `host_len > 0`, Prism reads `host_len` bytes at `host_ptr` as the routing host.
-* If `rewrite_len > 0`, Prism reads `rewrite_len` bytes at `rewrite_ptr` as a **replacement buffer** for the captured prelude.
-  * In parse phase, this rewritten prelude is carried along with the route resolution and can be forwarded upstream.
-  * In rewrite phase, this rewritten prelude is applied just before writing the prelude to the selected upstream.
-
-The referenced bytes must remain valid until the next call on the same module instance.
+- routes do **not** create default listeners
+- routing routes require explicit `middlewares`
+- `parsers` is only a compatibility alias, not the primary term
+- raw `.wasm` middleware loading is disabled; use `.wat`
+- UDP listeners do not support hostname routing
+- `buffer_size` is not yet wired into the actual copy buffer implementation
+- the admin router remains CORS-permissive even though managed write endpoints now require bearer auth
+- active worker sync is implemented end-to-end, but management-side passive orchestration is still limited to worker-agent endpoint exposure
+- managed auth currently uses shared bearer tokens rather than per-node secrets or RBAC

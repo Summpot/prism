@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Context;
 use directories::ProjectDirs;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConfigPath {
@@ -201,8 +201,212 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     Config::from_file_config(&mut fc, path)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PrismRole {
+    #[default]
+    Standalone,
+    Management,
+    Worker,
+}
+
+impl PrismRole {
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "standalone" => Ok(Self::Standalone),
+            "management" => Ok(Self::Management),
+            "worker" => Ok(Self::Worker),
+            other => anyhow::bail!(
+                "config: unsupported role {:?} (expected standalone, management, or worker)",
+                other
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for PrismRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Standalone => write!(f, "standalone"),
+            Self::Management => write!(f, "management"),
+            Self::Worker => write!(f, "worker"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ManagedConnectionMode {
+    #[default]
+    Active,
+    Passive,
+}
+
+impl ManagedConnectionMode {
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "active" => Ok(Self::Active),
+            "passive" => Ok(Self::Passive),
+            other => anyhow::bail!(
+                "config: unsupported managed.worker.connection_mode {:?} (expected active or passive)",
+                other
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for ManagedConnectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => write!(f, "active"),
+            Self::Passive => write!(f, "passive"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ManagedBootstrapConfig {
+    pub management: Option<ManagementBootstrapConfig>,
+    pub worker: Option<WorkerBootstrapConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagementBootstrapConfig {
+    pub state_file: String,
+    pub panel_token: String,
+    pub worker_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerBootstrapConfig {
+    pub node_id: String,
+    pub management_url: String,
+    pub auth_token: String,
+    pub connection_mode: ManagedConnectionMode,
+    pub sync_interval: Duration,
+    pub agent_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedConfigDocument {
+    #[serde(default)]
+    pub listeners: Vec<ManagedProxyListenerDocument>,
+    #[serde(default)]
+    pub routes: Vec<ManagedRouteDocument>,
+    #[serde(default)]
+    pub max_header_bytes: i64,
+    #[serde(default)]
+    pub proxy_protocol_v2: bool,
+    #[serde(default)]
+    pub buffer_size: i64,
+    #[serde(default)]
+    pub upstream_dial_timeout_ms: i64,
+    pub timeouts: Option<ManagedTimeoutsDocument>,
+    pub tunnel: Option<ManagedTunnelDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedProxyListenerDocument {
+    pub listen_addr: String,
+    #[serde(default)]
+    pub protocol: String,
+    #[serde(default)]
+    pub upstream: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedRouteDocument {
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    #[serde(default)]
+    pub upstreams: Vec<String>,
+    #[serde(default)]
+    pub middlewares: Vec<String>,
+    #[serde(default)]
+    pub strategy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTimeoutsDocument {
+    pub handshake_timeout_ms: Option<i64>,
+    pub idle_timeout_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTunnelDocument {
+    #[serde(default)]
+    pub auth_token: String,
+    #[serde(default = "default_true")]
+    pub auto_listen_services: bool,
+    #[serde(default)]
+    pub endpoints: Vec<ManagedTunnelEndpointDocument>,
+    pub client: Option<ManagedTunnelClientDocument>,
+    #[serde(default)]
+    pub services: Vec<ManagedTunnelServiceDocument>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTunnelEndpointDocument {
+    pub listen_addr: String,
+    #[serde(default)]
+    pub transport: String,
+    pub quic: Option<ManagedQuicServerDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTunnelClientDocument {
+    pub server_addr: String,
+    #[serde(default)]
+    pub transport: String,
+    pub dial_timeout_ms: Option<i64>,
+    pub quic: Option<ManagedQuicClientDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedQuicServerDocument {
+    pub cert_file: Option<String>,
+    pub key_file: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedQuicClientDocument {
+    pub server_name: Option<String>,
+    #[serde(default)]
+    pub insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTunnelServiceDocument {
+    pub name: String,
+    #[serde(default)]
+    pub proto: String,
+    pub local_addr: String,
+    #[serde(default)]
+    pub route_only: bool,
+    #[serde(default)]
+    pub remote_addr: String,
+    #[serde(default)]
+    pub masquerade_host: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
+    pub role: PrismRole,
+    pub managed: ManagedBootstrapConfig,
     pub listeners: Vec<ProxyListenerConfig>,
     pub admin_addr: String,
     pub logging: LoggingConfig,
@@ -216,26 +420,26 @@ pub struct Config {
     pub tunnel: TunnelConfig,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeouts {
     pub handshake_timeout: Duration,
     pub idle_timeout: Duration,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyListenerConfig {
     pub listen_addr: String,
     pub protocol: String, // tcp | udp
     pub upstream: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReloadConfig {
     pub enabled: bool,
     pub poll_interval: Duration,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoggingConfig {
     pub level: String,
     pub format: String,
@@ -243,7 +447,7 @@ pub struct LoggingConfig {
     pub add_source: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteConfig {
     pub host: Vec<String>,
     pub upstreams: Vec<String>,
@@ -251,7 +455,7 @@ pub struct RouteConfig {
     pub strategy: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TunnelConfig {
     pub auth_token: String,
     pub auto_listen_services: bool,
@@ -260,14 +464,14 @@ pub struct TunnelConfig {
     pub services: Vec<TunnelServiceConfig>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelEndpointConfig {
     pub listen_addr: String,
     pub transport: String,
     pub quic: QuicServerConfig,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelClientConfig {
     pub server_addr: String,
     pub transport: String,
@@ -275,19 +479,19 @@ pub struct TunnelClientConfig {
     pub quic: QuicClientConfig,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuicServerConfig {
     pub cert_file: String,
     pub key_file: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuicClientConfig {
     pub server_name: String,
     pub insecure_skip_verify: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelServiceConfig {
     pub name: String,
     pub proto: String,
@@ -303,6 +507,11 @@ pub struct TunnelServiceConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
+    #[serde(default)]
+    role: String,
+
+    managed: Option<FileManagedBootstrap>,
+
     #[serde(default)]
     listeners: Vec<FileProxyListener>,
 
@@ -331,6 +540,32 @@ struct FileConfig {
     timeouts: Option<FileTimeouts>,
 
     tunnel: Option<FileTunnel>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileManagedBootstrap {
+    management: Option<FileManagementBootstrap>,
+    worker: Option<FileWorkerBootstrap>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileManagementBootstrap {
+    state_file: Option<String>,
+    panel_token: Option<String>,
+    worker_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileWorkerBootstrap {
+    node_id: Option<String>,
+    management_url: Option<String>,
+    auth_token: Option<String>,
+    connection_mode: Option<String>,
+    sync_interval_ms: Option<i64>,
+    agent_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -448,6 +683,8 @@ impl StringOrVec {
 impl Config {
     fn from_file_config(fc: &mut FileConfig, _config_path: &Path) -> anyhow::Result<Config> {
         let mut cfg = Config {
+            role: PrismRole::Standalone,
+            managed: ManagedBootstrapConfig::default(),
             listeners: vec![],
             admin_addr: fc.admin_addr.trim().to_string(),
             logging: LoggingConfig {
@@ -715,6 +952,113 @@ impl Config {
             cfg.tunnel.auto_listen_services = true;
         }
 
+        cfg.role = PrismRole::parse(&fc.role)?;
+
+        if let Some(m) = &fc.managed {
+            if let Some(mm) = &m.management {
+                cfg.managed.management = Some(ManagementBootstrapConfig {
+                    state_file: mm
+                        .state_file
+                        .clone()
+                        .unwrap_or_else(|| "managed-state.json".into())
+                        .trim()
+                        .to_string(),
+                    panel_token: mm
+                        .panel_token
+                        .clone()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
+                    worker_token: mm
+                        .worker_token
+                        .clone()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
+                });
+            }
+
+            if let Some(mw) = &m.worker {
+                cfg.managed.worker = Some(WorkerBootstrapConfig {
+                    node_id: mw.node_id.clone().unwrap_or_default().trim().to_string(),
+                    management_url: mw
+                        .management_url
+                        .clone()
+                        .unwrap_or_default()
+                        .trim()
+                        .trim_end_matches('/')
+                        .to_string(),
+                    auth_token: mw.auth_token.clone().unwrap_or_default().trim().to_string(),
+                    connection_mode: ManagedConnectionMode::parse(
+                        mw.connection_mode.as_deref().unwrap_or("active"),
+                    )?,
+                    sync_interval: Duration::from_millis(
+                        mw.sync_interval_ms.unwrap_or(5000).max(0) as u64,
+                    ),
+                    agent_url: mw.agent_url.clone().unwrap_or_default().trim().to_string(),
+                });
+            }
+        }
+
+        match cfg.role {
+            PrismRole::Standalone => {}
+            PrismRole::Management => {
+                if cfg.admin_addr.trim().is_empty() {
+                    anyhow::bail!(
+                        "config: role=management requires admin_addr so the management API can bind"
+                    );
+                }
+
+                let management = cfg
+                    .managed
+                    .management
+                    .as_mut()
+                    .context("config: role=management requires managed.management")?;
+
+                if management.state_file.trim().is_empty() {
+                    management.state_file = "managed-state.json".into();
+                }
+                if management.panel_token.trim().is_empty() {
+                    anyhow::bail!(
+                        "config: role=management requires managed.management.panel_token"
+                    );
+                }
+                if management.worker_token.trim().is_empty() {
+                    anyhow::bail!(
+                        "config: role=management requires managed.management.worker_token"
+                    );
+                }
+            }
+            PrismRole::Worker => {
+                if cfg.admin_addr.trim().is_empty() {
+                    anyhow::bail!(
+                        "config: role=worker requires admin_addr so worker agent endpoints can bind"
+                    );
+                }
+
+                let worker = cfg
+                    .managed
+                    .worker
+                    .as_mut()
+                    .context("config: role=worker requires managed.worker")?;
+
+                if worker.node_id.trim().is_empty() {
+                    anyhow::bail!("config: role=worker requires managed.worker.node_id");
+                }
+                if worker.auth_token.trim().is_empty() {
+                    anyhow::bail!("config: role=worker requires managed.worker.auth_token");
+                }
+                if worker.connection_mode == ManagedConnectionMode::Active
+                    && worker.management_url.trim().is_empty()
+                {
+                    anyhow::bail!("config: active workers require managed.worker.management_url");
+                }
+                if worker.sync_interval.is_zero() {
+                    worker.sync_interval = Duration::from_millis(5000);
+                }
+            }
+        }
+
         Ok(cfg)
     }
 }
@@ -741,6 +1085,181 @@ fn normalize_middleware_ref(s: &str) -> anyhow::Result<String> {
         anyhow::bail!("middleware name must not contain '.' or file extensions");
     }
     Ok(out)
+}
+
+pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::Result<Config> {
+    let mut fc = FileConfig {
+        role: String::new(),
+        managed: None,
+        listeners: doc
+            .listeners
+            .iter()
+            .map(|listener| FileProxyListener {
+                listen_addr: listener.listen_addr.clone(),
+                protocol: listener.protocol.clone(),
+                upstream: listener.upstream.clone(),
+            })
+            .collect(),
+        admin_addr: String::new(),
+        logging: None,
+        routes: doc
+            .routes
+            .iter()
+            .map(|route| FileRoute {
+                host: if route.hosts.is_empty() {
+                    None
+                } else {
+                    Some(StringOrVec::Many(route.hosts.clone()))
+                },
+                hosts: None,
+                upstream: None,
+                upstreams: if route.upstreams.is_empty() {
+                    None
+                } else {
+                    Some(StringOrVec::Many(route.upstreams.clone()))
+                },
+                backend: None,
+                backends: None,
+                middlewares: if route.middlewares.is_empty() {
+                    None
+                } else {
+                    Some(StringOrVec::Many(route.middlewares.clone()))
+                },
+                parsers: None,
+                strategy: if route.strategy.trim().is_empty() {
+                    None
+                } else {
+                    Some(route.strategy.clone())
+                },
+            })
+            .collect(),
+        max_header_bytes: doc.max_header_bytes,
+        reload: None,
+        proxy_protocol_v2: doc.proxy_protocol_v2,
+        buffer_size: doc.buffer_size,
+        upstream_dial_timeout_ms: doc.upstream_dial_timeout_ms,
+        timeouts: doc.timeouts.as_ref().map(|timeouts| FileTimeouts {
+            handshake_timeout_ms: timeouts.handshake_timeout_ms,
+            idle_timeout_ms: timeouts.idle_timeout_ms,
+        }),
+        tunnel: doc.tunnel.as_ref().map(|tunnel| FileTunnel {
+            auth_token: Some(tunnel.auth_token.clone()),
+            auto_listen_services: Some(tunnel.auto_listen_services),
+            endpoints: Some(
+                tunnel
+                    .endpoints
+                    .iter()
+                    .map(|endpoint| FileTunnelEndpoint {
+                        listen_addr: endpoint.listen_addr.clone(),
+                        transport: if endpoint.transport.trim().is_empty() {
+                            None
+                        } else {
+                            Some(endpoint.transport.clone())
+                        },
+                        quic: endpoint.quic.as_ref().map(|quic| FileQuicServer {
+                            cert_file: quic.cert_file.clone(),
+                            key_file: quic.key_file.clone(),
+                        }),
+                    })
+                    .collect(),
+            ),
+            client: tunnel.client.as_ref().map(|client| FileTunnelClient {
+                server_addr: client.server_addr.clone(),
+                transport: if client.transport.trim().is_empty() {
+                    None
+                } else {
+                    Some(client.transport.clone())
+                },
+                dial_timeout_ms: client.dial_timeout_ms,
+                quic: client.quic.as_ref().map(|quic| FileQuicClient {
+                    server_name: quic.server_name.clone(),
+                    insecure_skip_verify: quic.insecure_skip_verify,
+                }),
+            }),
+            services: Some(
+                tunnel
+                    .services
+                    .iter()
+                    .map(|service| FileTunnelService {
+                        name: service.name.clone(),
+                        proto: if service.proto.trim().is_empty() {
+                            None
+                        } else {
+                            Some(service.proto.clone())
+                        },
+                        local_addr: service.local_addr.clone(),
+                        route_only: service.route_only,
+                        remote_addr: if service.remote_addr.trim().is_empty() {
+                            None
+                        } else {
+                            Some(service.remote_addr.clone())
+                        },
+                        masquerade_host: if service.masquerade_host.trim().is_empty() {
+                            None
+                        } else {
+                            Some(service.masquerade_host.clone())
+                        },
+                    })
+                    .collect(),
+            ),
+        }),
+    };
+
+    Config::from_file_config(&mut fc, Path::new("managed.json"))
+}
+
+pub fn overlay_managed_config_document(
+    bootstrap: &Config,
+    doc: &ManagedConfigDocument,
+) -> anyhow::Result<Config> {
+    let mut cfg = validate_managed_config_document(doc)?;
+    cfg.role = bootstrap.role;
+    cfg.managed = bootstrap.managed.clone();
+    cfg.admin_addr = bootstrap.admin_addr.clone();
+    cfg.logging = bootstrap.logging.clone();
+    cfg.reload = bootstrap.reload.clone();
+    Ok(cfg)
+}
+
+pub fn worker_bootstrap_runtime_config(bootstrap: &Config) -> Config {
+    let mut cfg = bootstrap.clone();
+    cfg.listeners.clear();
+    cfg.routes.clear();
+    cfg.tunnel = TunnelConfig::default();
+    cfg
+}
+
+pub fn empty_managed_runtime_config() -> Config {
+    validate_managed_config_document(&ManagedConfigDocument::default())
+        .expect("default managed config document must validate")
+}
+
+pub fn restart_required_reasons(current: &Config, next: &Config) -> Vec<String> {
+    let mut reasons = Vec::new();
+
+    if current.listeners != next.listeners {
+        reasons.push("listener topology changed".to_string());
+    }
+    if current.admin_addr.trim() != next.admin_addr.trim() {
+        reasons.push("admin_addr changed".to_string());
+    }
+    if current.tunnel.auth_token != next.tunnel.auth_token {
+        reasons.push("tunnel auth_token changed".to_string());
+    }
+    if current.tunnel.auto_listen_services != next.tunnel.auto_listen_services {
+        reasons.push("tunnel auto_listen_services changed".to_string());
+    }
+    if current.tunnel.endpoints != next.tunnel.endpoints {
+        reasons.push("tunnel endpoints changed".to_string());
+    }
+    if current.tunnel.client != next.tunnel.client {
+        reasons.push("tunnel client changed".to_string());
+    }
+    if current.tunnel.services != next.tunnel.services {
+        reasons.push("tunnel services changed".to_string());
+    }
+
+    reasons
 }
 
 const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
@@ -911,6 +1430,71 @@ parsers = ["Foo-Bar"]
         assert_eq!(cfg.routes[0].middlewares, vec!["foo_bar".to_string()]);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_configs_default_to_standalone_role() {
+        let dir = temp_dir("standalone_default_role");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[[listeners]]
+listen_addr = ":25565"
+protocol = "tcp"
+
+[[routes]]
+host = "example.com"
+upstreams = ["127.0.0.1:25565"]
+middlewares = ["minecraft_handshake"]
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert_eq!(cfg.role, PrismRole::Standalone);
+        assert!(cfg.managed.management.is_none());
+        assert!(cfg.managed.worker.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restart_required_reasons_detect_listener_changes() {
+        let current = validate_managed_config_document(&ManagedConfigDocument {
+            listeners: vec![ManagedProxyListenerDocument {
+                listen_addr: ":25565".to_string(),
+                protocol: "tcp".to_string(),
+                upstream: String::new(),
+            }],
+            routes: vec![ManagedRouteDocument {
+                hosts: vec!["play.example.com".to_string()],
+                upstreams: vec!["127.0.0.1:25566".to_string()],
+                middlewares: vec!["minecraft_handshake".to_string()],
+                strategy: "sequential".to_string(),
+            }],
+            ..Default::default()
+        })
+        .expect("current config");
+
+        let next = validate_managed_config_document(&ManagedConfigDocument {
+            listeners: vec![ManagedProxyListenerDocument {
+                listen_addr: ":25566".to_string(),
+                protocol: "tcp".to_string(),
+                upstream: String::new(),
+            }],
+            routes: vec![ManagedRouteDocument {
+                hosts: vec!["play.example.com".to_string()],
+                upstreams: vec!["127.0.0.1:25566".to_string()],
+                middlewares: vec!["minecraft_handshake".to_string()],
+                strategy: "sequential".to_string(),
+            }],
+            ..Default::default()
+        })
+        .expect("next config");
+
+        let reasons = restart_required_reasons(&current, &next);
+        assert!(reasons.iter().any(|reason| reason.contains("listener")));
     }
 
     #[test]

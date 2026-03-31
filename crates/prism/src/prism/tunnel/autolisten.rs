@@ -157,9 +157,7 @@ impl AutoListener {
                     && w.addr == cur.desired.addr
             });
 
-            if !should_keep
-                && let Some(old) = running.remove(&key)
-            {
+            if !should_keep && let Some(old) = running.remove(&key) {
                 let _ = old.stop.send(true);
                 old.task.abort();
                 tracing::info!(key=%key, "tunnel: stopped auto-listen");

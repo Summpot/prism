@@ -6,6 +6,13 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "role": {
+      "type": "string",
+      "description": "Prism runtime role. standalone preserves the traditional local-file model; management enables the managed control plane; worker enables managed worker bootstrap plus local agent endpoints.",
+      "enum": ["standalone", "management", "worker"],
+      "default": "standalone"
+    },
+    "managed": { "$ref": "#/$defs/managedBootstrap" },
     "listeners": {
       "type": "array",
       "description": "Public-facing proxy listeners (multi-port / multi-protocol).",
@@ -70,6 +77,36 @@
     "timeouts": { "$ref": "#/$defs/timeouts" },
     "tunnel": { "$ref": "#/$defs/tunnel" }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "role": { "const": "management" } },
+        "required": ["role"]
+      },
+      "then": {
+        "required": ["admin_addr", "managed"],
+        "properties": {
+          "managed": {
+            "required": ["management"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "role": { "const": "worker" } },
+        "required": ["role"]
+      },
+      "then": {
+        "required": ["admin_addr", "managed"],
+        "properties": {
+          "managed": {
+            "required": ["worker"]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -90,6 +127,81 @@
       "type": "integer",
       "minimum": 0,
       "description": "Duration in milliseconds."
+    },
+    "managedBootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Managed-mode bootstrap settings. In managed deployments the file stays bootstrap-focused while desired runtime config is stored centrally on the management node.",
+      "properties": {
+        "management": { "$ref": "#/$defs/managementBootstrap" },
+        "worker": { "$ref": "#/$defs/workerBootstrap" }
+      }
+    },
+    "managementBootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["panel_token", "worker_token"],
+      "properties": {
+        "state_file": {
+          "type": "string",
+          "description": "JSON state file path for the embedded management control plane. Relative paths resolve under Prism workdir.",
+          "default": "managed-state.json"
+        },
+        "panel_token": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Bearer token required for panel/browser access to /managed/* endpoints."
+        },
+        "worker_token": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Bearer token required for worker sync or management-to-worker agent access."
+        }
+      }
+    },
+    "workerBootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "auth_token"],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Stable worker identity used by the management node to track desired/applied revisions."
+        },
+        "management_url": {
+          "type": "string",
+          "description": "Management API base URL used by active workers to sync desired config and report status.",
+          "examples": ["http://127.0.0.1:8080"]
+        },
+        "auth_token": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Worker bearer token used for active sync and passive worker-agent endpoints."
+        },
+        "connection_mode": {
+          "type": "string",
+          "enum": ["active", "passive"],
+          "default": "active",
+          "description": "active = worker dials management; passive = worker exposes local agent endpoints for a reachable management node."
+        },
+        "sync_interval_ms": {
+          "$ref": "#/$defs/ms",
+          "description": "Active worker sync interval in milliseconds.",
+          "default": 5000
+        },
+        "agent_url": {
+          "type": "string",
+          "description": "Optional reachable worker agent URL advertised for passive management access.",
+          "examples": ["http://10.0.0.12:8081", ""]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "connection_mode": { "const": "active" } }
+          },
+          "then": {
+            "required": ["management_url"]
+          }
+        }
+      ]
     },
     "proxyListener": {
       "type": "object",

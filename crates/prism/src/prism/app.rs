@@ -5,7 +5,8 @@ use tokio::task::JoinSet;
 
 use crate::prism::middleware::MiddlewareProvider;
 use crate::prism::{
-    admin, config, logging, middleware, net, proxy, router, runtime_paths, telemetry, tunnel,
+    admin, config, logging, managed, middleware, net, proxy, router, runtime_paths, telemetry,
+    tunnel,
 };
 
 pub async fn run(
@@ -19,10 +20,10 @@ pub async fn run(
 
     let created = config::ensure_config_file(&resolved.path)?;
 
-    let cfg = config::load_config(&resolved.path)
+    let bootstrap_cfg = config::load_config(&resolved.path)
         .with_context(|| format!("load config: {}", resolved.path.display()))?;
 
-    let logrt = logging::init(&cfg.logging)?;
+    let logrt = logging::init(&bootstrap_cfg.logging)?;
     let _logrt_guard = logrt; // keep alive
 
     if created {
@@ -44,13 +45,76 @@ pub async fn run(
         );
     }
 
+    let management_plane = match bootstrap_cfg.role {
+        config::PrismRole::Management => Some(Arc::new(managed::ManagementPlane::open(
+            &paths.workdir,
+            bootstrap_cfg
+                .managed
+                .management
+                .as_ref()
+                .expect("management role validated in config"),
+        )?)),
+        _ => None,
+    };
+
+    let worker_agent = match bootstrap_cfg.role {
+        config::PrismRole::Worker => Some(Arc::new(managed::WorkerAgent::open(
+            &paths.workdir,
+            bootstrap_cfg
+                .managed
+                .worker
+                .as_ref()
+                .expect("worker role validated in config"),
+        )?)),
+        _ => None,
+    };
+
+    if let Some(worker_agent) = &worker_agent
+        && worker_agent.connection_mode() == config::ManagedConnectionMode::Active
+    {
+        if let Err(err) = worker_agent.sync_once().await {
+            tracing::warn!(
+                node_id = %bootstrap_cfg.managed.worker.as_ref().expect("worker config present").node_id,
+                err = %err,
+                "managed: initial worker sync failed; starting from persisted state"
+            );
+        }
+    }
+
+    let startup_managed_cfg = if let Some(worker_agent) = &worker_agent {
+        worker_agent.startup_config().await.map(|(_, cfg)| cfg)
+    } else {
+        None
+    };
+
+    let cfg = if let Some(startup_managed_cfg) = startup_managed_cfg.as_ref() {
+        config::overlay_managed_config_document(&bootstrap_cfg, startup_managed_cfg)?
+    } else if bootstrap_cfg.role == config::PrismRole::Worker {
+        config::worker_bootstrap_runtime_config(&bootstrap_cfg)
+    } else {
+        bootstrap_cfg.clone()
+    };
+
     let proxy_enabled = !cfg.listeners.is_empty();
     let tunnel_server_enabled = !cfg.tunnel.endpoints.is_empty();
     let tunnel_client_enabled = cfg.tunnel.client.is_some() && !cfg.tunnel.services.is_empty();
     let admin_enabled = !cfg.admin_addr.trim().is_empty()
-        && (proxy_enabled || tunnel_server_enabled || tunnel_client_enabled);
+        && (proxy_enabled
+            || tunnel_server_enabled
+            || tunnel_client_enabled
+            || matches!(
+                cfg.role,
+                config::PrismRole::Management | config::PrismRole::Worker
+            ));
 
-    if !proxy_enabled && !tunnel_server_enabled && !tunnel_client_enabled {
+    if !proxy_enabled
+        && !tunnel_server_enabled
+        && !tunnel_client_enabled
+        && !matches!(
+            cfg.role,
+            config::PrismRole::Management | config::PrismRole::Worker
+        )
+    {
         anyhow::bail!(
             "config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.client+services)"
         );
@@ -60,6 +124,7 @@ pub async fn run(
         config = %resolved.path.display(),
         workdir = %paths.workdir.display(),
         middleware_dir = %paths.middleware_dir.display(),
+        role = %cfg.role,
         proxy_enabled,
         tunnel_server_enabled,
         tunnel_client_enabled,
@@ -94,9 +159,9 @@ pub async fn run(
     let mut tasks = JoinSet::new();
 
     // Config reload loop (polling + admin-triggered).
-    {
+    if cfg.role != config::PrismRole::Worker {
         let config_path = resolved.path.clone();
-        let static_listeners = cfg.listeners.clone();
+        let static_cfg = cfg.clone();
         let router = rtr.clone();
         let runtime = tcp_runtime.clone();
         let middleware_dir = paths.middleware_dir.clone();
@@ -108,7 +173,7 @@ pub async fn run(
         tasks.spawn(async move {
             reload_loop(
                 config_path,
-                static_listeners,
+                static_cfg,
                 middleware_dir,
                 router,
                 runtime,
@@ -135,6 +200,20 @@ pub async fn run(
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
             tunnel: Some(tunnel_manager.clone()),
+            auth: admin::AdminAuth {
+                panel_token: management_plane
+                    .as_ref()
+                    .map(|plane| plane.panel_token().to_string()),
+                worker_token: if let Some(plane) = &management_plane {
+                    Some(plane.worker_token().to_string())
+                } else {
+                    worker_agent
+                        .as_ref()
+                        .map(|agent| agent.auth_token().to_string())
+                },
+            },
+            management: management_plane.clone(),
+            worker: worker_agent.clone(),
         };
 
         let shutdown = shutdown_rx.clone();
@@ -260,6 +339,29 @@ pub async fn run(
         tasks.spawn(async move { client.run(shutdown).await });
     }
 
+    if let Some(worker_agent) = &worker_agent {
+        worker_agent
+            .attach_runtime(managed::RuntimeApplyHandles {
+                middleware_dir: paths.middleware_dir.clone(),
+                router: rtr.clone(),
+                runtime: tcp_runtime.clone(),
+            })
+            .await;
+
+        if startup_managed_cfg.is_some() {
+            worker_agent.mark_started_with_startup_config().await?;
+        }
+
+        if worker_agent.connection_mode() == config::ManagedConnectionMode::Active {
+            let worker_agent = worker_agent.clone();
+            let shutdown = shutdown_rx.clone();
+            tasks.spawn(async move {
+                worker_agent.run_active_sync_loop(shutdown).await;
+                Ok(())
+            });
+        }
+    }
+
     // Wait for shutdown signal (Ctrl-C / SIGTERM) or unexpected task termination.
     tokio::select! {
         _ = shutdown_signal() => {
@@ -320,7 +422,7 @@ async fn shutdown_signal() {
 #[allow(clippy::too_many_arguments)]
 async fn reload_loop(
     config_path: PathBuf,
-    static_listeners: Vec<config::ProxyListenerConfig>,
+    static_cfg: config::Config,
     middleware_dir: PathBuf,
     router: Arc<router::Router>,
     runtime: Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
@@ -347,7 +449,7 @@ async fn reload_loop(
             _ = reload_rx.changed() => {
                 apply_reload(
                     &config_path,
-                    &static_listeners,
+                    &static_cfg,
                     &middleware_dir,
                     &router,
                     &runtime,
@@ -369,7 +471,7 @@ async fn reload_loop(
                 }
                 apply_reload(
                     &config_path,
-                    &static_listeners,
+                    &static_cfg,
                     &middleware_dir,
                     &router,
                     &runtime,
@@ -384,7 +486,7 @@ async fn reload_loop(
 
 async fn apply_reload(
     config_path: &Path,
-    static_listeners: &[config::ProxyListenerConfig],
+    static_cfg: &config::Config,
     middleware_dir: &Path,
     router: &Arc<router::Router>,
     runtime: &Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
@@ -407,23 +509,30 @@ async fn apply_reload(
         );
     }
 
-    // Listener topology changes require restart.
-    if !listeners_equal(static_listeners, &cfg.listeners) {
-        tracing::warn!(
-            "reload: listener topology changed; restart required to apply listener changes"
-        );
+    let restart_reasons = config::restart_required_reasons(static_cfg, &cfg);
+    if !restart_reasons.is_empty() {
+        tracing::warn!(reasons = ?restart_reasons, "reload: restart required for static topology changes");
     }
 
-    match build_routes_with_middlewares(&cfg, middleware_dir) {
-        Ok(routes_with_middlewares) => {
-            router.update(routes_with_middlewares);
-        }
-        Err(err) => {
-            tracing::warn!(err=%err, "reload: rebuild per-route middlewares failed");
-            return;
-        }
+    if let Err(err) = apply_runtime_config_update(&cfg, middleware_dir, router, runtime).await {
+        tracing::warn!(err=%err, "reload: hot-apply failed");
+        return;
     }
 
+    *enabled = cfg.reload.enabled;
+    *poll_interval = cfg.reload.poll_interval;
+
+    tracing::info!("reload: applied");
+}
+
+pub(crate) async fn apply_runtime_config_update(
+    cfg: &config::Config,
+    middleware_dir: &Path,
+    router: &Arc<router::Router>,
+    runtime: &Arc<tokio::sync::RwLock<proxy::TcpRuntimeConfig>>,
+) -> anyhow::Result<()> {
+    let routes_with_middlewares = build_routes_with_middlewares(cfg, middleware_dir)?;
+    router.update(routes_with_middlewares);
     *runtime.write().await = proxy::TcpRuntimeConfig {
         max_header_bytes: cfg.max_header_bytes,
         handshake_timeout: cfg.timeouts.handshake_timeout,
@@ -432,14 +541,10 @@ async fn apply_reload(
         buffer_size: cfg.buffer_size,
         proxy_protocol_v2: cfg.proxy_protocol_v2,
     };
-
-    *enabled = cfg.reload.enabled;
-    *poll_interval = cfg.reload.poll_interval;
-
-    tracing::info!("reload: applied");
+    Ok(())
 }
 
-fn build_routes_with_middlewares(
+pub(crate) fn build_routes_with_middlewares(
     cfg: &config::Config,
     middleware_dir: &Path,
 ) -> anyhow::Result<Vec<(config::RouteConfig, middleware::SharedMiddlewareChain)>> {
@@ -452,24 +557,6 @@ fn build_routes_with_middlewares(
         out.push((r.clone(), chain));
     }
     Ok(out)
-}
-
-fn listeners_equal(a: &[config::ProxyListenerConfig], b: &[config::ProxyListenerConfig]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    for (x, y) in a.iter().zip(b.iter()) {
-        if x.listen_addr.trim() != y.listen_addr.trim() {
-            return false;
-        }
-        if x.protocol.trim() != y.protocol.trim() {
-            return false;
-        }
-        if x.upstream.trim() != y.upstream.trim() {
-            return false;
-        }
-    }
-    true
 }
 
 fn file_sig(path: &Path) -> anyhow::Result<(u64, u64)> {

@@ -1,118 +1,283 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  Zap,
-  Server,
-  Route as RouteIcon,
-  Shield,
-  Waves,
-  Sparkles,
-} from 'lucide-react'
+	AlertTriangle,
+	ArrowRight,
+	CheckCircle2,
+	RefreshCw,
+	ServerCog,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 
-export const Route = createFileRoute('/')({ component: App })
+import {
+	getManagedNodes,
+	getManagementStatus,
+	type ManagedNodeSnapshot,
+	type ManagementStatusResponse,
+} from "@/lib/managementApi";
+import { usePanelSession } from "@/lib/panelSession";
 
-function App() {
-  const features = [
-    {
-      icon: <Zap className="w-12 h-12 text-cyan-400" />,
-      title: 'Powerful Server Functions',
-      description:
-        'Write server-side code that seamlessly integrates with your client components. Type-safe, secure, and simple.',
-    },
-    {
-      icon: <Server className="w-12 h-12 text-cyan-400" />,
-      title: 'Flexible Server Side Rendering',
-      description:
-        'Full-document SSR, streaming, and progressive enhancement out of the box. Control exactly what renders where.',
-    },
-    {
-      icon: <RouteIcon className="w-12 h-12 text-cyan-400" />,
-      title: 'API Routes',
-      description:
-        'Build type-safe API endpoints alongside your application. No separate backend needed.',
-    },
-    {
-      icon: <Shield className="w-12 h-12 text-cyan-400" />,
-      title: 'Strongly Typed Everything',
-      description:
-        'End-to-end type safety from server to client. Catch errors before they reach production.',
-    },
-    {
-      icon: <Waves className="w-12 h-12 text-cyan-400" />,
-      title: 'Full Streaming Support',
-      description:
-        'Stream data from server to client progressively. Perfect for AI applications and real-time updates.',
-    },
-    {
-      icon: <Sparkles className="w-12 h-12 text-cyan-400" />,
-      title: 'Next Generation Ready',
-      description:
-        'Built from the ground up for modern web applications. Deploy anywhere JavaScript runs.',
-    },
-  ]
+export const Route = createFileRoute("/")({ component: DashboardPage });
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
-      <section className="relative py-20 px-6 text-center overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-purple-500/10"></div>
-        <div className="relative max-w-5xl mx-auto">
-          <div className="flex items-center justify-center gap-6 mb-6">
-            <img
-              src="/tanstack-circle-logo.png"
-              alt="TanStack Logo"
-              className="w-24 h-24 md:w-32 md:h-32"
-            />
-            <h1 className="text-6xl md:text-7xl font-black text-white [letter-spacing:-0.08em]">
-              <span className="text-gray-300">TANSTACK</span>{' '}
-              <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                START
-              </span>
-            </h1>
-          </div>
-          <p className="text-2xl md:text-3xl text-gray-300 mb-4 font-light">
-            The framework for next generation AI applications
-          </p>
-          <p className="text-lg text-gray-400 max-w-3xl mx-auto mb-8">
-            Full-stack framework powered by TanStack Router for React and Solid.
-            Build modern applications with server functions, streaming, and type
-            safety.
-          </p>
-          <div className="flex flex-col items-center gap-4">
-            <a
-              href="https://tanstack.com/start"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-8 py-3 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-cyan-500/50"
-            >
-              Documentation
-            </a>
-            <p className="text-gray-400 text-sm mt-2">
-              Begin your TanStack Start journey by editing{' '}
-              <code className="px-2 py-1 bg-slate-700 rounded text-cyan-400">
-                /src/routes/index.tsx
-              </code>
-            </p>
-          </div>
-        </div>
-      </section>
+function DashboardPage() {
+	const { connection, ready } = usePanelSession();
+	const [status, setStatus] = useState<ManagementStatusResponse | null>(null);
+	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
+	const [error, setError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(false);
 
-      <section className="py-16 px-6 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {features.map((feature, index) => (
-            <div
-              key={index}
-              className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 hover:border-cyan-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/10"
-            >
-              <div className="mb-4">{feature.icon}</div>
-              <h3 className="text-xl font-semibold text-white mb-3">
-                {feature.title}
-              </h3>
-              <p className="text-gray-400 leading-relaxed">
-                {feature.description}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  )
+	useEffect(() => {
+		if (!connection) {
+			setStatus(null);
+			setNodes([]);
+			return;
+		}
+
+		let cancelled = false;
+		setLoading(true);
+		setError(null);
+
+		Promise.all([getManagementStatus(connection), getManagedNodes(connection)])
+			.then(([nextStatus, nextNodes]) => {
+				if (cancelled) {
+					return;
+				}
+
+				setStatus(nextStatus);
+				setNodes(nextNodes);
+			})
+			.catch((nextError) => {
+				if (!cancelled) {
+					setError(
+						nextError instanceof Error ? nextError.message : String(nextError),
+					);
+				}
+			})
+			.finally(() => {
+				if (!cancelled) {
+					setLoading(false);
+				}
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [connection]);
+
+	if (!ready) {
+		return <LoadingState label="Restoring Prism panel session…" />;
+	}
+
+	if (!connection) {
+		return <ConnectState />;
+	}
+
+	const onlineNodes = nodes.filter((node) => node.last_seen_unix_ms > 0).length;
+	const restartNodes = nodes.filter((node) => node.pending_restart).length;
+
+	return (
+		<div className="space-y-8">
+			<section className="rounded-[2rem] border border-white/8 bg-slate-950/70 px-6 py-8 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:px-8">
+				<div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+					<div className="max-w-4xl">
+						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
+							Prism management node
+						</div>
+						<h1 className="mt-3 text-4xl font-semibold tracking-tight text-white md:text-5xl">
+							Operational visibility for every Prism worker.
+						</h1>
+						<p className="mt-4 max-w-2xl text-base leading-7 text-slate-400 md:text-lg">
+							This panel treats the management node as the source of truth,
+							shows active versus passive worker connectivity, and lets you edit
+							managed listener and route revisions visually instead of
+							hand-editing files.
+						</p>
+					</div>
+
+					<div className="rounded-3xl border border-white/8 bg-white/4 px-5 py-4 text-sm text-slate-300">
+						<div className="font-medium text-white">Connected endpoint</div>
+						<div className="mt-2 break-all text-cyan-200/85">
+							{connection.baseUrl}
+						</div>
+					</div>
+				</div>
+			</section>
+
+			{error ? (
+				<div className="rounded-3xl border border-red-400/20 bg-red-400/8 px-5 py-4 text-sm text-red-100">
+					{error}
+				</div>
+			) : null}
+
+			<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+				<MetricCard
+					label="Registered nodes"
+					value={status?.node_count ?? nodes.length}
+					icon={<ServerCog className="h-5 w-5" />}
+				/>
+				<MetricCard
+					label="Seen online"
+					value={onlineNodes}
+					icon={<CheckCircle2 className="h-5 w-5" />}
+				/>
+				<MetricCard
+					label="Pending restart"
+					value={restartNodes}
+					icon={<AlertTriangle className="h-5 w-5" />}
+				/>
+				<MetricCard
+					label="State file"
+					value={status?.state_path ?? "Loading…"}
+					icon={<RefreshCw className="h-5 w-5" />}
+					compact
+				/>
+			</section>
+
+			<section className="rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:p-8">
+				<div className="flex items-center justify-between gap-4">
+					<div>
+						<h2 className="text-2xl font-semibold text-white">Node fleet</h2>
+						<p className="mt-2 text-sm leading-6 text-slate-400">
+							Worker health, revision drift, and restart pressure across your
+							managed Prism estate.
+						</p>
+					</div>
+					<Link
+						to="/nodes"
+						className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
+					>
+						Open nodes
+						<ArrowRight className="h-4 w-4" />
+					</Link>
+				</div>
+
+				<div className="mt-6 grid gap-4 xl:grid-cols-2">
+					{loading ? (
+						<LoadingState label="Loading management inventory…" />
+					) : nodes.length > 0 ? (
+						nodes
+							.slice(0, 4)
+							.map((node) => <NodeCard key={node.node_id} node={node} />)
+					) : (
+						<div className="rounded-3xl border border-dashed border-white/10 bg-white/3 px-6 py-10 text-sm text-slate-400">
+							No workers have enrolled yet. Connect one through the worker
+							bootstrap config, then return here.
+						</div>
+					)}
+				</div>
+			</section>
+		</div>
+	);
+}
+
+function MetricCard({
+	label,
+	value,
+	icon,
+	compact = false,
+}: {
+	label: string;
+	value: string | number;
+	icon: React.ReactNode;
+	compact?: boolean;
+}) {
+	return (
+		<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 shadow-[0_18px_70px_rgba(2,6,23,0.35)]">
+			<div className="flex items-center justify-between text-slate-400">
+				<span className="text-sm uppercase tracking-[0.2em]">{label}</span>
+				<div className="text-cyan-300">{icon}</div>
+			</div>
+			<div
+				className={`mt-4 ${compact ? "break-all text-sm text-white" : "text-3xl font-semibold text-white"}`}
+			>
+				{value}
+			</div>
+		</div>
+	);
+}
+
+function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
+	return (
+		<Link
+			to="/nodes/$nodeId"
+			params={{ nodeId: node.node_id }}
+			className="rounded-3xl border border-white/8 bg-white/4 p-5 transition hover:border-cyan-400/25 hover:bg-cyan-400/8"
+		>
+			<div className="flex items-start justify-between gap-4">
+				<div>
+					<div className="text-lg font-semibold text-white">{node.node_id}</div>
+					<div className="mt-2 text-sm text-slate-400">
+						Mode:{" "}
+						<span className="text-cyan-200">
+							{node.connection_mode ?? "unknown"}
+						</span>
+					</div>
+				</div>
+				<div
+					className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${node.pending_restart ? "bg-amber-400/12 text-amber-100" : "bg-emerald-400/12 text-emerald-100"}`}
+				>
+					{node.pending_restart ? "restart" : "steady"}
+				</div>
+			</div>
+			<div className="mt-5 grid gap-3 sm:grid-cols-2">
+				<StatusMini label="Desired" value={node.desired_revision} />
+				<StatusMini label="Applied" value={node.applied_revision} />
+			</div>
+		</Link>
+	);
+}
+
+function StatusMini({
+	label,
+	value,
+}: {
+	label: string;
+	value: string | number;
+}) {
+	return (
+		<div className="rounded-2xl border border-white/8 bg-slate-950/70 px-4 py-3">
+			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+				{label}
+			</div>
+			<div className="mt-2 text-xl font-semibold text-white">{value}</div>
+		</div>
+	);
+}
+
+function LoadingState({ label }: { label: string }) {
+	return (
+		<div className="rounded-3xl border border-white/8 bg-slate-950/70 px-6 py-10 text-sm text-slate-400">
+			{label}
+		</div>
+	);
+}
+
+function ConnectState() {
+	return (
+		<section className="flex min-h-[70vh] items-center justify-center">
+			<div className="max-w-2xl rounded-[2rem] border border-white/8 bg-slate-950/70 px-8 py-10 text-center shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+				<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-300">
+					<PlugPanel />
+				</div>
+				<h1 className="mt-6 text-3xl font-semibold text-white">
+					Connect to a management node
+				</h1>
+				<p className="mt-4 text-base leading-7 text-slate-400">
+					The panel is deployable on its own, so it needs a management API base
+					URL and a panel bearer token before it can render node inventory or
+					edit managed revisions.
+				</p>
+				<Link
+					to="/login"
+					className="mt-8 inline-flex items-center gap-3 rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+				>
+					Configure connection
+					<ArrowRight className="h-4 w-4" />
+				</Link>
+			</div>
+		</section>
+	);
+}
+
+function PlugPanel() {
+	return <ServerCog className="h-8 w-8" />;
 }

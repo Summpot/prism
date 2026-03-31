@@ -280,8 +280,7 @@ mod quic_tls {
     fn load_certs(path: &Path) -> anyhow::Result<Vec<CertificateDer<'static>>> {
         let data = fs::read(path)?;
         let mut rd = std::io::Cursor::new(&data);
-        let certs = rustls_pemfile::certs(&mut rd)
-            .collect::<Result<Vec<_>, _>>()?;
+        let certs = rustls_pemfile::certs(&mut rd).collect::<Result<Vec<_>, _>>()?;
         Ok(certs)
     }
 

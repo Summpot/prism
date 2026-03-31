@@ -5,6 +5,27 @@ buffer_size = 32768
 upstream_dial_timeout_ms = 5000
 max_header_bytes = 65536
 
+# role = "standalone" # standalone | management | worker
+
+# Management-only bootstrap example. A management node can omit listeners/routes/tunnel
+# entirely and just run the control plane + panel API.
+# role = "management"
+# [managed.management]
+# state_file = "managed-state.json"
+# panel_token = "panel-secret"
+# worker_token = "worker-secret"
+
+# Worker bootstrap example. Managed workers keep only bootstrap identity/agent
+# settings locally; desired runtime config is synced from the management node.
+# role = "worker"
+# [managed.worker]
+# node_id = "edge-1"
+# management_url = "http://127.0.0.1:8080"
+# auth_token = "worker-secret"
+# connection_mode = "active" # active | passive
+# sync_interval_ms = 5000
+# agent_url = "http://10.0.0.12:8081"
+
 # Public-facing proxy listeners (multi-port / multi-protocol).
 #
 # TCP listeners can run in hostname-routing mode (host extraction via wasm middlewares)

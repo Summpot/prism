@@ -2,6 +2,7 @@ pub mod admin;
 pub mod app;
 pub mod config;
 pub mod logging;
+pub mod managed;
 pub mod middleware;
 pub mod net;
 pub mod proxy;

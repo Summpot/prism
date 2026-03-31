@@ -19,8 +19,7 @@
 		"**/styles.css",
 		"**/target/**",
 		"**/.output/**",
-		"**/node_modules/**",
-		"**/prism-docs/**"
+		"**/node_modules/**"
 	],
 	"env": {
 		"browser": true

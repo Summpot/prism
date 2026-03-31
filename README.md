@@ -8,17 +8,27 @@ Today, the implementation in this repository supports:
 - **UDP listeners** in fixed-forward mode
 - **Per-route WAT middlewares** for parsing and rewriting connection preludes
 - **Reverse tunnels** over TCP, reliable UDP (KCP), or QUIC
-- **An HTTP admin API** for health, metrics, connection snapshots, reload signals, tunnel service snapshots, and managed control-plane APIs
+- **An HTTP admin API** for health, metrics, connection snapshots, reload
+  signals, tunnel service snapshots, and managed control-plane APIs
 
-> The frontend under `src/` is now a Prism management panel that targets the authenticated `/managed/*` APIs and can be deployed separately from the management node.
+> The frontend under `src/` is a Prism management panel that is built as a
+> TanStack Start SPA and served by the Prism binary itself.
 
 For implementation-level details, see [DESIGN.md](./DESIGN.md).
 
 ## What Prism does
 
-Prism is aimed at Minecraft-style routing, where the hostname lives in the first bytes of the TCP stream, but the routing stack is more general than that. A TCP listener can capture the initial prelude, run one or more WebAssembly text modules (`.wat`) to extract a host, match that host against ordered routes, optionally rewrite the prelude for the selected upstream, and then proxy the rest of the session.
+Prism is aimed at Minecraft-style routing, where the hostname lives in the
+first bytes of the TCP stream, but the routing stack is more general than that.
+A TCP listener can capture the initial prelude, run one or more WebAssembly
+text modules (`.wat`) to extract a host, match that host against ordered
+routes, optionally rewrite the prelude for the selected upstream, and then
+proxy the rest of the session.
 
-When a backend does not have a public IP, Prism can also run in tunnel mode. A tunnel client opens an outbound connection to a public Prism server, registers services, and lets the server reach those services either through `tunnel:<service>` routes or optional server-side auto-listened ports.
+When a backend does not have a public IP, Prism can also run in tunnel mode. A
+tunnel client opens an outbound connection to a public Prism server, registers
+services, and lets the server reach those services either through
+`tunnel:<service>` routes or optional server-side auto-listened ports.
 
 ## Quick start
 
@@ -73,7 +83,9 @@ Resolution order for the config file is:
    - Linux: `/etc/prism/prism.toml`
    - Other OSes: the per-user config directory from `directories::ProjectDirs`
 
-If the resolved config file does not exist, Prism creates a runnable default config and continues starting. That generated default config enables a **tunnel server** on `:7000` and an admin API on `:8080`.
+If the resolved config file does not exist, Prism creates a runnable default
+config and continues starting. That generated default config enables a
+**tunnel server** on `:7000` and an admin API on `:8080`.
 
 ### Runtime paths
 
@@ -92,7 +104,8 @@ Prism also resolves two runtime directories:
   - Default: `<config_dir>/middlewares`
   - Relative paths are resolved relative to the config directory
 
-At startup, Prism materializes its built-in reference middlewares into the middleware directory **if the files do not already exist**.
+At startup, Prism materializes its built-in reference middlewares into the
+middleware directory **if the files do not already exist**.
 
 ## Configuration model
 
@@ -101,15 +114,20 @@ At startup, Prism materializes its built-in reference middlewares into the middl
 Prism now supports three top-level roles:
 
 - `role = "standalone"` (default): traditional local-file Prism behavior
-- `role = "management"`: runs the management control plane and persists managed node state in the workdir
-- `role = "worker"`: runs a managed worker bootstrap that syncs desired config from a management node or exposes passive worker-agent endpoints
+- `role = "management"`: runs the management control plane and persists
+  managed node state in the workdir
+- `role = "worker"`: runs a managed worker bootstrap that syncs desired
+  config from a management node or exposes passive worker-agent endpoints
 
 Managed deployments use the `managed` bootstrap section for identity and authentication:
 
 - `managed.management.state_file`, `panel_token`, `worker_token`
-- `managed.worker.node_id`, `management_url`, `auth_token`, `connection_mode`, `sync_interval_ms`, `agent_url`
+- `managed.worker.node_id`, `management_url`, `auth_token`,
+  `connection_mode`, `sync_interval_ms`, `agent_url`
 
-In managed mode, the local file is bootstrap-focused. Desired runtime config is edited centrally through the management panel and synced as a structured config document.
+In managed mode, the local file is bootstrap-focused. Desired runtime config is
+edited centrally through the management panel and synced as a structured config
+document.
 
 ### Listeners
 
@@ -129,7 +147,8 @@ Current behavior:
 
 `":PORT"` shorthand is supported in config and normalized internally to `0.0.0.0:PORT`.
 
-Important: **routes do not create listeners automatically**. If you want Prism to proxy traffic, you must configure one or more `listeners` explicitly.
+Important: **routes do not create listeners automatically**. If you want Prism
+to proxy traffic, you must configure one or more `listeners` explicitly.
 
 ### Routes
 
@@ -151,9 +170,11 @@ Host patterns are matched case-insensitively and support:
 
 Wildcard captures can be reused in upstream templates as `$1`, `$2`, and so on.
 
-If multiple upstreams are configured, Prism orders candidates using `strategy` and then dials them with failover until one succeeds.
+If multiple upstreams are configured, Prism orders candidates using `strategy`
+and then dials them with failover until one succeeds.
 
-Direct upstreams may omit the port. In that case Prism falls back to the listener port that accepted the connection.
+Direct upstreams may omit the port. In that case Prism falls back to the
+listener port that accepted the connection.
 
 ### Middlewares
 
@@ -208,7 +229,8 @@ Current semantics:
 - `route_only = true` means the service can only be reached through `tunnel:<service>`
 - `remote_addr` requests a server-side auto listener when `tunnel.auto_listen_services = true`
 - `route_only = true` clears `remote_addr`
-- if multiple tunnel clients register the same service name, the **first active registrant** remains the routing owner until it disconnects
+- if multiple tunnel clients register the same service name, the **first active
+  registrant** remains the routing owner until it disconnects
 
 Supported tunnel transports:
 
@@ -216,7 +238,8 @@ Supported tunnel transports:
 - `udp` → KCP over UDP + yamux multiplexing
 - `quic` → QUIC streams over UDP
 
-For QUIC endpoints, Prism can auto-generate a self-signed certificate when `cert_file` and `key_file` are both empty.
+For QUIC endpoints, Prism can auto-generate a self-signed certificate when
+`cert_file` and `key_file` are both empty.
 
 ## Admin API
 
@@ -244,11 +267,14 @@ Managed control-plane endpoints:
 
 Operational notes:
 
-- The admin server only starts when `admin_addr` is non-empty **and** Prism has at least one enabled runtime role
+- The admin server only starts when `admin_addr` is non-empty **and** Prism has
+  at least one enabled runtime role
 - `/tunnel/services` returns `[]` when no tunnel manager is configured
 - Legacy read endpoints remain available without built-in auth
-- Managed endpoints use bearer auth (`panel_token` for panel access, `worker_token` / worker auth token for worker sync)
-- The admin router still uses **permissive CORS**; authentication protects writes, but deployments should still scope exposure carefully
+- Managed endpoints use bearer auth (`panel_token` for panel access,
+  `worker_token` / worker auth token for worker sync)
+- The admin router still uses **permissive CORS**; authentication protects
+  writes, but deployments should still scope exposure carefully
 
 ## Managed control plane
 
@@ -261,10 +287,14 @@ The management role persists a JSON control-plane state file under the Prism wor
 
 Worker mode supports two bootstrap directions:
 
-- **active**: the worker periodically syncs to `managed.worker.management_url` and receives desired config revisions
-- **passive**: the worker exposes authenticated local agent endpoints so a reachable management node can inspect/apply config later
+- **active**: the worker periodically syncs to
+  `managed.worker.management_url` and receives desired config revisions
+- **passive**: the worker exposes authenticated local agent endpoints so a
+  reachable management node can inspect/apply config later
 
-The current implementation ships the active sync loop end-to-end and exposes the passive worker-agent endpoints and state model, but does not yet include a full management-side passive polling/orchestration loop.
+The current implementation ships the active sync loop end-to-end and exposes
+the passive worker-agent endpoints and state model, but does not yet include a
+full management-side passive polling/orchestration loop.
 
 ## Metrics, reloads, and logging
 
@@ -293,7 +323,7 @@ Logging is configured under `logging` and supports:
 
 ## Docker
 
-This repository ships a backend `Dockerfile`, and CI builds/publishes a container image to GHCR:
+This repository ships a single `Dockerfile`, and CI builds/publishes one container image to GHCR:
 
 - `ghcr.io/<owner>/<repo>`
 
@@ -313,12 +343,14 @@ docker run --rm \
   ghcr.io/Summpot/prism:latest
 ```
 
-If you use UDP listeners or UDP-based tunnel transports, publish those ports as UDP explicitly. For example:
+If you use UDP listeners or UDP-based tunnel transports, publish those ports as
+UDP explicitly. For example:
 
 - UDP proxy listener: `-p 19132:19132/udp`
 - QUIC or KCP tunnel endpoint: `-p 7001:7001/udp`
 
-If you want Prism to auto-create config files or persist middleware/workdir state, mount directories instead of a single read-only config file.
+If you want Prism to auto-create config files or persist middleware/workdir
+state, mount directories instead of a single read-only config file.
 
 ## Frontend status
 
@@ -331,7 +363,9 @@ That frontend now ships a Prism panel experience with:
 - node detail pages with desired/applied revision status
 - a structured visual managed-config editor plus raw JSON preview
 
-The panel is deployable separately and stores its connection settings locally in the browser.
+The panel runs in SPA mode and is distributed through the Prism binary /
+container image rather than a separate frontend deployment. It stores its
+connection settings locally in the browser.
 
 ## Build and test
 
@@ -361,9 +395,10 @@ Current CI behavior:
 
 - runs `cargo test --workspace`
 - builds the frontend panel with `pnpm build`
+- reuses the SPA build output when packaging release binaries so the embedded
+  panel ships with the Rust artifacts
 - builds release binaries for multiple targets
 - publishes backend Docker images to GHCR on non-PR builds
-- publishes a separate frontend panel image as `ghcr.io/<owner>/<repo>-frontend`
 
 ## Schema and editor support
 

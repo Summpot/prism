@@ -45,3 +45,5 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 wasmer = { version = "7.0", default-features = false, features = ["singlepass", "wat"] }
 tokio-yamux = "0.3"
+rust-embed = "8"
+mime_guess = "2"

@@ -7,10 +7,11 @@ count.txt
 .env
 .nitro
 .tanstack
-.wrangler
 .output
 .vinxi
 todos.json
 .idea
 target
+crates/prism/frontend-dist/*
+!crates/prism/frontend-dist/.gitkeep
 

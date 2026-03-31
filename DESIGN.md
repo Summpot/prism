@@ -568,6 +568,24 @@ The repository root frontend under `src/` now provides a Prism panel that:
 - shows desired/applied revision state per node
 - edits managed config documents through a structured visual editor rather than raw file text
 
+### 8.5 Embedded frontend (rust-embed)
+
+The admin HTTP server embeds the frontend SPA as static assets via `rust-embed`. This allows a single Docker image (and a single binary) to serve both the API and the management panel.
+
+Build pipeline:
+
+1. `pnpm build` builds the frontend from the single root `vite.config.ts`, which enables TanStack Start [SPA mode](https://tanstack.com/start/latest/docs/framework/react/guide/spa-mode). Output goes to `dist/client/`.
+2. Release packaging and the Docker build copy `dist/client/` into `crates/prism/frontend-dist/`.
+3. `cargo build` / `cargo build --release` compile the Rust binary with those assets embedded at compile time via `rust-embed`.
+
+The admin router adds a fallback handler that:
+
+- serves exact-match files from the embedded assets (JS, CSS, images, etc.)
+- falls back to `_shell.html` for any unmatched path (SPA client-side routing)
+- returns 404 if no frontend assets are embedded (for example, if the SPA build artifacts were not copied into `frontend-dist` before compiling)
+
+In debug builds (`cargo build` without `--release`), `rust-embed` reads from the filesystem at runtime, allowing live frontend iteration without recompiling Rust.
+
 ## 9. Reload, shutdown, and reliability boundaries
 
 ### 9.1 Reload behavior

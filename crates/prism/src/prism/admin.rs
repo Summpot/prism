@@ -3,16 +3,21 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use axum::{
     Json, Router,
     extract::{Path as AxumPath, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
     response::IntoResponse,
     routing::{get, post, put},
 };
+use rust_embed::Embed;
 use serde::Serialize;
 use tokio::sync::watch;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::prism::telemetry;
 use crate::prism::{managed, tunnel};
+
+#[derive(Embed)]
+#[folder = "frontend-dist/"]
+struct FrontendAssets;
 
 #[derive(Clone, Debug, Default)]
 pub struct AdminAuth {
@@ -75,6 +80,7 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/managed/worker/sync", post(managed_worker_sync))
         .route("/managed/worker/status", get(worker_status))
         .route("/managed/worker/config", put(worker_apply_config))
+        .fallback(serve_frontend)
         .with_state(shared)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -89,6 +95,39 @@ async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
             break;
         }
     }
+}
+
+async fn serve_frontend(uri: Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+
+    // Try the exact path first.
+    if !path.is_empty() {
+        if let Some(file) = FrontendAssets::get(path) {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, mime.as_ref().to_string())],
+                file.data.into_owned(),
+            )
+                .into_response();
+        }
+    }
+
+    // SPA fallback: serve _shell.html for any unmatched route.
+    if let Some(file) = FrontendAssets::get("_shell.html") {
+        return (
+            StatusCode::OK,
+            [(
+                header::CONTENT_TYPE,
+                "text/html; charset=utf-8".to_string(),
+            )],
+            file.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    // No frontend assets embedded.
+    (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
 #[derive(Debug, Serialize)]

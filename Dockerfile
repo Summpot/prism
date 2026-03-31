@@ -6,7 +6,22 @@
 ARG RUST_MUSL_IMAGE=x86_64-musl-stable
 ARG MUSL_TARGET=x86_64-unknown-linux-musl
 
-# Build a static musl binary using https://github.com/BlackDex/rust-musl
+# ---------- Stage 1: build frontend as static SPA ----------
+FROM node:22-slim AS frontend
+
+WORKDIR /app
+
+RUN corepack enable \
+    && corepack prepare pnpm@latest --activate
+
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile
+
+COPY . ./
+RUN pnpm build
+
+# ---------- Stage 2: build Rust binary with embedded frontend ----------
 FROM docker.io/blackdex/rust-musl:${RUST_MUSL_IMAGE} AS build
 
 WORKDIR /home/rust/src
@@ -28,12 +43,16 @@ RUN --mount=type=cache,target=/home/rust/.cargo/registry \
 # Copy the rest and build.
 COPY . ./
 
+# Copy frontend SPA output (dist/client/) into the rust-embed folder before cargo build.
+COPY --from=frontend /app/dist/client/ crates/prism/frontend-dist/
+
 ARG MUSL_TARGET
 RUN --mount=type=cache,target=/home/rust/.cargo/registry \
     --mount=type=cache,target=/home/rust/src/target \
     cargo build --release -p prism --target ${MUSL_TARGET} \
     && cp -f /home/rust/src/target/${MUSL_TARGET}/release/prism /home/rust/prism
 
+# ---------- Stage 3: minimal runtime image ----------
 FROM alpine:3.20
 
 ARG MUSL_TARGET

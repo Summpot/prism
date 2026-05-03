@@ -2,8 +2,7 @@
 #
 # - Tunnel server listens on :7000 (tcp) and auto-listens any client services that set remote_addr.
 # - Admin API listens on :8080.
-# - Logs are printed to stdout and collected by Vector.
-# - Metrics are exposed at GET /metrics (Prometheus text format) and scraped by VictoriaMetrics.
+# - Logs are printed to stdout for the container runtime.
 
 admin_addr = ":8080"
 

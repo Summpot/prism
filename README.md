@@ -8,8 +8,8 @@ Today, the implementation in this repository supports:
 - **UDP listeners** in fixed-forward mode
 - **Per-route WAT middlewares** for parsing and rewriting connection preludes
 - **Reverse tunnels** over TCP, reliable UDP (KCP), or QUIC
-- **An HTTP admin API** for health, metrics, connection snapshots, reload
-  signals, tunnel service snapshots, and managed control-plane APIs
+- **An HTTP admin API** for health, connection snapshots, reload signals,
+  tunnel service snapshots, and managed control-plane APIs
 
 > The frontend under `src/` is a Prism management panel that is built as a
 > TanStack Start SPA and served by the Prism binary itself.
@@ -248,11 +248,13 @@ The admin server listens on `admin_addr`.
 Implemented endpoints:
 
 - `GET /health` → JSON `{ "ok": true }`
-- `GET /metrics` → Prometheus text exposition
 - `GET /conns` → JSON snapshot of active sessions
 - `GET /tunnel/services` → JSON snapshot of registered tunnel services
 - `GET /config` → JSON with the resolved config path
 - `POST /reload` → sends a best-effort reload signal and returns a sequence number
+
+Optional: setting `[metrics].enabled = true` exposes `GET /metrics` as a
+lightweight JSON snapshot for operators who want local counters.
 
 Managed control-plane endpoints:
 
@@ -296,15 +298,7 @@ The current implementation ships the active sync loop end-to-end and exposes
 the passive worker-agent endpoints and state model, but does not yet include a
 full management-side passive polling/orchestration loop.
 
-## Metrics, reloads, and logging
-
-Current metrics emitted by the proxy path include:
-
-- `prism_active_connections`
-- `prism_connections_total`
-- `prism_bytes_ingress_total`
-- `prism_bytes_egress_total`
-- `prism_route_hits_total{host="..."}`
+## Reloads and logging
 
 Reload behavior today:
 

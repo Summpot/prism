@@ -3,14 +3,14 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use axum::{
     Json, Router,
     extract::{Path as AxumPath, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    http::{HeaderMap, StatusCode, Uri, header},
     response::IntoResponse,
     routing::{get, post, put},
 };
 use rust_embed::Embed;
 use serde::Serialize;
 use tokio::sync::watch;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::cors::CorsLayer;
 
 use crate::prism::telemetry;
 use crate::prism::{managed, tunnel};
@@ -27,7 +27,8 @@ pub struct AdminAuth {
 
 #[derive(Clone)]
 pub struct AdminState {
-    pub prom: telemetry::SharedPrometheusHandle,
+    pub metrics: telemetry::SharedMetrics,
+    pub metrics_enabled: bool,
     pub sessions: telemetry::SharedSessions,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
@@ -83,7 +84,6 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .fallback(serve_frontend)
         .with_state(shared)
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
 }
 
 async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
@@ -117,10 +117,7 @@ async fn serve_frontend(uri: Uri) -> impl IntoResponse {
     if let Some(file) = FrontendAssets::get("_shell.html") {
         return (
             StatusCode::OK,
-            [(
-                header::CONTENT_TYPE,
-                "text/html; charset=utf-8".to_string(),
-            )],
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8".to_string())],
             file.data.into_owned(),
         )
             .into_response();
@@ -140,14 +137,17 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn metrics(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let body = st.prom.render();
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/plain; version=0.0.4"),
-        )],
-        body,
-    )
+    if !st.metrics_enabled {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "metrics endpoint not enabled".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    (StatusCode::OK, Json(st.metrics.snapshot())).into_response()
 }
 
 async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {

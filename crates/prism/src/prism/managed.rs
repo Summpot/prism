@@ -692,7 +692,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, path::PathBuf, sync::Arc, sync::OnceLock};
+    use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
     use axum::Router;
     use tokio::sync::watch;
@@ -713,12 +713,6 @@ mod tests {
         ));
         std::fs::create_dir_all(&p).expect("mkdir");
         p
-    }
-
-    fn test_prom() -> telemetry::SharedPrometheusHandle {
-        static PROM: OnceLock<telemetry::SharedPrometheusHandle> = OnceLock::new();
-        PROM.get_or_init(|| Arc::new(telemetry::init_prometheus().expect("prometheus")))
-            .clone()
     }
 
     fn simple_managed_doc(listen_addr: &str) -> config::ManagedConfigDocument {
@@ -744,7 +738,8 @@ mod tests {
         let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let state = admin::AdminState {
-            prom: test_prom(),
+            metrics: Arc::new(telemetry::MetricsRegistry::new()),
+            metrics_enabled: false,
             sessions: Arc::new(telemetry::SessionRegistry::new()),
             config_path: PathBuf::from("managed.json"),
             reload_tx,

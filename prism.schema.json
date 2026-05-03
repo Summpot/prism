@@ -23,6 +23,7 @@
 			"description": "Admin HTTP server listen address. Empty disables the admin server.",
 			"examples": [":8080", "127.0.0.1:8080", ""]
 		},
+		"metrics": { "$ref": "#/$defs/metrics" },
 		"logging": { "$ref": "#/$defs/logging" },
 		"routes": {
 			"type": "array",
@@ -265,6 +266,18 @@
 				"add_source": {
 					"type": "boolean",
 					"description": "Include source file/line in logs (slightly higher overhead).",
+					"default": false
+				}
+			}
+		},
+		"metrics": {
+			"type": "object",
+			"additionalProperties": false,
+			"description": "Optional local metrics endpoint settings. Disabled by default.",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Expose GET /metrics on the admin server as a lightweight JSON snapshot.",
 					"default": false
 				}
 			}

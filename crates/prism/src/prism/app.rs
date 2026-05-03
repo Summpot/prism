@@ -135,8 +135,8 @@ pub async fn run(
         "prism: starting"
     );
 
-    // Shared state for admin endpoints.
-    let prom = Arc::new(telemetry::init_prometheus()?);
+    // Shared state for admin endpoints and lightweight local metrics.
+    let metrics = Arc::new(telemetry::MetricsRegistry::new());
     let sessions = Arc::new(telemetry::SessionRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
 
@@ -195,7 +195,8 @@ pub async fn run(
             .with_context(|| format!("invalid admin_addr: {}", cfg.admin_addr))?;
 
         let admin_state = admin::AdminState {
-            prom: prom.clone(),
+            metrics: metrics.clone(),
+            metrics_enabled: cfg.metrics.enabled,
             sessions: sessions.clone(),
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
@@ -233,6 +234,7 @@ pub async fn run(
                         proxy::TcpHandler::routing(proxy::TcpRoutingHandlerOptions {
                             router: rtr.clone(),
                             sessions: sessions.clone(),
+                            metrics: metrics.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
                             runtime: tcp_runtime.clone(),
                         })
@@ -240,6 +242,7 @@ pub async fn run(
                         proxy::TcpHandler::forward(proxy::TcpForwardHandlerOptions {
                             upstream,
                             sessions: sessions.clone(),
+                            metrics: metrics.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
                             runtime: tcp_runtime.clone(),
                         })
@@ -262,6 +265,7 @@ pub async fn run(
                     let opts = proxy::UdpForwardOptions {
                         upstream,
                         sessions: sessions.clone(),
+                        metrics: metrics.clone(),
                         tunnel_manager: Some(tunnel_manager.clone()),
                         idle_timeout: cfg.timeouts.idle_timeout,
                     };

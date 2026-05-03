@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -6,19 +7,77 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Context;
 use dashmap::DashMap;
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::Serialize;
 
-/// Installs a Prometheus recorder for the `metrics` crate and returns a handle used to render
-/// the exposition format.
-///
-/// This should be called once per process at startup.
-pub fn init_prometheus() -> anyhow::Result<PrometheusHandle> {
-    PrometheusBuilder::new()
-        .install_recorder()
-        .context("metrics: install Prometheus recorder")
+#[derive(Debug, Default)]
+pub struct MetricsRegistry {
+    active_connections: AtomicU64,
+    connections_total: AtomicU64,
+    bytes_ingress_total: AtomicU64,
+    bytes_egress_total: AtomicU64,
+    route_hits_total: DashMap<String, AtomicU64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetricsSnapshot {
+    pub active_connections: u64,
+    pub connections_total: u64,
+    pub bytes_ingress_total: u64,
+    pub bytes_egress_total: u64,
+    pub route_hits_total: BTreeMap<String, u64>,
+}
+
+impl MetricsRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn connection_opened(&self) {
+        self.connections_total.fetch_add(1, Ordering::Relaxed);
+        self.active_connections.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn connection_closed(&self) {
+        let _ =
+            self.active_connections
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_sub(1)
+                });
+    }
+
+    pub fn record_bytes(&self, ingress: u64, egress: u64) {
+        self.bytes_ingress_total
+            .fetch_add(ingress, Ordering::Relaxed);
+        self.bytes_egress_total.fetch_add(egress, Ordering::Relaxed);
+    }
+
+    pub fn record_route_hit(&self, host: &str) {
+        let host = host.trim().to_ascii_lowercase();
+        if host.is_empty() {
+            return;
+        }
+        self.route_hits_total
+            .entry(host)
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> MetricsSnapshot {
+        let route_hits_total = self
+            .route_hits_total
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
+            .collect();
+
+        MetricsSnapshot {
+            active_connections: self.active_connections.load(Ordering::Relaxed),
+            connections_total: self.connections_total.load(Ordering::Relaxed),
+            bytes_ingress_total: self.bytes_ingress_total.load(Ordering::Relaxed),
+            bytes_egress_total: self.bytes_egress_total.load(Ordering::Relaxed),
+            route_hits_total,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,4 +150,28 @@ impl ReloadSignal {
 
 pub type SharedSessions = Arc<SessionRegistry>;
 
-pub type SharedPrometheusHandle = Arc<PrometheusHandle>;
+pub type SharedMetrics = Arc<MetricsRegistry>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metrics_registry_records_snapshot() {
+        let metrics = MetricsRegistry::new();
+
+        metrics.connection_opened();
+        metrics.connection_opened();
+        metrics.connection_closed();
+        metrics.record_bytes(128, 256);
+        metrics.record_route_hit("Play.Example.Com");
+        metrics.record_route_hit("play.example.com");
+
+        let snap = metrics.snapshot();
+        assert_eq!(snap.active_connections, 1);
+        assert_eq!(snap.connections_total, 2);
+        assert_eq!(snap.bytes_ingress_total, 128);
+        assert_eq!(snap.bytes_egress_total, 256);
+        assert_eq!(snap.route_hits_total.get("play.example.com"), Some(&2));
+    }
+}

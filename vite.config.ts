@@ -9,6 +9,11 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 const isVitest = !!process.env.VITEST;
 
 const config = defineConfig(({ command }) => ({
+	// TanStack Start prerenders the SPA shell through Vite preview during build.
+	// Bind preview to IPv4 so Docker/Node do not resolve localhost differently.
+	preview: {
+		host: "127.0.0.1",
+	},
 	resolve: {
 		alias: {
 			"@": fileURLToPath(new URL("./src", import.meta.url)),

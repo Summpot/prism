@@ -6,7 +6,7 @@ use crate::prism::tunnel::protocol::{MAX_DATAGRAM_BYTES, ProtocolError};
 ///
 /// Each datagram is encoded as: `u32be len` + `payload`.
 ///
-/// This is used for UDP proxying over a multiplexed stream (see DESIGN.md).
+/// This is used for UDP proxying over a multiplexed stream.
 pub struct DatagramConn<RW> {
     inner: RW,
 }

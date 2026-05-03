@@ -114,7 +114,7 @@ upstream = "127.0.0.1:25566"
 middlewares = ["minecraft_handshake"]
 
 # Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
-# using $1, $2, ... (see DESIGN.md for details).
+# using $1, $2, ...
 [[routes]]
 host = "*.labs.example.com"
 upstreams = ["127.0.0.1:25567", "127.0.0.1:25568"]

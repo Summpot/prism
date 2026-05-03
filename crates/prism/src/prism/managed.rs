@@ -739,6 +739,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let state = admin::AdminState {
             metrics: Arc::new(telemetry::MetricsRegistry::new()),
+            metrics_store: None,
             metrics_enabled: false,
             sessions: Arc::new(telemetry::SessionRegistry::new()),
             config_path: PathBuf::from("managed.json"),

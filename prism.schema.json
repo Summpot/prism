@@ -273,12 +273,23 @@
 		"metrics": {
 			"type": "object",
 			"additionalProperties": false,
-			"description": "Optional local metrics endpoint settings. Disabled by default.",
+			"description": "Optional local metrics endpoint and embedded DuckDB storage settings. Disabled by default.",
 			"properties": {
 				"enabled": {
 					"type": "boolean",
-					"description": "Expose GET /metrics on the admin server as a lightweight JSON snapshot.",
+					"description": "Expose GET /metrics on the admin server as a lightweight JSON snapshot backed by local in-process counters and periodic DuckDB snapshots.",
 					"default": false
+				},
+				"duckdb_path": {
+					"type": "string",
+					"description": "DuckDB database path for local metrics history. Relative paths resolve under Prism workdir.",
+					"default": "metrics.duckdb",
+					"examples": ["metrics.duckdb", "/var/lib/prism/metrics.duckdb"]
+				},
+				"flush_interval_ms": {
+					"$ref": "#/$defs/ms",
+					"description": "How often Prism writes metrics snapshots to DuckDB. Values below 1000 are clamped to 1000.",
+					"default": 10000
 				}
 			}
 		},

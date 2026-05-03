@@ -28,6 +28,7 @@ pub struct AdminAuth {
 #[derive(Clone)]
 pub struct AdminState {
     pub metrics: telemetry::SharedMetrics,
+    pub metrics_store: Option<Arc<telemetry::DuckdbMetricsStore>>,
     pub metrics_enabled: bool,
     pub sessions: telemetry::SharedSessions,
     pub config_path: PathBuf,
@@ -147,7 +148,8 @@ async fn metrics(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
             .into_response();
     }
 
-    (StatusCode::OK, Json(st.metrics.snapshot())).into_response()
+    let store = st.metrics_store.as_ref().map(|store| store.snapshot());
+    (StatusCode::OK, Json(st.metrics.snapshot_with_store(store))).into_response()
 }
 
 async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {

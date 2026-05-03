@@ -14,8 +14,6 @@ Today, the implementation in this repository supports:
 > The frontend under `src/` is a Prism management panel that is built as a
 > TanStack Start SPA and served by the Prism binary itself.
 
-For implementation-level details, see [DESIGN.md](./DESIGN.md).
-
 ## What Prism does
 
 Prism is aimed at Minecraft-style routing, where the hostname lives in the
@@ -254,7 +252,8 @@ Implemented endpoints:
 - `POST /reload` → sends a best-effort reload signal and returns a sequence number
 
 Optional: setting `[metrics].enabled = true` exposes `GET /metrics` as a
-lightweight JSON snapshot for operators who want local counters.
+lightweight JSON snapshot and writes periodic local history to an embedded
+DuckDB file under the Prism workdir.
 
 Managed control-plane endpoints:
 

@@ -1,7 +1,7 @@
 //! Tunnel mode (reverse connection), inspired by frp.
 //!
 //! This module was originally ported from the legacy Go implementation (now removed)
-//! and follows the wire format described in `DESIGN.md` (Tunnel wire protocol v1).
+//! and follows the tunnel wire protocol v1 format used by Prism.
 
 pub mod autolisten;
 pub mod client;

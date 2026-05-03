@@ -137,6 +137,16 @@ pub async fn run(
 
     // Shared state for admin endpoints and lightweight local metrics.
     let metrics = Arc::new(telemetry::MetricsRegistry::new());
+    let metrics_store = if cfg.metrics.enabled {
+        let metrics_path =
+            telemetry::resolve_metrics_duckdb_path(&paths.workdir, &cfg.metrics.duckdb_path);
+        Some(Arc::new(telemetry::DuckdbMetricsStore::open(
+            metrics_path,
+            cfg.metrics.flush_interval,
+        )?))
+    } else {
+        None
+    };
     let sessions = Arc::new(telemetry::SessionRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
 
@@ -196,6 +206,7 @@ pub async fn run(
 
         let admin_state = admin::AdminState {
             metrics: metrics.clone(),
+            metrics_store: metrics_store.clone(),
             metrics_enabled: cfg.metrics.enabled,
             sessions: sessions.clone(),
             config_path: resolved.path.clone(),
@@ -219,6 +230,16 @@ pub async fn run(
 
         let shutdown = shutdown_rx.clone();
         tasks.spawn(async move { admin::serve_with_shutdown(addr, admin_state, shutdown).await });
+    }
+
+    if let Some(metrics_store) = &metrics_store {
+        let metrics = metrics.clone();
+        let metrics_store = metrics_store.clone();
+        let shutdown = shutdown_rx.clone();
+        tasks.spawn(async move {
+            telemetry::run_duckdb_metrics_flush_loop(metrics, metrics_store, shutdown).await;
+            Ok(())
+        });
     }
 
     // Proxy listeners.

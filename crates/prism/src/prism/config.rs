@@ -443,6 +443,8 @@ pub struct ReloadConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetricsConfig {
     pub enabled: bool,
+    pub duckdb_path: String,
+    pub flush_interval: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -598,6 +600,8 @@ struct FileLogging {
 struct FileMetrics {
     #[serde(default)]
     enabled: bool,
+    duckdb_path: Option<String>,
+    flush_interval_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -703,6 +707,20 @@ impl Config {
             admin_addr: fc.admin_addr.trim().to_string(),
             metrics: MetricsConfig {
                 enabled: fc.metrics.as_ref().map(|m| m.enabled).unwrap_or(false),
+                duckdb_path: fc
+                    .metrics
+                    .as_ref()
+                    .and_then(|m| m.duckdb_path.clone())
+                    .unwrap_or_else(|| "metrics.duckdb".into())
+                    .trim()
+                    .to_string(),
+                flush_interval: Duration::from_millis(
+                    fc.metrics
+                        .as_ref()
+                        .and_then(|m| m.flush_interval_ms)
+                        .unwrap_or(10_000)
+                        .max(1000) as u64,
+                ),
             },
             logging: LoggingConfig {
                 level: "info".into(),
@@ -1489,6 +1507,8 @@ middlewares = ["minecraft_handshake"]
         std::fs::write(&cfg_path, "admin_addr = \":8080\"\n").expect("write");
         let cfg = load_config(&cfg_path).expect("load_config");
         assert!(!cfg.metrics.enabled);
+        assert_eq!(cfg.metrics.duckdb_path, "metrics.duckdb");
+        assert_eq!(cfg.metrics.flush_interval, Duration::from_millis(10_000));
 
         std::fs::write(
             &cfg_path,
@@ -1497,11 +1517,15 @@ admin_addr = ":8080"
 
 [metrics]
 enabled = true
+duckdb_path = "local.duckdb"
+flush_interval_ms = 2500
 "#,
         )
         .expect("write");
         let cfg = load_config(&cfg_path).expect("load_config");
         assert!(cfg.metrics.enabled);
+        assert_eq!(cfg.metrics.duckdb_path, "local.duckdb");
+        assert_eq!(cfg.metrics.flush_interval, Duration::from_millis(2500));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

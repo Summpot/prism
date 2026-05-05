@@ -430,7 +430,10 @@
 
     (local.set $prefix_len (i32.sub (local.get $addr_len_pos) (local.get $len_n)))
     (local.set $rest_ptr (i32.add (local.get $port_pos) (i32.const 2)))
-    (local.set $rest_len (i32.sub (local.get $end) (local.get $rest_ptr)))
+    ;; Preserve any already-read bytes after the handshake packet. Minecraft
+    ;; status refreshes often coalesce the following status request or ping into
+    ;; the same TCP read; dropping those bytes makes server-list pong flaky.
+    (local.set $rest_len (i32.sub (local.get $n) (local.get $rest_ptr)))
 
     ;; In Minecraft handshake, the port is a separate field.
     ;; Only write the upstream host (no :port) into the server address string.

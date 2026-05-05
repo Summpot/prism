@@ -700,6 +700,21 @@ mod tests {
         out
     }
 
+    fn mc_status_request_packet() -> Vec<u8> {
+        vec![0x01, 0x00]
+    }
+
+    fn mc_ping_packet(payload: i64) -> Vec<u8> {
+        let mut pkt = Vec::new();
+        push_varint(1, &mut pkt); // packet id
+        pkt.extend_from_slice(&payload.to_be_bytes());
+
+        let mut out = Vec::new();
+        push_varint(pkt.len() as u32, &mut out);
+        out.extend_from_slice(&pkt);
+        out
+    }
+
     fn read_varint(bytes: &[u8], mut i: usize) -> Option<(u32, usize)> {
         let mut res: u32 = 0;
         let mut shift: u32 = 0;
@@ -825,6 +840,39 @@ mod tests {
 
         assert_eq!(out, "backend.local");
         assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
+    }
+
+    #[test]
+    fn minecraft_handshake_rewrite_preserves_status_bytes_after_handshake() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let dir = root.join("middlewares");
+
+        let mc = WasmMiddleware::from_wat_path(
+            "minecraft_handshake",
+            &dir.join("minecraft_handshake.wat"),
+        )
+        .expect("compile minecraft_handshake");
+
+        let handshake = mc_handshake_prelude("play.example.com", 25565);
+        let mut suffix = mc_status_request_packet();
+        suffix.extend_from_slice(&mc_ping_packet(42));
+
+        let mut prelude = handshake.clone();
+        prelude.extend_from_slice(&suffix);
+
+        let rw = mc
+            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:25566"))
+            .expect("rewrite")
+            .rewrite
+            .expect("expected rewrite bytes");
+
+        assert!(rw.ends_with(&suffix));
+        assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
+
+        let rewritten_handshake_len = rw.len() - suffix.len();
+        assert_ne!(rewritten_handshake_len, handshake.len());
     }
 
     #[test]

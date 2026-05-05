@@ -506,9 +506,9 @@ pub struct TunnelServiceConfig {
     pub local_addr: String,
     pub route_only: bool,
     pub remote_addr: String,
-    /// Optional host label used for rewrite middlewares when this service is dialed as
-    /// an upstream (tunnel:<service>). This supports $1, $2... substitutions from route
-    /// wildcard captures.
+    /// Advanced host label used for rewrite middlewares when this service is dialed as
+    /// an upstream (tunnel:<service>). Leave empty to preserve the client's protocol host.
+    /// This supports $1, $2... substitutions from route wildcard captures.
     pub masquerade_host: String,
 }
 

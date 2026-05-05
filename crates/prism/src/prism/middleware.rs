@@ -35,9 +35,8 @@ pub struct MiddlewareCtx {
     /// The selected upstream label (after any default port fill) for rewrite.
     ///
     /// For direct upstreams this is typically a dial address like `host:port`.
-    /// For tunnel upstreams (`tunnel:<service>`), Prism may pass a configured/advertised
-    /// masquerade host (see `tunnel.services[].masquerade_host`) so rewrite middlewares can
-    /// chain multiple Prism instances.
+    /// For tunnel upstreams (`tunnel:<service>`), Prism skips rewrite unless a configured
+    /// masquerade host (see `tunnel.services[].masquerade_host`) provides a real protocol host.
     pub selected_upstream: Option<String>,
 }
 
@@ -700,6 +699,25 @@ mod tests {
         out
     }
 
+    fn mc_handshake_prelude_with_extra(host: &str, extra: &[u8], port: u16) -> Vec<u8> {
+        let mut addr = Vec::new();
+        addr.extend_from_slice(host.as_bytes());
+        addr.extend_from_slice(extra);
+
+        let mut pkt = Vec::new();
+        push_varint(0, &mut pkt); // packet id
+        push_varint(47, &mut pkt);
+        push_varint(addr.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&addr);
+        pkt.extend_from_slice(&port.to_be_bytes());
+        push_varint(1, &mut pkt);
+
+        let mut out = Vec::new();
+        push_varint(pkt.len() as u32, &mut out);
+        out.extend_from_slice(&pkt);
+        out
+    }
+
     fn mc_status_request_packet() -> Vec<u8> {
         vec![0x01, 0x00]
     }
@@ -751,6 +769,31 @@ mod tests {
         }
         let port = u16::from_be_bytes([prelude[i], prelude[i + 1]]);
         Some(port)
+    }
+
+    fn mc_handshake_extract_addr(prelude: &[u8]) -> Option<Vec<u8>> {
+        let (pkt_len, mut i) = read_varint(prelude, 0)?;
+        let end = i.checked_add(pkt_len as usize)?;
+        if end > prelude.len() {
+            return None;
+        }
+
+        let (_pid, ni) = read_varint(prelude, i)?;
+        i = ni;
+        let (_proto, ni) = read_varint(prelude, i)?;
+        i = ni;
+        let (addr_len, ni) = read_varint(prelude, i)?;
+        i = ni;
+        let addr_end = i.checked_add(addr_len as usize)?;
+        if addr_end > end {
+            return None;
+        }
+        Some(prelude[i..addr_end].to_vec())
+    }
+
+    fn mc_first_packet_end(prelude: &[u8]) -> Option<usize> {
+        let (pkt_len, i) = read_varint(prelude, 0)?;
+        i.checked_add(pkt_len as usize)
     }
 
     fn tls_client_hello_prelude(host: &str) -> Vec<u8> {
@@ -873,6 +916,47 @@ mod tests {
 
         let rewritten_handshake_len = rw.len() - suffix.len();
         assert_ne!(rewritten_handshake_len, handshake.len());
+        assert_eq!(mc_first_packet_end(&rw), Some(rewritten_handshake_len));
+        assert_eq!(&rw[rewritten_handshake_len..], suffix.as_slice());
+    }
+
+    #[test]
+    fn minecraft_handshake_rewrite_preserves_nul_delimited_address_suffix() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let dir = root.join("middlewares");
+
+        let mc = WasmMiddleware::from_wat_path(
+            "minecraft_handshake",
+            &dir.join("minecraft_handshake.wat"),
+        )
+        .expect("compile minecraft_handshake");
+
+        let extra = b"\0FML3\0modded-marker";
+        let handshake = mc_handshake_prelude_with_extra("play.example.com", extra, 25565);
+        let suffix = mc_status_request_packet();
+
+        let mut prelude = handshake;
+        prelude.extend_from_slice(&suffix);
+
+        let rw = mc
+            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:25566"))
+            .expect("rewrite")
+            .rewrite
+            .expect("expected rewrite bytes");
+
+        let mut expected_addr = b"backend.local".to_vec();
+        expected_addr.extend_from_slice(extra);
+        assert_eq!(
+            mc_handshake_extract_addr(&rw).as_deref(),
+            Some(expected_addr.as_slice())
+        );
+        assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
+
+        let rewritten_handshake_len = rw.len() - suffix.len();
+        assert_eq!(mc_first_packet_end(&rw), Some(rewritten_handshake_len));
+        assert_eq!(&rw[rewritten_handshake_len..], suffix.as_slice());
     }
 
     #[test]

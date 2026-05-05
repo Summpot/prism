@@ -197,6 +197,11 @@ These modules support both:
 - a **parse phase** to extract the routing host
 - a **rewrite phase** to rewrite the captured prelude for the selected upstream
 
+For `tunnel:<service>` routes, Prism preserves the captured prelude by default.
+This keeps protocol-level host data, including Minecraft mod/proxy metadata,
+identical to what the client sent. Prelude rewrite is only applied for direct
+upstreams, or for tunnel services that explicitly set `masquerade_host`.
+
 ### Tunnel mode
 
 Prism can run one or both tunnel roles in the same binary.
@@ -227,6 +232,8 @@ Current semantics:
 - `route_only = true` means the service can only be reached through `tunnel:<service>`
 - `remote_addr` requests a server-side auto listener when `tunnel.auto_listen_services = true`
 - `route_only = true` clears `remote_addr`
+- `masquerade_host` is an advanced escape hatch for chained proxy setups; leave it
+  empty for normal Minecraft tunnel routing so the client's handshake host is preserved
 - if multiple tunnel clients register the same service name, the **first active
   registrant** remains the routing owner until it disconnects
 

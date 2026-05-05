@@ -3,7 +3,8 @@
 ;; - Parse phase: extracts the Minecraft handshake "server address" string as routing host.
 ;;   If the string contains a NUL byte (Bungee/Velocity extra data), only the prefix before NUL is returned.
 ;; - Rewrite phase: rewrites the handshake host (and, if present, the port) to the selected upstream.
-;;   - The server address string is rewritten to the upstream host only (no ":port").
+;;   - The server address host prefix is rewritten to the upstream host only (no ":port").
+;;   - Any NUL-delimited suffix in the address string is preserved for Forge/Velocity/Bungee data.
 ;;   - If selected_upstream includes a numeric port, the u16 port field is rewritten as well.
 
 (module
@@ -371,11 +372,18 @@
     (local $addr_len i32)
     (local $addr_n i32)
     (local $addr_ptr i32)
+    (local $addr_host_len i32)
+    (local $addr_extra_ptr i32)
+    (local $addr_extra_len i32)
     (local $port_pos i32)
+    (local $i i32)
+    (local $b i32)
 
     (local $prefix_len i32)
     (local $rest_ptr i32)
     (local $rest_len i32)
+    (local $tail_ptr i32)
+    (local $tail_len i32)
 
     (local $new_addr_len i32)
     (local $new_addr_n i32)
@@ -428,12 +436,34 @@
     (local.set $port_pos (i32.add (local.get $addr_ptr) (local.get $addr_len)))
     (if (i32.gt_u (i32.add (local.get $port_pos) (i32.const 2)) (local.get $end)) (then (return (i64.const 1))))
 
+    ;; Preserve any NUL-delimited data after the visible host. Modded and proxied
+    ;; Minecraft clients use this area for protocol markers / forwarding data.
+    (local.set $addr_host_len (local.get $addr_len))
+    (local.set $i (i32.const 0))
+    (block $nul_done
+      (loop $nul_loop
+        (br_if $nul_done (i32.ge_u (local.get $i) (local.get $addr_len)))
+        (local.set $b (i32.load8_u (i32.add (local.get $addr_ptr) (local.get $i))))
+        (if (i32.eq (local.get $b) (i32.const 0))
+          (then
+            (local.set $addr_host_len (local.get $i))
+            (br $nul_done)
+          )
+        )
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $nul_loop)
+      )
+    )
+    (local.set $addr_extra_ptr (i32.add (local.get $addr_ptr) (local.get $addr_host_len)))
+    (local.set $addr_extra_len (i32.sub (local.get $addr_len) (local.get $addr_host_len)))
+
     (local.set $prefix_len (i32.sub (local.get $addr_len_pos) (local.get $len_n)))
     (local.set $rest_ptr (i32.add (local.get $port_pos) (i32.const 2)))
-    ;; Preserve any already-read bytes after the handshake packet. Minecraft
-    ;; status refreshes often coalesce the following status request or ping into
-    ;; the same TCP read; dropping those bytes makes server-list pong flaky.
-    (local.set $rest_len (i32.sub (local.get $n) (local.get $rest_ptr)))
+    (local.set $rest_len (i32.sub (local.get $end) (local.get $rest_ptr)))
+    ;; Preserve already-read packets after the handshake packet, but keep them
+    ;; outside the rewritten handshake packet length.
+    (local.set $tail_ptr (local.get $end))
+    (local.set $tail_len (i32.sub (local.get $n) (local.get $end)))
 
     ;; In Minecraft handshake, the port is a separate field.
     ;; Only write the upstream host (no :port) into the server address string.
@@ -442,7 +472,7 @@
     (local.set $host_len (i32.wrap_i64 (i64.shr_u (local.get $slice) (i64.const 32))))
     (if (i32.eq (local.get $host_len) (i32.const 0)) (then (return (i64.const 1))))
 
-    (local.set $new_addr_len (local.get $host_len))
+    (local.set $new_addr_len (i32.add (local.get $host_len) (local.get $addr_extra_len)))
     (local.set $new_addr_n (call $varint_len (local.get $new_addr_len)))
     (local.set $new_pkt_len
       (i32.add
@@ -473,9 +503,11 @@
     (local.set $w (call $write_varint (local.get $out_p) (local.get $new_addr_len)))
     (local.set $out_p (i32.add (local.get $out_p) (local.get $w)))
 
-    ;; new addr bytes (host only)
+    ;; new addr bytes: rewritten host plus original NUL-delimited suffix
     (call $memcpy_impl (local.get $out_p) (local.get $host_ptr) (local.get $host_len))
     (local.set $out_p (i32.add (local.get $out_p) (local.get $host_len)))
+    (call $memcpy_impl (local.get $out_p) (local.get $addr_extra_ptr) (local.get $addr_extra_len))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $addr_extra_len)))
 
     ;; port
     (local.set $port_pack (call $parse_port (local.get $up_ptr) (local.get $up_len)))
@@ -492,6 +524,10 @@
     ;; rest
     (call $memcpy_impl (local.get $out_p) (local.get $rest_ptr) (local.get $rest_len))
     (local.set $out_p (i32.add (local.get $out_p) (local.get $rest_len)))
+
+    ;; tail packets already captured after the handshake
+    (call $memcpy_impl (local.get $out_p) (local.get $tail_ptr) (local.get $tail_len))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $tail_len)))
 
     (return (call $set_rewrite (local.get $out_ptr) (i32.sub (local.get $out_p) (local.get $out_ptr))))
   )

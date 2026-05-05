@@ -627,7 +627,9 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         upstream_used.clone()
     };
 
-    if let Some(rw) = middleware.rewrite(&prelude, &selected_for_rewrite) {
+    if should_rewrite_prelude(&selected_for_rewrite)
+        && let Some(rw) = middleware.rewrite(&prelude, &selected_for_rewrite)
+    {
         prelude = rw;
     }
 
@@ -674,6 +676,14 @@ async fn dial_tcp_stream(
         TcpStream::connect(addr).await?
     };
     Ok(Box::new(c))
+}
+
+fn should_rewrite_prelude(selected_upstream: &str) -> bool {
+    let selected_upstream = selected_upstream.trim();
+    !selected_upstream.is_empty()
+        && !selected_upstream
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("tunnel:"))
 }
 
 async fn dial_upstream(
@@ -803,4 +813,17 @@ fn upstream_needs_port(addr: &str) -> bool {
         s
     };
     !after.contains(':')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_prelude_rewrite_for_tunnel_labels() {
+        assert!(!should_rewrite_prelude("tunnel:cti"));
+        assert!(!should_rewrite_prelude("  TUNNEL:monifactory  "));
+        assert!(!should_rewrite_prelude(""));
+        assert!(should_rewrite_prelude("backend.local:25566"));
+    }
 }

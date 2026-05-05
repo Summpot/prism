@@ -391,7 +391,8 @@ Current CI behavior:
 - reuses the SPA build output when packaging release binaries so the embedded
   panel ships with the Rust artifacts
 - builds release binaries for multiple targets
-- publishes backend Docker images to GHCR on non-PR builds
+- publishes backend Docker images to GHCR on non-PR builds (`latest` by
+  default, plus the version number for `v*` tags)
 
 ## Schema and editor support
 

@@ -251,9 +251,8 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=sha
-            type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest
+            type=semver,pattern={{version}},enable=${{ github.ref_type == 'tag' }}
 
       - name: Add arch suffix to tags
         id: archtags
@@ -312,9 +311,8 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=sha
-            type=raw,value=edge,enable=${{ github.ref_type != 'tag' }}
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest
+            type=semver,pattern={{version}},enable=${{ github.ref_type == 'tag' }}
 
       - name: Create and push multi-arch manifests
         shell: bash

@@ -551,10 +551,10 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let router::Resolution {
         host: resolved_host,
         upstreams,
+        matched_host,
         middleware,
         prelude_override,
         captures,
-        ..
     } = res;
 
     let host = resolved_host.trim().to_ascii_lowercase();
@@ -601,15 +601,11 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
 
     opts.sessions.add(telemetry::SessionInfo {
         id: sid.clone(),
-        client,
+        client: client.clone(),
         host: host.clone(),
         upstream: upstream_used.clone(),
         started_at_unix_ms: telemetry::now_unix_ms(),
     });
-
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(sid=%sid, host=%host, upstream=%upstream_used, "proxy: routed");
-    }
 
     // Apply any middleware prelude overrides from parse phase, then allow a rewrite pass based on
     // the selected upstream.
@@ -627,10 +623,31 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         upstream_used.clone()
     };
 
-    if should_rewrite_prelude(&selected_for_rewrite)
-        && let Some(rw) = middleware.rewrite(&prelude, &selected_for_rewrite)
-    {
-        prelude = rw;
+    let rewrite_eligible = should_rewrite_prelude(&selected_for_rewrite);
+    let mut rewrite_applied = false;
+    if rewrite_eligible {
+        if let Some(rw) = middleware.rewrite(&prelude, &selected_for_rewrite) {
+            prelude = rw;
+            rewrite_applied = true;
+        }
+    }
+
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        tracing::debug!(
+            sid=%sid,
+            client=%client,
+            host=%host,
+            matched_host=%matched_host,
+            upstream=%upstream_used,
+            upstream_candidates=?upstreams,
+            captures=?captures,
+            masquerade_host=?tunnel_masquerade_host,
+            selected_for_rewrite=%selected_for_rewrite,
+            rewrite_eligible=%rewrite_eligible,
+            rewrite_applied=%rewrite_applied,
+            prelude_len=prelude.len(),
+            "proxy: routed"
+        );
     }
 
     // Forward captured prelude upstream.

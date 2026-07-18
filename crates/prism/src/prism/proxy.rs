@@ -474,8 +474,24 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
 
                 match opts.router.resolve_prelude(&captured) {
                     Ok(Some(r)) => break Ok(Some(r)),
-                    Ok(None) => break Ok(None),
-                    Err(middleware::MiddlewareError::NeedMoreData) => continue,
+                    Ok(None) => {
+                        tracing::debug!(
+                            sid = %sid,
+                            client = %client,
+                            prelude_len = captured.len(),
+                            "proxy: router returned no match for current prelude"
+                        );
+                        break Ok(None);
+                    }
+                    Err(middleware::MiddlewareError::NeedMoreData) => {
+                        tracing::trace!(
+                            sid = %sid,
+                            client = %client,
+                            prelude_len = captured.len(),
+                            "proxy: router needs more handshake bytes"
+                        );
+                        continue;
+                    }
                     Err(e) => break Err(e),
                 }
             }
@@ -508,7 +524,12 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     };
 
     let Some(res) = res else {
-        tracing::debug!(sid=%sid, client=%client, "proxy: no route matched prelude");
+        tracing::warn!(
+            sid = %sid,
+            client = %client,
+            prelude_len = captured.len(),
+            "proxy: no route matched prelude (check host patterns, wildcard captures, and middleware host extraction; enable RUST_LOG=prism=debug for details)"
+        );
         let _ = conn.shutdown().await;
         return;
     };
@@ -522,8 +543,9 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         captures,
     } = res;
 
-    let host = resolved_host.trim().to_ascii_lowercase();
+    let host = router::normalize_routing_host(&resolved_host);
     if host.is_empty() {
+        tracing::warn!(sid = %sid, client = %client, "proxy: empty host after route resolution");
         let _ = conn.shutdown().await;
         return;
     }
@@ -536,6 +558,16 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let mut up_conn: Option<tunnel::transport::BoxedStream> = None;
     let mut tunnel_masquerade_host: Option<String> = None;
 
+    tracing::debug!(
+        sid = %sid,
+        client = %client,
+        host = %host,
+        matched_host = %matched_host,
+        captures = ?captures,
+        candidates = ?upstreams,
+        "proxy: dialing route upstreams"
+    );
+
     for cand in &upstreams {
         let addr = cand.trim().to_string();
         match dial_upstream(
@@ -547,17 +579,45 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         .await
         {
             Ok((c, label, masq)) => {
+                tracing::info!(
+                    sid = %sid,
+                    client = %client,
+                    host = %host,
+                    matched_host = %matched_host,
+                    upstream = %label,
+                    captures = ?captures,
+                    "proxy: upstream dial ok"
+                );
                 upstream_used = label;
                 up_conn = Some(c);
                 tunnel_masquerade_host = masq;
                 break;
             }
-            Err(err) => last_err = Some(err),
+            Err(err) => {
+                tracing::warn!(
+                    sid = %sid,
+                    client = %client,
+                    host = %host,
+                    candidate = %addr,
+                    err = %err,
+                    "proxy: upstream candidate dial failed"
+                );
+                last_err = Some(err);
+            }
         }
     }
 
     let Some(mut up) = up_conn else {
-        tracing::warn!(sid=%sid, client=%client, host=%host, err=%last_err.map(|e| e.to_string()).unwrap_or_default(), "proxy: upstream dial failed");
+        tracing::warn!(
+            sid = %sid,
+            client = %client,
+            host = %host,
+            matched_host = %matched_host,
+            captures = ?captures,
+            candidates = ?upstreams,
+            err = %last_err.map(|e| e.to_string()).unwrap_or_default(),
+            "proxy: all upstream candidates failed (for tunnel:$1 wildcards, service name must equal capture and be registered)"
+        );
         let _ = conn.shutdown().await;
         return;
     };

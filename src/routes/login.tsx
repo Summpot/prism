@@ -2,7 +2,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
-import { getManagementStatus } from "@/lib/managementApi";
+import { fieldClassName, PrimaryButton } from "@/components/ui";
+import { getHealth, getManagementStatus } from "@/lib/managementApi";
+import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
@@ -21,7 +23,11 @@ function LoginPage() {
 		setError(null);
 
 		try {
-			const nextConnection = { baseUrl, token };
+			const nextConnection = {
+				baseUrl: normalizeBaseUrl(baseUrl),
+				token: token.trim(),
+			};
+			await getHealth(nextConnection);
 			await getManagementStatus(nextConnection);
 			saveConnection(nextConnection);
 			navigate({ to: "/" });
@@ -50,9 +56,8 @@ function LoginPage() {
 				</div>
 
 				<p className="mt-6 text-base leading-7 text-slate-400">
-					Because the panel can be deployed separately, it authenticates directly against the
-					management API with a base URL and bearer token. The connection is stored locally in your
-					browser and can be cleared at any time.
+					Authenticate against the management API with a base URL and panel bearer token. The
+					connection is stored in browser local storage and can be cleared from the sidebar.
 				</p>
 
 				<form onSubmit={connect} className="mt-8 space-y-5">
@@ -62,7 +67,7 @@ function LoginPage() {
 							value={baseUrl}
 							onChange={(event) => setBaseUrl(event.target.value)}
 							placeholder="http://127.0.0.1:8080"
-							className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
+							className={fieldClassName}
 						/>
 					</label>
 					<label className="block space-y-2">
@@ -72,7 +77,7 @@ function LoginPage() {
 							onChange={(event) => setToken(event.target.value)}
 							type="password"
 							placeholder="panel-secret"
-							className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40"
+							className={fieldClassName}
 						/>
 					</label>
 
@@ -82,14 +87,10 @@ function LoginPage() {
 						</div>
 					) : null}
 
-					<button
-						type="submit"
-						disabled={submitting || !baseUrl.trim() || !token.trim()}
-						className="inline-flex items-center gap-3 rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-					>
+					<PrimaryButton type="submit" disabled={submitting || !baseUrl.trim() || !token.trim()}>
 						{submitting ? "Verifying endpoint…" : "Connect panel"}
 						<ArrowRight className="h-4 w-4" />
-					</button>
+					</PrimaryButton>
 				</form>
 			</div>
 		</section>

@@ -12,6 +12,19 @@ export interface ConfigIssue {
 	message: string;
 }
 
+export interface ManagedConfigSummary {
+	listeners: number;
+	tcpListeners: number;
+	udpListeners: number;
+	hostnameRoutingListeners: number;
+	routes: number;
+	tunnelEnabled: boolean;
+	tunnelEndpoints: number;
+	tunnelServices: number;
+	hasTunnelClient: boolean;
+	proxyProtocol: boolean;
+}
+
 function trimList(values: string[]) {
 	return values.map((value) => value.trim()).filter(Boolean);
 }
@@ -119,6 +132,23 @@ export function normalizeManagedConfig(doc: ManagedConfigDocument): ManagedConfi
 	};
 }
 
+export function summarizeManagedConfig(doc: ManagedConfigDocument): ManagedConfigSummary {
+	const normalized = normalizeManagedConfig(doc);
+	const tcpListeners = normalized.listeners.filter((listener) => listener.protocol === "tcp");
+	return {
+		listeners: normalized.listeners.length,
+		tcpListeners: tcpListeners.length,
+		udpListeners: normalized.listeners.filter((listener) => listener.protocol === "udp").length,
+		hostnameRoutingListeners: tcpListeners.filter((listener) => !listener.upstream).length,
+		routes: normalized.routes.length,
+		tunnelEnabled: Boolean(normalized.tunnel),
+		tunnelEndpoints: normalized.tunnel?.endpoints.length ?? 0,
+		tunnelServices: normalized.tunnel?.services.length ?? 0,
+		hasTunnelClient: Boolean(normalized.tunnel?.client),
+		proxyProtocol: normalized.proxy_protocol_v2,
+	};
+}
+
 export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[] {
 	const normalized = normalizeManagedConfig(doc);
 	const issues: ConfigIssue[] = [];
@@ -128,6 +158,13 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 			issues.push({
 				path: `listeners.${index}.listen_addr`,
 				message: "Listener address is required.",
+			});
+		}
+
+		if (listener.protocol !== "tcp" && listener.protocol !== "udp") {
+			issues.push({
+				path: `listeners.${index}.protocol`,
+				message: "Protocol must be tcp or udp.",
 			});
 		}
 
@@ -158,28 +195,85 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 				message: "Routing routes require at least one middleware.",
 			});
 		}
+		if (!["sequential", "random", "round-robin"].includes(route.strategy)) {
+			issues.push({
+				path: `routes.${index}.strategy`,
+				message: "Strategy must be sequential, random, or round-robin.",
+			});
+		}
 	});
 
-	normalized.tunnel?.services.forEach((service, index) => {
-		if (!service.name) {
+	if (normalized.routes.length > 0) {
+		const hasHostnameRouting = normalized.listeners.some(
+			(listener) => listener.protocol === "tcp" && !listener.upstream,
+		);
+		if (!hasHostnameRouting) {
 			issues.push({
-				path: `tunnel.services.${index}.name`,
-				message: "Tunnel service name is required.",
+				path: "listeners",
+				message:
+					"Hostname routes need at least one TCP listener with an empty upstream (hostname-routing mode).",
 			});
 		}
-		if (!service.local_addr) {
+	}
+
+	const tunnel = normalized.tunnel;
+	if (tunnel) {
+		tunnel.endpoints.forEach((endpoint, index) => {
+			if (!endpoint.listen_addr) {
+				issues.push({
+					path: `tunnel.endpoints.${index}.listen_addr`,
+					message: "Tunnel endpoint address is required.",
+				});
+			}
+			if (!["tcp", "udp", "quic"].includes(endpoint.transport)) {
+				issues.push({
+					path: `tunnel.endpoints.${index}.transport`,
+					message: "Transport must be tcp, udp, or quic.",
+				});
+			}
+		});
+
+		if (doc.tunnel?.client && !tunnel.client) {
 			issues.push({
-				path: `tunnel.services.${index}.local_addr`,
-				message: "Tunnel service local address is required.",
+				path: "tunnel.client.server_addr",
+				message: "Tunnel client server address is required.",
 			});
 		}
-		if (service.route_only && service.remote_addr) {
+
+		if (tunnel.client && !["tcp", "udp", "quic"].includes(tunnel.client.transport)) {
 			issues.push({
-				path: `tunnel.services.${index}.remote_addr`,
-				message: "route_only services must not declare remote_addr.",
+				path: "tunnel.client.transport",
+				message: "Client transport must be tcp, udp, or quic.",
 			});
 		}
-	});
+
+		tunnel.services.forEach((service, index) => {
+			if (!service.name) {
+				issues.push({
+					path: `tunnel.services.${index}.name`,
+					message: "Tunnel service name is required.",
+				});
+			}
+			if (!service.local_addr) {
+				issues.push({
+					path: `tunnel.services.${index}.local_addr`,
+					message: "Tunnel service local address is required.",
+				});
+			}
+			if (!["tcp", "udp"].includes(service.proto)) {
+				issues.push({
+					path: `tunnel.services.${index}.proto`,
+					message: "Service protocol must be tcp or udp.",
+				});
+			}
+			if (service.route_only && service.remote_addr) {
+				issues.push({
+					path: `tunnel.services.${index}.remote_addr`,
+					message: "route_only services must not declare remote_addr.",
+				});
+			}
+		});
+	}
 
 	return issues;
 }
@@ -191,10 +285,61 @@ export function formatIssuesByPath(issues: ConfigIssue[]) {
 	}, {});
 }
 
+export function managedConfigFingerprint(doc: ManagedConfigDocument) {
+	return JSON.stringify(normalizeManagedConfig(doc));
+}
+
+export function parseManagedConfigJson(
+	raw: string,
+): { ok: true; value: ManagedConfigDocument } | { ok: false; error: string } {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (error) {
+		return {
+			ok: false,
+			error: error instanceof Error ? error.message : "Invalid JSON",
+		};
+	}
+
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { ok: false, error: "Config root must be a JSON object." };
+	}
+
+	const value = parsed as Partial<ManagedConfigDocument>;
+	const base = createEmptyManagedConfig();
+	const doc: ManagedConfigDocument = {
+		listeners: Array.isArray(value.listeners) ? value.listeners : base.listeners,
+		routes: Array.isArray(value.routes) ? value.routes : base.routes,
+		max_header_bytes:
+			typeof value.max_header_bytes === "number" ? value.max_header_bytes : base.max_header_bytes,
+		proxy_protocol_v2: Boolean(value.proxy_protocol_v2),
+		buffer_size: typeof value.buffer_size === "number" ? value.buffer_size : base.buffer_size,
+		upstream_dial_timeout_ms:
+			typeof value.upstream_dial_timeout_ms === "number"
+				? value.upstream_dial_timeout_ms
+				: base.upstream_dial_timeout_ms,
+		timeouts: value.timeouts ?? base.timeouts,
+		tunnel: value.tunnel === null ? undefined : (value.tunnel ?? undefined),
+	};
+
+	return { ok: true, value: normalizeManagedConfig(doc) };
+}
+
+export function moveItem<T>(items: T[], from: number, to: number): T[] {
+	if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) {
+		return items;
+	}
+	const next = [...items];
+	const [item] = next.splice(from, 1);
+	next.splice(to, 0, item);
+	return next;
+}
+
 export function createEmptyTunnel(): ManagedTunnelDocument {
 	return {
 		auth_token: "",
-		auto_listen_services: false,
+		auto_listen_services: true,
 		endpoints: [],
 		client: null,
 		services: [],
@@ -222,5 +367,14 @@ export function createEmptyTunnelClient(): ManagedTunnelClientDocument {
 		transport: "tcp",
 		dial_timeout_ms: 5000,
 		quic: null,
+	};
+}
+
+export function createEmptyRoute(): ManagedRouteDocument {
+	return {
+		hosts: [""],
+		upstreams: [""],
+		middlewares: ["minecraft_handshake"],
+		strategy: "sequential",
 	};
 }

@@ -117,6 +117,31 @@ export interface ReloadResponse {
 	seq: number;
 }
 
+export interface HealthResponse {
+	ok: boolean;
+}
+
+export interface ConfigPathResponse {
+	path: string;
+}
+
+export interface MetricsStoreSnapshot {
+	backend: string;
+	path: string;
+	flush_interval_ms: number;
+	last_flush_unix_ms: number;
+	last_error: string;
+}
+
+export interface MetricsSnapshot {
+	active_connections: number;
+	connections_total: number;
+	bytes_ingress_total: number;
+	bytes_egress_total: number;
+	route_hits_total: Record<string, number>;
+	store?: MetricsStoreSnapshot | null;
+}
+
 export class ManagementApiError extends Error {
 	status: number;
 
@@ -143,13 +168,28 @@ async function apiRequest<T>(
 
 	if (!response.ok) {
 		const text = await response.text();
-		throw new ManagementApiError(
-			text || `Request failed with status ${response.status}`,
-			response.status,
-		);
+		let message = text || `Request failed with status ${response.status}`;
+		try {
+			const parsed = JSON.parse(text) as { error?: string };
+			if (parsed.error) {
+				message = parsed.error;
+			}
+		} catch {
+			// keep raw text
+		}
+		throw new ManagementApiError(message, response.status);
 	}
 
-	return (await response.json()) as T;
+	if (response.status === 204) {
+		return undefined as T;
+	}
+
+	const text = await response.text();
+	if (!text) {
+		return undefined as T;
+	}
+
+	return JSON.parse(text) as T;
 }
 
 export function getManagementStatus(connection: PanelConnection) {
@@ -201,4 +241,16 @@ export function triggerReload(connection: PanelConnection) {
 	return apiRequest<ReloadResponse>(connection, "/reload", {
 		method: "POST",
 	});
+}
+
+export function getHealth(connection: PanelConnection) {
+	return apiRequest<HealthResponse>(connection, "/health");
+}
+
+export function getConfigPath(connection: PanelConnection) {
+	return apiRequest<ConfigPathResponse>(connection, "/config");
+}
+
+export function getMetrics(connection: PanelConnection) {
+	return apiRequest<MetricsSnapshot>(connection, "/metrics");
 }

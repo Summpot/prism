@@ -3,6 +3,7 @@ import {
 	Activity,
 	Box,
 	Cable,
+	Gauge,
 	LogOut,
 	Menu,
 	Network,
@@ -18,22 +19,11 @@ import { usePanelSession } from "@/lib/panelSession";
 const navItems = [
 	{ to: "/", label: "Overview", icon: <Activity className="h-4 w-4" /> },
 	{ to: "/nodes", label: "Nodes", icon: <Box className="h-4 w-4" /> },
-	{
-		to: "/connections",
-		label: "Connections",
-		icon: <Cable className="h-4 w-4" />,
-	},
-	{
-		to: "/tunnel-services",
-		label: "Tunnel Services",
-		icon: <Unplug className="h-4 w-4" />,
-	},
-	{
-		to: "/login",
-		label: "Connection",
-		icon: <PlugZap className="h-4 w-4" />,
-	},
-];
+	{ to: "/connections", label: "Connections", icon: <Cable className="h-4 w-4" /> },
+	{ to: "/tunnel-services", label: "Tunnel Services", icon: <Unplug className="h-4 w-4" /> },
+	{ to: "/runtime", label: "Runtime", icon: <Gauge className="h-4 w-4" /> },
+	{ to: "/login", label: "Connection", icon: <PlugZap className="h-4 w-4" /> },
+] as const;
 
 function NavLink({
 	to,
@@ -55,6 +45,7 @@ function NavLink({
 				className:
 					"flex items-center gap-3 rounded-2xl border border-cyan-400/40 bg-cyan-400/12 px-4 py-3 text-sm font-medium text-white shadow-[0_0_0_1px_rgba(34,211,238,0.18)]",
 			}}
+			activeOptions={to === "/" ? { exact: true } : undefined}
 		>
 			{icon}
 			<span>{label}</span>
@@ -79,8 +70,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 					</div>
 				</div>
 				<p className="mt-4 text-sm leading-6 text-slate-400">
-					Operate standalone management nodes, inspect worker state, and edit structured Prism
-					configs without dropping into raw files.
+					Operate the management node, inspect workers, edit desired config revisions, and watch
+					live proxy state.
 				</p>
 			</div>
 
@@ -138,7 +129,6 @@ export default function Header() {
 
 	return (
 		<>
-			{/* Mobile top bar */}
 			<div className="fixed top-0 right-0 left-0 z-40 flex items-center gap-3 border-b border-white/8 bg-slate-950/95 px-4 py-3 backdrop-blur xl:hidden">
 				<button
 					type="button"
@@ -151,7 +141,6 @@ export default function Header() {
 				<span className="text-sm font-semibold text-white">Prism Control Plane</span>
 			</div>
 
-			{/* Mobile drawer overlay */}
 			{mobileOpen ? (
 				<div className="fixed inset-0 z-50 xl:hidden">
 					<button
@@ -176,7 +165,6 @@ export default function Header() {
 				</div>
 			) : null}
 
-			{/* Desktop sidebar */}
 			<aside className="hidden border-r border-white/8 bg-slate-950/80 xl:flex xl:w-80 xl:flex-col xl:backdrop-blur">
 				<SidebarContent />
 			</aside>

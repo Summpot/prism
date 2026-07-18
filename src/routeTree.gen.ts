@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TunnelServicesRouteImport } from './routes/tunnel-services'
+import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as NodesRouteImport } from './routes/nodes'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ConnectionsRouteImport } from './routes/connections'
@@ -20,6 +21,11 @@ import { Route as NodesNodeIdRouteImport } from './routes/nodes.$nodeId'
 const TunnelServicesRoute = TunnelServicesRouteImport.update({
   id: '/tunnel-services',
   path: '/tunnel-services',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RuntimeRoute = RuntimeRouteImport.update({
+  id: '/runtime',
+  path: '/runtime',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NodesRoute = NodesRouteImport.update({
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/connections': typeof ConnectionsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRouteWithChildren
+  '/runtime': typeof RuntimeRoute
   '/tunnel-services': typeof TunnelServicesRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/nodes/': typeof NodesIndexRoute
@@ -66,6 +73,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/connections': typeof ConnectionsRoute
   '/login': typeof LoginRoute
+  '/runtime': typeof RuntimeRoute
   '/tunnel-services': typeof TunnelServicesRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/nodes': typeof NodesIndexRoute
@@ -76,6 +84,7 @@ export interface FileRoutesById {
   '/connections': typeof ConnectionsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRouteWithChildren
+  '/runtime': typeof RuntimeRoute
   '/tunnel-services': typeof TunnelServicesRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/nodes/': typeof NodesIndexRoute
@@ -87,6 +96,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/login'
     | '/nodes'
+    | '/runtime'
     | '/tunnel-services'
     | '/nodes/$nodeId'
     | '/nodes/'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/connections'
     | '/login'
+    | '/runtime'
     | '/tunnel-services'
     | '/nodes/$nodeId'
     | '/nodes'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/login'
     | '/nodes'
+    | '/runtime'
     | '/tunnel-services'
     | '/nodes/$nodeId'
     | '/nodes/'
@@ -114,6 +126,7 @@ export interface RootRouteChildren {
   ConnectionsRoute: typeof ConnectionsRoute
   LoginRoute: typeof LoginRoute
   NodesRoute: typeof NodesRouteWithChildren
+  RuntimeRoute: typeof RuntimeRoute
   TunnelServicesRoute: typeof TunnelServicesRoute
 }
 
@@ -124,6 +137,13 @@ declare module '@tanstack/react-router' {
       path: '/tunnel-services'
       fullPath: '/tunnel-services'
       preLoaderRoute: typeof TunnelServicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runtime': {
+      id: '/runtime'
+      path: '/runtime'
+      fullPath: '/runtime'
+      preLoaderRoute: typeof RuntimeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/nodes': {
@@ -188,6 +208,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectionsRoute: ConnectionsRoute,
   LoginRoute: LoginRoute,
   NodesRoute: NodesRouteWithChildren,
+  RuntimeRoute: RuntimeRoute,
   TunnelServicesRoute: TunnelServicesRoute,
 }
 export const routeTree = rootRouteImport

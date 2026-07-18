@@ -1,9 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { RefreshCcw, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
+import {
+	Badge,
+	ErrorBanner,
+	PageHeader,
+	RefreshButton,
+	SearchInput,
+	StateCard,
+	ToggleChip,
+} from "@/components/ui";
+import { formatRelative, formatTime } from "@/lib/format";
 import { getManagedNodes, type ManagedNodeSnapshot } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
+import { usePolling } from "@/lib/usePolling";
 
 export const Route = createFileRoute("/nodes/")({ component: NodesIndexPage });
 
@@ -12,6 +22,9 @@ function NodesIndexPage() {
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [query, setQuery] = useState("");
+	const [autoRefresh, setAutoRefresh] = useState(true);
+	const [filter, setFilter] = useState<"all" | "drift" | "restart" | "error">("all");
 
 	const fetchNodes = useCallback(() => {
 		if (!connection) {
@@ -34,9 +47,35 @@ function NodesIndexPage() {
 			});
 	}, [connection]);
 
-	useEffect(() => {
-		fetchNodes();
-	}, [fetchNodes]);
+	usePolling(fetchNodes, 8_000, Boolean(connection) && autoRefresh);
+
+	const filtered = useMemo(() => {
+		const needle = query.trim().toLowerCase();
+		return nodes.filter((node) => {
+			if (filter === "drift" && node.desired_revision === node.applied_revision) {
+				return false;
+			}
+			if (filter === "restart" && !node.pending_restart) {
+				return false;
+			}
+			if (filter === "error" && !node.last_apply_error) {
+				return false;
+			}
+			if (!needle) {
+				return true;
+			}
+			const haystack = [
+				node.node_id,
+				node.connection_mode ?? "",
+				node.agent_url ?? "",
+				node.last_apply_error ?? "",
+				...node.restart_reasons,
+			]
+				.join(" ")
+				.toLowerCase();
+			return haystack.includes(needle);
+		});
+	}, [filter, nodes, query]);
 
 	if (!ready) {
 		return <StateCard label="Restoring session…" />;
@@ -48,51 +87,49 @@ function NodesIndexPage() {
 
 	return (
 		<div className="space-y-6">
-			<section className="rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 md:p-8">
-				<div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-					<div>
-						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
-							Managed nodes
+			<PageHeader
+				eyebrow="Managed nodes"
+				title="Prism worker inventory"
+				description="Track active versus passive connectivity, revision drift, restart pressure, and jump into the structured config editor."
+				actions={
+					<>
+						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
+							Auto-refresh {autoRefresh ? "on" : "off"}
+						</ToggleChip>
+						<RefreshButton onClick={fetchNodes} loading={loading} />
+						<div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+							{loading ? "Refreshing…" : `${nodes.length} nodes`}
 						</div>
-						<h1 className="mt-3 text-4xl font-semibold text-white">Prism worker inventory</h1>
-						<p className="mt-3 max-w-3xl text-base leading-7 text-slate-400">
-							Track whether nodes are syncing actively or waiting for passive access, spot revision
-							drift, and jump straight into the structured config editor for any worker.
-						</p>
-					</div>
-					<div className="flex items-center gap-3">
-						<button
-							type="button"
-							onClick={fetchNodes}
-							disabled={loading}
-							className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
-						>
-							<RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-							Refresh
-						</button>
-						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-							<RefreshCcw className="h-4 w-4 text-cyan-300" />
-							{loading ? "Refreshing…" : `${nodes.length} nodes loaded`}
-						</div>
-					</div>
-				</div>
-			</section>
+					</>
+				}
+			/>
 
-			{error ? (
-				<div className="flex items-center justify-between rounded-3xl border border-red-400/20 bg-red-400/8 px-5 py-4 text-sm text-red-100">
-					<span>{error}</span>
-					<button
-						type="button"
-						onClick={fetchNodes}
-						className="rounded-xl border border-red-400/30 px-3 py-1.5 text-xs font-medium transition hover:bg-red-400/15"
-					>
-						Retry
-					</button>
+			<div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+				<SearchInput
+					value={query}
+					onChange={setQuery}
+					placeholder="Filter by node id, mode, agent URL, error…"
+				/>
+				<div className="flex flex-wrap gap-2">
+					{(
+						[
+							["all", "All"],
+							["drift", "Drift"],
+							["restart", "Restart"],
+							["error", "Errors"],
+						] as const
+					).map(([value, label]) => (
+						<ToggleChip key={value} active={filter === value} onClick={() => setFilter(value)}>
+							{label}
+						</ToggleChip>
+					))}
 				</div>
-			) : null}
+			</div>
+
+			{error ? <ErrorBanner message={error} onRetry={fetchNodes} /> : null}
 
 			<div className="grid gap-4 xl:grid-cols-2">
-				{nodes.map((node) => (
+				{filtered.map((node) => (
 					<Link
 						key={node.node_id}
 						to="/nodes/$nodeId"
@@ -104,25 +141,43 @@ function NodesIndexPage() {
 								<div className="text-xl font-semibold text-white">{node.node_id}</div>
 								<div className="mt-2 text-sm text-slate-400">
 									Mode <span className="text-cyan-200">{node.connection_mode ?? "unknown"}</span>
+									{node.agent_url ? (
+										<>
+											{" · "}
+											<span className="break-all text-slate-300">{node.agent_url}</span>
+										</>
+									) : null}
 								</div>
 							</div>
-							<div
-								className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${node.pending_restart ? "bg-amber-400/12 text-amber-100" : "bg-emerald-400/12 text-emerald-100"}`}
-							>
-								{node.pending_restart ? "restart pending" : "in sync"}
+							<div className="flex flex-col items-end gap-2">
+								<Badge tone={node.pending_restart ? "warn" : "ok"}>
+									{node.pending_restart ? "restart pending" : "in sync"}
+								</Badge>
+								{node.desired_revision !== node.applied_revision ? (
+									<Badge tone="info">revision drift</Badge>
+								) : null}
 							</div>
 						</div>
 						<div className="mt-5 grid gap-3 sm:grid-cols-2">
 							<Value label="Desired revision" value={node.desired_revision} />
 							<Value label="Applied revision" value={node.applied_revision} />
-							<Value label="Last seen" value={formatTime(node.last_seen_unix_ms)} />
+							<Value
+								label="Last seen"
+								value={`${formatRelative(node.last_seen_unix_ms)} · ${formatTime(node.last_seen_unix_ms, "short")}`}
+							/>
 							<Value label="Apply error" value={node.last_apply_error || "none"} />
 						</div>
 					</Link>
 				))}
 
-				{!loading && nodes.length === 0 ? (
-					<StateCard label="No managed workers have enrolled yet." />
+				{!loading && filtered.length === 0 ? (
+					<StateCard
+						label={
+							nodes.length === 0
+								? "No managed workers have enrolled yet."
+								: "No nodes match the current filter."
+						}
+					/>
 				) : null}
 			</div>
 		</div>
@@ -133,26 +188,7 @@ function Value({ label, value }: { label: string; value: string | number }) {
 	return (
 		<div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
 			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</div>
-			<div className="mt-2 text-sm font-medium text-white">{value}</div>
+			<div className="mt-2 break-all text-sm font-medium text-white">{value}</div>
 		</div>
 	);
-}
-
-function StateCard({ label }: { label: string }) {
-	return (
-		<div className="rounded-3xl border border-white/8 bg-slate-950/70 px-6 py-10 text-sm text-slate-400">
-			{label}
-		</div>
-	);
-}
-
-function formatTime(value: number) {
-	if (!value) {
-		return "never";
-	}
-
-	return new Intl.DateTimeFormat("en-US", {
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(new Date(value));
 }

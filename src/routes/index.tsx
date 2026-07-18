@@ -1,22 +1,40 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+	Activity,
 	AlertTriangle,
 	ArrowRight,
 	CheckCircle2,
 	RefreshCw,
 	RotateCcw,
 	ServerCog,
+	Unplug,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
+	Badge,
+	ErrorBanner,
+	MetricCard,
+	PageHeader,
+	RefreshButton,
+	SecondaryButton,
+	StateCard,
+	ToggleChip,
+} from "@/components/ui";
+import { formatRelative } from "@/lib/format";
+import {
+	getConnections,
 	getManagedNodes,
 	getManagementStatus,
+	getMetrics,
+	getTunnelServices,
 	type ManagedNodeSnapshot,
 	type ManagementStatusResponse,
+	type MetricsSnapshot,
 	triggerReload,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
+import { usePolling } from "@/lib/usePolling";
 
 export const Route = createFileRoute("/")({ component: DashboardPage });
 
@@ -24,25 +42,43 @@ function DashboardPage() {
 	const { connection, ready } = usePanelSession();
 	const [status, setStatus] = useState<ManagementStatusResponse | null>(null);
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
+	const [connectionCount, setConnectionCount] = useState(0);
+	const [serviceCount, setServiceCount] = useState(0);
+	const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [reloading, setReloading] = useState(false);
 	const [reloadResult, setReloadResult] = useState<string | null>(null);
+	const [autoRefresh, setAutoRefresh] = useState(true);
 
 	const fetchData = useCallback(() => {
 		if (!connection) {
 			setStatus(null);
 			setNodes([]);
+			setConnectionCount(0);
+			setServiceCount(0);
+			setMetrics(null);
 			return;
 		}
 
 		setLoading(true);
 		setError(null);
 
-		Promise.all([getManagementStatus(connection), getManagedNodes(connection)])
-			.then(([nextStatus, nextNodes]) => {
+		Promise.all([
+			getManagementStatus(connection),
+			getManagedNodes(connection),
+			getConnections(connection).catch(() => [] as Awaited<ReturnType<typeof getConnections>>),
+			getTunnelServices(connection).catch(
+				() => [] as Awaited<ReturnType<typeof getTunnelServices>>,
+			),
+			getMetrics(connection).catch(() => null),
+		])
+			.then(([nextStatus, nextNodes, nextConns, nextServices, nextMetrics]) => {
 				setStatus(nextStatus);
 				setNodes(nextNodes);
+				setConnectionCount(nextConns.length);
+				setServiceCount(nextServices.length);
+				setMetrics(nextMetrics);
 			})
 			.catch((nextError) => {
 				setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -52,9 +88,7 @@ function DashboardPage() {
 			});
 	}, [connection]);
 
-	useEffect(() => {
-		fetchData();
-	}, [fetchData]);
+	usePolling(fetchData, 8_000, Boolean(connection) && autoRefresh);
 
 	const handleReload = async () => {
 		if (!connection) return;
@@ -74,7 +108,7 @@ function DashboardPage() {
 	};
 
 	if (!ready) {
-		return <LoadingState label="Restoring Prism panel session…" />;
+		return <StateCard label="Restoring Prism panel session…" />;
 	}
 
 	if (!connection) {
@@ -83,51 +117,31 @@ function DashboardPage() {
 
 	const onlineNodes = nodes.filter((node) => node.last_seen_unix_ms > 0).length;
 	const restartNodes = nodes.filter((node) => node.pending_restart).length;
+	const drifted = nodes.filter((node) => node.desired_revision !== node.applied_revision).length;
 
 	return (
 		<div className="space-y-8">
-			<section className="rounded-[2rem] border border-white/8 bg-slate-950/70 px-6 py-8 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:px-8">
-				<div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-					<div className="max-w-4xl">
-						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
-							Prism management node
+			<PageHeader
+				eyebrow="Prism management node"
+				title="Operational visibility for every Prism worker."
+				description="Source of truth for managed workers, live proxy sessions, tunnel registrations, and local runtime counters."
+				actions={
+					<>
+						<div className="rounded-3xl border border-white/8 bg-white/4 px-5 py-4 text-sm text-slate-300">
+							<div className="font-medium text-white">Connected endpoint</div>
+							<div className="mt-2 break-all text-cyan-200/85">{connection.baseUrl}</div>
 						</div>
-						<h1 className="mt-3 text-4xl font-semibold tracking-tight text-white md:text-5xl">
-							Operational visibility for every Prism worker.
-						</h1>
-						<p className="mt-4 max-w-2xl text-base leading-7 text-slate-400 md:text-lg">
-							This panel treats the management node as the source of truth, shows active versus
-							passive worker connectivity, and lets you edit managed listener and route revisions
-							visually instead of hand-editing files.
-						</p>
-					</div>
-
-					<div className="rounded-3xl border border-white/8 bg-white/4 px-5 py-4 text-sm text-slate-300">
-						<div className="font-medium text-white">Connected endpoint</div>
-						<div className="mt-2 break-all text-cyan-200/85">{connection.baseUrl}</div>
-						<div className="mt-3 flex flex-wrap gap-2">
-							<button
-								type="button"
-								onClick={fetchData}
-								disabled={loading}
-								className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10 disabled:opacity-50"
-							>
-								<RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
-								Refresh
-							</button>
-							<button
-								type="button"
-								onClick={handleReload}
-								disabled={reloading}
-								className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition hover:border-amber-400/30 hover:bg-amber-400/10 disabled:opacity-50"
-							>
-								<RotateCcw className={`h-3 w-3 ${reloading ? "animate-spin" : ""}`} />
-								Reload config
-							</button>
-						</div>
-					</div>
-				</div>
-			</section>
+						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
+							Auto-refresh {autoRefresh ? "on" : "off"}
+						</ToggleChip>
+						<RefreshButton onClick={fetchData} loading={loading} />
+						<SecondaryButton onClick={handleReload} disabled={reloading}>
+							<RotateCcw className={`h-4 w-4 ${reloading ? "animate-spin" : ""}`} />
+							Reload config
+						</SecondaryButton>
+					</>
+				}
+			/>
 
 			{reloadResult ? (
 				<div
@@ -141,18 +155,7 @@ function DashboardPage() {
 				</div>
 			) : null}
 
-			{error ? (
-				<div className="flex items-center justify-between rounded-3xl border border-red-400/20 bg-red-400/8 px-5 py-4 text-sm text-red-100">
-					<span>{error}</span>
-					<button
-						type="button"
-						onClick={fetchData}
-						className="rounded-xl border border-red-400/30 px-3 py-1.5 text-xs font-medium transition hover:bg-red-400/15"
-					>
-						Retry
-					</button>
-				</div>
-			) : null}
+			{error ? <ErrorBanner message={error} onRetry={fetchData} /> : null}
 
 			<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 				<MetricCard
@@ -166,14 +169,34 @@ function DashboardPage() {
 					icon={<CheckCircle2 className="h-5 w-5" />}
 				/>
 				<MetricCard
+					label="Revision drift"
+					value={drifted}
+					icon={<RefreshCw className="h-5 w-5" />}
+				/>
+				<MetricCard
 					label="Pending restart"
 					value={restartNodes}
 					icon={<AlertTriangle className="h-5 w-5" />}
 				/>
 				<MetricCard
+					label="Active connections"
+					value={connectionCount}
+					icon={<Activity className="h-5 w-5" />}
+				/>
+				<MetricCard
+					label="Tunnel services"
+					value={serviceCount}
+					icon={<Unplug className="h-5 w-5" />}
+				/>
+				<MetricCard
+					label="Ingress bytes"
+					value={metrics ? formatCompactBytes(metrics.bytes_ingress_total) : "n/a"}
+					icon={<Activity className="h-5 w-5" />}
+				/>
+				<MetricCard
 					label="State file"
 					value={status?.state_path ?? "Loading…"}
-					icon={<RefreshCw className="h-5 w-5" />}
+					icon={<ServerCog className="h-5 w-5" />}
 					compact
 				/>
 			</section>
@@ -183,7 +206,7 @@ function DashboardPage() {
 					<div>
 						<h2 className="text-2xl font-semibold text-white">Node fleet</h2>
 						<p className="mt-2 text-sm leading-6 text-slate-400">
-							Worker health, revision drift, and restart pressure across your managed Prism estate.
+							Worker health, revision drift, and restart pressure across managed workers.
 						</p>
 					</div>
 					<Link
@@ -196,10 +219,10 @@ function DashboardPage() {
 				</div>
 
 				<div className="mt-6 grid gap-4 xl:grid-cols-2">
-					{loading ? (
-						<LoadingState label="Loading management inventory…" />
+					{loading && nodes.length === 0 ? (
+						<StateCard label="Loading management inventory…" />
 					) : nodes.length > 0 ? (
-						nodes.slice(0, 4).map((node) => <NodeCard key={node.node_id} node={node} />)
+						nodes.slice(0, 6).map((node) => <NodeCard key={node.node_id} node={node} />)
 					) : (
 						<div className="rounded-3xl border border-dashed border-white/10 bg-white/3 px-6 py-10 text-sm text-slate-400">
 							No workers have enrolled yet. Connect one through the worker bootstrap config, then
@@ -212,33 +235,8 @@ function DashboardPage() {
 	);
 }
 
-function MetricCard({
-	label,
-	value,
-	icon,
-	compact = false,
-}: {
-	label: string;
-	value: string | number;
-	icon: React.ReactNode;
-	compact?: boolean;
-}) {
-	return (
-		<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 shadow-[0_18px_70px_rgba(2,6,23,0.35)]">
-			<div className="flex items-center justify-between text-slate-400">
-				<span className="text-sm uppercase tracking-[0.2em]">{label}</span>
-				<div className="text-cyan-300">{icon}</div>
-			</div>
-			<div
-				className={`mt-4 ${compact ? "break-all text-sm text-white" : "text-3xl font-semibold text-white"}`}
-			>
-				{value}
-			</div>
-		</div>
-	);
-}
-
 function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
+	const drifted = node.desired_revision !== node.applied_revision;
 	return (
 		<Link
 			to="/nodes/$nodeId"
@@ -250,18 +248,26 @@ function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
 					<div className="text-lg font-semibold text-white">{node.node_id}</div>
 					<div className="mt-2 text-sm text-slate-400">
 						Mode: <span className="text-cyan-200">{node.connection_mode ?? "unknown"}</span>
+						{" · "}
+						<span className="text-slate-300">{formatRelative(node.last_seen_unix_ms)}</span>
 					</div>
 				</div>
-				<div
-					className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${node.pending_restart ? "bg-amber-400/12 text-amber-100" : "bg-emerald-400/12 text-emerald-100"}`}
-				>
-					{node.pending_restart ? "restart" : "steady"}
+				<div className="flex flex-col items-end gap-2">
+					<Badge tone={node.pending_restart ? "warn" : "ok"}>
+						{node.pending_restart ? "restart" : "steady"}
+					</Badge>
+					{drifted ? <Badge tone="info">drift</Badge> : null}
 				</div>
 			</div>
 			<div className="mt-5 grid gap-3 sm:grid-cols-2">
 				<StatusMini label="Desired" value={node.desired_revision} />
 				<StatusMini label="Applied" value={node.applied_revision} />
 			</div>
+			{node.last_apply_error ? (
+				<div className="mt-4 truncate rounded-2xl border border-red-400/20 bg-red-400/8 px-3 py-2 text-xs text-red-100">
+					{node.last_apply_error}
+				</div>
+			) : null}
 		</Link>
 	);
 }
@@ -275,25 +281,17 @@ function StatusMini({ label, value }: { label: string; value: string | number })
 	);
 }
 
-function LoadingState({ label }: { label: string }) {
-	return (
-		<div className="rounded-3xl border border-white/8 bg-slate-950/70 px-6 py-10 text-sm text-slate-400">
-			{label}
-		</div>
-	);
-}
-
 function ConnectState() {
 	return (
 		<section className="flex min-h-[70vh] items-center justify-center">
 			<div className="max-w-2xl rounded-[2rem] border border-white/8 bg-slate-950/70 px-8 py-10 text-center shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
 				<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-300">
-					<PlugPanel />
+					<ServerCog className="h-8 w-8" />
 				</div>
 				<h1 className="mt-6 text-3xl font-semibold text-white">Connect to a management node</h1>
 				<p className="mt-4 text-base leading-7 text-slate-400">
-					The panel is deployable on its own, so it needs a management API base URL and a panel
-					bearer token before it can render node inventory or edit managed revisions.
+					The panel authenticates against the management API with a base URL and panel bearer token
+					before it can render inventory or edit managed revisions.
 				</p>
 				<Link
 					to="/login"
@@ -307,6 +305,9 @@ function ConnectState() {
 	);
 }
 
-function PlugPanel() {
-	return <ServerCog className="h-8 w-8" />;
+function formatCompactBytes(value: number) {
+	if (value < 1024) return `${value} B`;
+	if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+	if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+	return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

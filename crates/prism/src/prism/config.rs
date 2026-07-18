@@ -6,7 +6,12 @@ use std::{
 
 use anyhow::Context;
 use directories::ProjectDirs;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn deserialize_ignored_any<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConfigPath {
@@ -409,7 +414,6 @@ pub struct Config {
     pub managed: ManagedBootstrapConfig,
     pub listeners: Vec<ProxyListenerConfig>,
     pub admin_addr: String,
-    pub metrics: MetricsConfig,
     pub logging: LoggingConfig,
     pub routes: Vec<RouteConfig>,
     pub max_header_bytes: usize,
@@ -438,13 +442,6 @@ pub struct ProxyListenerConfig {
 pub struct ReloadConfig {
     pub enabled: bool,
     pub poll_interval: Duration,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetricsConfig {
-    pub enabled: bool,
-    pub duckdb_path: String,
-    pub flush_interval: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -526,7 +523,10 @@ struct FileConfig {
     #[serde(default)]
     admin_addr: String,
 
-    metrics: Option<FileMetrics>,
+    /// Accepted and ignored for backward compatibility (metrics support removed).
+    #[serde(default, deserialize_with = "deserialize_ignored_any")]
+    #[allow(dead_code)]
+    metrics: (),
 
     logging: Option<FileLogging>,
 
@@ -594,14 +594,6 @@ struct FileLogging {
     output: Option<String>,
     #[serde(default)]
     add_source: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct FileMetrics {
-    #[serde(default)]
-    enabled: bool,
-    duckdb_path: Option<String>,
-    flush_interval_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -705,23 +697,6 @@ impl Config {
             managed: ManagedBootstrapConfig::default(),
             listeners: vec![],
             admin_addr: fc.admin_addr.trim().to_string(),
-            metrics: MetricsConfig {
-                enabled: fc.metrics.as_ref().map(|m| m.enabled).unwrap_or(false),
-                duckdb_path: fc
-                    .metrics
-                    .as_ref()
-                    .and_then(|m| m.duckdb_path.clone())
-                    .unwrap_or_else(|| "metrics.duckdb".into())
-                    .trim()
-                    .to_string(),
-                flush_interval: Duration::from_millis(
-                    fc.metrics
-                        .as_ref()
-                        .and_then(|m| m.flush_interval_ms)
-                        .unwrap_or(10_000)
-                        .max(1000) as u64,
-                ),
-            },
             logging: LoggingConfig {
                 level: "info".into(),
                 format: "json".into(),
@@ -1173,7 +1148,7 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
         proxy_protocol_v2: doc.proxy_protocol_v2,
         buffer_size: doc.buffer_size,
         upstream_dial_timeout_ms: doc.upstream_dial_timeout_ms,
-        metrics: None,
+        metrics: (),
         timeouts: doc.timeouts.as_ref().map(|timeouts| FileTimeouts {
             handshake_timeout_ms: timeouts.handshake_timeout_ms,
             idle_timeout_ms: timeouts.idle_timeout_ms,
@@ -1252,7 +1227,6 @@ pub fn overlay_managed_config_document(
     cfg.role = bootstrap.role;
     cfg.managed = bootstrap.managed.clone();
     cfg.admin_addr = bootstrap.admin_addr.clone();
-    cfg.metrics = bootstrap.metrics.clone();
     cfg.logging = bootstrap.logging.clone();
     cfg.reload = bootstrap.reload.clone();
     Ok(cfg)
@@ -1279,9 +1253,6 @@ pub fn restart_required_reasons(current: &Config, next: &Config) -> Vec<String> 
     }
     if current.admin_addr.trim() != next.admin_addr.trim() {
         reasons.push("admin_addr changed".to_string());
-    }
-    if current.metrics != next.metrics {
-        reasons.push("metrics endpoint changed".to_string());
     }
     if current.tunnel.auth_token != next.tunnel.auth_token {
         reasons.push("tunnel auth_token changed".to_string());
@@ -1500,15 +1471,9 @@ middlewares = ["minecraft_handshake"]
     }
 
     #[test]
-    fn metrics_endpoint_defaults_disabled_and_can_be_enabled() {
-        let dir = temp_dir("metrics_enabled");
+    fn legacy_metrics_section_is_ignored() {
+        let dir = temp_dir("metrics_ignored");
         let cfg_path = dir.join("prism.toml");
-
-        std::fs::write(&cfg_path, "admin_addr = \":8080\"\n").expect("write");
-        let cfg = load_config(&cfg_path).expect("load_config");
-        assert!(!cfg.metrics.enabled);
-        assert_eq!(cfg.metrics.duckdb_path, "metrics.duckdb");
-        assert_eq!(cfg.metrics.flush_interval, Duration::from_millis(10_000));
 
         std::fs::write(
             &cfg_path,
@@ -1517,15 +1482,12 @@ admin_addr = ":8080"
 
 [metrics]
 enabled = true
-duckdb_path = "local.duckdb"
-flush_interval_ms = 2500
+store_path = "local.sqlite"
 "#,
         )
         .expect("write");
         let cfg = load_config(&cfg_path).expect("load_config");
-        assert!(cfg.metrics.enabled);
-        assert_eq!(cfg.metrics.duckdb_path, "local.duckdb");
-        assert_eq!(cfg.metrics.flush_interval, Duration::from_millis(2500));
+        assert_eq!(cfg.admin_addr, ":8080");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1566,19 +1528,6 @@ flush_interval_ms = 2500
 
         let reasons = restart_required_reasons(&current, &next);
         assert!(reasons.iter().any(|reason| reason.contains("listener")));
-    }
-
-    #[test]
-    fn restart_required_reasons_detect_metrics_endpoint_changes() {
-        let mut current = empty_managed_runtime_config();
-        let mut next = current.clone();
-        next.metrics.enabled = true;
-
-        let reasons = restart_required_reasons(&current, &next);
-        assert!(reasons.iter().any(|reason| reason.contains("metrics")));
-
-        current.metrics.enabled = true;
-        assert!(restart_required_reasons(&current, &next).is_empty());
     }
 
     #[test]

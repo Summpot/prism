@@ -258,10 +258,6 @@ Implemented endpoints:
 - `GET /config` → JSON with the resolved config path
 - `POST /reload` → sends a best-effort reload signal and returns a sequence number
 
-Optional: setting `[metrics].enabled = true` exposes `GET /metrics` as a
-lightweight JSON snapshot and writes periodic local history to an embedded
-DuckDB file under the Prism workdir.
-
 Managed control-plane endpoints:
 
 - `GET /managed/status`

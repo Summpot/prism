@@ -27,9 +27,6 @@ pub struct AdminAuth {
 
 #[derive(Clone)]
 pub struct AdminState {
-    pub metrics: telemetry::SharedMetrics,
-    pub metrics_store: Option<Arc<telemetry::DuckdbMetricsStore>>,
-    pub metrics_enabled: bool,
     pub sessions: telemetry::SharedSessions,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
@@ -67,7 +64,6 @@ pub(crate) fn build_router(state: AdminState) -> Router {
     let shared = Arc::new(state);
     Router::new()
         .route("/health", get(health))
-        .route("/metrics", get(metrics))
         .route("/conns", get(conns))
         .route("/tunnel/services", get(tunnel_services))
         .route("/reload", post(reload))
@@ -135,21 +131,6 @@ struct HealthResponse {
 
 async fn health() -> impl IntoResponse {
     (StatusCode::OK, Json(HealthResponse { ok: true }))
-}
-
-async fn metrics(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    if !st.metrics_enabled {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "metrics endpoint not enabled".to_string(),
-            }),
-        )
-            .into_response();
-    }
-
-    let store = st.metrics_store.as_ref().map(|store| store.snapshot());
-    (StatusCode::OK, Json(st.metrics.snapshot_with_store(store))).into_response()
 }
 
 async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {

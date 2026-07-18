@@ -33,23 +33,6 @@ export function formatDuration(startUnixMs: number) {
 	return `${days}d ${hours % 24}h`;
 }
 
-export function formatBytes(value: number) {
-	if (!Number.isFinite(value) || value <= 0) {
-		return "0 B";
-	}
-
-	const units = ["B", "KB", "MB", "GB", "TB"];
-	let size = value;
-	let unit = 0;
-	while (size >= 1024 && unit < units.length - 1) {
-		size /= 1024;
-		unit += 1;
-	}
-
-	const digits = size >= 100 || unit === 0 ? 0 : size >= 10 ? 1 : 2;
-	return `${size.toFixed(digits)} ${units[unit]}`;
-}
-
 export function formatRelative(unixMs: number) {
 	if (!unixMs) {
 		return "never";

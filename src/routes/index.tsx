@@ -26,11 +26,9 @@ import {
 	getConnections,
 	getManagedNodes,
 	getManagementStatus,
-	getMetrics,
 	getTunnelServices,
 	type ManagedNodeSnapshot,
 	type ManagementStatusResponse,
-	type MetricsSnapshot,
 	triggerReload,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
@@ -44,7 +42,6 @@ function DashboardPage() {
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
 	const [connectionCount, setConnectionCount] = useState(0);
 	const [serviceCount, setServiceCount] = useState(0);
-	const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [reloading, setReloading] = useState(false);
@@ -57,7 +54,6 @@ function DashboardPage() {
 			setNodes([]);
 			setConnectionCount(0);
 			setServiceCount(0);
-			setMetrics(null);
 			return;
 		}
 
@@ -71,14 +67,12 @@ function DashboardPage() {
 			getTunnelServices(connection).catch(
 				() => [] as Awaited<ReturnType<typeof getTunnelServices>>,
 			),
-			getMetrics(connection).catch(() => null),
 		])
-			.then(([nextStatus, nextNodes, nextConns, nextServices, nextMetrics]) => {
+			.then(([nextStatus, nextNodes, nextConns, nextServices]) => {
 				setStatus(nextStatus);
 				setNodes(nextNodes);
 				setConnectionCount(nextConns.length);
 				setServiceCount(nextServices.length);
-				setMetrics(nextMetrics);
 			})
 			.catch((nextError) => {
 				setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -124,7 +118,7 @@ function DashboardPage() {
 			<PageHeader
 				eyebrow="Prism management node"
 				title="Operational visibility for every Prism worker."
-				description="Source of truth for managed workers, live proxy sessions, tunnel registrations, and local runtime counters."
+				description="Source of truth for managed workers, live proxy sessions, and tunnel registrations."
 				actions={
 					<>
 						<div className="rounded-3xl border border-white/8 bg-white/4 px-5 py-4 text-sm text-slate-300">
@@ -187,11 +181,6 @@ function DashboardPage() {
 					label="Tunnel services"
 					value={serviceCount}
 					icon={<Unplug className="h-5 w-5" />}
-				/>
-				<MetricCard
-					label="Ingress bytes"
-					value={metrics ? formatCompactBytes(metrics.bytes_ingress_total) : "n/a"}
-					icon={<Activity className="h-5 w-5" />}
 				/>
 				<MetricCard
 					label="State file"
@@ -303,11 +292,4 @@ function ConnectState() {
 			</div>
 		</section>
 	);
-}
-
-function formatCompactBytes(value: number) {
-	if (value < 1024) return `${value} B`;
-	if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-	if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-	return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

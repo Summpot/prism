@@ -125,23 +125,6 @@ export interface ConfigPathResponse {
 	path: string;
 }
 
-export interface MetricsStoreSnapshot {
-	backend: string;
-	path: string;
-	flush_interval_ms: number;
-	last_flush_unix_ms: number;
-	last_error: string;
-}
-
-export interface MetricsSnapshot {
-	active_connections: number;
-	connections_total: number;
-	bytes_ingress_total: number;
-	bytes_egress_total: number;
-	route_hits_total: Record<string, number>;
-	store?: MetricsStoreSnapshot | null;
-}
-
 export class ManagementApiError extends Error {
 	status: number;
 
@@ -249,8 +232,4 @@ export function getHealth(connection: PanelConnection) {
 
 export function getConfigPath(connection: PanelConnection) {
 	return apiRequest<ConfigPathResponse>(connection, "/config");
-}
-
-export function getMetrics(connection: PanelConnection) {
-	return apiRequest<MetricsSnapshot>(connection, "/metrics");
 }

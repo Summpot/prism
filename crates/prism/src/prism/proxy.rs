@@ -11,23 +11,6 @@ use dashmap::DashMap;
 
 use crate::prism::{middleware, net, router, telemetry, tunnel};
 
-struct ActiveConnGuard {
-    metrics: telemetry::SharedMetrics,
-}
-
-impl ActiveConnGuard {
-    fn new(metrics: telemetry::SharedMetrics) -> Self {
-        metrics.connection_opened();
-        Self { metrics }
-    }
-}
-
-impl Drop for ActiveConnGuard {
-    fn drop(&mut self) {
-        self.metrics.connection_closed();
-    }
-}
-
 #[derive(Clone)]
 pub enum TcpHandler {
     Routing(Arc<TcpRoutingHandlerOptions>),
@@ -54,7 +37,6 @@ impl TcpHandler {
 pub struct TcpRoutingHandlerOptions {
     pub router: Arc<router::Router>,
     pub sessions: telemetry::SharedSessions,
-    pub metrics: telemetry::SharedMetrics,
 
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
 
@@ -64,7 +46,6 @@ pub struct TcpRoutingHandlerOptions {
 pub struct TcpForwardHandlerOptions {
     pub upstream: String,
     pub sessions: telemetry::SharedSessions,
-    pub metrics: telemetry::SharedMetrics,
 
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
 
@@ -129,7 +110,6 @@ pub async fn serve_tcp_with_shutdown(
 pub struct UdpForwardOptions {
     pub upstream: String,
     pub sessions: telemetry::SharedSessions,
-    pub metrics: telemetry::SharedMetrics,
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
     pub idle_timeout: Duration,
 }
@@ -192,7 +172,6 @@ pub async fn serve_udp_with_shutdown(
                             opts.upstream.clone(),
                             sock.clone(),
                             opts.sessions.clone(),
-                            opts.metrics.clone(),
                             opts.tunnel_manager.clone(),
                         ));
                         sessions.insert(src, s.clone());
@@ -210,7 +189,6 @@ pub async fn serve_udp_with_shutdown(
                         opts.upstream.clone(),
                         sock.clone(),
                         opts.sessions.clone(),
-                        opts.metrics.clone(),
                         opts.tunnel_manager.clone(),
                     ));
                     sessions.insert(src, sess.clone());
@@ -230,7 +208,6 @@ struct UdpSession {
     upstream: String,
     sock: Arc<UdpSocket>,
     sessions: telemetry::SharedSessions,
-    metrics: telemetry::SharedMetrics,
     tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
     last_seen_unix_ms: std::sync::atomic::AtomicU64,
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -243,7 +220,6 @@ impl UdpSession {
         upstream: String,
         sock: Arc<UdpSocket>,
         sessions: telemetry::SharedSessions,
-        metrics: telemetry::SharedMetrics,
         tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
     ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
@@ -254,7 +230,6 @@ impl UdpSession {
             upstream: upstream.clone(),
             sock,
             sessions,
-            metrics,
             tunnel_manager,
             last_seen_unix_ms: std::sync::atomic::AtomicU64::new(telemetry::now_unix_ms()),
             tx,
@@ -282,10 +257,8 @@ impl UdpSession {
         let upstream = self.upstream.clone();
         let sock = self.sock.clone();
         let sessions = self.sessions.clone();
-        let metrics = self.metrics.clone();
         let tunnel_manager = self.tunnel_manager.clone();
 
-        metrics.connection_opened();
         sessions.add(telemetry::SessionInfo {
             id: sid.clone(),
             client: src.to_string(),
@@ -296,7 +269,6 @@ impl UdpSession {
 
         tokio::spawn(async move {
             let res = udp_session_loop(sock, src, upstream, tunnel_manager, rx).await;
-            metrics.connection_closed();
             sessions.remove(&sid);
             if let Err(err) = res
                 && tracing::enabled!(tracing::Level::DEBUG)
@@ -413,7 +385,6 @@ async fn udp_sweep_loop(
 }
 
 async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>) {
-    let _active = ActiveConnGuard::new(opts.metrics.clone());
     let sid = telemetry::new_session_id();
     let client = conn.peer_addr().map(|a| a.to_string()).unwrap_or_default();
 
@@ -463,18 +434,12 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
 
     opts.sessions.remove(&sid);
 
-    match res {
-        Ok((ingress, egress)) => {
-            opts.metrics.record_bytes(ingress, egress);
-        }
-        Err(err) => {
-            tracing::debug!(sid = %sid, err = %err, "proxy: forward ended with error");
-        }
+    if let Err(err) = res {
+        tracing::debug!(sid = %sid, err = %err, "proxy: forward ended with error");
     }
 }
 
 async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>) {
-    let _active = ActiveConnGuard::new(opts.metrics.clone());
     let sid = telemetry::new_session_id();
     let client = conn.peer_addr().map(|a| a.to_string()).unwrap_or_default();
 
@@ -562,8 +527,6 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         let _ = conn.shutdown().await;
         return;
     }
-
-    opts.metrics.record_route_hit(&host);
 
     let default_port = conn.local_addr().ok().map(|a| a.port());
 
@@ -671,13 +634,8 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
 
     opts.sessions.remove(&sid);
 
-    match res {
-        Ok((ingress, egress)) => {
-            opts.metrics.record_bytes(ingress, egress);
-        }
-        Err(err) => {
-            tracing::debug!(sid=%sid, err=%err, "proxy: session ended with error");
-        }
+    if let Err(err) = res {
+        tracing::debug!(sid=%sid, err=%err, "proxy: session ended with error");
     }
 }
 

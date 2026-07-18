@@ -24,6 +24,14 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Quinn/reqwest pull both aws-lc-rs and ring into rustls. When more than one
+    // crypto backend is enabled, rustls refuses to auto-select a process default
+    // and panics on ServerConfig/ClientConfig builders used by QUIC tunnels.
+    // Prefer ring to match the existing insecure-skip-verify path in quic transport.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("install rustls CryptoProvider");
+
     let cli = Cli::parse();
     prism::run(cli.config, cli.workdir, cli.middleware_dir).await
 }

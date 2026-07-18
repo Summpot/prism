@@ -294,12 +294,22 @@ mod quic_tls {
         Ok(k)
     }
 
+    fn crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
+        // Prefer the process-level default when main installed one; otherwise use ring.
+        if let Some(provider) = rustls::crypto::CryptoProvider::get_default() {
+            Arc::clone(provider)
+        } else {
+            Arc::new(rustls::crypto::ring::default_provider())
+        }
+    }
+
     pub fn server_crypto_config(
         certs: Vec<CertificateDer<'static>>,
         key: PrivateKeyDer<'static>,
         next_protos: Vec<Vec<u8>>,
     ) -> anyhow::Result<rustls::ServerConfig> {
-        let mut cfg = rustls::ServerConfig::builder()
+        let mut cfg = rustls::ServerConfig::builder_with_provider(crypto_provider())
+            .with_safe_default_protocol_versions()?
             .with_no_client_auth()
             .with_single_cert(certs, key)?;
         cfg.alpn_protocols = next_protos;
@@ -311,7 +321,8 @@ mod quic_tls {
         next_protos: Vec<Vec<u8>>,
     ) -> anyhow::Result<rustls::ClientConfig> {
         if insecure_skip_verify {
-            let mut cfg = rustls::ClientConfig::builder()
+            let mut cfg = rustls::ClientConfig::builder_with_provider(crypto_provider())
+                .with_safe_default_protocol_versions()?
                 .dangerous()
                 .with_custom_certificate_verifier(SkipServerVerification::new())
                 .with_no_client_auth();
@@ -320,7 +331,8 @@ mod quic_tls {
         }
 
         let root = rustls::RootCertStore::empty();
-        let mut cfg = rustls::ClientConfig::builder()
+        let mut cfg = rustls::ClientConfig::builder_with_provider(crypto_provider())
+            .with_safe_default_protocol_versions()?
             .with_root_certificates(root)
             .with_no_client_auth();
         cfg.alpn_protocols = next_protos;
@@ -335,7 +347,7 @@ mod quic_tls {
 
     impl SkipServerVerification {
         fn new() -> Arc<Self> {
-            Arc::new(Self(Arc::new(rustls::crypto::ring::default_provider())))
+            Arc::new(Self(crypto_provider()))
         }
     }
 

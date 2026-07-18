@@ -11,10 +11,14 @@ FROM node:22-slim AS frontend
 
 WORKDIR /app
 
+# Pin pnpm so Docker CI does not pick up breaking "latest" policy changes
+# (e.g. ignored dependency build scripts / approve-builds).
 RUN corepack enable \
-    && corepack prepare pnpm@latest --activate
+    && corepack prepare pnpm@10.28.0 --activate
 
 COPY package.json pnpm-lock.yaml ./
+# package.json declares pnpm.onlyBuiltDependencies so esbuild's postinstall
+# is allowed under pnpm 10's strict dependency build policy.
 RUN --mount=type=cache,target=/root/.pnpm-store \
     pnpm install --frozen-lockfile
 

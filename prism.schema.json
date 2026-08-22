@@ -326,6 +326,44 @@
 					"type": "array",
 					"description": "Tunnel client registered services.",
 					"items": { "$ref": "#/$defs/tunnelService" }
+				},
+				"mdns": { "$ref": "#/$defs/mdns" }
+			}
+		},
+		"mdns": {
+			"type": "object",
+			"additionalProperties": false,
+			"description": "mDNS local service discovery settings (tunnel client only). When enabled, Prism advertises tunnel services on the LAN via mDNS and starts a local proxy for hostname-based routing.",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable mDNS service advertisement and local LAN proxy.",
+					"default": false
+				},
+				"domain": {
+					"type": "string",
+					"description": "mDNS domain suffix.",
+					"default": "local"
+				},
+				"subdomain": {
+					"type": "string",
+					"description": "Optional subdomain label. E.g. 'prism' makes services resolve as <name>.prism.local.",
+					"default": ""
+				},
+				"listen_addr": {
+					"type": "string",
+					"description": "Local proxy listen address (e.g. ':25565'). Bound on 0.0.0.0 for LAN access.",
+					"default": ""
+				},
+				"middlewares": {
+					"oneOf": [
+						{ "type": "string" },
+						{
+							"type": "array",
+							"items": { "type": "string" }
+						}
+					],
+					"description": "Middleware(s) for hostname extraction on the local proxy (e.g. 'minecraft_handshake')."
 				}
 			}
 		},

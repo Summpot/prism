@@ -343,6 +343,21 @@ pub struct ManagedTimeoutsDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+pub struct ManagedMdnsDocument {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default)]
+    pub subdomain: String,
+    #[serde(default)]
+    pub listen_addr: String,
+    #[serde(default)]
+    pub middlewares: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedTunnelDocument {
     #[serde(default)]
     pub auth_token: String,
@@ -353,6 +368,7 @@ pub struct ManagedTunnelDocument {
     pub client: Option<ManagedTunnelClientDocument>,
     #[serde(default)]
     pub services: Vec<ManagedTunnelServiceDocument>,
+    pub mdns: Option<ManagedMdnsDocument>,
 }
 
 fn default_true() -> bool {
@@ -461,12 +477,26 @@ pub struct RouteConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MdnsConfig {
+    pub enabled: bool,
+    /// Domain suffix, default "local".
+    pub domain: String,
+    /// Optional subdomain label, e.g. "prism" -> <name>.prism.local
+    pub subdomain: String,
+    /// Listen address for the local proxy (e.g. ":25565"), bound on 0.0.0.0 for LAN access.
+    pub listen_addr: String,
+    /// Middleware names used for hostname extraction on the local proxy.
+    pub middlewares: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TunnelConfig {
     pub auth_token: String,
     pub auto_listen_services: bool,
     pub endpoints: Vec<TunnelEndpointConfig>,
     pub client: Option<TunnelClientConfig>,
     pub services: Vec<TunnelServiceConfig>,
+    pub mdns: MdnsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,6 +663,17 @@ struct FileTunnel {
     endpoints: Option<Vec<FileTunnelEndpoint>>,
     client: Option<FileTunnelClient>,
     services: Option<Vec<FileTunnelService>>,
+    mdns: Option<FileMdns>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileMdns {
+    #[serde(default)]
+    enabled: bool,
+    domain: Option<String>,
+    subdomain: Option<String>,
+    listen_addr: Option<String>,
+    middlewares: Option<StringOrVec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -957,6 +998,35 @@ impl Config {
                     });
                 }
             }
+
+            if let Some(m) = &t.mdns {
+                cfg.tunnel.mdns.enabled = m.enabled;
+                cfg.tunnel.mdns.domain = m
+                    .domain
+                    .clone()
+                    .unwrap_or_else(|| "local".into())
+                    .trim()
+                    .to_ascii_lowercase();
+                if cfg.tunnel.mdns.domain.is_empty() {
+                    cfg.tunnel.mdns.domain = "local".into();
+                }
+                cfg.tunnel.mdns.subdomain = m
+                    .subdomain
+                    .clone()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_ascii_lowercase();
+                cfg.tunnel.mdns.listen_addr =
+                    m.listen_addr.clone().unwrap_or_default().trim().to_string();
+                cfg.tunnel.mdns.middlewares = m
+                    .middlewares
+                    .clone()
+                    .map(|v| v.into_vec())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|s| normalize_middleware_ref(&s).ok())
+                    .collect();
+            }
         } else {
             // Default: match Go defaults.
             cfg.tunnel.auto_listen_services = true;
@@ -1213,6 +1283,29 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                     })
                     .collect(),
             ),
+            mdns: tunnel.mdns.as_ref().map(|m| FileMdns {
+                enabled: m.enabled,
+                domain: if m.domain.trim().is_empty() {
+                    None
+                } else {
+                    Some(m.domain.clone())
+                },
+                subdomain: if m.subdomain.trim().is_empty() {
+                    None
+                } else {
+                    Some(m.subdomain.clone())
+                },
+                listen_addr: if m.listen_addr.trim().is_empty() {
+                    None
+                } else {
+                    Some(m.listen_addr.clone())
+                },
+                middlewares: if m.middlewares.is_empty() {
+                    None
+                } else {
+                    Some(StringOrVec::Many(m.middlewares.clone()))
+                },
+            }),
         }),
     };
 
@@ -1268,6 +1361,9 @@ pub fn restart_required_reasons(current: &Config, next: &Config) -> Vec<String> 
     }
     if current.tunnel.services != next.tunnel.services {
         reasons.push("tunnel services changed".to_string());
+    }
+    if current.tunnel.mdns != next.tunnel.mdns {
+        reasons.push("tunnel mdns changed".to_string());
     }
 
     reasons
@@ -1552,5 +1648,104 @@ upstreams = ["127.0.0.1:1234"]
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_mdns_config_toml_parsing() {
+        let dir = temp_dir("mdns_config");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel]
+auth_token = "secret"
+
+[tunnel.client]
+server_addr = "127.0.0.1:7000"
+
+[[tunnel.services]]
+name = "home-mc"
+local_addr = "127.0.0.1:25565"
+
+[tunnel.mdns]
+enabled = true
+domain = "local"
+subdomain = "prism"
+listen_addr = ":25565"
+middlewares = ["minecraft_handshake"]
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert!(cfg.tunnel.mdns.enabled);
+        assert_eq!(cfg.tunnel.mdns.domain, "local");
+        assert_eq!(cfg.tunnel.mdns.subdomain, "prism");
+        assert_eq!(cfg.tunnel.mdns.listen_addr, ":25565");
+        assert_eq!(
+            cfg.tunnel.mdns.middlewares,
+            vec!["minecraft_handshake".to_string()]
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_mdns_defaults() {
+        let dir = temp_dir("mdns_defaults");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.mdns]
+enabled = true
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert!(cfg.tunnel.mdns.enabled);
+        assert_eq!(cfg.tunnel.mdns.domain, "local");
+        assert_eq!(cfg.tunnel.mdns.subdomain, "");
+        assert_eq!(cfg.tunnel.mdns.listen_addr, "");
+        assert!(cfg.tunnel.mdns.middlewares.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restart_required_reasons_detect_mdns_changes() {
+        let current = validate_managed_config_document(&ManagedConfigDocument {
+            tunnel: Some(ManagedTunnelDocument {
+                mdns: Some(ManagedMdnsDocument {
+                    enabled: false,
+                    domain: "local".into(),
+                    subdomain: "prism".into(),
+                    listen_addr: ":25565".into(),
+                    middlewares: vec!["minecraft_handshake".into()],
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("current config");
+
+        let next = validate_managed_config_document(&ManagedConfigDocument {
+            tunnel: Some(ManagedTunnelDocument {
+                mdns: Some(ManagedMdnsDocument {
+                    enabled: true,
+                    domain: "local".into(),
+                    subdomain: "prism".into(),
+                    listen_addr: ":25565".into(),
+                    middlewares: vec!["minecraft_handshake".into()],
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("next config");
+
+        let reasons = restart_required_reasons(&current, &next);
+        assert!(reasons.iter().any(|reason| reason.contains("mdns")));
     }
 }

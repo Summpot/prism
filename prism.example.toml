@@ -90,6 +90,18 @@ key_file = ""
 # # Leave empty for normal Minecraft tunnel routing to preserve the client's handshake host.
 # # Supports $1, $2... substitutions from route wildcard capture groups.
 
+# mDNS local service discovery (tunnel client only).
+# When enabled, Prism advertises tunnel services on the local network via mDNS
+# so that other LAN devices can resolve <service>.<subdomain>.local to this machine
+# and connect through the local proxy.
+#
+# [tunnel.mdns]
+# enabled = false
+# domain = "local"
+# subdomain = "prism"         # services -> <name>.prism.local
+# listen_addr = ":25565"      # local proxy bind address (0.0.0.0 for LAN access)
+# middlewares = ["minecraft_handshake"]  # middleware for hostname extraction
+
 [logging]
 level = "info"
 format = "json"

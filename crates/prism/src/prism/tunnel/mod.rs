@@ -6,7 +6,9 @@
 pub mod autolisten;
 pub mod client;
 pub mod datagram;
+pub mod local_proxy;
 pub mod manager;
+pub mod mdns;
 pub mod protocol;
 pub mod server;
 pub mod transport;

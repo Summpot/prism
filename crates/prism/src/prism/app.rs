@@ -335,6 +335,83 @@ pub async fn run(
         let client = Arc::new(client);
         let shutdown = shutdown_rx.clone();
         tasks.spawn(async move { client.run(shutdown).await });
+
+        // mDNS local service discovery + local proxy.
+        if cfg.tunnel.mdns.enabled && !cfg.tunnel.mdns.listen_addr.trim().is_empty() {
+            // Build service name -> local_addr map for the local proxy.
+            let mut svc_map = std::collections::HashMap::new();
+            for s in &cfg.tunnel.services {
+                let name = s.name.trim().to_ascii_lowercase();
+                if !name.is_empty() && !s.local_addr.trim().is_empty() {
+                    svc_map.insert(name, s.local_addr.trim().to_string());
+                }
+            }
+
+            // Determine proxy port for mDNS advertisement.
+            let bind_addr = net::normalize_bind_addr(&cfg.tunnel.mdns.listen_addr);
+            let port: u16 = bind_addr
+                .rsplit_once(':')
+                .and_then(|(_, p)| p.parse().ok())
+                .unwrap_or(0);
+
+            // Start mDNS responder.
+            match tunnel::mdns::MdnsResponder::new(
+                &cfg.tunnel.mdns.domain,
+                &cfg.tunnel.mdns.subdomain,
+                port,
+                "", // auto-detect LAN IP
+            ) {
+                Ok(mut mdns) => {
+                    let names: Vec<&str> = svc_map.keys().map(|s| s.as_str()).collect();
+                    mdns.reconcile(&names);
+                    // Keep mdns alive until shutdown.
+                    let mut shutdown = shutdown_rx.clone();
+                    tasks.spawn(async move {
+                        let _ = shutdown.changed().await;
+                        mdns.shutdown();
+                        Ok(())
+                    });
+                }
+                Err(err) => {
+                    tracing::warn!(err = %err, "mdns: failed to start responder (continuing without mDNS)");
+                }
+            }
+
+            // Build middleware chain for hostname extraction.
+            if !cfg.tunnel.mdns.middlewares.is_empty() {
+                let provider =
+                    middleware::FsWasmMiddlewareProvider::new(paths.middleware_dir.clone());
+                match provider.chain(&cfg.tunnel.mdns.middlewares) {
+                    Ok(chain) => {
+                        let proxy = tunnel::local_proxy::LocalProxy::new(
+                            tunnel::local_proxy::LocalProxyConfig {
+                                listen_addr: cfg.tunnel.mdns.listen_addr.clone(),
+                                max_header_bytes: cfg.max_header_bytes,
+                                handshake_timeout: cfg.timeouts.handshake_timeout,
+                                domain: cfg.tunnel.mdns.domain.clone(),
+                                subdomain: cfg.tunnel.mdns.subdomain.clone(),
+                            },
+                            Arc::new(svc_map),
+                            chain,
+                        );
+                        let shutdown = shutdown_rx.clone();
+                        tasks.spawn(async move { proxy.run(shutdown).await });
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            err = %err,
+                            middlewares = ?cfg.tunnel.mdns.middlewares,
+                            "mdns: failed to build middleware chain for local proxy"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "mdns: no middlewares configured; local proxy will not start \
+                     (set tunnel.mdns.middlewares)"
+                );
+            }
+        }
     }
 
     if let Some(worker_agent) = &worker_agent {

@@ -21,6 +21,7 @@ pub struct ServerOptions {
     pub auth_token: String,
     pub quic: QuicServerOptions,
     pub manager: Arc<Manager>,
+    pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
 }
 
 pub struct Server {
@@ -74,8 +75,9 @@ impl Server {
                     let sess = sess?;
                     let mgr = self.opts.manager.clone();
                     let token = self.opts.auth_token.clone();
+                    let auth_mgr = self.opts.auth_manager.clone();
                     tokio::spawn(async move {
-                        if let Err(err) = handle_session(mgr, sess, token).await {
+                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr).await {
                             tracing::warn!(err=%err, "tunnel: session ended with error");
                         }
                     });
@@ -92,6 +94,7 @@ async fn handle_session(
     mgr: Arc<Manager>,
     sess: Arc<dyn crate::prism::tunnel::transport::TransportSession>,
     auth_token: String,
+    auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
 ) -> anyhow::Result<()> {
     let remote = sess
         .remote_addr()
@@ -102,23 +105,62 @@ async fn handle_session(
     let mut reg = sess.accept_stream().await?;
     let req = protocol::read_register_request(&mut reg).await?;
 
-    if !auth_token.trim().is_empty() && req.token != auth_token {
-        tracing::warn!(client=%remote, "tunnel: bad token");
-        sess.close().await;
-        return Ok(());
-    }
+    let identity = if let Some(ref am) = auth_mgr {
+        match am.verify_token(&req.token).await {
+            Some(ident) => Some(ident),
+            None => {
+                if !auth_token.trim().is_empty() && req.token == auth_token {
+                    Some(crate::prism::auth::AuthIdentity {
+                        user_id: "legacy_admin".to_string(),
+                        username: "Legacy Admin".to_string(),
+                        role: crate::prism::auth::UserRole::Admin,
+                        service_rules: vec!["*".to_string()],
+                        is_admin: true,
+                    })
+                } else if auth_token.trim().is_empty() && !am.is_auth_enabled().await {
+                    None
+                } else {
+                    tracing::warn!(client=%remote, "tunnel: bad token");
+                    sess.close().await;
+                    return Ok(());
+                }
+            }
+        }
+    } else if !auth_token.trim().is_empty() {
+        if req.token != auth_token {
+            tracing::warn!(client=%remote, "tunnel: bad token");
+            sess.close().await;
+            return Ok(());
+        }
+        None
+    } else {
+        None
+    };
 
     if req.is_client() {
         let cid = mgr.next_client_id("cs");
         mgr.register_client_session(cid.clone(), sess.clone())
             .await?;
-        tracing::info!(cid=%cid, client=%remote, "tunnel: client sidecar connected");
+        tracing::info!(
+            cid = %cid,
+            client = %remote,
+            user = ?identity.as_ref().map(|i| &i.username),
+            "tunnel: client sidecar connected"
+        );
 
         // Broadcast loop on reg stream sending active services whenever services change.
         let mgr_broadcast = mgr.clone();
+        let auth_mgr_broadcast = auth_mgr.clone();
+        let identity_broadcast = identity.clone();
+
         let broadcast_task = tokio::spawn(async move {
             let mut sub = mgr_broadcast.subscribe();
             let initial = mgr_broadcast.active_services().await;
+            let initial = if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
+                am.filter_services(id, &initial)
+            } else {
+                initial
+            };
             if protocol::write_service_catalog(&mut reg, &initial)
                 .await
                 .is_err()
@@ -127,6 +169,12 @@ async fn handle_session(
             }
             while sub.changed().await.is_ok() {
                 let services = mgr_broadcast.active_services().await;
+                let services =
+                    if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
+                        am.filter_services(id, &services)
+                    } else {
+                        services
+                    };
                 if protocol::write_service_catalog(&mut reg, &services)
                     .await
                     .is_err()
@@ -139,8 +187,11 @@ async fn handle_session(
         // Accept streams from connected Client that writes a PRPX header.
         while let Ok(client_stream) = sess.accept_stream().await {
             let mgr = mgr.clone();
+            let auth_mgr = auth_mgr.clone();
+            let identity = identity.clone();
             tokio::spawn(async move {
-                if let Err(err) = handle_client_stream(mgr, client_stream).await {
+                if let Err(err) = handle_client_stream(mgr, client_stream, auth_mgr, identity).await
+                {
                     tracing::debug!(err=%err, "tunnel: client stream relay ended");
                 }
             });
@@ -170,9 +221,23 @@ async fn handle_session(
 async fn handle_client_stream(
     mgr: Arc<Manager>,
     mut client_stream: crate::prism::tunnel::transport::BoxedStream,
+    auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
+    identity: Option<crate::prism::auth::AuthIdentity>,
 ) -> anyhow::Result<()> {
     let (kind, service_name, flags) =
         protocol::read_proxy_stream_header_with_flags(&mut client_stream).await?;
+
+    if let (Some(am), Some(id)) = (&auth_mgr, &identity) {
+        if !am.can_access_service(id, &service_name) {
+            tracing::warn!(
+                user = %id.username,
+                service = %service_name,
+                "tunnel: unauthorized client stream blocked by ACL"
+            );
+            return Ok(());
+        }
+    }
+
     match kind {
         protocol::ProxyStreamKind::Tcp => {
             let (mut conn_stream, _meta) = if flags != 0 {
@@ -294,7 +359,7 @@ mod tests {
         let mgr_clone = mgr.clone();
         let sess_clone = sess.clone();
         let handle = tokio::spawn(async move {
-            let _ = handle_session(mgr_clone, sess_clone, "secret".into()).await;
+            let _ = handle_session(mgr_clone, sess_clone, "secret".into(), None).await;
         });
 
         // Wait briefly for registration
@@ -343,7 +408,7 @@ mod tests {
         let mgr_clone = mgr.clone();
         let sess_clone = sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_clone, sess_clone, "".into()).await;
+            let _ = handle_session(mgr_clone, sess_clone, "".into(), None).await;
         });
 
         // Initially empty
@@ -374,7 +439,7 @@ mod tests {
         let mgr_c = mgr.clone();
         let conn_sess_clone = conn_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_clone, "".into()).await;
+            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None).await;
         });
 
         let (c1, c2) = w_handle.await.unwrap();
@@ -417,7 +482,7 @@ mod tests {
         let mgr_c = mgr.clone();
         let conn_sess_clone = conn_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_clone, "".into()).await;
+            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -441,7 +506,7 @@ mod tests {
         let mgr_cs = mgr.clone();
         let client_sess_clone = client_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_clone, "".into()).await;
+            let _ = handle_session(mgr_cs, client_sess_clone, "".into(), None).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -493,5 +558,124 @@ mod tests {
         conn_sess.close().await;
         drop(conn_accept_tx);
         drop(client_accept_tx);
+    }
+
+    #[tokio::test]
+    async fn server_filters_catalog_and_blocks_unauthorized_dial_by_acl() {
+        use crate::prism::auth::{AuthConfig, AuthManager, UserRecord, UserRole};
+
+        let auth = Arc::new(AuthManager::new(AuthConfig::default(), None));
+        let user = UserRecord {
+            id: "u_alice".into(),
+            username: "alice".into(),
+            display_name: None,
+            avatar_url: None,
+            role: UserRole::Member,
+            service_rules: vec!["mc-*".into()],
+            created_at_unix_ms: 100,
+            last_login_unix_ms: 100,
+        };
+        auth.upsert_user(user).await.unwrap();
+        let (alice_token, _) = auth
+            .create_client_token("u_alice", "Alice PC", None)
+            .await
+            .unwrap();
+
+        let mgr = Arc::new(Manager::new());
+
+        // 1. Connector registers two services: mc-survival and secret-database
+        let (conn_tx, conn_rx) = mpsc::channel(16);
+        let (conn_open_tx, mut conn_open_rx) = mpsc::channel(16);
+        let conn_sess = Arc::new(MockSession::new(conn_rx, Some(conn_open_tx)));
+        let (mut conn_reg_c, conn_reg_s) = tokio::io::duplex(4096);
+        conn_tx.send(Box::new(conn_reg_s)).await.unwrap();
+
+        let conn_req = protocol::RegisterRequest {
+            client_type: "connector".into(),
+            token: "conn_secret".into(),
+            services: vec![
+                protocol::RegisteredService {
+                    name: "mc-survival".into(),
+                    proto: "tcp".into(),
+                    local_addr: "127.0.0.1:25565".into(),
+                    ..Default::default()
+                },
+                protocol::RegisteredService {
+                    name: "secret-database".into(),
+                    proto: "tcp".into(),
+                    local_addr: "127.0.0.1:3306".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+        tokio::spawn(async move {
+            protocol::write_register_request(&mut conn_reg_c, &conn_req)
+                .await
+                .unwrap();
+        });
+
+        let mgr_c = mgr.clone();
+        let conn_sess_c = conn_sess.clone();
+        let auth_c = auth.clone();
+        tokio::spawn(async move {
+            let _ = handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c)).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(mgr.active_services().await.len(), 2);
+
+        // 2. Alice connects as client with her token
+        let (client_tx, client_rx) = mpsc::channel(16);
+        let client_sess = Arc::new(MockSession::new(client_rx, None));
+        let (mut client_reg_c, client_reg_s) = tokio::io::duplex(4096);
+        client_tx.send(Box::new(client_reg_s)).await.unwrap();
+
+        let client_req = protocol::RegisterRequest {
+            client_type: "client".into(),
+            token: alice_token,
+            services: vec![],
+        };
+
+        let cat_handle = tokio::spawn(async move {
+            protocol::write_register_request(&mut client_reg_c, &client_req)
+                .await
+                .unwrap();
+            protocol::read_service_catalog(&mut client_reg_c)
+                .await
+                .unwrap()
+        });
+
+        let mgr_cs = mgr.clone();
+        let client_sess_c = client_sess.clone();
+        let auth_cs = auth.clone();
+        tokio::spawn(async move {
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs)).await;
+        });
+
+        // 3. Verify that Alice ONLY sees mc-survival in catalog (secret-database filtered out)
+        let catalog = cat_handle.await.unwrap();
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].name, "mc-survival");
+
+        // 4. Alice attempts to dial unauthorized "secret-database"
+        let (mut dial_client, dial_server) = tokio::io::duplex(4096);
+        client_tx.send(Box::new(dial_server)).await.unwrap();
+
+        protocol::write_proxy_stream_header(
+            &mut dial_client,
+            protocol::ProxyStreamKind::Tcp,
+            "secret-database",
+        )
+        .await
+        .unwrap();
+        dial_client.write_all(b"HACK").await.unwrap();
+
+        // Connector should NOT receive any dial stream because server ACL blocked it!
+        let dialed =
+            tokio::time::timeout(std::time::Duration::from_millis(100), conn_open_rx.recv()).await;
+        assert!(dialed.is_err()); // timed out = blocked!
+
+        client_sess.close().await;
+        conn_sess.close().await;
     }
 }

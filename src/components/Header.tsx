@@ -11,6 +11,7 @@ import {
 	PlugZap,
 	ShieldCheck,
 	Unplug,
+	Users,
 	X,
 } from "lucide-react";
 import { useState } from "react";
@@ -24,6 +25,7 @@ const navItems = [
 	{ to: "/connections", label: "Connections", icon: <Cable className="h-4 w-4" /> },
 	{ to: "/tunnel-services", label: "Tunnel Services", icon: <Unplug className="h-4 w-4" /> },
 	{ to: "/runtime", label: "Runtime", icon: <Gauge className="h-4 w-4" /> },
+	{ to: "/users", label: "Access & Users", icon: <Users className="h-4 w-4" /> },
 	{ to: "/login", label: "Connection", icon: <PlugZap className="h-4 w-4" /> },
 ] as const;
 

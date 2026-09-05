@@ -43,6 +43,18 @@ reload:
 
 max_header_bytes: 65536
 
+# Authentication & Access Control (OAuth + Token Management)
+# auth:
+#   github:
+#     enabled: false
+#     client_id: "your-github-oauth-client-id"
+#     client_secret: "your-github-oauth-client-secret"
+#     redirect_uri: "http://127.0.0.1:8080/auth/github/callback"
+#     allowed_users: ["your-github-username"]
+#     allowed_orgs: []
+#     admin_users: ["your-github-username"]
+#     default_service_rules: ["*"]
+
 tunnel:
   auth_token: ""
   # When true, prisms will automatically open server-side listeners for tunnel

@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev --port 3000",
-		"build": "vite build",
+		"build": "vite build && node -e \"const fs=require('fs'); if(fs.existsSync('dist/client/_shell.html')) fs.copyFileSync('dist/client/_shell.html', 'dist/client/index.html');\"",
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
 		"format": "oxfmt",
@@ -39,6 +39,7 @@
 		"jsdom": "^27.4.0",
 		"oxfmt": "^0.43.0",
 		"oxlint": "^1.58.0",
+		"tauri": "^0.15.0",
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1",
 		"vitest": "^3.2.4",

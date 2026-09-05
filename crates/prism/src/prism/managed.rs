@@ -750,6 +750,7 @@ mod tests {
             management: Some(plane),
             worker: None,
             client: None,
+            auth_manager: None,
         };
 
         let app: Router = admin::build_router(state);

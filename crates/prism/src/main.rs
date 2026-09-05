@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod prism;
 
 use clap::Parser;
@@ -32,6 +34,15 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        unsafe extern "system" {
+            fn AttachConsole(dwProcessId: u32) -> i32;
+        }
+        // Attach to calling terminal so CLI usage prints output
+        AttachConsole(0xFFFFFFFF);
+    }
+
     // Quinn/reqwest pull both aws-lc-rs and ring into rustls. When more than one
     // crypto backend is enabled, rustls refuses to auto-select a process default
     // and panics on ServerConfig/ClientConfig builders used by QUIC tunnels.
@@ -58,6 +69,22 @@ async fn main() -> anyhow::Result<()> {
 
         let should_launch_gui = cli.gui || (cli.config.is_none() && !cli.headless && has_display);
         if should_launch_gui {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                unsafe extern "system" {
+                    fn GetConsoleWindow() -> *mut std::ffi::c_void;
+                    fn ShowWindow(hwnd: *mut std::ffi::c_void, nCmdShow: i32) -> i32;
+                    fn GetConsoleProcessList(process_list: *mut u32, count: u32) -> u32;
+                }
+                let mut pids = [0u32; 2];
+                let count = GetConsoleProcessList(pids.as_mut_ptr(), 2);
+                if count <= 1 {
+                    let hwnd = GetConsoleWindow();
+                    if !hwnd.is_null() {
+                        ShowWindow(hwnd, 0);
+                    }
+                }
+            }
             return prism::desktop::run().await;
         }
     }

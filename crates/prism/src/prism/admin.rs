@@ -36,6 +36,7 @@ pub struct AdminState {
     pub management: Option<Arc<managed::ManagementPlane>>,
     pub worker: Option<Arc<managed::WorkerAgent>>,
     pub client: Option<Arc<tunnel::client::ClientController>>,
+    pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
 }
 
 #[allow(dead_code)]
@@ -45,21 +46,29 @@ pub async fn serve(addr: SocketAddr, state: AdminState) -> anyhow::Result<()> {
     serve_with_shutdown(addr, state, rx).await
 }
 
-pub async fn serve_with_shutdown(
-    addr: SocketAddr,
+pub async fn serve_listener_with_shutdown(
+    listener: tokio::net::TcpListener,
     state: AdminState,
     shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let app = build_router(state);
-
+    let addr = listener.local_addr()?;
     tracing::info!(admin_addr = %addr, "admin: listening");
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(wait_shutdown(shutdown))
         .await?;
 
     Ok(())
+}
+
+pub async fn serve_with_shutdown(
+    addr: SocketAddr,
+    state: AdminState,
+    shutdown: watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    serve_listener_with_shutdown(listener, state, shutdown).await
 }
 
 pub(crate) fn build_router(state: AdminState) -> Router {
@@ -89,6 +98,22 @@ pub(crate) fn build_router(state: AdminState) -> Router {
             get(client_get_profiles).post(client_save_profiles),
         )
         .route("/middlewares/{name}/data", post(post_middleware_data))
+        .route("/auth/providers", get(auth_providers))
+        .route("/auth/device/code", post(auth_device_code))
+        .route("/auth/device/poll", post(auth_device_poll))
+        .route("/auth/github/login", get(auth_github_login))
+        .route("/auth/github/callback", get(auth_github_callback))
+        .route("/auth/session", get(auth_session))
+        .route(
+            "/auth/tokens",
+            get(auth_list_tokens).post(auth_create_token),
+        )
+        .route(
+            "/auth/tokens/{token_id}",
+            axum::routing::delete(auth_revoke_token),
+        )
+        .route("/managed/users", get(managed_users))
+        .route("/managed/users/{user_id}", put(put_managed_user))
         .fallback(serve_frontend)
         .with_state(shared)
         .layer(CorsLayer::permissive())
@@ -328,7 +353,7 @@ async fn reload(
     headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_mutation_auth(&headers, &st)?;
+    require_mutation_auth(&headers, &st).await?;
 
     let mut next = (*st.reload_tx.borrow()).clone();
     next.next();
@@ -356,7 +381,7 @@ async fn managed_status(
     headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st)?;
+    require_panel_auth(&headers, &st).await?;
     let management = st
         .management
         .as_ref()
@@ -368,7 +393,7 @@ async fn managed_nodes(
     headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st)?;
+    require_panel_auth(&headers, &st).await?;
     let management = st
         .management
         .as_ref()
@@ -381,7 +406,7 @@ async fn managed_node(
     State(st): State<Arc<AdminState>>,
     AxumPath(node_id): AxumPath<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st)?;
+    require_panel_auth(&headers, &st).await?;
     let management = st
         .management
         .as_ref()
@@ -399,7 +424,7 @@ async fn managed_node_config(
     State(st): State<Arc<AdminState>>,
     AxumPath(node_id): AxumPath<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st)?;
+    require_panel_auth(&headers, &st).await?;
     let management = st
         .management
         .as_ref()
@@ -418,7 +443,7 @@ async fn put_managed_node_config(
     AxumPath(node_id): AxumPath<String>,
     Json(request): Json<managed::PutManagedNodeConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st)?;
+    require_panel_auth(&headers, &st).await?;
     let management = st
         .management
         .as_ref()
@@ -497,7 +522,7 @@ async fn post_middleware_data(
     AxumPath(name): AxumPath<String>,
     Json(payload): Json<MiddlewareDataPayload>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_mutation_auth(&headers, &st)?;
+    require_mutation_auth(&headers, &st).await?;
 
     use base64::Engine;
     let trimmed = payload.data.trim();
@@ -564,26 +589,55 @@ impl IntoResponse for ApiError {
     }
 }
 
-fn require_mutation_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiError> {
-    if let Some(token) = st
-        .auth
-        .panel_token
-        .as_ref()
-        .or(st.auth.worker_token.as_ref())
+async fn require_mutation_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiError> {
+    if let Some(token) = extract_bearer_token(headers) {
+        if let Some(ref am) = st.auth_manager {
+            if let Some(ident) = am.verify_token(&token).await {
+                if ident.is_admin {
+                    return Ok(());
+                }
+            }
+        }
+        if let Some(expected) = st
+            .auth
+            .panel_token
+            .as_ref()
+            .or(st.auth.worker_token.as_ref())
+        {
+            if token.trim() == expected.trim() {
+                return Ok(());
+            }
+        }
+        Err(ApiError::unauthorized("invalid bearer token"))
+    } else if st.auth.panel_token.is_none()
+        && st.auth.worker_token.is_none()
+        && st.auth_manager.is_none()
     {
-        require_bearer(headers, token)
-    } else {
         Ok(())
+    } else {
+        Err(ApiError::unauthorized("missing Authorization header"))
     }
 }
 
-fn require_panel_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiError> {
-    let token = st
-        .auth
-        .panel_token
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("panel auth not configured"))?;
-    require_bearer(headers, token)
+async fn require_panel_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiError> {
+    let token = extract_bearer_token(headers)
+        .ok_or_else(|| ApiError::unauthorized("missing Authorization header"))?;
+
+    if let Some(ref am) = st.auth_manager {
+        if let Some(ident) = am.verify_token(&token).await {
+            if ident.is_admin {
+                return Ok(());
+            }
+        }
+    }
+
+    if let Some(expected) = st.auth.panel_token.as_ref() {
+        if token.trim() == expected.trim() {
+            return Ok(());
+        }
+    }
+
+    Err(ApiError::unauthorized("panel authentication required"))
 }
 
 fn require_worker_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiError> {
@@ -595,20 +649,314 @@ fn require_worker_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiEr
     require_bearer(headers, token)
 }
 
+fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?;
+    Some(token.trim().to_string())
+}
+
 fn require_bearer(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
-    let Some(value) = headers.get(header::AUTHORIZATION) else {
+    let Some(token) = extract_bearer_token(headers) else {
         return Err(ApiError::unauthorized("missing Authorization header"));
     };
-    let value = value
-        .to_str()
-        .map_err(|_| ApiError::unauthorized("invalid Authorization header"))?;
-    let Some(token) = value.strip_prefix("Bearer ") else {
-        return Err(ApiError::unauthorized("expected Bearer token"));
-    };
-    if token.trim() != expected {
+    if token.trim() != expected.trim() {
         return Err(ApiError::unauthorized("invalid bearer token"));
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuthProvidersResponse {
+    pub github_enabled: bool,
+    pub github_client_id: Option<String>,
+    pub mode: String,
+}
+
+async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let (github_enabled, github_client_id, mode) = if let Some(ref am) = st.auth_manager {
+        if let Some(gh) = am.github_config() {
+            (true, Some(gh.client_id.clone()), "hybrid".to_string())
+        } else {
+            (false, None, "token".to_string())
+        }
+    } else {
+        (false, None, "token".to_string())
+    };
+
+    (
+        StatusCode::OK,
+        Json(AuthProvidersResponse {
+            github_enabled,
+            github_client_id,
+            mode,
+        }),
+    )
+}
+
+async fn auth_device_code(
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
+    let resp = am
+        .request_device_code()
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok((StatusCode::OK, Json(resp)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DevicePollRequest {
+    pub device_code: String,
+}
+
+async fn auth_device_poll(
+    State(st): State<Arc<AdminState>>,
+    Json(payload): Json<DevicePollRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
+    let result = am
+        .poll_device_code(&payload.device_code)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok((StatusCode::OK, Json(result)))
+}
+
+async fn auth_github_login(
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
+    let gh = am
+        .github_config()
+        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("GitHub OAuth not enabled")))?;
+
+    let mut url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&scope=read:user",
+        gh.client_id
+    );
+    if let Some(ref r) = gh.redirect_uri {
+        url.push_str(&format!("&redirect_uri={r}"));
+    }
+    Ok(axum::response::Redirect::temporary(&url))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitHubCallbackQuery {
+    pub code: Option<String>,
+    pub error: Option<String>,
+}
+
+async fn auth_github_callback(
+    State(st): State<Arc<AdminState>>,
+    axum::extract::Query(query): axum::extract::Query<GitHubCallbackQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
+
+    if let Some(err) = query.error {
+        return Err(ApiError::unauthorized(&format!(
+            "GitHub login error: {err}"
+        )));
+    }
+    let code = query
+        .code
+        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("missing code parameter")))?;
+
+    let (user, raw_token, _) = am
+        .exchange_web_code(&code)
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    let redirect_url = format!(
+        "/login#token={}&user_id={}&username={}&role={:?}",
+        raw_token, user.id, user.username, user.role
+    );
+    Ok(axum::response::Redirect::temporary(&redirect_url))
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuthSessionResponse {
+    pub authenticated: bool,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub role: Option<String>,
+    pub service_rules: Vec<String>,
+    pub is_admin: bool,
+}
+
+async fn auth_session(headers: HeaderMap, State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(token) = extract_bearer_token(&headers) {
+        if let Some(ref am) = st.auth_manager {
+            if let Some(ident) = am.verify_token(&token).await {
+                let user = am.get_user(&ident.user_id).await;
+                return (
+                    StatusCode::OK,
+                    Json(AuthSessionResponse {
+                        authenticated: true,
+                        user_id: Some(ident.user_id),
+                        username: Some(ident.username),
+                        display_name: user.as_ref().and_then(|u| u.display_name.clone()),
+                        avatar_url: user.as_ref().and_then(|u| u.avatar_url.clone()),
+                        role: Some(format!("{:?}", ident.role).to_lowercase()),
+                        service_rules: ident.service_rules,
+                        is_admin: ident.is_admin,
+                    }),
+                );
+            }
+        }
+        if let Some(ref panel_token) = st.auth.panel_token {
+            if token.trim() == panel_token.trim() {
+                return (
+                    StatusCode::OK,
+                    Json(AuthSessionResponse {
+                        authenticated: true,
+                        user_id: Some("panel_admin".to_string()),
+                        username: Some("Panel Admin".to_string()),
+                        display_name: Some("System Admin".to_string()),
+                        avatar_url: None,
+                        role: Some("admin".to_string()),
+                        service_rules: vec!["*".to_string()],
+                        is_admin: true,
+                    }),
+                );
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(AuthSessionResponse {
+            authenticated: false,
+            user_id: None,
+            username: None,
+            display_name: None,
+            avatar_url: None,
+            role: None,
+            service_rules: vec![],
+            is_admin: false,
+        }),
+    )
+}
+
+async fn auth_list_tokens(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::not_found("auth manager not configured"))?;
+    let tokens = am.list_tokens(None).await;
+    Ok((StatusCode::OK, Json(tokens)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateTokenRequest {
+    pub user_id: String,
+    pub name: String,
+    pub expires_in_days: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateTokenResponse {
+    pub raw_token: String,
+    pub token: crate::prism::auth::TokenRecord,
+}
+
+async fn auth_create_token(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+    Json(payload): Json<CreateTokenRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::not_found("auth manager not configured"))?;
+    let (raw_token, token) = am
+        .create_client_token(&payload.user_id, &payload.name, payload.expires_in_days)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok((
+        StatusCode::OK,
+        Json(CreateTokenResponse { raw_token, token }),
+    ))
+}
+
+async fn auth_revoke_token(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+    AxumPath(token_id): AxumPath<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::not_found("auth manager not configured"))?;
+    let revoked = am.revoke_token(&token_id).await;
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({ "revoked": revoked })),
+    ))
+}
+
+async fn managed_users(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::not_found("auth manager not configured"))?;
+    let users = am.list_users().await;
+    Ok((StatusCode::OK, Json(users)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRequest {
+    pub role: crate::prism::auth::UserRole,
+    #[serde(default)]
+    pub service_rules: Vec<String>,
+}
+
+async fn put_managed_user(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+    AxumPath(user_id): AxumPath<String>,
+    Json(payload): Json<UpdateUserRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let am = st
+        .auth_manager
+        .as_ref()
+        .ok_or_else(|| ApiError::not_found("auth manager not configured"))?;
+
+    let mut user = am
+        .get_user(&user_id)
+        .await
+        .ok_or_else(|| ApiError::not_found("user not found"))?;
+
+    user.role = payload.role;
+    user.service_rules = payload.service_rules;
+    am.upsert_user(user.clone())
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    Ok((StatusCode::OK, Json(user)))
 }
 
 #[cfg(test)]
@@ -633,6 +981,7 @@ mod tests {
             management: None,
             worker: None,
             client: None,
+            auth_manager: None,
         };
 
         let app = build_router(state);
@@ -713,6 +1062,7 @@ mod tests {
             management: None,
             worker: None,
             client: None,
+            auth_manager: None,
         };
 
         let app = build_router(state);
@@ -761,6 +1111,7 @@ mod tests {
             management: None,
             worker: None,
             client: Some(client_controller),
+            auth_manager: None,
         };
 
         let app = build_router(state);

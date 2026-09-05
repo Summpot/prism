@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsersRouteImport } from './routes/users'
 import { Route as TunnelServicesRouteImport } from './routes/tunnel-services'
 import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as NodesRouteImport } from './routes/nodes'
@@ -19,6 +20,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as NodesIndexRouteImport } from './routes/nodes.index'
 import { Route as NodesNodeIdRouteImport } from './routes/nodes.$nodeId'
 
+const UsersRoute = UsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TunnelServicesRoute = TunnelServicesRouteImport.update({
   id: '/tunnel-services',
   path: '/tunnel-services',
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/nodes': typeof NodesRouteWithChildren
   '/runtime': typeof RuntimeRoute
   '/tunnel-services': typeof TunnelServicesRoute
+  '/users': typeof UsersRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/nodes/': typeof NodesIndexRoute
 }
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/runtime': typeof RuntimeRoute
   '/tunnel-services': typeof TunnelServicesRoute
+  '/users': typeof UsersRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/nodes': typeof NodesIndexRoute
 }
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/nodes': typeof NodesRouteWithChildren
   '/runtime': typeof RuntimeRoute
   '/tunnel-services': typeof TunnelServicesRoute
+  '/users': typeof UsersRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/nodes/': typeof NodesIndexRoute
 }
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/nodes'
     | '/runtime'
     | '/tunnel-services'
+    | '/users'
     | '/nodes/$nodeId'
     | '/nodes/'
   fileRoutesByTo: FileRoutesByTo
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/runtime'
     | '/tunnel-services'
+    | '/users'
     | '/nodes/$nodeId'
     | '/nodes'
   id:
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/nodes'
     | '/runtime'
     | '/tunnel-services'
+    | '/users'
     | '/nodes/$nodeId'
     | '/nodes/'
   fileRoutesById: FileRoutesById
@@ -141,10 +153,18 @@ export interface RootRouteChildren {
   NodesRoute: typeof NodesRouteWithChildren
   RuntimeRoute: typeof RuntimeRoute
   TunnelServicesRoute: typeof TunnelServicesRoute
+  UsersRoute: typeof UsersRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/users': {
+      id: '/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof UsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/tunnel-services': {
       id: '/tunnel-services'
       path: '/tunnel-services'
@@ -231,6 +251,7 @@ const rootRouteChildren: RootRouteChildren = {
   NodesRoute: NodesRouteWithChildren,
   RuntimeRoute: RuntimeRoute,
   TunnelServicesRoute: TunnelServicesRoute,
+  UsersRoute: UsersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

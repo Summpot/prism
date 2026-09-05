@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { ArrowRight, Github, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { fieldClassName, PrimaryButton } from "@/components/ui";
-import { getHealth, getManagementStatus } from "@/lib/managementApi";
+import { getAuthProviders, getHealth, getManagementStatus } from "@/lib/managementApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 
@@ -16,6 +16,50 @@ function LoginPage() {
 	const [token, setToken] = useState(connection?.token ?? "");
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [githubEnabled, setGithubEnabled] = useState(false);
+
+	// Handle OAuth redirect hash fragments: /login#token=prism_adm_...
+	useEffect(() => {
+		const hash = window.location.hash;
+		if (hash && hash.includes("token=")) {
+			const cleanHash = hash.startsWith("#") ? hash.slice(1) : hash;
+			const params = new URLSearchParams(cleanHash);
+			const urlToken = params.get("token");
+			if (urlToken) {
+				const nextConnection = {
+					baseUrl: normalizeBaseUrl(baseUrl),
+					token: urlToken,
+				};
+				window.history.replaceState(null, "", window.location.pathname);
+				saveConnection(nextConnection);
+				navigate({ to: "/" });
+			}
+		}
+	}, [baseUrl, navigate, saveConnection]);
+
+	// Check if management endpoint has GitHub OAuth enabled
+	useEffect(() => {
+		let active = true;
+		if (!baseUrl.trim()) {
+			setGithubEnabled(false);
+			return;
+		}
+		try {
+			const norm = normalizeBaseUrl(baseUrl);
+			getAuthProviders(norm).then((res) => {
+				if (active) {
+					setGithubEnabled(res.github);
+				}
+			});
+		} catch {
+			if (active) {
+				setGithubEnabled(false);
+			}
+		}
+		return () => {
+			active = false;
+		};
+	}, [baseUrl]);
 
 	const connect = async (event: React.FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
@@ -38,6 +82,11 @@ function LoginPage() {
 		}
 	};
 
+	const loginWithGitHub = () => {
+		const norm = normalizeBaseUrl(baseUrl);
+		window.location.href = `${norm}/auth/github/login`;
+	};
+
 	return (
 		<section className="mx-auto flex min-h-[70vh] w-full max-w-3xl items-center justify-center">
 			<div className="w-full rounded-[2rem] border border-white/8 bg-slate-950/75 p-8 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:p-10">
@@ -56,27 +105,61 @@ function LoginPage() {
 				</div>
 
 				<p className="mt-6 text-base leading-7 text-slate-400">
-					Authenticate against the management API with a base URL and panel bearer token. The
-					connection is stored in browser local storage and can be cleared from the sidebar.
+					Authenticate against the management API with a base URL and token. You can sign in
+					directly with GitHub OAuth or provide a static panel token.
 				</p>
 
-				<form onSubmit={connect} className="mt-8 space-y-5">
+				{githubEnabled ? (
+					<div className="mt-8 space-y-4">
+						<label className="block space-y-2">
+							<span className="text-sm font-medium text-white">Management API base URL</span>
+							<input
+								value={baseUrl}
+								onChange={(event) => setBaseUrl(event.target.value)}
+								placeholder="http://127.0.0.1:8080"
+								className={fieldClassName}
+							/>
+						</label>
+
+						<button
+							type="button"
+							onClick={loginWithGitHub}
+							className="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-5 py-3.5 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15"
+						>
+							<Github className="h-5 w-5" />
+							Sign in with GitHub
+						</button>
+
+						<div className="relative my-6">
+							<div className="absolute inset-0 flex items-center">
+								<div className="w-full border-t border-white/10" />
+							</div>
+							<div className="relative flex justify-center text-xs uppercase">
+								<span className="bg-slate-950 px-3 text-slate-400">or use token manually</span>
+							</div>
+						</div>
+					</div>
+				) : null}
+
+				<form onSubmit={connect} className={`${githubEnabled ? "mt-4" : "mt-8"} space-y-5`}>
+					{!githubEnabled ? (
+						<label className="block space-y-2">
+							<span className="text-sm font-medium text-white">Management API base URL</span>
+							<input
+								value={baseUrl}
+								onChange={(event) => setBaseUrl(event.target.value)}
+								placeholder="http://127.0.0.1:8080"
+								className={fieldClassName}
+							/>
+						</label>
+					) : null}
 					<label className="block space-y-2">
-						<span className="text-sm font-medium text-white">Management API base URL</span>
-						<input
-							value={baseUrl}
-							onChange={(event) => setBaseUrl(event.target.value)}
-							placeholder="http://127.0.0.1:8080"
-							className={fieldClassName}
-						/>
-					</label>
-					<label className="block space-y-2">
-						<span className="text-sm font-medium text-white">Panel bearer token</span>
+						<span className="text-sm font-medium text-white">Bearer token</span>
 						<input
 							value={token}
 							onChange={(event) => setToken(event.target.value)}
 							type="password"
-							placeholder="panel-secret"
+							placeholder="prism_adm_... or panel-token"
 							className={fieldClassName}
 						/>
 					</label>

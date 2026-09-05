@@ -15,7 +15,7 @@ import {
 	Trash2,
 	Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge, EmptyState, ErrorBanner, PageHeader } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
@@ -38,6 +38,7 @@ export const Route = createFileRoute("/client")({
 
 function ClientDashboardPage() {
 	const { connection } = usePanelSession();
+	const effectiveConnection = useMemo(() => connection ?? { baseUrl: "", token: "" }, [connection]);
 	const [status, setStatus] = useState<ClientStatusResponse | null>(null);
 	const [profiles, setProfiles] = useState<ClientProfile[]>([]);
 	const [selectedProfileId, setSelectedProfileId] = useState<string>("");
@@ -61,10 +62,7 @@ function ClientDashboardPage() {
 
 	// Fetch status
 	const fetchStatus = useCallback(() => {
-		if (!connection) {
-			return;
-		}
-		getClientStatus(connection)
+		getClientStatus(effectiveConnection)
 			.then((resp) => {
 				setStatus(resp);
 				if (resp.running && resp.server_addr) {
@@ -76,14 +74,11 @@ function ClientDashboardPage() {
 				// Ignore if offline
 				console.debug("Failed to fetch client status:", err);
 			});
-	}, [connection]);
+	}, [effectiveConnection]);
 
 	// Fetch saved profiles
 	const fetchProfiles = useCallback(() => {
-		if (!connection) {
-			return;
-		}
-		getClientProfiles(connection)
+		getClientProfiles(effectiveConnection)
 			.then((list) => {
 				setProfiles(list);
 				if (list.length > 0 && !selectedProfileId) {
@@ -100,14 +95,14 @@ function ClientDashboardPage() {
 			.catch(() => {
 				// optional endpoint
 			});
-	}, [connection, selectedProfileId]);
+	}, [effectiveConnection, selectedProfileId]);
 
 	useEffect(() => {
 		fetchStatus();
 		fetchProfiles();
 	}, [fetchStatus, fetchProfiles]);
 
-	usePolling(fetchStatus, 1_500, Boolean(connection));
+	usePolling(fetchStatus, 1_500, true);
 
 	// Profile selection change
 	const handleSelectProfile = (id: string) => {
@@ -125,9 +120,6 @@ function ClientDashboardPage() {
 
 	// Save current profile
 	const handleSaveProfile = async () => {
-		if (!connection) {
-			return;
-		}
 		const existingIndex = profiles.findIndex(
 			(p) => p.id === selectedProfileId || p.server_addr === serverAddr,
 		);
@@ -152,31 +144,25 @@ function ClientDashboardPage() {
 
 		setProfiles(updated);
 		setSelectedProfileId(id);
-		await saveClientProfiles(connection, updated).catch(() => {});
+		await saveClientProfiles(effectiveConnection, updated).catch(() => {});
 	};
 
 	// Delete profile
 	const handleDeleteProfile = async (id: string) => {
-		if (!connection) {
-			return;
-		}
 		const updated = profiles.filter((p) => p.id !== id);
 		setProfiles(updated);
 		if (selectedProfileId === id) {
 			setSelectedProfileId(updated[0]?.id || "");
 		}
-		await saveClientProfiles(connection, updated).catch(() => {});
+		await saveClientProfiles(effectiveConnection, updated).catch(() => {});
 	};
 
 	// Connect / Start client
 	const handleConnect = async () => {
-		if (!connection) {
-			return;
-		}
 		setActionLoading(true);
 		setError(null);
 		try {
-			await startClient(connection, {
+			await startClient(effectiveConnection, {
 				server_addr: serverAddr,
 				transport,
 				auth_token: authToken,
@@ -193,13 +179,10 @@ function ClientDashboardPage() {
 
 	// Disconnect / Stop client
 	const handleDisconnect = async () => {
-		if (!connection) {
-			return;
-		}
 		setActionLoading(true);
 		setError(null);
 		try {
-			await stopClient(connection);
+			await stopClient(effectiveConnection);
 			fetchStatus();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));

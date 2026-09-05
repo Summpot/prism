@@ -922,6 +922,7 @@ mod tests {
                 key_file: "".into(),
             },
             manager: mgr.clone(),
+            auth_manager: None,
         })
         .unwrap();
 

@@ -16,7 +16,9 @@
 				"minWidth": 820,
 				"minHeight": 580,
 				"resizable": true,
-				"fullscreen": false
+				"fullscreen": false,
+				"url": "index.html",
+				"visible": false
 			}
 		],
 		"security": {

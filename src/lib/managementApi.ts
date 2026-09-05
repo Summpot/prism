@@ -332,3 +332,124 @@ export function saveClientProfiles(connection: PanelConnection, profiles: Client
 		body: JSON.stringify(profiles),
 	});
 }
+
+export interface AuthProvidersResponse {
+	github: boolean;
+}
+
+export interface DeviceCodeResponse {
+	device_code: string;
+	user_code: string;
+	verification_uri: string;
+	expires_in: number;
+	interval: number;
+}
+
+export interface DevicePollResult {
+	status: "pending" | "slow_down" | "expired" | "denied" | "complete";
+	token?: string;
+	user?: UserRecord;
+}
+
+export interface AuthSessionResponse {
+	authenticated: boolean;
+	user_id?: string | null;
+	username?: string | null;
+	display_name?: string | null;
+	avatar_url?: string | null;
+	role?: string | null;
+	is_admin: boolean;
+}
+
+export interface UserRecord {
+	id: string;
+	username: string;
+	display_name?: string | null;
+	avatar_url?: string | null;
+	role: "admin" | "member" | "disabled";
+	service_rules: string[];
+	created_at_unix_ms: number;
+	last_login_unix_ms: number;
+}
+
+export interface TokenRecord {
+	id: string;
+	user_id: string;
+	token_type: "client" | "admin" | "connector";
+	name: string;
+	service_rules?: string[] | null;
+	created_at_unix_ms: number;
+	expires_at_unix_ms?: number | null;
+	last_used_unix_ms: number;
+}
+
+export interface CreateTokenPayload {
+	name: string;
+	token_type: "client" | "admin" | "connector";
+	expires_in_days?: number | null;
+}
+
+export interface CreateTokenResponse {
+	raw_token: string;
+	record: TokenRecord;
+}
+
+export function getAuthProviders(baseUrl: string) {
+	return fetch(`${baseUrl}/auth/providers`)
+		.then(async (res) => {
+			if (!res.ok) {
+				return { github: false };
+			}
+			return (await res.json()) as AuthProvidersResponse;
+		})
+		.catch(() => ({ github: false }));
+}
+
+export function requestDeviceCode(connection: PanelConnection) {
+	return apiRequest<DeviceCodeResponse>(connection, "/auth/device/code", {
+		method: "POST",
+	});
+}
+
+export function pollDeviceCode(connection: PanelConnection, deviceCode: string) {
+	return apiRequest<DevicePollResult>(connection, "/auth/device/poll", {
+		method: "POST",
+		body: JSON.stringify({ device_code: deviceCode }),
+	});
+}
+
+export function getAuthSession(connection: PanelConnection) {
+	return apiRequest<AuthSessionResponse>(connection, "/auth/session");
+}
+
+export function listAuthTokens(connection: PanelConnection) {
+	return apiRequest<TokenRecord[]>(connection, "/auth/tokens");
+}
+
+export function createAuthToken(connection: PanelConnection, payload: CreateTokenPayload) {
+	return apiRequest<CreateTokenResponse>(connection, "/auth/tokens", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+}
+
+export function revokeAuthToken(connection: PanelConnection, tokenId: string) {
+	return apiRequest<{ ok: boolean }>(connection, `/auth/tokens/${encodeURIComponent(tokenId)}`, {
+		method: "DELETE",
+	});
+}
+
+export function listManagedUsers(connection: PanelConnection) {
+	return apiRequest<UserRecord[]>(connection, "/managed/users");
+}
+
+export function updateManagedUser(
+	connection: PanelConnection,
+	userId: string,
+	payload: { role?: string; service_rules?: string[] },
+) {
+	return apiRequest<UserRecord>(connection, `/managed/users/${encodeURIComponent(userId)}`, {
+		method: "PUT",
+		body: JSON.stringify(payload),
+	});
+}

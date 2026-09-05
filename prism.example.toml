@@ -45,6 +45,20 @@ listen_addr = ":19132"
 protocol = "udp"
 upstream = "127.0.0.1:19132"
 
+# Authentication & Access Control (OAuth + Token Management)
+# [auth]
+# # When enabled, users can sign in with GitHub via Web OAuth (Control Panel)
+# # and Device Authorization Flow (Client sidecars).
+# [auth.github]
+# enabled = false
+# client_id = "your-github-oauth-client-id"
+# client_secret = "your-github-oauth-client-secret"
+# redirect_uri = "http://127.0.0.1:8080/auth/github/callback"
+# allowed_users = ["your-github-username"]
+# allowed_orgs = []
+# admin_users = ["your-github-username"]
+# default_service_rules = ["*"]
+
 [tunnel]
 auth_token = ""
 

@@ -75,7 +75,8 @@
 			"examples": [5000]
 		},
 		"timeouts": { "$ref": "#/$defs/timeouts" },
-		"tunnel": { "$ref": "#/$defs/tunnel" }
+		"tunnel": { "$ref": "#/$defs/tunnel" },
+		"auth": { "$ref": "#/$defs/auth" }
 	},
 	"allOf": [
 		{
@@ -595,6 +596,28 @@
 					"maximum": 22,
 					"description": "Zstd compression level (default 3).",
 					"default": 3
+				}
+			}
+		},
+		"auth": {
+			"type": "object",
+			"description": "Authentication and authorization configuration.",
+			"additionalProperties": false,
+			"properties": {
+				"github": {
+					"type": "object",
+					"description": "GitHub OAuth configuration for web control panel and client device flow.",
+					"additionalProperties": false,
+					"properties": {
+						"enabled": { "type": "boolean", "default": false },
+						"client_id": { "type": "string" },
+						"client_secret": { "type": "string" },
+						"redirect_uri": { "type": "string" },
+						"allowed_users": { "type": "array", "items": { "type": "string" } },
+						"allowed_orgs": { "type": "array", "items": { "type": "string" } },
+						"admin_users": { "type": "array", "items": { "type": "string" } },
+						"default_service_rules": { "type": "array", "items": { "type": "string" } }
+					}
 				}
 			}
 		},

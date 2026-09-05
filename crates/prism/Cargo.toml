@@ -70,3 +70,4 @@ cfb-mode = "0.8"
 miniz_oxide = { version = "0.8", features = ["simd"] }
 zstd = "0.13"
 base64 = "0.23"
+sha2 = "0.10"

@@ -27,16 +27,17 @@ pub async fn run() -> anyhow::Result<()> {
         management: None,
         worker: None,
         client: Some(client_controller.clone()),
+        auth_manager: None,
     };
 
-    // Find free local port for embedded admin/client server
+    // Bind embedded admin/client server to a free local port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let local_addr = listener.local_addr()?;
-    drop(listener);
 
     tokio::spawn(async move {
         let _ =
-            crate::prism::admin::serve_with_shutdown(local_addr, admin_state, shutdown_rx).await;
+            crate::prism::admin::serve_listener_with_shutdown(listener, admin_state, shutdown_rx)
+                .await;
     });
 
     let client_ctrl_for_tray = client_controller.clone();
@@ -49,6 +50,7 @@ pub async fn run() -> anyhow::Result<()> {
             // Navigate window to local client UI
             let url = format!("http://{local_addr}/client");
             main_window.navigate(url.parse().expect("valid url"))?;
+            let _ = main_window.show();
 
             // Build Tray Menu
             let show_i = MenuItem::with_id(app, "show", "Open Prism Client", true, None::<&str>)?;

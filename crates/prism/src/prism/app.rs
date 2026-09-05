@@ -144,6 +144,10 @@ pub async fn run(
     let sessions = Arc::new(telemetry::SessionRegistry::new());
     let traffic = Arc::new(telemetry::TrafficStatsRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
+    let auth_manager = Arc::new(crate::prism::auth::AuthManager::new(
+        cfg.auth.clone(),
+        Some(&paths.workdir),
+    ));
 
     // Routing stack.
     let routes_with_middlewares = build_routes_with_middlewares(&cfg, &paths.middleware_dir)?;
@@ -224,6 +228,7 @@ pub async fn run(
             management: management_plane.clone(),
             worker: worker_agent.clone(),
             client: Some(client_controller.clone()),
+            auth_manager: Some(auth_manager.clone()),
         };
 
         let shutdown = shutdown_rx.clone();
@@ -299,6 +304,7 @@ pub async fn run(
                     key_file: ep.quic.key_file.clone(),
                 },
                 manager: tunnel_manager.clone(),
+                auth_manager: Some(auth_manager.clone()),
             })?;
 
             let shutdown = shutdown_rx.clone();

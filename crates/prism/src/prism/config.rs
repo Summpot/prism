@@ -309,6 +309,41 @@ pub struct ManagedConfigDocument {
     pub upstream_dial_timeout_ms: i64,
     pub timeouts: Option<ManagedTimeoutsDocument>,
     pub tunnel: Option<ManagedTunnelDocument>,
+    #[serde(default)]
+    pub auth: Option<ManagedAuthDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedAuthDocument {
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub legacy_token: Option<String>,
+    pub github: Option<ManagedGitHubOAuthDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedGitHubOAuthDocument {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: String,
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
+    #[serde(default)]
+    pub admin_users: Vec<String>,
+    #[serde(default)]
+    pub admin_orgs: Vec<String>,
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+    #[serde(default)]
+    pub allowed_orgs: Vec<String>,
+    #[serde(default)]
+    pub default_role: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -501,6 +536,7 @@ pub struct Config {
     pub upstream_dial_timeout: Duration,
     pub timeouts: Timeouts,
     pub tunnel: TunnelConfig,
+    pub auth: crate::prism::auth::AuthConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -715,6 +751,8 @@ struct FileConfig {
     timeouts: Option<FileTimeouts>,
 
     tunnel: Option<FileTunnel>,
+
+    auth: Option<FileAuthConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -896,6 +934,35 @@ struct FileTrafficOptimizer {
     zstd_level: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileAuthConfig {
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    legacy_token: Option<String>,
+    github: Option<FileGitHubOAuthConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileGitHubOAuthConfig {
+    #[serde(default)]
+    enabled: bool,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    redirect_uri: Option<String>,
+    #[serde(default)]
+    admin_users: Option<StringOrVec>,
+    #[serde(default)]
+    admin_orgs: Option<StringOrVec>,
+    #[serde(default)]
+    allowed_users: Option<StringOrVec>,
+    #[serde(default)]
+    allowed_orgs: Option<StringOrVec>,
+    default_role: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum StringOrVec {
@@ -959,6 +1026,7 @@ impl Config {
                 ),
             },
             tunnel: TunnelConfig::default(),
+            auth: crate::prism::auth::AuthConfig::default(),
         };
 
         if cfg.max_header_bytes == 0 {
@@ -1290,6 +1358,41 @@ impl Config {
             cfg.tunnel.auto_listen_services = true;
         }
 
+        let mut auth_cfg = crate::prism::auth::AuthConfig::default();
+        if let Some(fa) = fc.auth.take() {
+            if let Some(mode) = fa.mode {
+                auth_cfg.mode = mode.trim().to_string();
+            }
+            auth_cfg.legacy_token = fa
+                .legacy_token
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if let Some(fg) = fa.github {
+                auth_cfg.github = Some(crate::prism::auth::GitHubOAuthConfig {
+                    enabled: fg.enabled,
+                    client_id: fg.client_id.unwrap_or_default().trim().to_string(),
+                    client_secret: fg.client_secret.unwrap_or_default().trim().to_string(),
+                    redirect_uri: fg
+                        .redirect_uri
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
+                    admin_users: fg.admin_users.map(|s| s.into_vec()).unwrap_or_default(),
+                    admin_orgs: fg.admin_orgs.map(|s| s.into_vec()).unwrap_or_default(),
+                    allowed_users: fg.allowed_users.map(|s| s.into_vec()).unwrap_or_default(),
+                    allowed_orgs: fg.allowed_orgs.map(|s| s.into_vec()).unwrap_or_default(),
+                    default_role: fg
+                        .default_role
+                        .unwrap_or_else(|| "member".to_string())
+                        .trim()
+                        .to_string(),
+                });
+            }
+        }
+        if auth_cfg.legacy_token.is_none() && !cfg.tunnel.auth_token.trim().is_empty() {
+            auth_cfg.legacy_token = Some(cfg.tunnel.auth_token.trim().to_string());
+        }
+        cfg.auth = auth_cfg;
+
         cfg.role = PrismRole::parse(&fc.role)?;
 
         if let Some(m) = &fc.managed {
@@ -1620,6 +1723,25 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 } else {
                     Some(StringOrVec::Many(m.middlewares.clone()))
                 },
+            }),
+        }),
+        auth: doc.auth.as_ref().map(|a| FileAuthConfig {
+            mode: if a.mode.trim().is_empty() {
+                None
+            } else {
+                Some(a.mode.clone())
+            },
+            legacy_token: a.legacy_token.clone(),
+            github: a.github.as_ref().map(|g| FileGitHubOAuthConfig {
+                enabled: g.enabled,
+                client_id: Some(g.client_id.clone()),
+                client_secret: Some(g.client_secret.clone()),
+                redirect_uri: g.redirect_uri.clone(),
+                admin_users: Some(StringOrVec::Many(g.admin_users.clone())),
+                admin_orgs: Some(StringOrVec::Many(g.admin_orgs.clone())),
+                allowed_users: Some(StringOrVec::Many(g.allowed_users.clone())),
+                allowed_orgs: Some(StringOrVec::Many(g.allowed_orgs.clone())),
+                default_role: Some(g.default_role.clone()),
             }),
         }),
     };
@@ -2342,6 +2464,50 @@ motd_prefix = "[Custom] "
         let opt = client.traffic_optimizer.expect("traffic optimizer");
         assert!(opt.enabled);
         assert_eq!(opt.zstd_window_log(), 23);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_auth_config_parsing() {
+        let dir =
+            std::env::temp_dir().join(format!("prism-test-auth-cfg-{}", rand::random::<u32>()));
+        std::fs::create_dir_all(&dir).expect("create_dir_all");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+[auth]
+mode = "hybrid"
+legacy_token = "old-secret"
+
+[auth.github]
+enabled = true
+client_id = "gh_id_123"
+client_secret = "gh_sec_456"
+redirect_uri = "https://example.com/callback"
+admin_users = ["Summpot", "alice"]
+admin_orgs = "MyOrg"
+allowed_users = ["bob"]
+default_role = "member"
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert_eq!(cfg.auth.mode, "hybrid");
+        assert_eq!(cfg.auth.legacy_token.as_deref(), Some("old-secret"));
+
+        let gh = cfg.auth.github.expect("github config");
+        assert!(gh.enabled);
+        assert_eq!(gh.client_id, "gh_id_123");
+        assert_eq!(gh.client_secret, "gh_sec_456");
+        assert_eq!(
+            gh.redirect_uri.as_deref(),
+            Some("https://example.com/callback")
+        );
+        assert_eq!(gh.admin_users, vec!["Summpot", "alice"]);
+        assert_eq!(gh.admin_orgs, vec!["MyOrg"]);
+        assert_eq!(gh.allowed_users, vec!["bob"]);
+        assert_eq!(gh.default_role, "member");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

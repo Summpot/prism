@@ -137,7 +137,7 @@ impl Client {
             }
         }
 
-        // 3. Built-in default middlewares (e.g. "minecraft", "minecraft_handshake", "tls_sni")
+        // 3. Built-in default middlewares (e.g. "minecraft", "tls_sni")
         if let Some(wat) = get_default_middleware_wat(name) {
             let store = wasmer::Store::new(engine.clone());
             let module = wasmer::Module::new(&store, wat.as_bytes())?;

@@ -48,7 +48,7 @@ protocol = "tcp"
 [[routes]]
 host = "play.example.com"
 upstream = "127.0.0.1:25565"
-middlewares = ["minecraft_handshake"]
+middlewares = ["minecraft"]
 ```
 
 Then start Prism with either Cargo or a built binary:
@@ -189,7 +189,7 @@ Current middleware rules:
 
 Built-in middlewares currently shipped by the repo:
 
-- `minecraft_handshake`
+- `minecraft`
 - `tls_sni`
 
 These modules support both:

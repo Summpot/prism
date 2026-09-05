@@ -34,18 +34,18 @@
 					{
 						"host": "play.example.com",
 						"upstream": "127.0.0.1:25566",
-						"middlewares": ["minecraft_handshake"]
+						"middlewares": ["minecraft"]
 					},
 					{
 						"host": "*.labs.example.com",
 						"upstreams": ["127.0.0.1:25567", "127.0.0.1:25568"],
 						"strategy": "round-robin",
-						"middlewares": ["minecraft_handshake"]
+						"middlewares": ["minecraft"]
 					},
 					{
 						"host": "home.example.com",
 						"upstream": "tunnel:home-mc",
-						"middlewares": ["minecraft_handshake"]
+						"middlewares": ["minecraft"]
 					}
 				]
 			]
@@ -364,7 +364,7 @@
 							"items": { "type": "string" }
 						}
 					],
-					"description": "Middleware(s) for hostname extraction on the local proxy (e.g. 'minecraft_handshake')."
+					"description": "Middleware(s) for hostname extraction on the local proxy (e.g. 'minecraft')."
 				}
 			}
 		},

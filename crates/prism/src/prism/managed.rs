@@ -725,7 +725,7 @@ mod tests {
             routes: vec![config::ManagedRouteDocument {
                 hosts: vec!["play.example.com".to_string()],
                 upstreams: vec!["127.0.0.1:25566".to_string()],
-                middlewares: vec!["minecraft_handshake".to_string()],
+                middlewares: vec!["minecraft".to_string()],
                 strategy: "sequential".to_string(),
             }],
             ..Default::default()

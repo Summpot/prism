@@ -374,7 +374,7 @@ export function createEmptyRoute(): ManagedRouteDocument {
 	return {
 		hosts: [""],
 		upstreams: [""],
-		middlewares: ["minecraft_handshake"],
+		middlewares: ["minecraft"],
 		strategy: "sequential",
 	};
 }

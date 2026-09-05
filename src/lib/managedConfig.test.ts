@@ -35,7 +35,7 @@ describe("managedConfig helpers", () => {
 			{
 				hosts: [" play.example.com "],
 				upstreams: [" 127.0.0.1:25565 "],
-				middlewares: ["Minecraft-Handshake"],
+				middlewares: ["Tls-Sni"],
 				strategy: "",
 			},
 		];
@@ -44,7 +44,7 @@ describe("managedConfig helpers", () => {
 		expect(normalized.routes[0]).toEqual({
 			hosts: ["play.example.com"],
 			upstreams: ["127.0.0.1:25565"],
-			middlewares: ["minecraft_handshake"],
+			middlewares: ["tls_sni"],
 			strategy: "sequential",
 		});
 	});
@@ -59,7 +59,7 @@ describe("managedConfig helpers", () => {
 			{
 				hosts: ["play.example.com"],
 				upstreams: ["127.0.0.1:25565"],
-				middlewares: ["minecraft_handshake"],
+				middlewares: ["minecraft"],
 				strategy: "sequential",
 			},
 		];

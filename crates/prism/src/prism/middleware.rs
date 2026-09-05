@@ -18,9 +18,6 @@ use wasmer::{
     TypedFunction, imports,
 };
 
-#[allow(dead_code)]
-pub type WasmInstanceParts = (Store, Instance, Memory, TypedFunction<(i32, i32), i64>);
-
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
     #[error("need more data")]
@@ -47,6 +44,7 @@ pub struct MiddlewareCtx {
     /// For direct upstreams this is typically a dial address like `host:port`.
     /// For tunnel upstreams (`tunnel:<service>`), Prism skips rewrite unless a configured
     /// masquerade host (see `tunnel.services[].masquerade_host`) provides a real protocol host.
+    #[allow(dead_code)]
     pub selected_upstream: Option<String>,
 }
 
@@ -241,13 +239,6 @@ impl MiddlewareProvider for FsWasmMiddlewareProvider {
 }
 
 pub const DEFAULT_MIDDLEWARES: &[(&str, &str)] = &[
-    (
-        "minecraft_handshake",
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../middlewares/minecraft_handshake.wat"
-        )),
-    ),
     (
         "tls_sni",
         include_str!(concat!(
@@ -820,7 +811,6 @@ pub struct WasmProtocolSession {
     poll_fn: Option<TypedFunction<(i32, i32, i32), i64>>,
     #[allow(dead_code)]
     set_data_fn: Option<TypedFunction<(i32, i32), i32>>,
-    legacy_fn: Option<TypedFunction<(i32, i32), i64>>,
     state: SessionState,
 }
 
@@ -846,10 +836,6 @@ impl WasmProtocolSession {
 
         let poll_fn = instance.exports.get_typed_function(&store, "poll").ok();
         let set_data_fn = instance.exports.get_typed_function(&store, "set_data").ok();
-        let legacy_fn = instance
-            .exports
-            .get_typed_function(&store, "prism_mw_run")
-            .ok();
 
         Ok(Self {
             store,
@@ -858,7 +844,6 @@ impl WasmProtocolSession {
             env,
             poll_fn,
             set_data_fn,
-            legacy_fn,
             state: SessionState::Handshake,
         })
     }
@@ -888,10 +873,6 @@ impl WasmProtocolSession {
 
     pub fn sym_table(&self) -> Arc<Mutex<DynamicSymbolTable>> {
         self.env.as_ref(&self.store).sym_table.clone()
-    }
-
-    pub fn has_legacy(&self) -> bool {
-        self.legacy_fn.is_some()
     }
 
     pub fn memory(&self) -> &Memory {
@@ -948,25 +929,6 @@ impl WasmProtocolSession {
         let poll_fn = match &self.poll_fn {
             Some(f) => f.clone(),
             None => {
-                if self.state == SessionState::Handshake && self.legacy_fn.is_some() {
-                    let out = self.run_legacy(buf, &MiddlewareCtx::parse());
-                    match out {
-                        Ok(out) => {
-                            self.state = SessionState::Streaming;
-                            return Ok(PollResult::Handshake(HandshakeResult::RouteMatch {
-                                host: out.host,
-                                rewrite: out.rewrite,
-                            }));
-                        }
-                        Err(MiddlewareError::NeedMoreData) => {
-                            return Ok(PollResult::Handshake(HandshakeResult::NeedMoreData));
-                        }
-                        Err(MiddlewareError::NoMatch) => {
-                            return Ok(PollResult::Handshake(HandshakeResult::NoMatch));
-                        }
-                        Err(e) => return Err(e),
-                    }
-                }
                 return Err(MiddlewareError::Fatal(
                     "wasm module missing 'poll' export".into(),
                 ));
@@ -1075,177 +1037,11 @@ impl WasmProtocolSession {
             },
         }
     }
-
-    pub fn run_legacy(
-        &mut self,
-        prelude: &[u8],
-        ctx: &MiddlewareCtx,
-    ) -> Result<MiddlewareOutput, MiddlewareError> {
-        let legacy_fn = match &self.legacy_fn {
-            Some(f) => f.clone(),
-            None => {
-                return Err(MiddlewareError::Fatal(
-                    "wasm module missing 'prism_mw_run' export".into(),
-                ));
-            }
-        };
-
-        const CTX_STRUCT_LEN: u32 = 16;
-        let mut cursor: u32 = ((prelude.len() as u32) + 7) & !7; // align8
-        let ctx_ptr = cursor;
-        cursor = cursor
-            .checked_add(CTX_STRUCT_LEN)
-            .ok_or_else(|| MiddlewareError::Fatal("ctx overflow".into()))?;
-
-        let upstream = ctx
-            .selected_upstream
-            .as_deref()
-            .unwrap_or_default()
-            .as_bytes();
-
-        let upstream_ptr = if !upstream.is_empty() {
-            let p = cursor;
-            cursor = cursor
-                .checked_add(upstream.len() as u32)
-                .ok_or_else(|| MiddlewareError::Fatal("ctx upstream overflow".into()))?;
-            p
-        } else {
-            0
-        };
-
-        let need = cursor as u64;
-        let mut mem_size = self.memory.view(&self.store).data_size();
-        if need > mem_size {
-            let delta = need - mem_size;
-            let pages_needed = delta.div_ceil(65536);
-            self.memory
-                .grow(&mut self.store, Pages(pages_needed as u32))
-                .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
-            mem_size = self.memory.view(&self.store).data_size();
-        }
-
-        if mem_size < 4 * 65536 {
-            let pages = (4 * 65536 - mem_size).div_ceil(65536);
-            self.memory
-                .grow(&mut self.store, Pages(pages as u32))
-                .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
-        }
-
-        if !prelude.is_empty() {
-            self.memory
-                .view(&self.store)
-                .write(0, prelude)
-                .map_err(|e| {
-                    MiddlewareError::Fatal(format!("wasm memory write prelude failed: {e}"))
-                })?;
-        }
-
-        if !upstream.is_empty() {
-            self.memory
-                .view(&self.store)
-                .write(upstream_ptr as u64, upstream)
-                .map_err(|e| {
-                    MiddlewareError::Fatal(format!("wasm memory write upstream failed: {e}"))
-                })?;
-        }
-
-        let mut ctx_buf = [0u8; CTX_STRUCT_LEN as usize];
-        ctx_buf[0..4].copy_from_slice(&1u32.to_le_bytes());
-        ctx_buf[4..8].copy_from_slice(&(ctx.phase as u32).to_le_bytes());
-        ctx_buf[8..12].copy_from_slice(&upstream_ptr.to_le_bytes());
-        ctx_buf[12..16].copy_from_slice(&(upstream.len() as u32).to_le_bytes());
-
-        self.memory
-            .view(&self.store)
-            .write(ctx_ptr as u64, &ctx_buf)
-            .map_err(|e| MiddlewareError::Fatal(format!("wasm memory write ctx failed: {e}")))?;
-
-        let out = legacy_fn
-            .call(&mut self.store, prelude.len() as i32, ctx_ptr as i32)
-            .map_err(|e| MiddlewareError::Fatal(format!("wasm middleware call failed: {e}")))?;
-
-        if out == 0 {
-            return Err(MiddlewareError::NeedMoreData);
-        }
-        if out == 1 {
-            return Err(MiddlewareError::NoMatch);
-        }
-        if out == -1 {
-            return Err(MiddlewareError::Fatal("wasm middleware fatal error".into()));
-        }
-
-        let ptr = (out as u64 & 0xffff_ffff) as u32;
-        let len = ((out as u64) >> 32) as u32;
-        if len < 16 {
-            return Err(MiddlewareError::Fatal(format!(
-                "wasm middleware output too small (len={len})"
-            )));
-        }
-
-        let view = self.memory.view(&self.store);
-        let end = (ptr as u64)
-            .checked_add(len as u64)
-            .ok_or_else(|| MiddlewareError::Fatal("wasm output range overflow".into()))?;
-        if end > view.data_size() {
-            return Err(MiddlewareError::Fatal(format!(
-                "wasm output out of bounds (ptr={ptr}, len={len}, mem={})",
-                view.data_size()
-            )));
-        }
-
-        let mut header = [0u8; 16];
-        view.read(ptr as u64, &mut header)
-            .map_err(|e| MiddlewareError::Fatal(format!("wasm memory read failed: {e}")))?;
-
-        let host_ptr = u32::from_le_bytes(header[0..4].try_into().unwrap());
-        let host_len = u32::from_le_bytes(header[4..8].try_into().unwrap());
-        let rw_ptr = u32::from_le_bytes(header[8..12].try_into().unwrap());
-        let rw_len = u32::from_le_bytes(header[12..16].try_into().unwrap());
-
-        let mut out = MiddlewareOutput::default();
-
-        if host_len > 0 {
-            let host_end = (host_ptr as u64)
-                .checked_add(host_len as u64)
-                .ok_or_else(|| MiddlewareError::Fatal("host range overflow".into()))?;
-            if host_end > view.data_size() {
-                return Err(MiddlewareError::Fatal("host out of bounds".into()));
-            }
-            let mut buf = vec![0u8; host_len as usize];
-            view.read(host_ptr as u64, &mut buf)
-                .map_err(|e| MiddlewareError::Fatal(format!("wasm host read failed: {e}")))?;
-            let host = String::from_utf8_lossy(&buf).trim().to_ascii_lowercase();
-            if !host.is_empty() {
-                out.host = Some(host);
-            }
-        }
-
-        if rw_len > 0 {
-            let rw_end = (rw_ptr as u64)
-                .checked_add(rw_len as u64)
-                .ok_or_else(|| MiddlewareError::Fatal("rewrite range overflow".into()))?;
-            if rw_end > view.data_size() {
-                return Err(MiddlewareError::Fatal("rewrite out of bounds".into()));
-            }
-            let mut buf = vec![0u8; rw_len as usize];
-            view.read(rw_ptr as u64, &mut buf)
-                .map_err(|e| MiddlewareError::Fatal(format!("wasm rewrite read failed: {e}")))?;
-            out.rewrite = Some(buf);
-        }
-
-        if out.host.is_none() && out.rewrite.is_none() {
-            return Err(MiddlewareError::NoMatch);
-        }
-
-        Ok(out)
-    }
 }
 
 pub struct WasmMiddleware {
     name: String,
     path_hint: String,
-    #[allow(dead_code)]
-    fn_name: String,
     engine: Engine,
     module: Module,
 }
@@ -1294,7 +1090,6 @@ impl WasmMiddleware {
             anyhow::bail!("middleware: empty wasm middleware name");
         }
 
-        let fn_name = "prism_mw_run".to_string();
         let engine = Engine::default();
         let store = Store::new(engine.clone());
         let module = Module::new(&store, wat_bytes).context("middleware: compile wat module")?;
@@ -1302,7 +1097,6 @@ impl WasmMiddleware {
         Ok(Self {
             name: name.to_string(),
             path_hint,
-            fn_name,
             engine,
             module,
         })
@@ -1313,7 +1107,6 @@ impl WasmMiddleware {
         Self {
             name: name.to_string(),
             path_hint: name.to_string(),
-            fn_name: "prism_mw_run".to_string(),
             engine,
             module,
         }
@@ -1333,31 +1126,6 @@ impl WasmMiddleware {
         WasmProtocolSession::new(&self.engine, &self.module)
     }
 
-    #[allow(dead_code)]
-    pub fn instantiate(&self) -> anyhow::Result<WasmInstanceParts> {
-        let mut store = Store::new(self.engine.clone());
-        let env = FunctionEnv::new(&mut store, HostEnv::default());
-        let import_object = create_prism_imports(&mut store, &env);
-
-        let instance = Instance::new(&mut store, &self.module, &import_object)
-            .context("middleware: instantiate wasm")?;
-
-        let memory = instance
-            .exports
-            .get_memory("memory")
-            .map_err(|e| anyhow::anyhow!("middleware: wasm missing exported memory 'memory': {e}"))?
-            .clone();
-
-        env.as_mut(&mut store).memory = Some(memory.clone());
-
-        let run: TypedFunction<(i32, i32), i64> = instance
-            .exports
-            .get_typed_function(&store, &self.fn_name)
-            .with_context(|| format!("middleware: wasm missing export {:?}", self.fn_name))?;
-
-        Ok((store, instance, memory, run))
-    }
-
     fn apply_impl(
         &self,
         prelude: &[u8],
@@ -1367,7 +1135,7 @@ impl WasmMiddleware {
             .create_session()
             .map_err(|e| MiddlewareError::Fatal(e.to_string()))?;
 
-        if ctx.phase == MiddlewarePhase::Parse && session.has_poll() {
+        if ctx.phase == MiddlewarePhase::Parse {
             match session.poll(prelude)? {
                 PollResult::Handshake(HandshakeResult::NeedMoreData) => {
                     return Err(MiddlewareError::NeedMoreData);
@@ -1389,16 +1157,12 @@ impl WasmMiddleware {
             }
         }
 
-        if session.has_legacy() {
-            return session.run_legacy(prelude, ctx);
-        }
-
-        if ctx.phase == MiddlewarePhase::Rewrite && session.has_poll() {
+        if ctx.phase == MiddlewarePhase::Rewrite {
             return Ok(MiddlewareOutput::default());
         }
 
         Err(MiddlewareError::Fatal(format!(
-            "wasm middleware {} missing required export ('poll' or 'prism_mw_run')",
+            "wasm middleware {} missing required 'poll' export",
             self.path_hint
         )))
     }
@@ -1438,44 +1202,38 @@ mod tests {
         p
     }
 
-    // Minimal middleware: if phase==parse, always return host="x" and rewrite="abc".
+    // Minimal middleware: if state==0, always return host="x" and rewrite="abc".
     const TEST_WAT: &str = r#"(module
     (memory (export "memory") 2)
 
-  (func $pack (param $ptr i32) (param $len i32) (result i64)
-    (i64.or
-      (i64.extend_i32_u (local.get $ptr))
-      (i64.shl (i64.extend_i32_u (local.get $len)) (i64.const 32))
-    )
-  )
-
-    (func (export "prism_mw_run") (param $n i32) (param $ctx i32) (result i64)
-    (local $phase i32)
-    (local.set $phase (i32.load (i32.add (local.get $ctx) (i32.const 4))))
-
-    ;; out struct at 65536
-    ;; struct { host_ptr, host_len, rw_ptr, rw_len }
-    (if (i32.eq (local.get $phase) (i32.const 0))
-      (then
-        ;; host at 100
-        (i32.store (i32.const 100) (i32.const 0x78)) ;; 'x'
-        ;; rewrite at 200: 'a''b''c'
-        (i32.store8 (i32.const 200) (i32.const 0x61))
-        (i32.store8 (i32.const 201) (i32.const 0x62))
-        (i32.store8 (i32.const 202) (i32.const 0x63))
-
-        (i32.store (i32.const 65536) (i32.const 100))
-        (i32.store (i32.const 65540) (i32.const 1))
-        (i32.store (i32.const 65544) (i32.const 200))
-        (i32.store (i32.const 65548) (i32.const 3))
-        (return (call $pack (i32.const 65536) (i32.const 16)))
+    (func $pack_result (param $action i32) (param $val i32) (result i64)
+      (i64.or
+        (i64.shl (i64.extend_i32_u (local.get $action)) (i64.const 32))
+        (i64.extend_i32_u (local.get $val))
       )
     )
 
-    ;; rewrite phase: no-op
-    (i64.const 1)
-  )
-)"#;
+    (func (export "poll") (param $buf_ptr i32) (param $buf_len i32) (param $state i32) (result i64)
+      (if (i32.eq (local.get $state) (i32.const 0))
+        (then
+          ;; host at 100
+          (i32.store (i32.const 100) (i32.const 0x78)) ;; 'x'
+          ;; rewrite at 200: 'a''b''c'
+          (i32.store8 (i32.const 200) (i32.const 0x61))
+          (i32.store8 (i32.const 201) (i32.const 0x62))
+          (i32.store8 (i32.const 202) (i32.const 0x63))
+
+          (i32.store (i32.const 65536) (i32.const 100))
+          (i32.store (i32.const 65540) (i32.const 1))
+          (i32.store (i32.const 65544) (i32.const 200))
+          (i32.store (i32.const 65548) (i32.const 3))
+          (return (call $pack_result (i32.const 1) (i32.const 65536)))
+        )
+      )
+
+      (call $pack_result (i32.const 1) (local.get $buf_len))
+    )
+  )"#;
 
     #[test]
     fn wasm_middleware_returns_host_and_rewrite() {
@@ -1498,7 +1256,7 @@ mod tests {
             .join("..");
         let dir = root.join("middlewares");
 
-        for name in ["minecraft_handshake", "tls_sni", "minecraft"] {
+        for name in ["tls_sni", "minecraft"] {
             let wat_path = dir.join(format!("{name}.wat"));
             assert!(
                 wat_path.exists(),
@@ -1523,7 +1281,7 @@ mod tests {
         assert!(created2.is_empty(), "expected no new files on second run");
 
         // Ensure we do not overwrite user-edited content.
-        let custom = dir.join("minecraft_handshake.wat");
+        let custom = dir.join("tls_sni.wat");
         fs::write(&custom, "(module)\n").expect("write custom");
         let _ = materialize_default_middlewares(&dir).expect("materialize 3");
         let now = fs::read_to_string(&custom).expect("read custom");
@@ -1602,69 +1360,6 @@ mod tests {
         out
     }
 
-    fn read_varint(bytes: &[u8], mut i: usize) -> Option<(u32, usize)> {
-        let mut res: u32 = 0;
-        let mut shift: u32 = 0;
-        loop {
-            let b = *bytes.get(i)?;
-            i += 1;
-            res |= ((b & 0x7f) as u32) << shift;
-            if (b & 0x80) == 0 {
-                return Some((res, i));
-            }
-            shift += 7;
-            if shift > 28 {
-                return None;
-            }
-        }
-    }
-
-    fn mc_handshake_extract_port(prelude: &[u8]) -> Option<u16> {
-        let (pkt_len, mut i) = read_varint(prelude, 0)?;
-        let end = i.checked_add(pkt_len as usize)?;
-        if end > prelude.len() {
-            return None;
-        }
-
-        let (_pid, ni) = read_varint(prelude, i)?;
-        i = ni;
-        let (_proto, ni) = read_varint(prelude, i)?;
-        i = ni;
-        let (addr_len, ni) = read_varint(prelude, i)?;
-        i = ni;
-        i = i.checked_add(addr_len as usize)?;
-        if i + 2 > end {
-            return None;
-        }
-        let port = u16::from_be_bytes([prelude[i], prelude[i + 1]]);
-        Some(port)
-    }
-
-    fn mc_handshake_extract_addr(prelude: &[u8]) -> Option<Vec<u8>> {
-        let (pkt_len, mut i) = read_varint(prelude, 0)?;
-        let end = i.checked_add(pkt_len as usize)?;
-        if end > prelude.len() {
-            return None;
-        }
-
-        let (_pid, ni) = read_varint(prelude, i)?;
-        i = ni;
-        let (_proto, ni) = read_varint(prelude, i)?;
-        i = ni;
-        let (addr_len, ni) = read_varint(prelude, i)?;
-        i = ni;
-        let addr_end = i.checked_add(addr_len as usize)?;
-        if addr_end > end {
-            return None;
-        }
-        Some(prelude[i..addr_end].to_vec())
-    }
-
-    fn mc_first_packet_end(prelude: &[u8]) -> Option<usize> {
-        let (pkt_len, i) = read_varint(prelude, 0)?;
-        i.checked_add(pkt_len as usize)
-    }
-
     fn tls_client_hello_prelude(host: &str) -> Vec<u8> {
         // Minimal TLS record containing a single ClientHello with a single SNI hostname.
         let host_bytes = host.as_bytes();
@@ -1724,83 +1419,61 @@ mod tests {
     }
 
     #[test]
-    fn minecraft_handshake_rewrite_uses_host_only_and_sets_port() {
+    fn minecraft_extracts_host() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..");
         let dir = root.join("middlewares");
 
-        let mc = WasmMiddleware::from_wat_path(
-            "minecraft_handshake",
-            &dir.join("minecraft_handshake.wat"),
-        )
-        .expect("compile minecraft_handshake");
+        let mc = WasmMiddleware::from_wat_path("minecraft", &dir.join("minecraft.wat"))
+            .expect("compile minecraft");
 
         let prelude = mc_handshake_prelude("play.example.com", 25565);
 
-        let rw = mc
-            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:25566"))
-            .expect("rewrite")
-            .rewrite
-            .expect("expected rewrite bytes");
-
         let out = mc
-            .apply(&rw, &MiddlewareCtx::parse())
-            .expect("parse rewritten")
+            .apply(&prelude, &MiddlewareCtx::parse())
+            .expect("parse")
             .host
             .expect("host");
 
-        assert_eq!(out, "backend.local");
-        assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
+        assert_eq!(out, "play.example.com");
     }
 
     #[test]
-    fn minecraft_handshake_rewrite_preserves_status_bytes_after_handshake() {
+    fn minecraft_extracts_host_with_trailing_status_bytes() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..");
         let dir = root.join("middlewares");
 
-        let mc = WasmMiddleware::from_wat_path(
-            "minecraft_handshake",
-            &dir.join("minecraft_handshake.wat"),
-        )
-        .expect("compile minecraft_handshake");
+        let mc = WasmMiddleware::from_wat_path("minecraft", &dir.join("minecraft.wat"))
+            .expect("compile minecraft");
 
         let handshake = mc_handshake_prelude("play.example.com", 25565);
         let mut suffix = mc_status_request_packet();
         suffix.extend_from_slice(&mc_ping_packet(42));
 
-        let mut prelude = handshake.clone();
+        let mut prelude = handshake;
         prelude.extend_from_slice(&suffix);
 
-        let rw = mc
-            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:25566"))
-            .expect("rewrite")
-            .rewrite
-            .expect("expected rewrite bytes");
+        let out = mc
+            .apply(&prelude, &MiddlewareCtx::parse())
+            .expect("parse")
+            .host
+            .expect("host");
 
-        assert!(rw.ends_with(&suffix));
-        assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
-
-        let rewritten_handshake_len = rw.len() - suffix.len();
-        assert_ne!(rewritten_handshake_len, handshake.len());
-        assert_eq!(mc_first_packet_end(&rw), Some(rewritten_handshake_len));
-        assert_eq!(&rw[rewritten_handshake_len..], suffix.as_slice());
+        assert_eq!(out, "play.example.com");
     }
 
     #[test]
-    fn minecraft_handshake_rewrite_preserves_nul_delimited_address_suffix() {
+    fn minecraft_extracts_host_with_nul_delimited_address_suffix() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..");
         let dir = root.join("middlewares");
 
-        let mc = WasmMiddleware::from_wat_path(
-            "minecraft_handshake",
-            &dir.join("minecraft_handshake.wat"),
-        )
-        .expect("compile minecraft_handshake");
+        let mc = WasmMiddleware::from_wat_path("minecraft", &dir.join("minecraft.wat"))
+            .expect("compile minecraft");
 
         let extra = b"\0FML3\0modded-marker";
         let handshake = mc_handshake_prelude_with_extra("play.example.com", extra, 25565);
@@ -1809,27 +1482,17 @@ mod tests {
         let mut prelude = handshake;
         prelude.extend_from_slice(&suffix);
 
-        let rw = mc
-            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:25566"))
-            .expect("rewrite")
-            .rewrite
-            .expect("expected rewrite bytes");
+        let out = mc
+            .apply(&prelude, &MiddlewareCtx::parse())
+            .expect("parse")
+            .host
+            .expect("host");
 
-        let mut expected_addr = b"backend.local".to_vec();
-        expected_addr.extend_from_slice(extra);
-        assert_eq!(
-            mc_handshake_extract_addr(&rw).as_deref(),
-            Some(expected_addr.as_slice())
-        );
-        assert_eq!(mc_handshake_extract_port(&rw), Some(25566));
-
-        let rewritten_handshake_len = rw.len() - suffix.len();
-        assert_eq!(mc_first_packet_end(&rw), Some(rewritten_handshake_len));
-        assert_eq!(&rw[rewritten_handshake_len..], suffix.as_slice());
+        assert_eq!(out, "play.example.com");
     }
 
     #[test]
-    fn tls_sni_rewrite_uses_upstream_host_only() {
+    fn tls_sni_handshake_and_streaming() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..");
@@ -1847,18 +1510,34 @@ mod tests {
             .expect("host");
         assert_eq!(parsed, "orig.example.com");
 
-        let rw = tls
-            .apply(&prelude, &MiddlewareCtx::rewrite("backend.local:443"))
-            .expect("rewrite")
-            .rewrite
-            .expect("expected rewrite bytes");
+        let mut session = tls.create_session().expect("create session");
+        assert_eq!(session.state(), SessionState::Handshake);
 
-        let parsed2 = tls
-            .apply(&rw, &MiddlewareCtx::parse())
-            .expect("parse rewritten")
-            .host
-            .expect("host");
-        assert_eq!(parsed2, "backend.local");
+        // State 0: Handshake
+        let res = session.poll(&prelude).expect("poll handshake");
+        assert_eq!(
+            res,
+            PollResult::Handshake(HandshakeResult::RouteMatch {
+                host: Some("orig.example.com".to_string()),
+                rewrite: None,
+            })
+        );
+        assert_eq!(session.state(), SessionState::Streaming);
+
+        // State 1: Streaming - partial record (< 5 bytes)
+        let incomplete = &prelude[..3];
+        let res_inc = session.poll(incomplete).expect("poll stream incomplete");
+        assert_eq!(res_inc, PollResult::Stream(StreamResult::NeedMoreData));
+
+        // State 1: Streaming - full record
+        let res_full = session.poll(&prelude).expect("poll stream full");
+        assert_eq!(
+            res_full,
+            PollResult::Stream(StreamResult::Frame {
+                len: prelude.len(),
+                priority: FramePriority::Defer,
+            })
+        );
     }
 
     #[test]

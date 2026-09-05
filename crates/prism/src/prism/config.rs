@@ -1872,7 +1872,7 @@ protocol = "tcp"
 [[routes]]
 host = "example.com"
 upstreams = ["127.0.0.1:25565"]
-middlewares = ["minecraft_handshake"]
+middlewares = ["minecraft"]
 "#;
 
         std::fs::write(&cfg_path, toml).expect("write");
@@ -1917,7 +1917,7 @@ store_path = "local.sqlite"
             routes: vec![ManagedRouteDocument {
                 hosts: vec!["play.example.com".to_string()],
                 upstreams: vec!["127.0.0.1:25566".to_string()],
-                middlewares: vec!["minecraft_handshake".to_string()],
+                middlewares: vec!["minecraft".to_string()],
                 strategy: "sequential".to_string(),
             }],
             ..Default::default()
@@ -1933,7 +1933,7 @@ store_path = "local.sqlite"
             routes: vec![ManagedRouteDocument {
                 hosts: vec!["play.example.com".to_string()],
                 upstreams: vec!["127.0.0.1:25566".to_string()],
-                middlewares: vec!["minecraft_handshake".to_string()],
+                middlewares: vec!["minecraft".to_string()],
                 strategy: "sequential".to_string(),
             }],
             ..Default::default()
@@ -1991,7 +1991,7 @@ enabled = true
 domain = "local"
 subdomain = "prism"
 listen_addr = ":25565"
-middlewares = ["minecraft_handshake"]
+middlewares = ["minecraft"]
 "#;
 
         std::fs::write(&cfg_path, toml).expect("write");
@@ -2000,10 +2000,7 @@ middlewares = ["minecraft_handshake"]
         assert_eq!(cfg.tunnel.mdns.domain, "local");
         assert_eq!(cfg.tunnel.mdns.subdomain, "prism");
         assert_eq!(cfg.tunnel.mdns.listen_addr, ":25565");
-        assert_eq!(
-            cfg.tunnel.mdns.middlewares,
-            vec!["minecraft_handshake".to_string()]
-        );
+        assert_eq!(cfg.tunnel.mdns.middlewares, vec!["minecraft".to_string()]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2281,7 +2278,7 @@ enabled = true
                     domain: "local".into(),
                     subdomain: "prism".into(),
                     listen_addr: ":25565".into(),
-                    middlewares: vec!["minecraft_handshake".into()],
+                    middlewares: vec!["minecraft".into()],
                 }),
                 ..Default::default()
             }),
@@ -2296,7 +2293,7 @@ enabled = true
                     domain: "local".into(),
                     subdomain: "prism".into(),
                     listen_addr: ":25565".into(),
-                    middlewares: vec!["minecraft_handshake".into()],
+                    middlewares: vec!["minecraft".into()],
                 }),
                 ..Default::default()
             }),

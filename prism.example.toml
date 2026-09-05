@@ -125,7 +125,7 @@ key_file = ""
 # domain = "local"
 # subdomain = "prism"         # services -> <name>.prism.local
 # listen_addr = ":25565"      # local proxy bind address (0.0.0.0 for LAN access)
-# middlewares = ["minecraft_handshake"]  # middleware for hostname extraction
+# middlewares = ["minecraft"]  # middleware for hostname extraction
 
 [logging]
 level = "info"
@@ -149,7 +149,7 @@ idle_timeout_ms = 0
 [[routes]]
 host = "play.example.com"
 upstream = "127.0.0.1:25566"
-middlewares = ["minecraft_handshake"]
+middlewares = ["minecraft"]
 
 # Wildcards ('*' and '?') support capture groups that can be substituted into upstreams
 # using $1, $2, ...
@@ -157,9 +157,9 @@ middlewares = ["minecraft_handshake"]
 host = "*.labs.example.com"
 upstreams = ["127.0.0.1:25567", "127.0.0.1:25568"]
 strategy = "round-robin"
-middlewares = ["minecraft_handshake"]
+middlewares = ["minecraft"]
 
 [[routes]]
 host = "home.example.com"
 upstream = "tunnel:home-mc"
-middlewares = ["minecraft_handshake"]
+middlewares = ["minecraft"]

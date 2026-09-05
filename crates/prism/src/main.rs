@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            return prism::desktop::run().await;
+            return prism::desktop::run(cli.config).await;
         }
     }
 

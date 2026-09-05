@@ -5,6 +5,7 @@ import {
 	Cable,
 	Gamepad2,
 	Gauge,
+	Github,
 	LogOut,
 	Menu,
 	Network,
@@ -26,7 +27,7 @@ const navItems = [
 	{ to: "/tunnel-services", label: "Tunnel Services", icon: <Unplug className="h-4 w-4" /> },
 	{ to: "/runtime", label: "Runtime", icon: <Gauge className="h-4 w-4" /> },
 	{ to: "/users", label: "Access & Users", icon: <Users className="h-4 w-4" /> },
-	{ to: "/login", label: "Connection", icon: <PlugZap className="h-4 w-4" /> },
+	{ to: "/login", label: "Control Plane Login", icon: <PlugZap className="h-4 w-4" /> },
 ] as const;
 
 function NavLink({
@@ -113,8 +114,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							</button>
 						</>
 					) : (
-						<div className="mt-4 text-sm text-slate-400">
-							No management endpoint configured yet.
+						<div className="mt-4 space-y-3">
+							<div className="text-xs text-slate-400">No management node attached.</div>
+							<Link
+								to="/login"
+								onClick={onNavigate}
+								className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-400/20"
+							>
+								<Github className="h-3.5 w-3.5" />
+								<span>Sign In with GitHub</span>
+							</Link>
 						</div>
 					)}
 				</div>
@@ -149,6 +158,7 @@ export default function Header() {
 				<div className="fixed inset-0 z-50 xl:hidden">
 					<button
 						type="button"
+						aria-label="Close mobile menu backdrop"
 						tabIndex={-1}
 						className="absolute inset-0 bg-black/60 backdrop-blur-sm"
 						onClick={() => setMobileOpen(false)}

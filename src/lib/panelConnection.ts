@@ -15,6 +15,29 @@ export function normalizeBaseUrl(value: string) {
 	return value.trim().replace(/\/+$/, "");
 }
 
+export function deriveManagementUrl(serverAddr: string): string {
+	const trimmed = serverAddr.trim();
+	if (!trimmed) {
+		return "";
+	}
+	let host = trimmed;
+	if (host.includes("://")) {
+		host = host.split("://")[1] || "";
+	}
+	if (host.startsWith("[")) {
+		const end = host.indexOf("]");
+		if (end !== -1) {
+			host = host.slice(0, end + 1);
+		}
+	} else if (host.includes(":")) {
+		host = host.split(":")[0] || "";
+	}
+	if (!host) {
+		return "";
+	}
+	return `http://${host}:8080`;
+}
+
 export function normalizePanelConnection(value: PanelConnection): PanelConnection {
 	return {
 		baseUrl: normalizeBaseUrl(value.baseUrl),

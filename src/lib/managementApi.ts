@@ -334,7 +334,9 @@ export function saveClientProfiles(connection: PanelConnection, profiles: Client
 }
 
 export interface AuthProvidersResponse {
-	github: boolean;
+	github_enabled: boolean;
+	github_client_id?: string | null;
+	mode: string;
 }
 
 export interface DeviceCodeResponse {
@@ -394,15 +396,20 @@ export interface CreateTokenResponse {
 	record: TokenRecord;
 }
 
-export function getAuthProviders(baseUrl: string) {
+export function getAuthProviders(baseUrl: string): Promise<AuthProvidersResponse> {
 	return fetch(`${baseUrl}/auth/providers`)
 		.then(async (res) => {
 			if (!res.ok) {
-				return { github: false };
+				return { github_enabled: false, github_client_id: null, mode: "token" };
 			}
-			return (await res.json()) as AuthProvidersResponse;
+			const data = (await res.json()) as Record<string, unknown>;
+			return {
+				github_enabled: Boolean(data.github_enabled ?? data.github),
+				github_client_id: (data.github_client_id as string) ?? null,
+				mode: (data.mode as string) ?? "token",
+			};
 		})
-		.catch(() => ({ github: false }));
+		.catch(() => ({ github_enabled: false, github_client_id: null, mode: "token" }));
 }
 
 export function requestDeviceCode(connection: PanelConnection) {

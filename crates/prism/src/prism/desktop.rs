@@ -8,7 +8,7 @@ use tauri::WindowEvent;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     tracing::info!("prism: starting desktop GUI mode");
 
@@ -17,17 +17,40 @@ pub async fn run() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let client_controller = Arc::new(crate::prism::tunnel::client::ClientController::new(None));
 
+    let resolved_config = crate::prism::config::resolve_config_path(config_path).ok();
+    let loaded_cfg = resolved_config
+        .as_ref()
+        .and_then(|r| crate::prism::config::load_config(&r.path).ok());
+
+    let (auth_cfg, actual_config_path) = match (&resolved_config, &loaded_cfg) {
+        (Some(r), Some(c)) => (c.auth.clone(), r.path.clone()),
+        (Some(r), None) => (crate::prism::auth::AuthConfig::default(), r.path.clone()),
+        _ => (
+            crate::prism::auth::AuthConfig::default(),
+            PathBuf::from("prism.toml"),
+        ),
+    };
+
+    let workdir = directories::ProjectDirs::from("com", "prism", "prism")
+        .map(|p| p.data_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let auth_manager = Arc::new(crate::prism::auth::AuthManager::new(
+        auth_cfg,
+        Some(&workdir),
+    ));
+
     let admin_state = crate::prism::admin::AdminState {
         sessions: Arc::new(crate::prism::telemetry::SessionRegistry::new()),
         traffic: Arc::new(crate::prism::telemetry::TrafficStatsRegistry::new()),
-        config_path: PathBuf::from("prism.toml"),
+        config_path: actual_config_path,
         reload_tx,
         tunnel: None,
         auth: crate::prism::admin::AdminAuth::default(),
         management: None,
         worker: None,
         client: Some(client_controller.clone()),
-        auth_manager: None,
+        auth_manager: Some(auth_manager),
     };
 
     // Bind embedded admin/client server to a free local port

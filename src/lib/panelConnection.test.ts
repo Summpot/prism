@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	clearPanelConnection,
+	deriveManagementUrl,
 	loadPanelConnection,
 	normalizeBaseUrl,
 	persistPanelConnection,
@@ -53,5 +54,16 @@ describe("panelConnection", () => {
 		});
 		clearPanelConnection(storage);
 		expect(loadPanelConnection(storage)).toBeNull();
+	});
+
+	it("derives management url correctly from tunnel server address", () => {
+		expect(deriveManagementUrl("")).toBe("");
+		expect(deriveManagementUrl("127.0.0.1:7000")).toBe("http://127.0.0.1:8080");
+		expect(deriveManagementUrl("mc.prism.gg:7000")).toBe("http://mc.prism.gg:8080");
+		expect(deriveManagementUrl("quic://play.example.com:7000")).toBe(
+			"http://play.example.com:8080",
+		);
+		expect(deriveManagementUrl("[::1]:7000")).toBe("http://[::1]:8080");
+		expect(deriveManagementUrl("1.2.3.4")).toBe("http://1.2.3.4:8080");
 	});
 });

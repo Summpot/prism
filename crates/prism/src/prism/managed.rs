@@ -751,6 +751,7 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
+            serve_frontend: false,
         };
 
         let app: Router = admin::build_router(state);

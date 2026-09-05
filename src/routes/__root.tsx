@@ -1,4 +1,12 @@
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import {
+	createRootRoute,
+	HeadContent,
+	Outlet,
+	Scripts,
+	useLocation,
+	useNavigate,
+} from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import Header from "@/components/Header";
 import { PanelSessionProvider } from "@/lib/panelSession";
@@ -16,7 +24,7 @@ export const Route = createRootRoute({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "Prism Control Plane",
+				title: "Prism Connect",
 			},
 		],
 		links: [
@@ -29,22 +37,57 @@ export const Route = createRootRoute({
 	component: RootDocument,
 });
 
+function RootContent() {
+	const location = useLocation();
+	const navigate = useNavigate();
+
+	const isDesktop =
+		typeof window !== "undefined" &&
+		(Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__) ||
+			Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+
+	useEffect(() => {
+		if (
+			typeof window !== "undefined" &&
+			(isDesktop || window.location.pathname.includes("_shell.html"))
+		) {
+			if (location.pathname === "/" || location.pathname === "/_shell.html") {
+				void navigate({ to: "/client" });
+			}
+		}
+	}, [isDesktop, location.pathname, navigate]);
+
+	const isClientShell = location.pathname === "/client" || location.pathname === "/_shell.html";
+
+	if (isClientShell) {
+		return (
+			<div className="min-h-screen bg-background text-foreground">
+				<Outlet />
+			</div>
+		);
+	}
+
+	return (
+		<div className="min-h-screen bg-background text-foreground">
+			<div className="mx-auto flex min-h-screen max-w-[1800px]">
+				<Header />
+				<main className="flex-1 min-w-0 px-4 pt-16 pb-8 md:px-8 xl:px-10 xl:pt-8 xl:pb-8">
+					<Outlet />
+				</main>
+			</div>
+		</div>
+	);
+}
+
 function RootDocument() {
 	return (
-		<html lang="en" className="bg-slate-950">
+		<html lang="en" className="dark">
 			<head>
 				<HeadContent />
 			</head>
-			<body>
+			<body className="min-h-screen bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary">
 				<PanelSessionProvider>
-					<div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.12),_transparent_32%),linear-gradient(180deg,_#020617_0%,_#0f172a_52%,_#020617_100%)] text-white">
-						<div className="mx-auto flex min-h-screen max-w-[1800px]">
-							<Header />
-							<main className="flex-1 px-4 pt-16 pb-6 md:px-8 xl:px-10 xl:pt-8 xl:pb-8">
-								<Outlet />
-							</main>
-						</div>
-					</div>
+					<RootContent />
 				</PanelSessionProvider>
 				<Scripts />
 			</body>

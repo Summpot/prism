@@ -33,6 +33,9 @@ use crate::prism::tunnel::transport::{
 };
 use serde::{Deserialize, Serialize};
 
+/// A single log entry captured from the client sidecar.
+pub type ClientLogEntry = crate::prism::logging::LogEntry;
+
 /// Terminal user sidecar client.
 pub struct Client {
     config: TunnelClientConfig,
@@ -210,15 +213,16 @@ impl Client {
         let local_port = listener.local_addr()?.port();
 
         tracing::info!(
-            listen_addr = %bind_addr,
-            port = local_port,
-            server_addr = %self.config.server_addr,
-            transport = %self.config.transport,
-            "tunnel client: local listener bound"
+            "Local listener bound to {} (port {}), targeting server {} via {}",
+            bind_addr,
+            local_port,
+            self.config.server_addr,
+            self.config.transport
         );
 
         // 2. Start Fake LAN broadcaster background task if enabled
         if let Some(broadcaster) = &self.broadcaster {
+            tracing::info!("Minecraft Fake LAN auto-discovery service started");
             let broadcaster_clone = broadcaster.clone();
             let broadcaster_shutdown = shutdown.clone();
             tokio::spawn(async move {
@@ -289,18 +293,23 @@ impl Client {
                 break;
             }
 
+            tracing::info!(
+                "Connecting to tunnel server at {} via {}...",
+                self.config.server_addr,
+                self.config.transport
+            );
+
             match self.connect_and_sync(local_port, shutdown.clone()).await {
                 Ok(()) => {
-                    tracing::info!("tunnel client: session closed cleanly");
+                    tracing::info!("Tunnel session closed cleanly");
                     break;
                 }
                 Err(err) => {
                     tracing::warn!(
-                        server = %self.config.server_addr,
-                        transport = %self.config.transport,
-                        err = %err,
-                        backoff = %humantime::format_duration(backoff),
-                        "tunnel client: disconnected from server; reconnecting"
+                        "Disconnected from server {}: {}; reconnecting in {:?}",
+                        self.config.server_addr,
+                        err,
+                        backoff
                     );
                 }
             }
@@ -370,9 +379,9 @@ impl Client {
         *self.current_sess.write().await = Some(sess.clone());
 
         tracing::info!(
-            server = %self.config.server_addr,
-            transport = %self.config.transport,
-            "tunnel client: registered with server, waiting for catalog updates"
+            "Connected to server {} ({}), registered sidecar client",
+            self.config.server_addr,
+            self.config.transport
         );
 
         // Catalog sync loop on the register stream
@@ -392,10 +401,11 @@ impl Client {
                         }
                     };
 
+                    let names = services.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
                     tracing::info!(
-                        count = services.len(),
-                        services = ?services.iter().map(|s| &s.name).collect::<Vec<_>>(),
-                        "tunnel client: received service catalog update"
+                        "Received service catalog update: {} services [{}]",
+                        services.len(),
+                        if names.is_empty() { "none" } else { &names }
                     );
 
                     // Update known services
@@ -480,7 +490,7 @@ async fn handle_player_connection(
     config: TunnelClientConfig,
     traffic_stats: SharedTrafficStats,
 ) -> anyhow::Result<()> {
-    tracing::debug!(peer = %peer_addr, "tunnel client: new player connected");
+    tracing::info!(peer = %peer_addr, "Incoming player connection from {peer_addr}");
 
     // 1. Determine target service from handshake Packet 0 or default
     let (target_service, initial_bytes) = if let Some(module) = &wasm_module {
@@ -532,6 +542,13 @@ async fn handle_player_connection(
         };
         (svc, Vec::new())
     };
+
+    tracing::info!(
+        peer = %peer_addr,
+        service = %target_service.name,
+        "Player {peer_addr} routed to service '{}'",
+        target_service.name
+    );
 
     // 2. Obtain active tunnel transport session
     let sess = {
@@ -739,7 +756,7 @@ struct ActiveClientInstance {
 }
 
 /// Dynamic lifecycle controller for terminal client sidecar.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ClientController {
     active: Arc<RwLock<Option<ActiveClientInstance>>>,
     middleware_dir: Option<PathBuf>,
@@ -765,6 +782,11 @@ impl ClientController {
     /// Starts or restarts the client sidecar with the given configuration.
     pub async fn start(&self, config: TunnelClientConfig) -> anyhow::Result<()> {
         self.stop().await;
+
+        tracing::info!(
+            "Starting client sidecar connecting to {}",
+            config.server_addr
+        );
 
         let mut client = Client::new(config)?;
         if let Some(ref dir) = self.middleware_dir {
@@ -793,6 +815,7 @@ impl ClientController {
         let mut guard = self.active.write().await;
         if let Some(instance) = guard.take() {
             let _ = instance.shutdown_tx.send(true);
+            tracing::info!("Client sidecar stopped");
         }
     }
 
@@ -810,6 +833,26 @@ impl ClientController {
     #[allow(dead_code)]
     pub async fn is_running(&self) -> bool {
         self.active.read().await.is_some()
+    }
+
+    /// Returns recent logs up to `limit`.
+    pub async fn logs(&self, limit: usize) -> Vec<ClientLogEntry> {
+        crate::prism::logging::get_recent_logs(limit)
+    }
+
+    /// Clears all stored logs.
+    pub async fn clear_logs(&self) {
+        crate::prism::logging::clear_recent_logs();
+    }
+
+    /// Appends a log entry directly.
+    #[allow(dead_code)]
+    pub async fn add_log(&self, level: &str, target: &str, message: &str) {
+        crate::prism::logging::append_log_entry(
+            level.to_string(),
+            target.to_string(),
+            message.to_string(),
+        );
     }
 }
 
@@ -1033,6 +1076,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_controller_lifecycle() {
+        crate::prism::logging::init_desktop_or_test_subscriber();
         let controller = ClientController::new(None);
         let status = controller.status().await;
         assert!(!status.running);
@@ -1064,5 +1108,12 @@ mod tests {
 
         controller.stop().await;
         assert!(!controller.is_running().await);
+
+        let logs = controller.logs(100).await;
+        assert!(!logs.is_empty());
+        assert!(logs.iter().any(|l| l.message.contains("client sidecar")));
+
+        controller.clear_logs().await;
+        assert!(controller.logs(100).await.is_empty());
     }
 }

@@ -229,6 +229,7 @@ pub async fn run(
             worker: worker_agent.clone(),
             client: Some(client_controller.clone()),
             auth_manager: Some(auth_manager.clone()),
+            serve_frontend: true,
         };
 
         let shutdown = shutdown_rx.clone();

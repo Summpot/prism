@@ -4,20 +4,23 @@
 	"version": "0.1.0",
 	"identifier": "com.prism.client",
 	"build": {
-		"frontendDist": "frontend-dist"
+		"beforeDevCommand": "pnpm dev",
+		"devUrl": "http://localhost:3000",
+		"beforeBuildCommand": "pnpm build",
+		"frontendDist": "../../dist/client"
 	},
 	"app": {
 		"withGlobalTauri": true,
 		"windows": [
 			{
-				"title": "Prism Client",
+				"title": "Prism",
 				"width": 980,
 				"height": 720,
 				"minWidth": 820,
 				"minHeight": 580,
 				"resizable": true,
 				"fullscreen": false,
-				"url": "index.html",
+				"url": "_shell.html",
 				"visible": false
 			}
 		],

@@ -9,7 +9,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
+    crate::prism::logging::init_desktop_or_test_subscriber();
     tracing::info!("prism: starting desktop GUI mode");
 
     // 1. Prepare Prism client controller and background Admin/Client API
@@ -51,11 +51,16 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         worker: None,
         client: Some(client_controller.clone()),
         auth_manager: Some(auth_manager),
+        serve_frontend: false,
     };
 
-    // Bind embedded admin/client server to a free local port
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    // Bind embedded admin/client server (prefer standard 8080, fallback to random free port)
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:8080").await {
+        Ok(l) => l,
+        Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0").await?,
+    };
     let local_addr = listener.local_addr()?;
+    tracing::info!(%local_addr, "prism desktop: embedded admin/client API listening");
 
     tokio::spawn(async move {
         let _ =
@@ -69,22 +74,42 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     tauri::Builder::default()
         .setup(move |app| {
             let main_window = app.get_webview_window("main").expect("main window exists");
-
-            // Navigate window to local client UI
-            let url = format!("http://{local_addr}/client");
-            main_window.navigate(url.parse().expect("valid url"))?;
             let _ = main_window.show();
 
             // Build Tray Menu
+            let title_i = MenuItem::with_id(app, "title", "Prism Client", false, None::<&str>)?;
+            let sep0 = tauri::menu::PredefinedMenuItem::separator(app)?;
             let show_i = MenuItem::with_id(app, "show", "Open Prism Client", true, None::<&str>)?;
+            let hide_i = MenuItem::with_id(app, "hide", "Hide to Tray", true, None::<&str>)?;
+            let sep1 = tauri::menu::PredefinedMenuItem::separator(app)?;
             let disconnect_i =
                 MenuItem::with_id(app, "disconnect", "Disconnect Tunnel", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &disconnect_i, &quit_i])?;
+            let sep2 = tauri::menu::PredefinedMenuItem::separator(app)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit Prism", true, None::<&str>)?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &title_i,
+                    &sep0,
+                    &show_i,
+                    &hide_i,
+                    &sep1,
+                    &disconnect_i,
+                    &sep2,
+                    &quit_i,
+                ],
+            )?;
+
+            let tray_icon = app.default_window_icon().cloned().unwrap_or_else(|| {
+                tauri::image::Image::from_bytes(include_bytes!("../../icons/icon.png"))
+                    .expect("embedded icon")
+            });
 
             let ctrl_clone = client_ctrl_for_tray.clone();
             let _tray = TrayIconBuilder::new()
+                .icon(tray_icon)
                 .menu(&menu)
+                .show_menu_on_left_click(false)
                 .tooltip("Prism Client")
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "show" => {
@@ -92,6 +117,11 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                             let _ = window.show();
                             let _ = window.unminimize();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "hide" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
                         }
                     }
                     "disconnect" => {
@@ -105,19 +135,28 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                     }
                     _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    }
+                    | TrayIconEvent::DoubleClick {
                         button: tauri::tray::MouseButton::Left,
                         ..
-                    } = event
-                    {
+                    } => {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
+                    _ => {}
                 })
                 .build(app)?;
 

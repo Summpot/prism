@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode, Uri, header},
     response::IntoResponse,
     routing::{get, post, put},
@@ -37,6 +37,7 @@ pub struct AdminState {
     pub worker: Option<Arc<managed::WorkerAgent>>,
     pub client: Option<Arc<tunnel::client::ClientController>>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
+    pub serve_frontend: bool,
 }
 
 #[allow(dead_code)]
@@ -72,8 +73,9 @@ pub async fn serve_with_shutdown(
 }
 
 pub(crate) fn build_router(state: AdminState) -> Router {
+    let serve_frontend_enabled = state.serve_frontend;
     let shared = Arc::new(state);
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(health))
         .route("/conns", get(conns))
         .route("/tunnel/services", get(tunnel_services))
@@ -97,6 +99,7 @@ pub(crate) fn build_router(state: AdminState) -> Router {
             "/client/profiles",
             get(client_get_profiles).post(client_save_profiles),
         )
+        .route("/client/logs", get(client_logs).delete(client_clear_logs))
         .route("/middlewares/{name}/data", post(post_middleware_data))
         .route("/auth/providers", get(auth_providers))
         .route("/auth/device/code", post(auth_device_code))
@@ -113,10 +116,13 @@ pub(crate) fn build_router(state: AdminState) -> Router {
             axum::routing::delete(auth_revoke_token),
         )
         .route("/managed/users", get(managed_users))
-        .route("/managed/users/{user_id}", put(put_managed_user))
-        .fallback(serve_frontend)
-        .with_state(shared)
-        .layer(CorsLayer::permissive())
+        .route("/managed/users/{user_id}", put(put_managed_user));
+
+    if serve_frontend_enabled {
+        router = router.fallback(serve_frontend);
+    }
+
+    router.with_state(shared).layer(CorsLayer::permissive())
 }
 
 async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
@@ -342,6 +348,41 @@ async fn client_save_profiles(Json(profiles): Json<Vec<ClientProfile>>) -> impl 
         }
     }
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClientLogsQuery {
+    pub limit: Option<usize>,
+}
+
+async fn client_logs(
+    State(st): State<Arc<AdminState>>,
+    Query(query): Query<ClientLogsQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    if let Some(ref client) = st.client {
+        let logs = client.logs(limit).await;
+        (StatusCode::OK, Json(logs)).into_response()
+    } else {
+        (
+            StatusCode::OK,
+            Json(Vec::<tunnel::client::ClientLogEntry>::new()),
+        )
+            .into_response()
+    }
+}
+
+async fn client_clear_logs(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(ref client) = st.client {
+        client.clear_logs().await;
+        (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+    } else {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "client controller not enabled" })),
+        )
+            .into_response()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -982,6 +1023,7 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
+            serve_frontend: false,
         };
 
         let app = build_router(state);
@@ -1063,6 +1105,7 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
+            serve_frontend: false,
         };
 
         let app = build_router(state);
@@ -1097,6 +1140,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_endpoints() {
+        crate::prism::logging::init_desktop_or_test_subscriber();
         let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let client_controller = Arc::new(tunnel::client::ClientController::new(None));
@@ -1112,6 +1156,7 @@ mod tests {
             worker: None,
             client: Some(client_controller),
             auth_manager: None,
+            serve_frontend: false,
         };
 
         let app = build_router(state);
@@ -1183,6 +1228,75 @@ mod tests {
             .unwrap();
         let status: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(status["running"], false);
+
+        // 5. Test logs endpoint
+        let resp = http
+            .get(format!("http://{addr}/client/logs?limit=50"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let logs: Vec<serde_json::Value> = resp.json().await.unwrap();
+        assert!(!logs.is_empty());
+
+        // 6. Clear logs
+        let resp = http
+            .delete(format!("http://{addr}/client/logs"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+        let resp = http
+            .get(format!("http://{addr}/client/logs"))
+            .send()
+            .await
+            .unwrap();
+        let logs: Vec<serde_json::Value> = resp.json().await.unwrap();
+        assert!(logs.is_empty());
+
+        let _ = shutdown_tx.send(true);
+    }
+
+    #[tokio::test]
+    async fn test_serve_frontend_flag() {
+        let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let state = AdminState {
+            sessions: Arc::new(telemetry::SessionRegistry::new()),
+            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth::default(),
+            management: None,
+            worker: None,
+            client: None,
+            auth_manager: None,
+            serve_frontend: false,
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(wait_shutdown(shutdown_rx))
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/client"))
+            .send()
+            .await
+            .unwrap();
+
+        // When serve_frontend is false, non-API route returns 404
+        assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
         let _ = shutdown_tx.send(true);
     }

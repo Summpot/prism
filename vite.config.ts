@@ -14,13 +14,37 @@ const config = defineConfig(({ command }) => ({
 	preview: {
 		host: "127.0.0.1",
 	},
+	server: {
+		port: 3000,
+		strictPort: true,
+		proxy: {
+			"/client": "http://127.0.0.1:8080",
+			"/stats": "http://127.0.0.1:8080",
+			"/auth": "http://127.0.0.1:8080",
+			"/health": "http://127.0.0.1:8080",
+			"/conns": "http://127.0.0.1:8080",
+			"/tunnel": "http://127.0.0.1:8080",
+			"/managed": "http://127.0.0.1:8080",
+			"/middlewares": "http://127.0.0.1:8080",
+			"/reload": "http://127.0.0.1:8080",
+			"/config": "http://127.0.0.1:8080",
+		},
+	},
 	resolve: {
 		alias: {
 			"@": fileURLToPath(new URL("./src", import.meta.url)),
 		},
 	},
 	plugins: [
-		...(isVitest || command !== "serve" ? [] : [devtools()]),
+		...(isVitest || command !== "serve"
+			? []
+			: [
+					devtools({
+						eventBusConfig: {
+							enabled: false,
+						},
+					}),
+				]),
 		viteTsConfigPaths({
 			projects: ["./tsconfig.json"],
 		}),

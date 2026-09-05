@@ -19,7 +19,7 @@ desktop = ["dep:tauri", "dep:tauri-build"]
 tauri-build = { version = "2", default-features = false, optional = true, features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"], optional = true }
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"], optional = true }
 anyhow = "1.0"
 arc-swap = "1.9"
 async-trait = "0.1"

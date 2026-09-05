@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-	ArrowRight,
+	Activity,
 	Check,
 	CheckCircle2,
+	ChevronRight,
+	Clock,
 	Copy,
 	Download,
 	ExternalLink,
@@ -11,23 +13,46 @@ import {
 	Gamepad2,
 	Github,
 	Layers,
-	Play,
+	Menu,
 	Plus,
+	Power,
 	Radio,
+	RotateCcw,
+	Search,
+	Server,
+	Settings2,
 	Share2,
-	Square,
+	Terminal,
 	Trash2,
+	Wifi,
+	WifiOff,
 	X,
 	Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Badge, EmptyState, ErrorBanner, PageHeader } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardFooter,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatBytes } from "@/lib/format";
 import {
+	type ClientLogEntry,
 	type ClientProfile,
 	type ClientStatusResponse,
 	type DeviceCodeResponse,
+	clearClientLogs,
+	getClientLogs,
 	getClientProfiles,
 	getClientStatus,
 	getHealth,
@@ -41,6 +66,7 @@ import { deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 import { encodePrismLink, parsePrismLink } from "@/lib/prismLink";
 import { usePolling } from "@/lib/usePolling";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/client")({
 	component: ClientDashboardPage,
@@ -48,15 +74,36 @@ export const Route = createFileRoute("/client")({
 
 function ClientDashboardPage() {
 	const { connection, saveConnection } = usePanelSession();
-	const effectiveConnection = useMemo(() => connection ?? { baseUrl: "", token: "" }, [connection]);
+	const effectiveConnection = useMemo(
+		() =>
+			connection ?? {
+				baseUrl:
+					typeof window !== "undefined" &&
+					((window as unknown as { __TAURI__?: unknown }).__TAURI__ ||
+						(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+						? "http://127.0.0.1:8080"
+						: "",
+				token: "",
+			},
+		[connection],
+	);
+
 	const [status, setStatus] = useState<ClientStatusResponse | null>(null);
 	const [profiles, setProfiles] = useState<ClientProfile[]>([]);
 	const [selectedProfileId, setSelectedProfileId] = useState<string>("");
 	const [actionLoading, setActionLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [copied, setCopied] = useState<string | null>(null);
+	const [activeTab, setActiveTab] = useState<string>("overview");
+	const [drawerOpen, setDrawerOpen] = useState(false);
 
-	// Form state
+	// Throughput sparkline history
+	const [throughputSamples, setThroughputSamples] = useState<number[]>([
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	]);
+	const prevWireRef = useRef(0);
+
+	// Form / profile config state
 	const [serverAddr, setServerAddr] = useState("127.0.0.1:7000");
 	const [transport, setTransport] = useState("quic");
 	const [authToken, setAuthToken] = useState("");
@@ -65,12 +112,22 @@ function ClientDashboardPage() {
 	const [profileName, setProfileName] = useState("Default Realm");
 	const [showToken, setShowToken] = useState(false);
 
-	// Auto connect management panel state
+	// Auto-connect management panel state
 	const [autoConnectPanel, setAutoConnectPanel] = useState(true);
 	const managementUrl = useMemo(
 		() => deriveManagementUrl(serverAddr) || "http://127.0.0.1:8080",
 		[serverAddr],
 	);
+
+	// Uptime timer state
+	const [uptimeSeconds, setUptimeSeconds] = useState(0);
+
+	// Logs state
+	const [logs, setLogs] = useState<ClientLogEntry[]>([]);
+	const [logFilterLevel, setLogFilterLevel] = useState<string>("ALL");
+	const [logSearchQuery, setLogSearchQuery] = useState("");
+	const [autoScrollLogs, setAutoScrollLogs] = useState(true);
+	const logsEndRef = useRef<HTMLDivElement | null>(null);
 
 	// GitHub auth modal state
 	const [githubAuthOpen, setGithubAuthOpen] = useState(false);
@@ -92,17 +149,15 @@ function ClientDashboardPage() {
 			.then((resp) => {
 				setStatus(resp);
 				if (resp.running && resp.server_addr) {
-					// sync active server info if connected
 					setServerAddr((prev) => prev || resp.server_addr);
 				}
 			})
 			.catch((err) => {
-				// Ignore if offline
 				console.debug("Failed to fetch client status:", err);
 			});
 	}, [effectiveConnection]);
 
-	// Fetch saved profiles
+	// Fetch profiles
 	const fetchProfiles = useCallback(() => {
 		getClientProfiles(effectiveConnection)
 			.then((list) => {
@@ -118,19 +173,66 @@ function ClientDashboardPage() {
 					setFakeLanBroadcast(first.fake_lan_broadcast);
 				}
 			})
-			.catch(() => {
-				// optional endpoint
-			});
+			.catch(() => {});
 	}, [effectiveConnection, selectedProfileId]);
+
+	// Fetch logs
+	const fetchLogs = useCallback(() => {
+		getClientLogs(effectiveConnection, 300)
+			.then((entries) => {
+				setLogs(entries);
+			})
+			.catch(() => {});
+	}, [effectiveConnection]);
 
 	useEffect(() => {
 		fetchStatus();
 		fetchProfiles();
-	}, [fetchStatus, fetchProfiles]);
+		fetchLogs();
+	}, [fetchStatus, fetchProfiles, fetchLogs]);
 
-	usePolling(fetchStatus, 1_500, true);
+	// Poll status frequently
+	usePolling(fetchStatus, 1500, true);
 
-	// Auto-connect management panel session when tunnel is running and connected
+	// Poll logs frequently while on logs tab or when running
+	usePolling(fetchLogs, 1500, activeTab === "logs" || status?.running === true);
+
+	// Auto-scroll logs to bottom
+	useEffect(() => {
+		if (autoScrollLogs && logsEndRef.current) {
+			logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+		}
+	}, [logs, autoScrollLogs]);
+
+	// Connection duration timer
+	useEffect(() => {
+		let interval: ReturnType<typeof setInterval> | null = null;
+		if (status?.state === "connected") {
+			interval = setInterval(() => {
+				setUptimeSeconds((prev) => prev + 1);
+			}, 1000);
+		} else {
+			setUptimeSeconds(0);
+		}
+		return () => {
+			if (interval) clearInterval(interval);
+		};
+	}, [status?.state]);
+
+	// Throughput sample tracking for live waveform sparkline
+	useEffect(() => {
+		if (status?.running) {
+			const currentWire = status.stats.wire_bytes;
+			const delta = prevWireRef.current > 0 ? Math.max(0, currentWire - prevWireRef.current) : 0;
+			prevWireRef.current = currentWire;
+			setThroughputSamples((prev) => [...prev.slice(1), delta]);
+		} else {
+			prevWireRef.current = 0;
+			setThroughputSamples([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+		}
+	}, [status?.running, status?.stats.wire_bytes]);
+
+	// Auto-connect management panel session when connected
 	useEffect(() => {
 		if (!autoConnectPanel) return;
 		if (!status?.running || status.state !== "connected") return;
@@ -138,7 +240,6 @@ function ClientDashboardPage() {
 		const targetUrl = managementUrl.trim() || deriveManagementUrl(serverAddr || status.server_addr);
 		if (!targetUrl) return;
 
-		// If already connected to targetUrl with this token, no need to re-verify
 		if (connection?.baseUrl === targetUrl && connection?.token === authToken.trim()) {
 			return;
 		}
@@ -148,7 +249,6 @@ function ClientDashboardPage() {
 				saveConnection({ baseUrl: targetUrl, token: authToken.trim() });
 			})
 			.catch(() => {
-				// Fallback: If remote :8080 is unreachable, check desktop local origin
 				if (
 					typeof window !== "undefined" &&
 					window.location.origin &&
@@ -181,7 +281,6 @@ function ClientDashboardPage() {
 			setDeviceCode(resp);
 			setDevicePolling(true);
 
-			// Automatically open GitHub device verification URI
 			if (typeof window !== "undefined") {
 				window.open(resp.verification_uri, "_blank");
 			}
@@ -202,11 +301,11 @@ function ClientDashboardPage() {
 							setGithubAuthOpen(false);
 							setDeviceSuccess(false);
 							setDeviceCode(null);
-						}, 2500);
+						}, 2000);
 					} else if (pollRes.status === "expired" || pollRes.status === "denied") {
 						clearInterval(timer);
 						setDevicePolling(false);
-						setAuthError(`GitHub 设备授权失败: ${pollRes.status}`);
+						setAuthError(`GitHub device authorization failed: ${pollRes.status}`);
 					}
 				} catch {
 					// continue polling
@@ -219,7 +318,7 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Profile selection change
+	// Select Profile
 	const handleSelectProfile = (id: string) => {
 		setSelectedProfileId(id);
 		const p = profiles.find((item) => item.id === id);
@@ -233,7 +332,7 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Save current profile
+	// Save Profile
 	const handleSaveProfile = async () => {
 		const existingIndex = profiles.findIndex(
 			(p) => p.id === selectedProfileId || p.server_addr === serverAddr,
@@ -262,7 +361,7 @@ function ClientDashboardPage() {
 		await saveClientProfiles(effectiveConnection, updated).catch(() => {});
 	};
 
-	// Delete profile
+	// Delete Profile
 	const handleDeleteProfile = async (id: string) => {
 		const updated = profiles.filter((p) => p.id !== id);
 		setProfiles(updated);
@@ -272,7 +371,7 @@ function ClientDashboardPage() {
 		await saveClientProfiles(effectiveConnection, updated).catch(() => {});
 	};
 
-	// Connect / Start client
+	// Connect / Disconnect Handlers
 	const handleConnect = async () => {
 		setActionLoading(true);
 		setError(null);
@@ -285,6 +384,7 @@ function ClientDashboardPage() {
 				fake_lan_broadcast: fakeLanBroadcast,
 			});
 			fetchStatus();
+			fetchLogs();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -292,13 +392,13 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Disconnect / Stop client
 	const handleDisconnect = async () => {
 		setActionLoading(true);
 		setError(null);
 		try {
 			await stopClient(effectiveConnection);
 			fetchStatus();
+			fetchLogs();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -306,7 +406,36 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Import invite link
+	// Toggle Connect Switch
+	const handleToggleTunnel = () => {
+		if (status?.running) {
+			handleDisconnect();
+		} else {
+			handleConnect();
+		}
+	};
+
+	// Clear Logs Handler
+	const handleClearLogs = async () => {
+		try {
+			await clearClientLogs(effectiveConnection);
+			setLogs([]);
+		} catch (err) {
+			console.error("Failed to clear logs:", err);
+		}
+	};
+
+	// Copy all visible logs
+	const handleCopyAllLogs = () => {
+		const text = filteredLogs
+			.map((l) => `[${l.timestamp}] [${l.level}] [${l.target}] ${l.message}`)
+			.join("\n");
+		navigator.clipboard.writeText(text);
+		setCopied("all-logs");
+		setTimeout(() => setCopied(null), 2000);
+	};
+
+	// Import Link
 	const handleImportLink = () => {
 		setImportError(null);
 		const parsed = parsePrismLink(importUrl);
@@ -315,19 +444,11 @@ function ClientDashboardPage() {
 			return;
 		}
 
-		if (parsed.name) {
-			setProfileName(parsed.name);
-		}
+		if (parsed.name) setProfileName(parsed.name);
 		setServerAddr(parsed.server_addr);
-		if (parsed.transport) {
-			setTransport(parsed.transport);
-		}
-		if (parsed.auth_token !== undefined) {
-			setAuthToken(parsed.auth_token);
-		}
-		if (parsed.listen_addr) {
-			setListenAddr(parsed.listen_addr);
-		}
+		if (parsed.transport) setTransport(parsed.transport);
+		if (parsed.auth_token !== undefined) setAuthToken(parsed.auth_token);
+		if (parsed.listen_addr) setListenAddr(parsed.listen_addr);
 		if (parsed.fake_lan_broadcast !== undefined) {
 			setFakeLanBroadcast(parsed.fake_lan_broadcast);
 		}
@@ -336,7 +457,7 @@ function ClientDashboardPage() {
 		setImportUrl("");
 	};
 
-	// Copy invite link
+	// Share Link
 	const handleShareLink = () => {
 		const link = encodePrismLink({
 			name: profileName,
@@ -367,624 +488,1168 @@ function ClientDashboardPage() {
 	const wireBytes = status?.stats.wire_bytes ?? 0;
 	const savedRatio = (status?.stats.saved_ratio ?? 0) * 100;
 
+	// Format uptime
+	const formatUptime = (seconds: number) => {
+		const hrs = Math.floor(seconds / 3600);
+		const mins = Math.floor((seconds % 3600) / 60);
+		const secs = seconds % 60;
+		return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+	};
+
+	// Filter logs
+	const filteredLogs = useMemo(() => {
+		return logs.filter((l) => {
+			if (logFilterLevel !== "ALL" && l.level.toUpperCase() !== logFilterLevel) {
+				return false;
+			}
+			if (logSearchQuery.trim()) {
+				const q = logSearchQuery.toLowerCase();
+				return (
+					l.message.toLowerCase().includes(q) ||
+					l.target.toLowerCase().includes(q) ||
+					l.level.toLowerCase().includes(q)
+				);
+			}
+			return true;
+		});
+	}, [logs, logFilterLevel, logSearchQuery]);
+
 	return (
-		<div className="flex flex-col gap-6">
-			<PageHeader
-				eyebrow="Terminal Client"
-				title="Prism Client Dashboard"
-				description="Transparent network tunnel sidecar with L7 traffic optimization and Minecraft Fake LAN auto-discovery."
-				actions={
-					<div className="flex items-center gap-3">
-						<button
-							type="button"
-							onClick={() => setImportModalOpen(true)}
-							className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-white"
-						>
-							<Download className="h-4 w-4 text-cyan-400" />
-							Import Invite Link
-						</button>
-						<button
-							type="button"
-							onClick={handleShareLink}
-							className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-white"
-						>
-							{copied === "share" ? (
-								<Check className="h-4 w-4 text-emerald-400" />
-							) : (
-								<Share2 className="h-4 w-4 text-cyan-400" />
-							)}
-							{copied === "share" ? "Copied!" : "Share Link"}
-						</button>
-					</div>
-				}
-			/>
+		<div className="relative min-h-screen bg-background">
+			{/* OpenVPN Style Slide-Out Navigation Drawer */}
+			{drawerOpen ? (
+				<div className="fixed inset-0 z-50 flex">
+					{/* Backdrop */}
+					<div
+						className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+						onClick={() => setDrawerOpen(false)}
+					/>
 
-			{error ? <ErrorBanner message={error} onRetry={fetchStatus} /> : null}
-
-			{/* Top Hero Status Banner */}
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-				{/* Connection Status Card */}
-				<div className="relative overflow-hidden rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 backdrop-blur">
-					<div className="flex items-center justify-between">
-						<span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-							Tunnel State
-						</span>
-						{isConnected ? (
-							<span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/30">
-								<span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-								Connected
-							</span>
-						) : isConnecting ? (
-							<span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-400 ring-1 ring-amber-500/30">
-								<span className="h-2 w-2 animate-ping rounded-full bg-amber-400" />
-								Reconnecting...
-							</span>
-						) : (
-							<span className="inline-flex items-center gap-1.5 rounded-full bg-slate-500/15 px-3 py-1 text-xs font-medium text-slate-400 ring-1 ring-slate-500/30">
-								<span className="h-2 w-2 rounded-full bg-slate-400" />
-								Disconnected
-							</span>
-						)}
-					</div>
-
-					<div className="mt-4 flex items-baseline gap-2">
-						<span className="text-2xl font-bold tracking-tight text-white">
-							{status?.server_addr || serverAddr || "No Server Configured"}
-						</span>
-					</div>
-					<div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-						<Badge tone="cyan">{status?.transport || transport}</Badge>
-						<span>Local Ingress: {status?.listen_addr || listenAddr}</span>
-					</div>
-
-					{connection ? (
-						<div className="mt-3 flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs">
-							<div className="flex items-center gap-2 text-emerald-300">
-								<span className="h-2 w-2 rounded-full bg-emerald-400" />
-								<span>Admin Panel Sync: {connection.baseUrl}</span>
-							</div>
-							<Link
-								to="/"
-								className="flex items-center gap-1 font-semibold text-emerald-400 hover:text-emerald-300"
-							>
-								Dashboard <ArrowRight className="h-3.5 w-3.5" />
-							</Link>
-						</div>
-					) : null}
-
-					<div className="mt-6 flex gap-3">
-						{isRunning ? (
-							<button
-								type="button"
-								disabled={actionLoading}
-								onClick={handleDisconnect}
-								className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/15 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-500/25 disabled:opacity-50"
-							>
-								<Square className="h-4 w-4 fill-current" />
-								Disconnect Tunnel
-							</button>
-						) : (
-							<button
-								type="button"
-								disabled={actionLoading || !serverAddr}
-								onClick={handleConnect}
-								className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50"
-							>
-								<Play className="h-4 w-4 fill-current" />
-								Connect Now
-							</button>
-						)}
-					</div>
-				</div>
-
-				{/* Traffic Optimizer Metrics */}
-				<div className="rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 backdrop-blur lg:col-span-2">
-					<div className="flex items-center justify-between">
-						<div className="flex items-center gap-2">
-							<Zap className="h-4 w-4 text-cyan-400" />
-							<span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-								Traffic Optimizer Performance
-							</span>
-						</div>
-						<span className="text-xs text-slate-400">
-							{savedRatio > 0 ? `${savedRatio.toFixed(1)}% bandwidth saved` : "Ready"}
-						</span>
-					</div>
-
-					{/* Progress Bar */}
-					<div className="mt-4">
-						<div className="flex justify-between text-xs text-slate-400">
-							<span>Compression Ratio</span>
-							<span className="font-semibold text-cyan-300">{savedRatio.toFixed(1)}%</span>
-						</div>
-						<div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-800">
-							<div
-								className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-500"
-								style={{ width: `${Math.min(100, Math.max(0, savedRatio))}%` }}
-							/>
-						</div>
-					</div>
-
-					{/* Stats Grid */}
-					<div className="mt-6 grid grid-cols-3 gap-4 border-t border-white/8 pt-4">
-						<div>
-							<div className="text-xs text-slate-400">Game Traffic (Raw)</div>
-							<div className="mt-1 text-lg font-semibold text-white">{formatBytes(rawBytes)}</div>
-						</div>
-						<div>
-							<div className="text-xs text-slate-400">Network Wire Sent</div>
-							<div className="mt-1 text-lg font-semibold text-slate-300">
-								{formatBytes(wireBytes)}
-							</div>
-						</div>
-						<div>
-							<div className="text-xs text-slate-400">Bandwidth Saved</div>
-							<div className="mt-1 text-lg font-semibold text-emerald-400">
-								{formatBytes(savedBytes)}
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			{/* Main Configuration & Discovered Services Layout */}
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-				{/* Left 1 Col: Server Configuration & Profiles */}
-				<div className="rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 backdrop-blur">
-					<div className="flex items-center justify-between">
-						<h2 className="text-base font-semibold text-white">Server Settings</h2>
-						{profiles.length > 0 ? (
-							<label className="flex items-center gap-2">
-								<span className="sr-only">Select Server Profile</span>
-								<select
-									aria-label="Select Server Profile"
-									value={selectedProfileId}
-									onChange={(e) => handleSelectProfile(e.target.value)}
-									className="rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 outline-none transition focus:border-cyan-400"
-								>
-									{profiles.map((p) => (
-										<option key={p.id} value={p.id}>
-											{p.name}
-										</option>
-									))}
-								</select>
-							</label>
-						) : null}
-					</div>
-
-					<div className="mt-5 flex flex-col gap-4">
-						<label className="block space-y-1.5">
-							<span className="text-xs font-medium text-slate-400">Profile Name</span>
-							<input
-								type="text"
-								value={profileName}
-								onChange={(e) => setProfileName(e.target.value)}
-								placeholder="e.g. My Survival Realm"
-								className="w-full rounded-xl border border-white/10 bg-white/4 px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400"
-							/>
-						</label>
-
-						<label className="block space-y-1.5">
-							<span className="text-xs font-medium text-slate-400">Relay Server Address</span>
-							<input
-								type="text"
-								value={serverAddr}
-								onChange={(e) => setServerAddr(e.target.value)}
-								placeholder="relay.example.com:7000"
-								className="w-full rounded-xl border border-white/10 bg-white/4 px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400"
-							/>
-						</label>
-
-						<div className="grid grid-cols-2 gap-3">
-							<label className="block space-y-1.5">
-								<span className="text-xs font-medium text-slate-400">Transport</span>
-								<select
-									value={transport}
-									onChange={(e) => setTransport(e.target.value)}
-									className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-400"
-								>
-									<option value="quic">QUIC (Fast & Resilient)</option>
-									<option value="kcp">KCP (Low Latency UDP)</option>
-									<option value="tcp">TCP (Standard)</option>
-								</select>
-							</label>
-
-							<label className="block space-y-1.5">
-								<span className="text-xs font-medium text-slate-400">Local Port</span>
-								<input
-									type="text"
-									value={listenAddr}
-									onChange={(e) => setListenAddr(e.target.value)}
-									placeholder="127.0.0.1:25565"
-									className="w-full rounded-xl border border-white/10 bg-white/4 px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400"
-								/>
-							</label>
-						</div>
-
-						<div className="space-y-1.5">
-							<div className="flex items-center justify-between">
-								<span className="text-xs font-medium text-slate-400">Auth Token</span>
-								<button
-									type="button"
-									onClick={() => {
-										setAuthServerUrl(managementUrl || "http://127.0.0.1:8080");
-										setGithubAuthOpen(true);
-									}}
-									className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-medium text-cyan-300 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-white"
-								>
-									<Github className="h-3 w-3 text-cyan-400" />
-									<span>GitHub 登录获取</span>
-								</button>
-							</div>
-							<div className="relative">
-								<input
-									type={showToken ? "text" : "password"}
-									value={authToken}
-									onChange={(e) => setAuthToken(e.target.value)}
-									placeholder="Server authentication token"
-									className="w-full rounded-xl border border-white/10 bg-white/4 px-3.5 py-2 pr-10 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400"
-								/>
-								<button
-									type="button"
-									onClick={() => setShowToken(!showToken)}
-									className="absolute top-1/2 right-3 -translate-y-1/2 text-slate-400 transition hover:text-white"
-								>
-									{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-								</button>
-							</div>
-						</div>
-
-						{/* Auto connect panel session toggle */}
-						<label
-							aria-label="Auto-connect Control Panel"
-							className="mt-1 flex cursor-pointer items-start gap-3 rounded-xl border border-white/6 bg-white/2 p-3 transition hover:bg-white/4"
-						>
-							<input
-								type="checkbox"
-								checked={autoConnectPanel}
-								onChange={(e) => setAutoConnectPanel(e.target.checked)}
-								className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-400"
-							/>
-							<div className="flex flex-col">
-								<span className="text-sm font-medium text-slate-200">
-									Auto-connect Control Panel
-								</span>
-								<span className="text-xs text-slate-400">
-									Automatically authenticate and attach panel session ({managementUrl}) when tunnel
-									connects.
-								</span>
-							</div>
-						</label>
-
-						{/* Fake LAN toggle */}
-						<label
-							aria-label="Minecraft Fake LAN Discovery"
-							className="mt-1 flex cursor-pointer items-start gap-3 rounded-xl border border-white/6 bg-white/2 p-3 transition hover:bg-white/4"
-						>
-							<input
-								type="checkbox"
-								checked={fakeLanBroadcast}
-								onChange={(e) => setFakeLanBroadcast(e.target.checked)}
-								className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-400"
-							/>
-							<div className="flex flex-col">
-								<span className="text-sm font-medium text-slate-200">
-									Minecraft Fake LAN Discovery
-								</span>
-								<span className="text-xs text-slate-400">
-									Broadcasts game sessions locally so friends can connect from the "LAN Games" list
-									without typing IP.
-								</span>
-							</div>
-						</label>
-
-						<div className="flex gap-2 pt-2">
-							<button
-								type="button"
-								onClick={handleSaveProfile}
-								className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 py-2.5 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-400/20"
-							>
-								<Plus className="h-3.5 w-3.5" />
-								Save Profile
-							</button>
-							{selectedProfileId ? (
-								<button
-									type="button"
-									onClick={() => handleDeleteProfile(selectedProfileId)}
-									className="flex items-center justify-center rounded-xl border border-red-400/20 bg-red-400/10 px-3 text-red-400 transition hover:bg-red-400/20"
-								>
-									<Trash2 className="h-4 w-4" />
-								</button>
-							) : null}
-						</div>
-					</div>
-				</div>
-
-				{/* Right 2 Cols: Discovered Services & Game Status */}
-				<div className="flex flex-col gap-6 lg:col-span-2">
-					{/* Fake LAN Active Card */}
-					{fakeLanBroadcast && isConnected ? (
-						<div className="relative overflow-hidden rounded-[2rem] border border-cyan-400/20 bg-gradient-to-r from-cyan-950/40 to-slate-950/60 p-6">
-							<div className="flex items-start gap-4">
-								<div className="flex h-12 w-12 flex-none items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-500/30">
-									<Gamepad2 className="h-6 w-6" />
+					{/* Drawer Content */}
+					<div className="relative z-10 flex w-72 flex-col border-r border-border bg-card p-5 text-card-foreground shadow-2xl">
+						<div className="flex items-center justify-between border-b border-border pb-4">
+							<div className="flex items-center gap-3">
+								<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shadow-xs ring-1 ring-primary/20">
+									<Radio className="h-5 w-5" />
 								</div>
 								<div>
-									<h3 className="text-base font-semibold text-white">
-										Minecraft LAN Auto-Discovery Active
-									</h3>
-									<p className="mt-1 text-sm text-slate-300">
-										Simply launch Minecraft on this machine, go to <b>Multiplayer</b>, and your
-										server will appear automatically in the <b>LAN Games</b> list!
-									</p>
-									<div className="mt-3 flex items-center gap-3">
-										<button
-											type="button"
-											onClick={() => copyText(status?.listen_addr || listenAddr, "lan-addr")}
-											className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-white/10"
-										>
-											{copied === "lan-addr" ? (
-												<Check className="h-3.5 w-3.5 text-emerald-400" />
-											) : (
-												<Copy className="h-3.5 w-3.5 text-slate-400" />
-											)}
-											Manual IP: {status?.listen_addr || listenAddr}
-										</button>
+									<div className="text-sm font-bold tracking-tight text-foreground">
+										Prism Connect
 									</div>
+									<div className="text-[11px] text-muted-foreground">OpenVPN Client Shell</div>
 								</div>
 							</div>
-						</div>
-					) : null}
-
-					{/* Discovered Services Catalog */}
-					<div className="flex-1 rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 backdrop-blur">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-2">
-								<Layers className="h-4 w-4 text-cyan-400" />
-								<h2 className="text-base font-semibold text-white">Discovered Remote Services</h2>
-							</div>
-							<span className="text-xs text-slate-400">
-								{status?.known_services.length || 0} active services
-							</span>
+							<Button
+								variant="ghost"
+								size="icon"
+								className="h-8 w-8 text-muted-foreground hover:text-foreground"
+								onClick={() => setDrawerOpen(false)}
+							>
+								<X className="h-4 w-4" />
+							</Button>
 						</div>
 
-						<div className="mt-4 flex flex-col gap-3">
-							{status?.known_services && status.known_services.length > 0 ? (
-								status.known_services.map((svc) => (
-									<div
-										key={svc.name}
-										className="flex flex-col justify-between gap-3 rounded-2xl border border-white/8 bg-white/3 p-4 transition hover:border-cyan-400/30 md:flex-row md:items-center"
-									>
-										<div className="flex items-center gap-3">
-											<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-400">
-												<Radio className="h-5 w-5" />
-											</div>
-											<div>
-												<div className="flex items-center gap-2">
-													<span className="font-semibold text-white">{svc.name}</span>
-													<Badge tone="cyan">{svc.proto.toUpperCase()}</Badge>
-												</div>
-												<div className="mt-0.5 text-xs text-slate-400">
-													Remote Route: {svc.masquerade_host || "Direct Tunnel"}
-												</div>
-											</div>
-										</div>
-
-										<div className="flex items-center gap-2">
-											<button
-												type="button"
-												onClick={() => copyText(status?.listen_addr || listenAddr, svc.name)}
-												className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-cyan-400/10 hover:text-white"
-											>
-												{copied === svc.name ? (
-													<Check className="h-3.5 w-3.5 text-emerald-400" />
-												) : (
-													<Copy className="h-3.5 w-3.5 text-slate-400" />
-												)}
-												Copy Join Address
-											</button>
-										</div>
-									</div>
-								))
-							) : (
-								<EmptyState
-									icon={<Radio className="h-8 w-8" />}
-									label={
-										isConnected
-											? "Connected to relay server. Waiting for Connector to publish game services..."
-											: "Connect to a Prism server to synchronize available services."
-									}
-								/>
-							)}
-						</div>
-					</div>
-				</div>
-			</div>
-
-			{/* Import Modal */}
-			{importModalOpen ? (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-					<div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900 p-6 shadow-2xl">
-						<h3 className="text-lg font-semibold text-white">Import Prism Invite Link</h3>
-						<p className="mt-1 text-sm text-slate-400">
-							Paste a <code className="text-cyan-300">prism://</code> link or server address
-							provided by your server administrator:
-						</p>
-
-						<div className="mt-4">
-							<input
-								type="text"
-								value={importUrl}
-								onChange={(e) => setImportUrl(e.target.value)}
-								placeholder="prism://play.example.com:7000?token=..."
-								className="w-full rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400"
-							/>
-							{importError ? <p className="mt-2 text-xs text-red-400">{importError}</p> : null}
-						</div>
-
-						<div className="mt-6 flex justify-end gap-3">
+						<nav className="mt-4 flex flex-1 flex-col gap-1.5">
 							<button
 								type="button"
 								onClick={() => {
-									setImportModalOpen(false);
-									setImportError(null);
+									setActiveTab("overview");
+									setDrawerOpen(false);
 								}}
-								className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5"
+								className={cn(
+									"flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+									activeTab === "overview"
+										? "bg-primary/10 text-primary ring-1 ring-primary/20"
+										: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+								)}
 							>
-								Cancel
+								<Layers className="h-4 w-4" />
+								<span>Connection Overview</span>
 							</button>
+
 							<button
 								type="button"
-								onClick={handleImportLink}
-								className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-400"
+								onClick={() => {
+									setActiveTab("profiles");
+									setDrawerOpen(false);
+								}}
+								className={cn(
+									"flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+									activeTab === "profiles"
+										? "bg-primary/10 text-primary ring-1 ring-primary/20"
+										: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+								)}
 							>
-								Import & Apply
+								<Server className="h-4 w-4" />
+								<span>Profiles</span>
 							</button>
+
+							<button
+								type="button"
+								onClick={() => {
+									setActiveTab("logs");
+									setDrawerOpen(false);
+								}}
+								className={cn(
+									"flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+									activeTab === "logs"
+										? "bg-primary/10 text-primary ring-1 ring-primary/20"
+										: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+								)}
+							>
+								<Terminal className="h-4 w-4" />
+								<span>Diagnostics & Logs</span>
+							</button>
+
+							<button
+								type="button"
+								onClick={() => {
+									setActiveTab("settings");
+									setDrawerOpen(false);
+								}}
+								className={cn(
+									"flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+									activeTab === "settings"
+										? "bg-primary/10 text-primary ring-1 ring-primary/20"
+										: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+								)}
+							>
+								<Settings2 className="h-4 w-4" />
+								<span>Settings</span>
+							</button>
+
+							<Separator className="my-3" />
+
+							<Link
+								to="/"
+								className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+								onClick={() => setDrawerOpen(false)}
+							>
+								<div className="flex items-center gap-3">
+									<Activity className="h-4 w-4" />
+									<span>Server Control Plane</span>
+								</div>
+								<ExternalLink className="h-3.5 w-3.5 opacity-60" />
+							</Link>
+						</nav>
+
+						<div className="mt-auto border-t border-border pt-4">
+							{isRunning ? (
+								<Button
+									variant="destructive"
+									size="sm"
+									className="w-full gap-2 text-xs"
+									onClick={() => {
+										handleDisconnect();
+										setDrawerOpen(false);
+									}}
+								>
+									<Power className="h-3.5 w-3.5" />
+									<span>Disconnect Tunnel</span>
+								</Button>
+							) : (
+								<Button
+									variant="default"
+									size="sm"
+									className="w-full gap-2 text-xs"
+									onClick={() => {
+										handleConnect();
+										setDrawerOpen(false);
+									}}
+								>
+									<Power className="h-3.5 w-3.5" />
+									<span>Connect Tunnel</span>
+								</Button>
+							)}
 						</div>
 					</div>
 				</div>
 			) : null}
 
-			{/* GitHub Auth Modal */}
-			{githubAuthOpen ? (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-					<div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900 p-6 shadow-2xl">
-						<div className="flex items-center justify-between">
+			<div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 md:px-8">
+				{/* OpenVPN Connect Style Window Header Bar */}
+				<div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex items-center gap-3">
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={() => setDrawerOpen(true)}
+							className="-ml-1 h-10 w-10 text-muted-foreground hover:text-foreground"
+							aria-label="Open navigation drawer"
+						>
+							<Menu className="h-5 w-5" />
+						</Button>
+
+						<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-xs ring-1 ring-primary/20">
+							<Radio className="h-5 w-5" />
+						</div>
+						<div>
 							<div className="flex items-center gap-2">
-								<Github className="h-5 w-5 text-white" />
-								<h3 className="text-lg font-semibold text-white">GitHub 授权登录</h3>
+								<h1 className="text-base font-bold tracking-tight text-foreground">
+									Prism Connect
+								</h1>
+								{isConnected ? (
+									<Badge
+										variant="outline"
+										className="border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+									>
+										<span className="mr-1.5 h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+										CONNECTED
+									</Badge>
+								) : isConnecting ? (
+									<Badge
+										variant="outline"
+										className="border-amber-500/30 bg-amber-500/10 text-amber-500"
+									>
+										<span className="mr-1.5 h-2 w-2 animate-ping rounded-full bg-amber-500" />
+										CONNECTING
+									</Badge>
+								) : (
+									<Badge
+										variant="outline"
+										className="border-muted-foreground/30 text-muted-foreground"
+									>
+										<span className="mr-1.5 h-2 w-2 rounded-full bg-muted-foreground/50" />
+										DISCONNECTED
+									</Badge>
+								)}
 							</div>
-							<button
-								type="button"
-								onClick={() => {
-									setGithubAuthOpen(false);
-									setDeviceCode(null);
-									setDevicePolling(false);
-									setAuthError(null);
-								}}
-								className="text-slate-400 hover:text-white"
+							<p className="text-xs text-muted-foreground">
+								High-performance transparent proxy tunnel with L7 traffic optimizer
+							</p>
+						</div>
+					</div>
+
+					{/* Header Actions */}
+					<div className="flex flex-wrap items-center gap-2">
+						{profiles.length > 0 ? (
+							<select
+								aria-label="Select Profile"
+								value={selectedProfileId}
+								onChange={(e) => handleSelectProfile(e.target.value)}
+								className="h-8 rounded-lg border border-input bg-background px-3 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
 							>
-								<X className="h-5 w-5" />
-							</button>
+								{profiles.map((p) => (
+									<option key={p.id} value={p.id}>
+										{p.name}
+									</option>
+								))}
+							</select>
+						) : null}
+
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setImportModalOpen(true)}
+							className="gap-1.5 text-xs"
+						>
+							<Download className="h-3.5 w-3.5 text-primary" />
+							<span>Import</span>
+						</Button>
+
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={handleShareLink}
+							className="gap-1.5 text-xs"
+						>
+							{copied === "share" ? (
+								<Check className="h-3.5 w-3.5 text-emerald-500" />
+							) : (
+								<Share2 className="h-3.5 w-3.5 text-primary" />
+							)}
+							<span>{copied === "share" ? "Copied" : "Share"}</span>
+						</Button>
+					</div>
+				</div>
+
+				{error ? (
+					<div className="flex items-center justify-between gap-4 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+						<span>{error}</span>
+						<Button variant="outline" size="xs" onClick={fetchStatus}>
+							Retry
+						</Button>
+					</div>
+				) : null}
+
+				{/* Main Hero Card: Iconic OpenVPN Connect Style Connection Switch & Live Metrics */}
+				<Card className="overflow-hidden border-border bg-card shadow-sm">
+					<div className="p-6 md:p-8">
+						<div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+							{/* Left: Profile Title & Server details */}
+							<div className="space-y-2">
+								<div className="flex items-center gap-2">
+									<h2 className="text-2xl font-bold tracking-tight text-foreground">
+										{profileName || "Prism Tunnel Profile"}
+									</h2>
+									<Badge variant="secondary" className="font-mono text-[11px] uppercase">
+										{status?.transport || transport}
+									</Badge>
+								</div>
+
+								<div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+									<div className="flex items-center gap-1.5">
+										<Server className="h-4 w-4 text-primary" />
+										<span className="font-mono text-foreground">
+											{status?.server_addr || serverAddr || "No Server Configured"}
+										</span>
+									</div>
+									<Separator orientation="vertical" className="h-4" />
+									<div className="flex items-center gap-1.5">
+										<span>Ingress:</span>
+										<span className="font-mono text-foreground">
+											{status?.listen_addr || listenAddr}
+										</span>
+									</div>
+								</div>
+
+								{connection ? (
+									<div className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+										<span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+										<span>Admin Sync: {connection.baseUrl}</span>
+										<Link
+											to="/"
+											className="inline-flex items-center gap-0.5 text-primary hover:underline"
+										>
+											<span>Dashboard</span>
+											<ChevronRight className="h-3 w-3" />
+										</Link>
+									</div>
+								) : null}
+							</div>
+
+							{/* Right: The OpenVPN Style Tactile Big Connect Switch */}
+							<div className="flex flex-col items-center gap-2 sm:items-end">
+								<div
+									onClick={!actionLoading ? handleToggleTunnel : undefined}
+									role="button"
+									tabIndex={0}
+									onKeyDown={(e) => {
+										if (e.key === "Enter" || e.key === " ") {
+											handleToggleTunnel();
+										}
+									}}
+									className={cn(
+										"relative flex h-14 w-32 cursor-pointer items-center rounded-full p-1.5 transition-all duration-300 select-none",
+										isRunning
+											? "bg-emerald-500 shadow-md shadow-emerald-500/20"
+											: "bg-muted ring-1 ring-border hover:bg-muted/80",
+										actionLoading && "cursor-not-allowed opacity-60",
+									)}
+								>
+									{/* Thumb */}
+									<div
+										className={cn(
+											"flex h-11 w-11 items-center justify-center rounded-full bg-background text-foreground shadow-md transition-all duration-300",
+											isRunning
+												? "translate-x-[4.3rem] text-emerald-600"
+												: "translate-x-0 text-muted-foreground",
+										)}
+									>
+										{actionLoading ? (
+											<RotateCcw className="h-5 w-5 animate-spin text-primary" />
+										) : isRunning ? (
+											<Power className="h-5 w-5" />
+										) : (
+											<Power className="h-5 w-5" />
+										)}
+									</div>
+
+									{/* Internal Status Text */}
+									<span
+										className={cn(
+											"absolute text-xs font-bold uppercase tracking-wider transition-opacity duration-300",
+											isRunning ? "left-3 text-white" : "right-3 text-muted-foreground",
+										)}
+									>
+										{isRunning ? "ON" : "OFF"}
+									</span>
+								</div>
+
+								<div className="text-center text-xs font-semibold uppercase tracking-wider sm:text-right">
+									{isConnected ? (
+										<span className="text-emerald-500">Connected</span>
+									) : isConnecting ? (
+										<span className="text-amber-500">Connecting...</span>
+									) : (
+										<span className="text-muted-foreground">Disconnected</span>
+									)}
+								</div>
+							</div>
 						</div>
 
-						<p className="mt-2 text-sm text-slate-400">
-							通过 GitHub 账号授权获取 Relay Server 的访问令牌，并同步连接管理控制面板。
-						</p>
+						{/* Active Connection Metrics (Uptime + Traffic Optimizer) */}
+						{isConnected ? (
+							<div className="mt-8 border-t border-border/80 pt-6">
+								<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+									<div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+										<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+											<Clock className="h-3.5 w-3.5 text-primary" />
+											<span>Connected Uptime</span>
+										</div>
+										<div className="mt-2 font-mono text-xl font-bold tracking-tight text-foreground">
+											{formatUptime(uptimeSeconds)}
+										</div>
+									</div>
 
-						<div className="mt-4 flex flex-col gap-3">
-							<label className="block space-y-1">
-								<span className="text-xs font-medium text-slate-400">
-									认证服务地址 (Auth Server URL)
-								</span>
-								<input
-									type="text"
-									value={authServerUrl}
-									onChange={(e) => setAuthServerUrl(e.target.value)}
-									placeholder="http://127.0.0.1:8080"
-									disabled={devicePolling}
-									className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400 disabled:opacity-50"
-								/>
-							</label>
+									<div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+										<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+											<Activity className="h-3.5 w-3.5 text-primary" />
+											<span>Raw Traffic</span>
+										</div>
+										<div className="mt-2 font-mono text-xl font-bold tracking-tight text-foreground">
+											{formatBytes(rawBytes)}
+										</div>
+									</div>
 
-							{authError ? (
-								<div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400">
-									{authError}
+									<div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+										<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+											<Wifi className="h-3.5 w-3.5 text-primary" />
+											<span>Wire Sent</span>
+										</div>
+										<div className="mt-2 font-mono text-xl font-bold tracking-tight text-foreground">
+											{formatBytes(wireBytes)}
+										</div>
+									</div>
+
+									<div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+										<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+											<Zap className="h-3.5 w-3.5 text-emerald-500" />
+											<span>Saved Bandwidth</span>
+										</div>
+										<div className="mt-2 font-mono text-xl font-bold tracking-tight text-emerald-500">
+											{savedRatio.toFixed(1)}% ({formatBytes(savedBytes)})
+										</div>
+									</div>
 								</div>
-							) : null}
 
-							{deviceSuccess ? (
-								<div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/15 p-4 text-emerald-300">
-									<CheckCircle2 className="h-5 w-5 flex-none" />
+								{/* Live Throughput Waveform Graph */}
+								<div className="mt-4 rounded-xl border border-border/60 bg-muted/20 p-4">
+									<div className="flex items-center justify-between">
+										<div className="flex items-center gap-2 text-xs text-muted-foreground">
+											<Activity className="h-3.5 w-3.5 text-emerald-500" />
+											<span className="font-medium text-foreground">Live Network Throughput</span>
+										</div>
+										<span className="font-mono text-xs font-semibold text-emerald-500">
+											{formatBytes(throughputSamples[throughputSamples.length - 1] || 0)}/s
+										</span>
+									</div>
+									<div className="mt-3 flex items-end justify-between gap-4">
+										<div className="flex-1 overflow-hidden">
+											<ThroughputSparkline samples={throughputSamples} />
+										</div>
+										<div className="flex-none text-right text-[11px] text-muted-foreground">
+											<span>Zstd L7 Optimizer: {savedRatio.toFixed(1)}% Saved</span>
+										</div>
+									</div>
+								</div>
+
+								{/* Bandwidth Compression Progress Bar */}
+								<div className="mt-4">
+									<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+										<div
+											className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+											style={{ width: `${Math.min(100, Math.max(0, savedRatio))}%` }}
+										/>
+									</div>
+								</div>
+							</div>
+						) : null}
+
+						{/* Minecraft LAN Auto-Discovery Highlight Card */}
+						{fakeLanBroadcast && isConnected ? (
+							<div className="mt-6 flex flex-col gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="flex items-center gap-3">
+									<div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-primary/15 text-primary">
+										<Gamepad2 className="h-5 w-5" />
+									</div>
 									<div>
-										<p className="text-sm font-semibold">GitHub 授权成功！</p>
-										<p className="text-xs text-emerald-400/80">
-											Auth Token 已自动填入表单并同步连接管理面板。
+										<div className="text-sm font-semibold text-foreground">
+											Minecraft LAN Auto-Discovery Active
+										</div>
+										<div className="text-xs text-muted-foreground">
+											Your server will appear directly under <b>Multiplayer &gt; LAN Games</b>!
+										</div>
+									</div>
+								</div>
+
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => copyText(status?.listen_addr || listenAddr, "lan-btn")}
+									className="gap-1.5 text-xs"
+								>
+									{copied === "lan-btn" ? (
+										<Check className="h-3.5 w-3.5 text-emerald-500" />
+									) : (
+										<Copy className="h-3.5 w-3.5" />
+									)}
+									<span>{copied === "lan-btn" ? "Copied" : status?.listen_addr || listenAddr}</span>
+								</Button>
+							</div>
+						) : null}
+					</div>
+				</Card>
+
+				{/* OpenVPN Connect Style Tabs Section: Overview, Logs, Profiles, Settings */}
+				<Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+					<TabsList className="grid w-full grid-cols-4">
+						<TabsTrigger value="overview" className="gap-2 text-xs">
+							<Layers className="h-3.5 w-3.5" />
+							<span>Overview</span>
+						</TabsTrigger>
+						<TabsTrigger value="logs" className="gap-2 text-xs">
+							<Terminal className="h-3.5 w-3.5" />
+							<span>Client Logs</span>
+							{logs.length > 0 ? (
+								<span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold">
+									{logs.length}
+								</span>
+							) : null}
+						</TabsTrigger>
+						<TabsTrigger value="profiles" className="gap-2 text-xs">
+							<Server className="h-3.5 w-3.5" />
+							<span>Profiles</span>
+						</TabsTrigger>
+						<TabsTrigger value="settings" className="gap-2 text-xs">
+							<Settings2 className="h-3.5 w-3.5" />
+							<span>Settings</span>
+						</TabsTrigger>
+					</TabsList>
+
+					{/* 1. Overview Tab: Discovered Services */}
+					<TabsContent value="overview" className="mt-4 space-y-4">
+						<Card className="shadow-xs">
+							<CardHeader className="flex flex-row items-center justify-between pb-3">
+								<div>
+									<CardTitle className="text-base font-semibold">
+										Discovered Remote Services
+									</CardTitle>
+									<CardDescription>
+										Synchronized game & proxy services broadcast by the tunnel relay
+									</CardDescription>
+								</div>
+								<Badge variant="outline">{status?.known_services.length || 0} active</Badge>
+							</CardHeader>
+							<CardContent>
+								{status?.known_services && status.known_services.length > 0 ? (
+									<div className="divide-y divide-border">
+										{status.known_services.map((svc) => (
+											<div
+												key={svc.name}
+												className="flex flex-col justify-between gap-3 py-3 sm:flex-row sm:items-center"
+											>
+												<div className="flex items-center gap-3">
+													<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+														<Radio className="h-4 w-4" />
+													</div>
+													<div>
+														<div className="flex items-center gap-2">
+															<span className="font-semibold text-foreground">{svc.name}</span>
+															<Badge
+																variant="secondary"
+																className="font-mono text-[10px] uppercase"
+															>
+																{svc.proto}
+															</Badge>
+														</div>
+														<div className="font-mono text-xs text-muted-foreground">
+															{svc.masquerade_host || "Direct Tunnel"}
+														</div>
+													</div>
+												</div>
+
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => copyText(status?.listen_addr || listenAddr, svc.name)}
+													className="gap-1.5 text-xs"
+												>
+													{copied === svc.name ? (
+														<Check className="h-3.5 w-3.5 text-emerald-500" />
+													) : (
+														<Copy className="h-3.5 w-3.5" />
+													)}
+													<span>{copied === svc.name ? "Copied" : "Copy Join Address"}</span>
+												</Button>
+											</div>
+										))}
+									</div>
+								) : (
+									<div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
+										<WifiOff className="mb-2 h-8 w-8 text-muted-foreground/50" />
+										<p className="text-sm">
+											{isConnected
+												? "Waiting for Connector to publish game services..."
+												: "Connect to a Prism server to view and synchronize services."}
 										</p>
 									</div>
+								)}
+							</CardContent>
+						</Card>
+					</TabsContent>
+
+					{/* 2. Client Logs Tab: Real-Time Terminal View */}
+					<TabsContent value="logs" className="mt-4 space-y-3">
+						<Card className="shadow-xs">
+							<CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+								<div>
+									<CardTitle className="text-base font-semibold">Client Sidecar Logs</CardTitle>
+									<CardDescription>
+										Real-time diagnostic events generated by the tunnel client runtime
+									</CardDescription>
 								</div>
-							) : deviceCode ? (
-								<div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-									<div className="text-xs text-slate-400">
-										请在 GitHub 页面输入以下 8 位设备码：
+
+								{/* Logs Control Toolbar */}
+								<div className="flex flex-wrap items-center gap-2">
+									{/* Level Filters */}
+									<div className="flex items-center rounded-lg border border-input p-0.5 text-xs">
+										{(["ALL", "INFO", "WARN", "ERROR"] as const).map((lvl) => (
+											<button
+												key={lvl}
+												type="button"
+												onClick={() => setLogFilterLevel(lvl)}
+												className={cn(
+													"rounded-md px-2.5 py-1 font-semibold transition",
+													logFilterLevel === lvl
+														? "bg-primary text-primary-foreground shadow-xs"
+														: "text-muted-foreground hover:text-foreground",
+												)}
+											>
+												{lvl}
+											</button>
+										))}
 									</div>
-									<div className="mt-2 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-										<span className="font-mono text-xl font-bold tracking-wider text-cyan-300">
-											{deviceCode.user_code}
-										</span>
+
+									{/* Auto-scroll toggle */}
+									<Button
+										variant={autoScrollLogs ? "secondary" : "outline"}
+										size="xs"
+										onClick={() => setAutoScrollLogs(!autoScrollLogs)}
+										className="text-xs"
+									>
+										Auto-scroll: {autoScrollLogs ? "ON" : "OFF"}
+									</Button>
+
+									{/* Clear Logs */}
+									<Button
+										variant="outline"
+										size="xs"
+										onClick={handleClearLogs}
+										className="text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+									>
+										Clear
+									</Button>
+
+									{/* Copy All Logs */}
+									<Button
+										variant="outline"
+										size="xs"
+										onClick={handleCopyAllLogs}
+										className="gap-1 text-xs"
+									>
+										{copied === "all-logs" ? (
+											<Check className="h-3 w-3 text-emerald-500" />
+										) : (
+											<Copy className="h-3 w-3" />
+										)}
+										<span>{copied === "all-logs" ? "Copied" : "Copy"}</span>
+									</Button>
+								</div>
+							</CardHeader>
+
+							<CardContent>
+								{/* Filter Input */}
+								<div className="relative mb-3">
+									<Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+									<Input
+										placeholder="Search client logs..."
+										value={logSearchQuery}
+										onChange={(e) => setLogSearchQuery(e.target.value)}
+										className="h-8 pl-8 text-xs font-mono"
+									/>
+								</div>
+
+								{/* Terminal Window */}
+								<div className="h-96 w-full overflow-y-auto rounded-lg border border-border bg-slate-950 p-4 font-mono text-xs text-slate-200 selection:bg-primary/30">
+									{filteredLogs.length > 0 ? (
+										<div className="flex flex-col gap-1.5">
+											{filteredLogs.map((entry, idx) => {
+												const lvl = entry.level.toUpperCase();
+												const badgeColor =
+													lvl === "ERROR"
+														? "text-red-400 bg-red-950/60 border-red-800/40"
+														: lvl === "WARN"
+															? "text-amber-400 bg-amber-950/60 border-amber-800/40"
+															: lvl === "DEBUG"
+																? "text-slate-400 bg-slate-900 border-slate-800"
+																: "text-emerald-400 bg-emerald-950/60 border-emerald-800/40";
+
+												return (
+													<div
+														key={idx}
+														className="flex items-start gap-2.5 leading-relaxed hover:bg-white/5 px-1 py-0.5 rounded"
+													>
+														<span className="shrink-0 text-slate-500 selection:text-slate-300">
+															[{entry.timestamp}]
+														</span>
+														<span
+															className={cn(
+																"shrink-0 rounded px-1.5 py-0.2 text-[10px] font-bold border",
+																badgeColor,
+															)}
+														>
+															{entry.level}
+														</span>
+														<span className="shrink-0 text-slate-400">{entry.target}:</span>
+														<span className="break-all text-slate-100">{entry.message}</span>
+													</div>
+												);
+											})}
+											<div ref={logsEndRef} />
+										</div>
+									) : (
+										<div className="flex h-full flex-col items-center justify-center text-slate-500">
+											<Terminal className="mb-2 h-6 w-6 opacity-40" />
+											<p>No client logs recorded yet.</p>
+											<p className="text-[11px] text-slate-600">
+												Start the tunnel client sidecar to observe real-time events.
+											</p>
+										</div>
+									)}
+								</div>
+							</CardContent>
+						</Card>
+					</TabsContent>
+
+					{/* 3. Profiles Tab: Manage & Import/Export */}
+					<TabsContent value="profiles" className="mt-4 space-y-4">
+						<Card className="shadow-xs">
+							<CardHeader className="flex flex-row items-center justify-between pb-3">
+								<div>
+									<CardTitle className="text-base font-semibold">Saved Tunnel Profiles</CardTitle>
+									<CardDescription>
+										Quickly switch between configured game realms or tunnel servers
+									</CardDescription>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										const id = `profile-${Date.now()}`;
+										setProfileName("New Profile");
+										setServerAddr("127.0.0.1:7000");
+										setTransport("quic");
+										setAuthToken("");
+										setListenAddr("127.0.0.1:25565");
+										setFakeLanBroadcast(true);
+										setSelectedProfileId(id);
+									}}
+									className="gap-1.5 text-xs"
+								>
+									<Plus className="h-3.5 w-3.5" />
+									<span>Add New</span>
+								</Button>
+							</CardHeader>
+							<CardContent>
+								{profiles.length > 0 ? (
+									<div className="divide-y divide-border">
+										{profiles.map((p) => {
+											const isSelected = p.id === selectedProfileId;
+											return (
+												<div key={p.id} className="flex items-center justify-between py-3">
+													<div className="flex items-center gap-3">
+														<Button
+															variant={isSelected ? "default" : "outline"}
+															size="xs"
+															onClick={() => handleSelectProfile(p.id)}
+															className="text-xs"
+														>
+															{isSelected ? "Active" : "Select"}
+														</Button>
+														<div>
+															<div className="font-semibold text-foreground">{p.name}</div>
+															<div className="font-mono text-xs text-muted-foreground">
+																{p.server_addr} ({p.transport.toUpperCase()}) &bull; Local:{" "}
+																{p.listen_addr}
+															</div>
+														</div>
+													</div>
+
+													<div className="flex items-center gap-2">
+														<Button
+															variant="outline"
+															size="icon-xs"
+															onClick={() => {
+																handleSelectProfile(p.id);
+																setActiveTab("settings");
+															}}
+															title="Edit profile settings"
+														>
+															<Settings2 className="h-3.5 w-3.5" />
+														</Button>
+														<Button
+															variant="outline"
+															size="icon-xs"
+															onClick={() => handleDeleteProfile(p.id)}
+															className="text-destructive hover:bg-destructive/10"
+															title="Delete profile"
+														>
+															<Trash2 className="h-3.5 w-3.5" />
+														</Button>
+													</div>
+												</div>
+											);
+										})}
+									</div>
+								) : (
+									<div className="py-6 text-center text-sm text-muted-foreground">
+										No saved profiles yet. Click "Add New" or import a link.
+									</div>
+								)}
+							</CardContent>
+						</Card>
+					</TabsContent>
+
+					{/* 4. Settings Tab: Connection Configuration & GitHub Auth */}
+					<TabsContent value="settings" className="mt-4 space-y-4">
+						<Card className="shadow-xs">
+							<CardHeader>
+								<CardTitle className="text-base font-semibold">Profile Settings</CardTitle>
+								<CardDescription>
+									Configure connection parameters for the current profile
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="space-y-4">
+								<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+									<div className="space-y-1.5">
+										<label className="text-xs font-medium text-muted-foreground">
+											Profile Name
+										</label>
+										<Input
+											value={profileName}
+											onChange={(e) => setProfileName(e.target.value)}
+											placeholder="e.g. My Survival Realm"
+										/>
+									</div>
+
+									<div className="space-y-1.5">
+										<label className="text-xs font-medium text-muted-foreground">
+											Relay Server Address
+										</label>
+										<Input
+											value={serverAddr}
+											onChange={(e) => setServerAddr(e.target.value)}
+											placeholder="relay.example.com:7000"
+										/>
+									</div>
+								</div>
+
+								<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+									<div className="space-y-1.5">
+										<label className="text-xs font-medium text-muted-foreground">
+											Transport Protocol
+										</label>
+										<select
+											aria-label="Transport Protocol"
+											value={transport}
+											onChange={(e) => setTransport(e.target.value)}
+											className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+										>
+											<option value="quic">QUIC (Fast & Resilient)</option>
+											<option value="kcp">KCP (Low Latency UDP)</option>
+											<option value="tcp">TCP (Standard)</option>
+										</select>
+									</div>
+
+									<div className="space-y-1.5">
+										<label className="text-xs font-medium text-muted-foreground">
+											Local Port / Ingress
+										</label>
+										<Input
+											value={listenAddr}
+											onChange={(e) => setListenAddr(e.target.value)}
+											placeholder="127.0.0.1:25565"
+										/>
+									</div>
+								</div>
+
+								{/* Auth Token with GitHub Quick Login */}
+								<div className="space-y-1.5">
+									<div className="flex items-center justify-between">
+										<label className="text-xs font-medium text-muted-foreground">
+											Authentication Token
+										</label>
+										<Button
+											type="button"
+											variant="outline"
+											size="xs"
+											onClick={() => {
+												setAuthServerUrl(managementUrl || "http://127.0.0.1:8080");
+												setGithubAuthOpen(true);
+											}}
+											className="gap-1.5 text-xs text-primary"
+										>
+											<Github className="h-3 w-3" />
+											<span>GitHub 1-Click Login</span>
+										</Button>
+									</div>
+									<div className="relative">
+										<Input
+											type={showToken ? "text" : "password"}
+											value={authToken}
+											onChange={(e) => setAuthToken(e.target.value)}
+											placeholder="Server auth token (optional)"
+											className="pr-10"
+										/>
 										<button
 											type="button"
-											onClick={() => copyText(deviceCode.user_code, "user-code")}
-											className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white"
+											onClick={() => setShowToken(!showToken)}
+											className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 										>
-											{copied === "user-code" ? (
-												<Check className="h-4 w-4 text-emerald-400" />
-											) : (
-												<Copy className="h-4 w-4" />
-											)}
-											{copied === "user-code" ? "已复制" : "复制"}
+											{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
 										</button>
 									</div>
+								</div>
 
-									<div className="mt-4 flex items-center justify-between">
-										<a
-											href={deviceCode.verification_uri}
-											target="_blank"
-											rel="noreferrer"
-											className="inline-flex items-center gap-1.5 text-xs font-medium text-cyan-400 hover:underline"
-										>
-											<span>打开 GitHub 验证页面</span>
-											<ExternalLink className="h-3.5 w-3.5" />
-										</a>
-										{devicePolling ? (
-											<span className="flex items-center gap-2 text-xs text-slate-400">
-												<span className="h-2 w-2 animate-ping rounded-full bg-cyan-400" />
-												等待用户授权中...
-											</span>
-										) : null}
+								<Separator />
+
+								{/* Toggles */}
+								<div className="space-y-3">
+									<div className="flex items-center justify-between rounded-lg border border-border p-3">
+										<div className="space-y-0.5">
+											<div className="text-sm font-medium text-foreground">
+												Minecraft Fake LAN Auto-Discovery
+											</div>
+											<div className="text-xs text-muted-foreground">
+												Broadcasts game session on the local network for Minecraft "LAN Games"
+											</div>
+										</div>
+										<Switch checked={fakeLanBroadcast} onCheckedChange={setFakeLanBroadcast} />
+									</div>
+
+									<div className="flex items-center justify-between rounded-lg border border-border p-3">
+										<div className="space-y-0.5">
+											<div className="text-sm font-medium text-foreground">
+												Auto-Connect Control Panel
+											</div>
+											<div className="text-xs text-muted-foreground">
+												Automatically sync admin panel session ({managementUrl}) when tunnel
+												connects
+											</div>
+										</div>
+										<Switch checked={autoConnectPanel} onCheckedChange={setAutoConnectPanel} />
 									</div>
 								</div>
-							) : (
-								<div className="mt-2 flex flex-col gap-3">
-									<button
-										type="button"
+							</CardContent>
+
+							<CardFooter className="flex justify-between border-t border-border pt-4">
+								{selectedProfileId ? (
+									<Button
+										variant="outline"
+										onClick={() => handleDeleteProfile(selectedProfileId)}
+										className="text-destructive hover:bg-destructive/10"
+									>
+										Delete Profile
+									</Button>
+								) : (
+									<div />
+								)}
+
+								<Button onClick={handleSaveProfile} className="gap-2">
+									<Check className="h-4 w-4" />
+									<span>Save Profile</span>
+								</Button>
+							</CardFooter>
+						</Card>
+					</TabsContent>
+				</Tabs>
+
+				{/* Import Modal */}
+				{importModalOpen ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-xs">
+						<Card className="w-full max-w-lg shadow-xl">
+							<CardHeader>
+								<CardTitle>Import Prism Invite Link</CardTitle>
+								<CardDescription>
+									Paste a <code className="text-primary">prism://</code> link or server address
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="space-y-3">
+								<Input
+									value={importUrl}
+									onChange={(e) => setImportUrl(e.target.value)}
+									placeholder="prism://play.example.com:7000?token=..."
+								/>
+								{importError ? <p className="text-xs text-destructive">{importError}</p> : null}
+							</CardContent>
+							<CardFooter className="flex justify-end gap-2 border-t border-border pt-4">
+								<Button
+									variant="outline"
+									onClick={() => {
+										setImportModalOpen(false);
+										setImportError(null);
+									}}
+								>
+									Cancel
+								</Button>
+								<Button onClick={handleImportLink}>Import & Apply</Button>
+							</CardFooter>
+						</Card>
+					</div>
+				) : null}
+
+				{/* GitHub Device Auth Modal */}
+				{githubAuthOpen ? (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-xs">
+						<Card className="w-full max-w-lg shadow-xl">
+							<CardHeader className="flex flex-row items-center justify-between pb-3">
+								<div className="flex items-center gap-2">
+									<Github className="h-5 w-5" />
+									<CardTitle>GitHub Device Authorization</CardTitle>
+								</div>
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									onClick={() => {
+										setGithubAuthOpen(false);
+										setDeviceCode(null);
+										setDevicePolling(false);
+										setAuthError(null);
+									}}
+								>
+									<X className="h-4 w-4" />
+								</Button>
+							</CardHeader>
+							<CardContent className="space-y-4">
+								<p className="text-sm text-muted-foreground">
+									Authenticate via GitHub to fetch a client access token from the relay server.
+								</p>
+
+								<div className="space-y-1.5">
+									<label className="text-xs font-medium text-muted-foreground">
+										Auth Server Address
+									</label>
+									<Input
+										value={authServerUrl}
+										onChange={(e) => setAuthServerUrl(e.target.value)}
+										disabled={devicePolling}
+									/>
+								</div>
+
+								{authError ? (
+									<div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+										{authError}
+									</div>
+								) : null}
+
+								{deviceSuccess ? (
+									<div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-500">
+										<CheckCircle2 className="h-5 w-5 flex-none" />
+										<div className="text-xs">
+											<p className="font-semibold">GitHub Authorization Succeeded!</p>
+											<p>Token automatically applied to profile settings.</p>
+										</div>
+									</div>
+								) : deviceCode ? (
+									<div className="space-y-3 rounded-lg border border-border bg-muted/40 p-4">
+										<div className="text-xs text-muted-foreground">
+											Enter this 8-digit device code on the GitHub verification page:
+										</div>
+										<div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-2.5">
+											<span className="font-mono text-xl font-bold tracking-wider text-primary">
+												{deviceCode.user_code}
+											</span>
+											<Button
+												variant="outline"
+												size="xs"
+												onClick={() => copyText(deviceCode.user_code, "user-code")}
+												className="gap-1 text-xs"
+											>
+												{copied === "user-code" ? (
+													<Check className="h-3 w-3 text-emerald-500" />
+												) : (
+													<Copy className="h-3 w-3" />
+												)}
+												<span>{copied === "user-code" ? "Copied" : "Copy"}</span>
+											</Button>
+										</div>
+
+										<div className="flex items-center justify-between pt-1">
+											<a
+												href={deviceCode.verification_uri}
+												target="_blank"
+												rel="noreferrer"
+												className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+											>
+												<span>Open GitHub Verification</span>
+												<ExternalLink className="h-3 w-3" />
+											</a>
+											{devicePolling ? (
+												<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+													<span className="h-2 w-2 animate-ping rounded-full bg-primary" />
+													Waiting for authorization...
+												</span>
+											) : null}
+										</div>
+									</div>
+								) : (
+									<Button
 										onClick={startDeviceAuth}
 										disabled={deviceLoading}
-										className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-800 to-slate-700 py-3 text-sm font-semibold text-white transition hover:from-slate-700 hover:to-slate-600 disabled:opacity-50"
+										className="w-full gap-2"
 									>
 										<Github className="h-4 w-4" />
-										{deviceLoading ? "正在请求设备码..." : "发起 GitHub 设备码授权登录"}
-									</button>
-									<div className="flex items-center justify-between text-xs text-slate-500">
-										<span>浏览器标准 OAuth 登录流程：</span>
-										<a
-											href={`${normalizeBaseUrl(authServerUrl)}/auth/github/login`}
-											className="flex items-center gap-1 text-cyan-400 hover:underline"
-										>
-											网页跳转登录 <ExternalLink className="h-3 w-3" />
-										</a>
-									</div>
-								</div>
-							)}
-						</div>
-
-						<div className="mt-6 flex justify-end">
-							<button
-								type="button"
-								onClick={() => {
-									setGithubAuthOpen(false);
-									setDeviceCode(null);
-									setDevicePolling(false);
-									setAuthError(null);
-								}}
-								className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5"
-							>
-								关闭
-							</button>
-						</div>
+										<span>
+											{deviceLoading ? "Requesting code..." : "Request Device Code Login"}
+										</span>
+									</Button>
+								)}
+							</CardContent>
+							<CardFooter className="flex justify-end border-t border-border pt-4">
+								<Button
+									variant="outline"
+									onClick={() => {
+										setGithubAuthOpen(false);
+										setDeviceCode(null);
+										setDevicePolling(false);
+										setAuthError(null);
+									}}
+								>
+									Close
+								</Button>
+							</CardFooter>
+						</Card>
 					</div>
-				</div>
-			) : null}
+				) : null}
+			</div>
 		</div>
+	);
+}
+
+function ThroughputSparkline({ samples }: { samples: number[] }) {
+	const max = Math.max(...samples, 1024);
+	const width = 280;
+	const height = 36;
+	const points = samples
+		.map((v, i) => {
+			const x = (i / (samples.length - 1)) * width;
+			const y = height - (v / max) * (height - 8) - 4;
+			return `${x.toFixed(1)},${y.toFixed(1)}`;
+		})
+		.join(" ");
+
+	return (
+		<svg viewBox={`0 0 ${width} ${height}`} className="h-9 w-full overflow-visible">
+			<polyline
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="2.5"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				className="text-emerald-500 transition-all duration-300"
+				points={points}
+			/>
+		</svg>
 	);
 }

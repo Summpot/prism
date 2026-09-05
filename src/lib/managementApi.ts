@@ -333,6 +333,23 @@ export function saveClientProfiles(connection: PanelConnection, profiles: Client
 	});
 }
 
+export interface ClientLogEntry {
+	timestamp: string;
+	level: string;
+	target: string;
+	message: string;
+}
+
+export function getClientLogs(connection: PanelConnection, limit = 200) {
+	return apiRequest<ClientLogEntry[]>(connection, `/client/logs?limit=${limit}`);
+}
+
+export function clearClientLogs(connection: PanelConnection) {
+	return apiRequest<{ ok: boolean }>(connection, "/client/logs", {
+		method: "DELETE",
+	});
+}
+
 export interface AuthProvidersResponse {
 	github_enabled: boolean;
 	github_client_id?: string | null;

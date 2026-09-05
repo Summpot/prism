@@ -5,10 +5,13 @@
 
 pub mod autolisten;
 pub mod client;
+pub mod connector;
 pub mod datagram;
+pub mod fake_lan;
 pub mod local_proxy;
 pub mod manager;
 pub mod mdns;
 pub mod protocol;
 pub mod server;
+pub mod traffic_optimizer;
 pub mod transport;

@@ -37,6 +37,7 @@ struct ClientConn {
 
 struct State {
     clients: HashMap<String, ClientConn>,
+    client_sessions: HashMap<String, Arc<dyn TransportSession>>,
     primary: HashMap<String, String>,
 }
 
@@ -59,6 +60,7 @@ impl Manager {
             id_seq: AtomicU64::new(1),
             state: RwLock::new(State {
                 clients: HashMap::new(),
+                client_sessions: HashMap::new(),
                 primary: HashMap::new(),
             }),
             changed: tx,
@@ -151,6 +153,54 @@ impl Manager {
         self.bump_changed();
     }
 
+    pub async fn register_client_session(
+        &self,
+        id: String,
+        sess: Arc<dyn TransportSession>,
+    ) -> anyhow::Result<()> {
+        if id.trim().is_empty() {
+            anyhow::bail!("tunnel: empty client id");
+        }
+        let mut st = self.state.write().await;
+        if let Some(old) = st.client_sessions.remove(&id) {
+            old.close().await;
+        }
+        st.client_sessions.insert(id, sess);
+        Ok(())
+    }
+
+    pub async fn unregister_client_session(&self, id: &str) {
+        let id = id.trim();
+        if id.is_empty() {
+            return;
+        }
+        let mut st = self.state.write().await;
+        let old = st.client_sessions.remove(id);
+        drop(st);
+        if let Some(sess) = old {
+            sess.close().await;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn client_sessions_count(&self) -> usize {
+        self.state.read().await.client_sessions.len()
+    }
+
+    pub async fn active_services(&self) -> Vec<RegisteredService> {
+        let st = self.state.read().await;
+        let mut out = Vec::new();
+        for (name, cid) in &st.primary {
+            if let Some(cc) = st.clients.get(cid) {
+                if let Some(svc) = cc.services.get(name) {
+                    out.push(svc.clone());
+                }
+            }
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
     pub async fn snapshot_services(&self) -> Vec<ServiceSnapshot> {
         let st = self.state.read().await;
         let mut out = Vec::new();
@@ -175,7 +225,9 @@ impl Manager {
 
     #[allow(dead_code)]
     pub async fn dial_service_tcp(&self, service: &str) -> Result<BoxedStream, ManagerError> {
-        let (st, _svc) = self.dial_service_tcp_inner(None, service).await?;
+        let (st, _svc) = self
+            .dial_service_tcp_inner_with_flags(None, service, 0)
+            .await?;
         Ok(st)
     }
 
@@ -183,7 +235,17 @@ impl Manager {
         &self,
         service: &str,
     ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
-        self.dial_service_tcp_inner(None, service).await
+        self.dial_service_tcp_inner_with_flags(None, service, 0)
+            .await
+    }
+
+    pub async fn dial_service_tcp_with_flags(
+        &self,
+        service: &str,
+        flags: u8,
+    ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
+        self.dial_service_tcp_inner_with_flags(None, service, flags)
+            .await
     }
 
     pub async fn dial_service_tcp_from_client(
@@ -192,9 +254,20 @@ impl Manager {
         service: &str,
     ) -> Result<BoxedStream, ManagerError> {
         let (st, _svc) = self
-            .dial_service_tcp_inner(Some(client_id), service)
+            .dial_service_tcp_inner_with_flags(Some(client_id), service, 0)
             .await?;
         Ok(st)
+    }
+
+    #[allow(dead_code)]
+    pub async fn dial_service_tcp_from_client_with_flags(
+        &self,
+        client_id: &str,
+        service: &str,
+        flags: u8,
+    ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
+        self.dial_service_tcp_inner_with_flags(Some(client_id), service, flags)
+            .await
     }
 
     #[allow(dead_code)]
@@ -203,7 +276,8 @@ impl Manager {
         client_id: &str,
         service: &str,
     ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
-        self.dial_service_tcp_inner(Some(client_id), service).await
+        self.dial_service_tcp_inner_with_flags(Some(client_id), service, 0)
+            .await
     }
 
     pub async fn dial_service_udp(&self, service: &str) -> Result<BoxedStream, ManagerError> {
@@ -218,10 +292,11 @@ impl Manager {
         self.dial_service_udp_inner(Some(client_id), service).await
     }
 
-    async fn dial_service_tcp_inner(
+    async fn dial_service_tcp_inner_with_flags(
         &self,
         client_id: Option<&str>,
         service: &str,
+        flags: u8,
     ) -> Result<(BoxedStream, RegisteredService), ManagerError> {
         let service = service.trim();
         if service.is_empty() {
@@ -248,13 +323,23 @@ impl Manager {
             (cc.sess.clone(), svc)
         };
 
+        let mut effective_flags = flags;
+        if svc.traffic_optimizer.as_ref().is_some_and(|to| to.enabled) {
+            effective_flags |= protocol::FLAG_TRAFFIC_OPTIMIZER;
+        }
+
         let mut st = sess
             .open_stream()
             .await
             .map_err(|_| ManagerError::ServiceNotFound)?;
-        protocol::write_proxy_stream_header(&mut st, ProxyStreamKind::Tcp, service)
-            .await
-            .map_err(|_| ManagerError::ServiceNotFound)?;
+        protocol::write_proxy_stream_header_with_flags(
+            &mut st,
+            ProxyStreamKind::Tcp,
+            service,
+            effective_flags,
+        )
+        .await
+        .map_err(|_| ManagerError::ServiceNotFound)?;
         Ok((st, svc))
     }
 

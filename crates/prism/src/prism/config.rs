@@ -365,6 +365,9 @@ pub struct ManagedTunnelDocument {
     pub auto_listen_services: bool,
     #[serde(default)]
     pub endpoints: Vec<ManagedTunnelEndpointDocument>,
+    #[serde(default)]
+    pub connector: Option<ManagedTunnelConnectorDocument>,
+    #[serde(default)]
     pub client: Option<ManagedTunnelClientDocument>,
     #[serde(default)]
     pub services: Vec<ManagedTunnelServiceDocument>,
@@ -373,6 +376,10 @@ pub struct ManagedTunnelDocument {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_motd_prefix() -> String {
+    "[Prism] ".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -386,12 +393,55 @@ pub struct ManagedTunnelEndpointDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ManagedTunnelConnectorDocument {
+    pub server_addr: String,
+    #[serde(default)]
+    pub transport: String,
+    #[serde(default)]
+    pub auth_token: String,
+    pub dial_timeout_ms: Option<i64>,
+    pub quic: Option<ManagedQuicClientDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedTunnelClientDocument {
     pub server_addr: String,
     #[serde(default)]
     pub transport: String,
-    pub dial_timeout_ms: Option<i64>,
-    pub quic: Option<ManagedQuicClientDocument>,
+    #[serde(default)]
+    pub auth_token: String,
+    #[serde(default)]
+    pub listen_addr: String,
+    pub middleware: Option<String>,
+    #[serde(default)]
+    pub fake_lan_broadcast: bool,
+    #[serde(default = "default_motd_prefix")]
+    pub motd_prefix: String,
+    pub traffic_optimizer: Option<ManagedTrafficOptimizerClientDocument>,
+    pub discovery: Option<ManagedClientDiscoveryDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedClientDiscoveryDocument {
+    pub minecraft_lan: Option<ManagedMinecraftLanDiscoveryDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedMinecraftLanDiscoveryDocument {
+    #[serde(default)]
+    pub enabled: bool,
+    pub motd_prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTrafficOptimizerClientDocument {
+    #[serde(default)]
+    pub enabled: bool,
+    pub zstd_window_log: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -422,6 +472,18 @@ pub struct ManagedTunnelServiceDocument {
     pub remote_addr: String,
     #[serde(default)]
     pub masquerade_host: String,
+    pub middleware: Option<String>,
+    pub traffic_optimizer: Option<ManagedTrafficOptimizerDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedTrafficOptimizerDocument {
+    #[serde(default)]
+    pub enabled: bool,
+    pub flush_interval_ms: Option<u64>,
+    pub zstd_window_log: Option<u32>,
+    pub zstd_level: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -494,6 +556,7 @@ pub struct TunnelConfig {
     pub auth_token: String,
     pub auto_listen_services: bool,
     pub endpoints: Vec<TunnelEndpointConfig>,
+    pub connector: Option<TunnelConnectorConfig>,
     pub client: Option<TunnelClientConfig>,
     pub services: Vec<TunnelServiceConfig>,
     pub mdns: MdnsConfig,
@@ -507,11 +570,47 @@ pub struct TunnelEndpointConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelConnectorConfig {
+    pub server_addr: String,
+    pub transport: String,
+    pub auth_token: String,
+    pub dial_timeout_ms: Option<i64>,
+    pub dial_timeout: Duration,
+    pub quic: Option<QuicClientConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelClientConfig {
     pub server_addr: String,
     pub transport: String,
-    pub dial_timeout: Duration,
-    pub quic: QuicClientConfig,
+    pub auth_token: String,
+    pub listen_addr: String,
+    pub middleware: Option<String>,
+    pub fake_lan_broadcast: bool,
+    pub motd_prefix: String,
+    pub traffic_optimizer: Option<TrafficOptimizerClientConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrafficOptimizerClientConfig {
+    pub enabled: bool,
+    pub zstd_window_log: Option<u32>,
+}
+
+impl Default for TrafficOptimizerClientConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            zstd_window_log: Some(23),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl TrafficOptimizerClientConfig {
+    pub fn zstd_window_log(&self) -> u32 {
+        self.zstd_window_log.unwrap_or(23)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -526,6 +625,40 @@ pub struct QuicClientConfig {
     pub insecure_skip_verify: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrafficOptimizerConfig {
+    pub enabled: bool,
+    pub flush_interval_ms: Option<u64>,
+    pub zstd_window_log: Option<u32>,
+    pub zstd_level: Option<i32>,
+}
+
+impl Default for TrafficOptimizerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            flush_interval_ms: Some(20),
+            zstd_window_log: Some(23),
+            zstd_level: Some(3),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl TrafficOptimizerConfig {
+    pub fn flush_interval_ms(&self) -> u64 {
+        self.flush_interval_ms.unwrap_or(20)
+    }
+
+    pub fn zstd_window_log(&self) -> u32 {
+        self.zstd_window_log.unwrap_or(23)
+    }
+
+    pub fn zstd_level(&self) -> i32 {
+        self.zstd_level.unwrap_or(3)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelServiceConfig {
     pub name: String,
@@ -537,6 +670,8 @@ pub struct TunnelServiceConfig {
     /// an upstream (tunnel:<service>). Leave empty to preserve the client's protocol host.
     /// This supports $1, $2... substitutions from route wildcard captures.
     pub masquerade_host: String,
+    pub middleware: Option<String>,
+    pub traffic_optimizer: Option<TrafficOptimizerConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -661,6 +796,7 @@ struct FileTunnel {
     auth_token: Option<String>,
     auto_listen_services: Option<bool>,
     endpoints: Option<Vec<FileTunnelEndpoint>>,
+    connector: Option<FileTunnelConnector>,
     client: Option<FileTunnelClient>,
     services: Option<Vec<FileTunnelService>>,
     mdns: Option<FileMdns>,
@@ -684,11 +820,45 @@ struct FileTunnelEndpoint {
 }
 
 #[derive(Debug, Deserialize)]
+struct FileTunnelConnector {
+    server_addr: String,
+    transport: Option<String>,
+    auth_token: Option<String>,
+    dial_timeout_ms: Option<i64>,
+    quic: Option<FileQuicClient>,
+}
+
+#[derive(Debug, Deserialize)]
 struct FileTunnelClient {
     server_addr: String,
     transport: Option<String>,
-    dial_timeout_ms: Option<i64>,
-    quic: Option<FileQuicClient>,
+    auth_token: Option<String>,
+    listen_addr: Option<String>,
+    middleware: Option<String>,
+    #[serde(default)]
+    fake_lan_broadcast: bool,
+    motd_prefix: Option<String>,
+    traffic_optimizer: Option<FileTrafficOptimizerClient>,
+    discovery: Option<FileClientDiscovery>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileClientDiscovery {
+    minecraft_lan: Option<FileMinecraftLanDiscovery>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileMinecraftLanDiscovery {
+    #[serde(default)]
+    enabled: bool,
+    motd_prefix: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileTrafficOptimizerClient {
+    #[serde(default)]
+    enabled: bool,
+    zstd_window_log: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -713,6 +883,17 @@ struct FileTunnelService {
     route_only: bool,
     remote_addr: Option<String>,
     masquerade_host: Option<String>,
+    middleware: Option<String>,
+    traffic_optimizer: Option<FileTrafficOptimizer>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileTrafficOptimizer {
+    #[serde(default)]
+    enabled: bool,
+    flush_interval_ms: Option<u64>,
+    zstd_window_log: Option<u32>,
+    zstd_level: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -947,7 +1128,75 @@ impl Config {
                 }
             }
 
+            if let Some(conn) = &t.connector {
+                let mut auth_token = conn
+                    .auth_token
+                    .clone()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if auth_token.is_empty() {
+                    auth_token = cfg.tunnel.auth_token.clone();
+                }
+                cfg.tunnel.connector = Some(TunnelConnectorConfig {
+                    server_addr: conn.server_addr.trim().to_string(),
+                    transport: conn
+                        .transport
+                        .clone()
+                        .unwrap_or_else(|| "tcp".into())
+                        .trim()
+                        .to_ascii_lowercase(),
+                    auth_token,
+                    dial_timeout_ms: conn.dial_timeout_ms,
+                    dial_timeout: Duration::from_millis(
+                        conn.dial_timeout_ms.unwrap_or(5000).max(0) as u64,
+                    ),
+                    quic: conn.quic.as_ref().map(|q| QuicClientConfig {
+                        server_name: q.server_name.clone().unwrap_or_default().trim().to_string(),
+                        insecure_skip_verify: q.insecure_skip_verify,
+                    }),
+                });
+            }
+
             if let Some(c) = &t.client {
+                let mut auth_token = c.auth_token.clone().unwrap_or_default().trim().to_string();
+                if auth_token.is_empty() {
+                    auth_token = cfg.tunnel.auth_token.clone();
+                }
+                let middleware = match c.middleware.as_deref() {
+                    Some(m) if !m.trim().is_empty() => Some(
+                        normalize_middleware_ref(m)
+                            .with_context(|| "config: tunnel.client invalid middleware")?,
+                    ),
+                    _ => None,
+                };
+                let traffic_optimizer =
+                    c.traffic_optimizer
+                        .as_ref()
+                        .map(|to| TrafficOptimizerClientConfig {
+                            enabled: to.enabled,
+                            zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
+                        });
+
+                let (fake_lan_broadcast, motd_prefix) = if let Some(ref d) = c.discovery {
+                    if let Some(ref mc) = d.minecraft_lan {
+                        (
+                            mc.enabled,
+                            mc.motd_prefix.clone().unwrap_or_else(|| "[Prism] ".into()),
+                        )
+                    } else {
+                        (
+                            c.fake_lan_broadcast,
+                            c.motd_prefix.clone().unwrap_or_else(|| "[Prism] ".into()),
+                        )
+                    }
+                } else {
+                    (
+                        c.fake_lan_broadcast,
+                        c.motd_prefix.clone().unwrap_or_else(|| "[Prism] ".into()),
+                    )
+                };
+
                 cfg.tunnel.client = Some(TunnelClientConfig {
                     server_addr: c.server_addr.trim().to_string(),
                     transport: c
@@ -956,28 +1205,35 @@ impl Config {
                         .unwrap_or_else(|| "tcp".into())
                         .trim()
                         .to_ascii_lowercase(),
-                    dial_timeout: Duration::from_millis(
-                        c.dial_timeout_ms.unwrap_or(5000).max(0) as u64
-                    ),
-                    quic: QuicClientConfig {
-                        server_name: c
-                            .quic
-                            .as_ref()
-                            .and_then(|q| q.server_name.clone())
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string(),
-                        insecure_skip_verify: c
-                            .quic
-                            .as_ref()
-                            .map(|q| q.insecure_skip_verify)
-                            .unwrap_or(false),
-                    },
+                    auth_token,
+                    listen_addr: c.listen_addr.clone().unwrap_or_default().trim().to_string(),
+                    middleware,
+                    fake_lan_broadcast,
+                    motd_prefix,
+                    traffic_optimizer,
                 });
             }
 
             if let Some(svcs) = &t.services {
                 for s in svcs {
+                    let middleware = match s.middleware.as_deref() {
+                        Some(m) if !m.trim().is_empty() => {
+                            Some(normalize_middleware_ref(m).with_context(|| {
+                                format!("config: tunnel.services[{}] invalid middleware", s.name)
+                            })?)
+                        }
+                        _ => None,
+                    };
+                    let traffic_optimizer =
+                        s.traffic_optimizer
+                            .as_ref()
+                            .map(|to| TrafficOptimizerConfig {
+                                enabled: to.enabled,
+                                flush_interval_ms: Some(to.flush_interval_ms.unwrap_or(20)),
+                                zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
+                                zstd_level: Some(to.zstd_level.unwrap_or(3)),
+                            });
+
                     cfg.tunnel.services.push(TunnelServiceConfig {
                         name: s.name.trim().to_string(),
                         proto: s
@@ -995,6 +1251,8 @@ impl Config {
                             .unwrap_or_default()
                             .trim()
                             .to_string(),
+                        middleware,
+                        traffic_optimizer,
                     });
                 }
             }
@@ -1244,6 +1502,27 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                     })
                     .collect(),
             ),
+            connector: tunnel
+                .connector
+                .as_ref()
+                .map(|connector| FileTunnelConnector {
+                    server_addr: connector.server_addr.clone(),
+                    transport: if connector.transport.trim().is_empty() {
+                        None
+                    } else {
+                        Some(connector.transport.clone())
+                    },
+                    auth_token: if connector.auth_token.trim().is_empty() {
+                        None
+                    } else {
+                        Some(connector.auth_token.clone())
+                    },
+                    dial_timeout_ms: connector.dial_timeout_ms,
+                    quic: connector.quic.as_ref().map(|quic| FileQuicClient {
+                        server_name: quic.server_name.clone(),
+                        insecure_skip_verify: quic.insecure_skip_verify,
+                    }),
+                }),
             client: tunnel.client.as_ref().map(|client| FileTunnelClient {
                 server_addr: client.server_addr.clone(),
                 transport: if client.transport.trim().is_empty() {
@@ -1251,10 +1530,37 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 } else {
                     Some(client.transport.clone())
                 },
-                dial_timeout_ms: client.dial_timeout_ms,
-                quic: client.quic.as_ref().map(|quic| FileQuicClient {
-                    server_name: quic.server_name.clone(),
-                    insecure_skip_verify: quic.insecure_skip_verify,
+                auth_token: if client.auth_token.trim().is_empty() {
+                    None
+                } else {
+                    Some(client.auth_token.clone())
+                },
+                listen_addr: if client.listen_addr.trim().is_empty() {
+                    None
+                } else {
+                    Some(client.listen_addr.clone())
+                },
+                middleware: client.middleware.clone(),
+                fake_lan_broadcast: client.fake_lan_broadcast,
+                motd_prefix: if client.motd_prefix.trim().is_empty() {
+                    None
+                } else {
+                    Some(client.motd_prefix.clone())
+                },
+                traffic_optimizer: client.traffic_optimizer.as_ref().map(|to| {
+                    FileTrafficOptimizerClient {
+                        enabled: to.enabled,
+                        zstd_window_log: to.zstd_window_log,
+                    }
+                }),
+                discovery: client.discovery.as_ref().map(|d| FileClientDiscovery {
+                    minecraft_lan: d
+                        .minecraft_lan
+                        .as_ref()
+                        .map(|mc| FileMinecraftLanDiscovery {
+                            enabled: mc.enabled,
+                            motd_prefix: mc.motd_prefix.clone(),
+                        }),
                 }),
             }),
             services: Some(
@@ -1280,6 +1586,15 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                         } else {
                             Some(service.masquerade_host.clone())
                         },
+                        middleware: service.middleware.clone(),
+                        traffic_optimizer: service.traffic_optimizer.as_ref().map(|to| {
+                            FileTrafficOptimizer {
+                                enabled: to.enabled,
+                                flush_interval_ms: to.flush_interval_ms,
+                                zstd_window_log: to.zstd_window_log,
+                                zstd_level: to.zstd_level,
+                            }
+                        }),
                     })
                     .collect(),
             ),
@@ -1356,6 +1671,9 @@ pub fn restart_required_reasons(current: &Config, next: &Config) -> Vec<String> 
     if current.tunnel.endpoints != next.tunnel.endpoints {
         reasons.push("tunnel endpoints changed".to_string());
     }
+    if current.tunnel.connector != next.tunnel.connector {
+        reasons.push("tunnel connector changed".to_string());
+    }
     if current.tunnel.client != next.tunnel.client {
         reasons.push("tunnel client changed".to_string());
     }
@@ -1379,7 +1697,7 @@ const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubuserco
 # tunnel mode (frp-like): Prism starts a tunnel server and waits for clients to
 # connect and register services.
 #
-# To expose a service to the public internet, configure the tunnel client with a
+# To expose a service to the public internet, configure the tunnel connector with a
 # service remote_addr (for example ":25565"); Prism will auto-listen on that port
 # on the server side.
 
@@ -1419,7 +1737,7 @@ const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# yaml-language-server: $schema=ht
 # tunnel mode (frp-like): Prism starts a tunnel server and waits for clients to
 # connect and register services.
 #
-# To expose a service to the public internet, configure the tunnel client with a
+# To expose a service to the public internet, configure the tunnel connector with a
 # service remote_addr (for example ":25565"); Prism will auto-listen on that port
 # on the server side.
 
@@ -1661,7 +1979,7 @@ admin_addr = ":8080"
 [tunnel]
 auth_token = "secret"
 
-[tunnel.client]
+[tunnel.connector]
 server_addr = "127.0.0.1:7000"
 
 [[tunnel.services]]
@@ -1688,6 +2006,247 @@ middlewares = ["minecraft_handshake"]
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_connector_and_service_optimizer_config() {
+        let dir = temp_dir("connector_config");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.connector]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "cluster-secret-token"
+dial_timeout_ms = 3500
+
+[tunnel.connector.quic]
+server_name = "relay.example.com"
+insecure_skip_verify = true
+
+[[tunnel.services]]
+name = "minecraft-survival"
+proto = "tcp"
+local_addr = "127.0.0.1:25565"
+middleware = "minecraft"
+
+[tunnel.services.traffic_optimizer]
+enabled = true
+flush_interval_ms = 20
+zstd_window_log = 23
+zstd_level = 3
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+
+        let conn = cfg.tunnel.connector.as_ref().expect("connector configured");
+        assert_eq!(conn.server_addr, "relay.example.com:7000");
+        assert_eq!(conn.transport, "quic");
+        assert_eq!(conn.auth_token, "cluster-secret-token");
+        assert_eq!(conn.dial_timeout_ms, Some(3500));
+        assert_eq!(conn.dial_timeout, Duration::from_millis(3500));
+        let quic = conn.quic.as_ref().expect("quic client configured");
+        assert_eq!(quic.server_name, "relay.example.com");
+        assert!(quic.insecure_skip_verify);
+
+        assert_eq!(cfg.tunnel.services.len(), 1);
+        let svc = &cfg.tunnel.services[0];
+        assert_eq!(svc.name, "minecraft-survival");
+        assert_eq!(svc.proto, "tcp");
+        assert_eq!(svc.local_addr, "127.0.0.1:25565");
+        assert_eq!(svc.middleware, Some("minecraft".to_string()));
+
+        let opt = svc
+            .traffic_optimizer
+            .as_ref()
+            .expect("traffic optimizer configured");
+        assert!(opt.enabled);
+        assert_eq!(opt.flush_interval_ms, Some(20));
+        assert_eq!(opt.zstd_window_log, Some(23));
+        assert_eq!(opt.zstd_level, Some(3));
+        assert_eq!(opt.flush_interval_ms(), 20);
+        assert_eq!(opt.zstd_window_log(), 23);
+        assert_eq!(opt.zstd_level(), 3);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_client_sidecar_config() {
+        let dir = temp_dir("client_sidecar_config");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "cluster-secret-token"
+listen_addr = "127.0.0.1:25565"
+middleware = "minecraft"
+fake_lan_broadcast = true
+motd_prefix = "[Prism] "
+
+[tunnel.client.traffic_optimizer]
+enabled = true
+zstd_window_log = 23
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+
+        let client = cfg.tunnel.client.as_ref().expect("client configured");
+        assert_eq!(client.server_addr, "relay.example.com:7000");
+        assert_eq!(client.transport, "quic");
+        assert_eq!(client.auth_token, "cluster-secret-token");
+        assert_eq!(client.listen_addr, "127.0.0.1:25565");
+        assert_eq!(client.middleware, Some("minecraft".to_string()));
+        assert!(client.fake_lan_broadcast);
+        assert_eq!(client.motd_prefix, "[Prism] ");
+
+        let opt = client
+            .traffic_optimizer
+            .as_ref()
+            .expect("client traffic optimizer configured");
+        assert!(opt.enabled);
+        assert_eq!(opt.zstd_window_log, Some(23));
+        assert_eq!(opt.zstd_window_log(), 23);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_traffic_optimizer_defaults() {
+        let dir = temp_dir("optimizer_defaults");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+
+[tunnel.client.traffic_optimizer]
+enabled = true
+
+[[tunnel.services]]
+name = "minecraft-survival"
+local_addr = "127.0.0.1:25565"
+
+[tunnel.services.traffic_optimizer]
+enabled = true
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+
+        let client = cfg.tunnel.client.as_ref().expect("client configured");
+        assert_eq!(client.transport, "tcp");
+        assert!(!client.fake_lan_broadcast);
+        assert_eq!(client.motd_prefix, "[Prism] ");
+        let c_opt = client.traffic_optimizer.as_ref().expect("client optimizer");
+        assert!(c_opt.enabled);
+        assert_eq!(c_opt.zstd_window_log, Some(23));
+
+        let svc = &cfg.tunnel.services[0];
+        let s_opt = svc.traffic_optimizer.as_ref().expect("service optimizer");
+        assert!(s_opt.enabled);
+        assert_eq!(s_opt.flush_interval_ms, Some(20));
+        assert_eq!(s_opt.zstd_window_log, Some(23));
+        assert_eq!(s_opt.zstd_level, Some(3));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restart_required_reasons_detect_connector_and_client_changes() {
+        let current = validate_managed_config_document(&ManagedConfigDocument {
+            tunnel: Some(ManagedTunnelDocument {
+                connector: Some(ManagedTunnelConnectorDocument {
+                    server_addr: "relay.example.com:7000".into(),
+                    transport: "quic".into(),
+                    auth_token: "token1".into(),
+                    dial_timeout_ms: Some(5000),
+                    quic: None,
+                }),
+                client: Some(ManagedTunnelClientDocument {
+                    server_addr: "relay.example.com:7000".into(),
+                    transport: "quic".into(),
+                    auth_token: "token1".into(),
+                    listen_addr: "127.0.0.1:25565".into(),
+                    middleware: Some("minecraft".into()),
+                    fake_lan_broadcast: false,
+                    motd_prefix: "[Prism] ".into(),
+                    traffic_optimizer: None,
+                    discovery: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("current config");
+
+        let next_connector_changed = validate_managed_config_document(&ManagedConfigDocument {
+            tunnel: Some(ManagedTunnelDocument {
+                connector: Some(ManagedTunnelConnectorDocument {
+                    server_addr: "relay2.example.com:7000".into(),
+                    transport: "quic".into(),
+                    auth_token: "token1".into(),
+                    dial_timeout_ms: Some(5000),
+                    quic: None,
+                }),
+                client: Some(ManagedTunnelClientDocument {
+                    server_addr: "relay.example.com:7000".into(),
+                    transport: "quic".into(),
+                    auth_token: "token1".into(),
+                    listen_addr: "127.0.0.1:25565".into(),
+                    middleware: Some("minecraft".into()),
+                    fake_lan_broadcast: false,
+                    motd_prefix: "[Prism] ".into(),
+                    traffic_optimizer: None,
+                    discovery: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("next connector config");
+
+        let next_client_changed = validate_managed_config_document(&ManagedConfigDocument {
+            tunnel: Some(ManagedTunnelDocument {
+                connector: Some(ManagedTunnelConnectorDocument {
+                    server_addr: "relay.example.com:7000".into(),
+                    transport: "quic".into(),
+                    auth_token: "token1".into(),
+                    dial_timeout_ms: Some(5000),
+                    quic: None,
+                }),
+                client: Some(ManagedTunnelClientDocument {
+                    server_addr: "relay.example.com:7000".into(),
+                    transport: "quic".into(),
+                    auth_token: "token1".into(),
+                    listen_addr: "127.0.0.1:25566".into(),
+                    middleware: Some("minecraft".into()),
+                    fake_lan_broadcast: true,
+                    motd_prefix: "[Prism] ".into(),
+                    traffic_optimizer: None,
+                    discovery: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("next client config");
+
+        let reasons_conn = restart_required_reasons(&current, &next_connector_changed);
+        assert!(reasons_conn.iter().any(|r| r.contains("connector")));
+
+        let reasons_client = restart_required_reasons(&current, &next_client_changed);
+        assert!(reasons_client.iter().any(|r| r.contains("client")));
     }
 
     #[test]
@@ -1747,5 +2306,46 @@ enabled = true
 
         let reasons = restart_required_reasons(&current, &next);
         assert!(reasons.iter().any(|reason| reason.contains("mdns")));
+    }
+
+    #[test]
+    fn test_tunnel_client_discovery_minecraft_lan() {
+        let dir = temp_dir("client_discovery_lan");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "secret"
+listen_addr = "127.0.0.1:25565"
+middleware = "minecraft"
+
+[tunnel.client.traffic_optimizer]
+enabled = true
+zstd_window_log = 23
+
+[tunnel.client.discovery.minecraft_lan]
+enabled = true
+motd_prefix = "[Custom] "
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        let client = cfg.tunnel.client.expect("client config");
+        assert_eq!(client.server_addr, "relay.example.com:7000");
+        assert_eq!(client.transport, "quic");
+        assert_eq!(client.listen_addr, "127.0.0.1:25565");
+        assert_eq!(client.middleware, Some("minecraft".into()));
+        assert!(client.fake_lan_broadcast);
+        assert_eq!(client.motd_prefix, "[Custom] ");
+
+        let opt = client.traffic_optimizer.expect("traffic optimizer");
+        assert!(opt.enabled);
+        assert_eq!(opt.zstd_window_log(), 23);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

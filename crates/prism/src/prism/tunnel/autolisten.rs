@@ -426,6 +426,7 @@ mod tests {
                 route_only: true,
                 remote_addr: "127.0.0.1:0".into(),
                 masquerade_host: "".into(),
+                ..Default::default()
             }],
         )
         .await
@@ -451,6 +452,7 @@ mod tests {
                 route_only: false,
                 remote_addr: "127.0.0.1:0".into(),
                 masquerade_host: "svc.internal".into(),
+                ..Default::default()
             }],
         )
         .await

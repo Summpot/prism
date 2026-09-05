@@ -14,4 +14,6 @@ todos.json
 target
 crates/prism/frontend-dist/*
 !crates/prism/frontend-dist/.gitkeep
+agent/build/
+agent/*.jar
 

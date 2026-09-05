@@ -97,10 +97,13 @@ pub async fn run(
 
     let proxy_enabled = !cfg.listeners.is_empty();
     let tunnel_server_enabled = !cfg.tunnel.endpoints.is_empty();
-    let tunnel_client_enabled = cfg.tunnel.client.is_some() && !cfg.tunnel.services.is_empty();
+    let tunnel_connector_enabled =
+        cfg.tunnel.connector.is_some() && !cfg.tunnel.services.is_empty();
+    let tunnel_client_enabled = cfg.tunnel.client.is_some();
     let admin_enabled = !cfg.admin_addr.trim().is_empty()
         && (proxy_enabled
             || tunnel_server_enabled
+            || tunnel_connector_enabled
             || tunnel_client_enabled
             || matches!(
                 cfg.role,
@@ -109,6 +112,7 @@ pub async fn run(
 
     if !proxy_enabled
         && !tunnel_server_enabled
+        && !tunnel_connector_enabled
         && !tunnel_client_enabled
         && !matches!(
             cfg.role,
@@ -116,7 +120,7 @@ pub async fn run(
         )
     {
         anyhow::bail!(
-            "config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.client+services)"
+            "config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.connector+services and/or tunnel.client)"
         );
     }
 
@@ -127,6 +131,7 @@ pub async fn run(
         role = %cfg.role,
         proxy_enabled,
         tunnel_server_enabled,
+        tunnel_connector_enabled,
         tunnel_client_enabled,
         admin_addr = %cfg.admin_addr,
         proxy_listeners = cfg.listeners.len(),
@@ -303,9 +308,9 @@ pub async fn run(
         }
     }
 
-    // Tunnel client.
-    if tunnel_client_enabled {
-        let cc = cfg.tunnel.client.as_ref().expect("checked above");
+    // Tunnel connector (service publisher).
+    if tunnel_connector_enabled {
+        let conn = cfg.tunnel.connector.as_ref().expect("checked above");
         let services = cfg
             .tunnel
             .services
@@ -317,24 +322,36 @@ pub async fn run(
                 route_only: s.route_only,
                 remote_addr: s.remote_addr.clone(),
                 masquerade_host: s.masquerade_host.clone(),
+                middleware: s.middleware.clone(),
+                traffic_optimizer: s.traffic_optimizer.clone(),
             })
             .collect::<Vec<_>>();
 
-        let client = tunnel::client::Client::new(tunnel::client::ClientOptions {
-            server_addr: cc.server_addr.clone(),
-            transport: cc.transport.clone(),
-            auth_token: cfg.tunnel.auth_token.clone(),
+        let quic_opts = conn
+            .quic
+            .as_ref()
+            .map(|q| tunnel::connector::QuicConnectorOptions {
+                server_name: q.server_name.clone(),
+                insecure_skip_verify: q.insecure_skip_verify,
+            })
+            .unwrap_or_else(|| tunnel::connector::QuicConnectorOptions {
+                server_name: String::new(),
+                insecure_skip_verify: false,
+            });
+
+        let connector = tunnel::connector::Connector::new(tunnel::connector::ConnectorOptions {
+            server_addr: conn.server_addr.clone(),
+            transport: conn.transport.clone(),
+            auth_token: conn.auth_token.clone(),
             services,
-            dial_timeout: cc.dial_timeout,
-            quic: tunnel::client::QuicClientOptions {
-                server_name: cc.quic.server_name.clone(),
-                insecure_skip_verify: cc.quic.insecure_skip_verify,
-            },
+            dial_timeout: conn.dial_timeout,
+            quic: quic_opts,
+            middleware_dir: Some(paths.middleware_dir.clone()),
         })?;
 
-        let client = Arc::new(client);
+        let connector = Arc::new(connector);
         let shutdown = shutdown_rx.clone();
-        tasks.spawn(async move { client.run(shutdown).await });
+        tasks.spawn(async move { connector.run(shutdown).await });
 
         // mDNS local service discovery + local proxy.
         if cfg.tunnel.mdns.enabled && !cfg.tunnel.mdns.listen_addr.trim().is_empty() {
@@ -412,6 +429,23 @@ pub async fn run(
                 );
             }
         }
+    }
+
+    // Tunnel client sidecar.
+    if tunnel_client_enabled {
+        let tc = cfg.tunnel.client.as_ref().expect("checked above");
+        tracing::info!(
+            server_addr = %tc.server_addr,
+            listen_addr = %tc.listen_addr,
+            middleware = ?tc.middleware,
+            fake_lan_broadcast = tc.fake_lan_broadcast,
+            "tunnel client sidecar enabled"
+        );
+        let client = tunnel::client::Client::new(tc.clone())?
+            .with_middleware_dir(paths.middleware_dir.clone());
+        let client = Arc::new(client);
+        let shutdown = shutdown_rx.clone();
+        tasks.spawn(async move { client.run(shutdown).await });
     }
 
     if let Some(worker_agent) = &worker_agent {

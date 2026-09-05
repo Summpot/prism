@@ -321,10 +321,11 @@
 					"description": "Tunnel server endpoints.",
 					"items": { "$ref": "#/$defs/tunnelEndpoint" }
 				},
+				"connector": { "$ref": "#/$defs/tunnelConnector" },
 				"client": { "$ref": "#/$defs/tunnelClient" },
 				"services": {
 					"type": "array",
-					"description": "Tunnel client registered services.",
+					"description": "Tunnel connector registered services.",
 					"items": { "$ref": "#/$defs/tunnelService" }
 				},
 				"mdns": { "$ref": "#/$defs/mdns" }
@@ -397,9 +398,10 @@
 				}
 			}
 		},
-		"tunnelClient": {
+		"tunnelConnector": {
 			"type": "object",
 			"additionalProperties": false,
+			"required": ["server_addr"],
 			"properties": {
 				"server_addr": {
 					"$ref": "#/$defs/nonEmptyString",
@@ -407,8 +409,13 @@
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "udp", "quic"],
+					"enum": ["tcp", "udp", "quic", "kcp"],
 					"default": "tcp"
+				},
+				"auth_token": {
+					"type": "string",
+					"description": "Optional shared secret token for authenticating with the tunnel server.",
+					"default": ""
 				},
 				"dial_timeout_ms": {
 					"$ref": "#/$defs/ms",
@@ -416,6 +423,87 @@
 					"default": 5000
 				},
 				"quic": { "$ref": "#/$defs/quicClient" }
+			}
+		},
+		"tunnelClient": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["server_addr"],
+			"properties": {
+				"server_addr": {
+					"$ref": "#/$defs/nonEmptyString",
+					"description": "Tunnel server address."
+				},
+				"transport": {
+					"type": "string",
+					"enum": ["tcp", "quic", "kcp", "udp"],
+					"default": "tcp"
+				},
+				"auth_token": {
+					"type": "string",
+					"description": "Optional shared secret token for authenticating with the tunnel server.",
+					"default": ""
+				},
+				"listen_addr": {
+					"type": "string",
+					"description": "Local proxy listen address (e.g. '127.0.0.1:25565').",
+					"default": ""
+				},
+				"middleware": {
+					"type": "string",
+					"description": "Standard Prism middleware name (e.g. 'minecraft')."
+				},
+				"fake_lan_broadcast": {
+					"type": "boolean",
+					"description": "Enable LAN multicast broadcast reflection for zero-config client discovery.",
+					"default": false
+				},
+				"motd_prefix": {
+					"type": "string",
+					"description": "MOTD prefix for LAN broadcast reflection.",
+					"default": "[Prism] "
+				},
+				"traffic_optimizer": { "$ref": "#/$defs/trafficOptimizerClient" },
+				"discovery": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"minecraft_lan": {
+							"type": "object",
+							"additionalProperties": false,
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"description": "Enable LAN multicast broadcast reflection for zero-config client discovery.",
+									"default": false
+								},
+								"motd_prefix": {
+									"type": "string",
+									"description": "MOTD prefix for LAN broadcast reflection.",
+									"default": "[Prism] "
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"trafficOptimizerClient": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable traffic optimizer decoding on client sidecar.",
+					"default": false
+				},
+				"zstd_window_log": {
+					"type": "integer",
+					"minimum": 10,
+					"maximum": 30,
+					"description": "Zstd sliding window log (default 23 = 8MB).",
+					"default": 23
+				}
 			}
 		},
 		"quicClient": {
@@ -461,7 +549,12 @@
 					"description": "Advanced host label used by rewrite middlewares when this service is dialed as an upstream (tunnel:<service>). Leave empty for normal Minecraft tunnel routing so Prism preserves the client's handshake host. Supports $1, $2... substitutions from route wildcard capture groups.",
 					"default": "",
 					"examples": ["edge.internal", "$1.edge.internal", "edge.internal:25565", ""]
-				}
+				},
+				"middleware": {
+					"type": "string",
+					"description": "Standard Prism middleware name (e.g. 'minecraft')."
+				},
+				"traffic_optimizer": { "$ref": "#/$defs/trafficOptimizer" }
 			},
 			"allOf": [
 				{
@@ -474,6 +567,36 @@
 					}
 				}
 			]
+		},
+		"trafficOptimizer": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable native traffic optimizer (batching and zstd continuous stream compression).",
+					"default": false
+				},
+				"flush_interval_ms": {
+					"$ref": "#/$defs/ms",
+					"description": "Time slice batch aggregation flush interval in milliseconds (default 20ms = 1 tick).",
+					"default": 20
+				},
+				"zstd_window_log": {
+					"type": "integer",
+					"minimum": 10,
+					"maximum": 30,
+					"description": "Zstd sliding window log (default 23 = 8MB).",
+					"default": 23
+				},
+				"zstd_level": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 22,
+					"description": "Zstd compression level (default 3).",
+					"default": 3
+				}
+			}
 		},
 		"route": {
 			"type": "object",

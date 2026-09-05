@@ -2,14 +2,24 @@ use std::{
     collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex, RwLock as StdRwLock},
 };
 
+use aes::Aes128;
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{BlockEncrypt, KeyInit};
 use anyhow::Context;
+use rsa::pkcs1::DecodeRsaPrivateKey;
+use rsa::pkcs8::DecodePrivateKey;
+use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 use thiserror::Error;
-use wasmer::{Engine, Instance, Memory, Module, Pages, Store, TypedFunction, imports};
+use wasmer::{
+    Engine, Function, FunctionEnv, FunctionEnvMut, Instance, Memory, Module, Pages, Store,
+    TypedFunction, imports,
+};
 
-type WasmInstanceParts = (Store, Instance, Memory, TypedFunction<(i32, i32), i64>);
+#[allow(dead_code)]
+pub type WasmInstanceParts = (Store, Instance, Memory, TypedFunction<(i32, i32), i64>);
 
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
@@ -230,7 +240,7 @@ impl MiddlewareProvider for FsWasmMiddlewareProvider {
     }
 }
 
-const DEFAULT_MIDDLEWARES: &[(&str, &str)] = &[
+pub const DEFAULT_MIDDLEWARES: &[(&str, &str)] = &[
     (
         "minecraft_handshake",
         include_str!(concat!(
@@ -245,7 +255,24 @@ const DEFAULT_MIDDLEWARES: &[(&str, &str)] = &[
             "/../../middlewares/tls_sni.wat"
         )),
     ),
+    (
+        "minecraft",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../middlewares/minecraft.wat"
+        )),
+    ),
 ];
+
+pub fn get_default_middleware_wat(name: &str) -> Option<&'static str> {
+    let base = name.strip_suffix(".wat").unwrap_or(name).trim();
+    for (n, wat) in DEFAULT_MIDDLEWARES {
+        if *n == base {
+            return Some(wat);
+        }
+    }
+    None
+}
 
 /// Ensure the middleware directory exists and contains Prism's default WAT middlewares.
 ///
@@ -292,97 +319,778 @@ pub fn materialize_default_middlewares(dir: &Path) -> anyhow::Result<Vec<PathBuf
     Ok(created)
 }
 
-pub struct WasmMiddleware {
-    name: String,
-    path_hint: String,
-    fn_name: String,
-    engine: Engine,
-    module: Module,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum SessionState {
+    Handshake = 0,
+    Streaming = 1,
 }
 
-impl WasmMiddleware {
-    pub fn from_wat_path(name: &str, path: &Path) -> anyhow::Result<Self> {
-        let name = name.trim();
-        if name.is_empty() {
-            anyhow::bail!("middleware: empty wasm middleware name");
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandshakeResult {
+    NeedMoreData,
+    RouteMatch {
+        host: Option<String>,
+        rewrite: Option<Vec<u8>>,
+    },
+    NoMatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FramePriority {
+    Defer = 1,
+    Urgent = 2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamResult {
+    NeedMoreData,
+    Frame { len: usize, priority: FramePriority },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PollResult {
+    Handshake(HandshakeResult),
+    Stream(StreamResult),
+}
+
+static MIDDLEWARE_DATA_STORE: LazyLock<Arc<StdRwLock<HashMap<(String, Option<u16>), Vec<u8>>>>> =
+    LazyLock::new(|| Arc::new(StdRwLock::new(HashMap::new())));
+
+/// Injects external data (e.g. RSA private key DER) for a named middleware and optional port.
+pub fn set_injected_middleware_data(name: &str, port: Option<u16>, data: Vec<u8>) {
+    let mut store = MIDDLEWARE_DATA_STORE.write().unwrap();
+    store.insert((name.trim().to_ascii_lowercase(), port), data);
+}
+
+/// Retrieves previously injected external data for a named middleware and optional port.
+pub fn get_injected_middleware_data(name: &str, port: Option<u16>) -> Option<Vec<u8>> {
+    let store = MIDDLEWARE_DATA_STORE.read().unwrap();
+    let name_lower = name.trim().to_ascii_lowercase();
+    store
+        .get(&(name_lower.clone(), port))
+        .or_else(|| store.get(&(name_lower, None)))
+        .cloned()
+}
+
+pub const DEFAULT_SYMBOL_TABLE_CAPACITY: usize = 1024;
+
+/// HPACK-style (RFC 7541) dynamic symbol table for zero-copy string deduplication.
+#[derive(Debug, Clone)]
+pub struct DynamicSymbolTable {
+    capacity: usize,
+    current_max_seq: u64,
+    seq_to_str: HashMap<u64, Vec<u8>>,
+    str_to_seq: HashMap<Vec<u8>, u64>,
+}
+
+impl DynamicSymbolTable {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            current_max_seq: 0,
+            seq_to_str: HashMap::new(),
+            str_to_seq: HashMap::new(),
         }
-        if path.as_os_str().is_empty() {
-            anyhow::bail!("middleware: empty wasm middleware path");
-        }
-
-        if path
-            .extension()
-            .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm"))
-        {
-            anyhow::bail!(
-                "middleware: loading raw .wasm is disabled; provide a .wat file instead ({})",
-                path.display()
-            );
-        }
-
-        let wat_bytes = std::fs::read(path)
-            .with_context(|| format!("middleware: read wat {}", path.display()))?;
-
-        if wat_bytes.starts_with(b"\0asm") {
-            anyhow::bail!(
-                "middleware: expected WAT text input but got a wasm binary (path={})",
-                path.display()
-            );
-        }
-
-        let fn_name = "prism_mw_run".to_string();
-        let engine = Engine::default();
-        let store = Store::new(engine.clone());
-        let module = Module::new(&store, wat_bytes).context("middleware: compile wat module")?;
-
-        Ok(Self {
-            name: name.to_string(),
-            path_hint: path.display().to_string(),
-            fn_name,
-            engine,
-            module,
-        })
     }
 
-    fn instantiate(&self) -> anyhow::Result<WasmInstanceParts> {
-        let mut store = Store::new(self.engine.clone());
-        let import_object = imports! {};
+    /// Intern a symbol into the dynamic table.
+    ///
+    /// Returns:
+    /// - `(0 << 32) | index`: if symbol already exists in table (1-based index)
+    /// - `(1 << 32) | 1`: if newly added (inserted at index 1)
+    pub fn intern(&mut self, symbol: &[u8]) -> i64 {
+        if let Some(&seq) = self.str_to_seq.get(symbol) {
+            let index = self.current_max_seq.saturating_sub(seq) + 1;
+            return index as i64; // High 32 bits = 0
+        }
 
-        let instance = Instance::new(&mut store, &self.module, &import_object)
-            .context("middleware: instantiate wasm")?;
+        self.current_max_seq += 1;
+        let new_seq = self.current_max_seq;
+        self.str_to_seq.insert(symbol.to_vec(), new_seq);
+        self.seq_to_str.insert(new_seq, symbol.to_vec());
 
-        let run: TypedFunction<(i32, i32), i64> = instance
-            .exports
-            .get_typed_function(&store, &self.fn_name)
-            .with_context(|| format!("middleware: wasm missing export {:?}", self.fn_name))?;
+        if self.seq_to_str.len() > self.capacity {
+            let oldest_seq = self.current_max_seq.saturating_sub(self.capacity as u64);
+            if let Some(old_sym) = self.seq_to_str.remove(&oldest_seq) {
+                self.str_to_seq.remove(&old_sym);
+            }
+        }
+
+        (1i64 << 32) | 1i64
+    }
+
+    /// Resolve a 1-based index back to original symbol bytes.
+    pub fn resolve(&self, index: i32) -> Option<&[u8]> {
+        if index <= 0 {
+            return None;
+        }
+        let target_seq = self.current_max_seq.checked_sub(index as u64 - 1)?;
+        self.seq_to_str.get(&target_seq).map(|v| v.as_slice())
+    }
+
+    pub fn len(&self) -> usize {
+        self.seq_to_str.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.seq_to_str.is_empty()
+    }
+}
+
+impl Default for DynamicSymbolTable {
+    fn default() -> Self {
+        Self::new(DEFAULT_SYMBOL_TABLE_CAPACITY)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HostEnv {
+    pub memory: Option<Memory>,
+    pub sym_table: Arc<Mutex<DynamicSymbolTable>>,
+}
+
+impl Default for HostEnv {
+    fn default() -> Self {
+        Self {
+            memory: None,
+            sym_table: Arc::new(Mutex::new(DynamicSymbolTable::default())),
+        }
+    }
+}
+
+/// Standalone RSA PKCS#1 v1.5 decryption helper.
+pub fn crypto_rsa_decrypt(key_der: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, i32> {
+    let key = RsaPrivateKey::from_pkcs1_der(key_der)
+        .or_else(|_| RsaPrivateKey::from_pkcs8_der(key_der))
+        .map_err(|_| -1)?;
+
+    key.decrypt(Pkcs1v15Encrypt, ciphertext).map_err(|_| -2)
+}
+
+/// Standalone AES-128-CFB8 in-place encryption/decryption helper.
+pub fn crypto_aes_cfb8(
+    key: &[u8; 16],
+    iv: &mut [u8; 16],
+    data: &mut [u8],
+    is_encrypt: bool,
+) -> Result<(), i32> {
+    let cipher = Aes128::new(GenericArray::from_slice(key));
+    for b in data.iter_mut() {
+        let mut block = GenericArray::clone_from_slice(iv);
+        cipher.encrypt_block(&mut block);
+        let keystream = block[0];
+        let in_b = *b;
+        let out_b = in_b ^ keystream;
+        *b = out_b;
+        let feedback = if is_encrypt { out_b } else { in_b };
+        iv.copy_within(1..16, 0);
+        iv[15] = feedback;
+    }
+    Ok(())
+}
+
+/// Standalone Deflate/Zlib decompress helper (Zlib RFC 1950 with raw Deflate RFC 1951 fallback).
+pub fn deflate_decompress(input: &[u8]) -> Result<Vec<u8>, i32> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    match miniz_oxide::inflate::decompress_to_vec_zlib(input) {
+        Ok(out) => Ok(out),
+        Err(_) => match miniz_oxide::inflate::decompress_to_vec(input) {
+            Ok(out) => Ok(out),
+            Err(_) => Err(-2),
+        },
+    }
+}
+
+/// Standalone Deflate/Zlib compress helper (Zlib RFC 1950).
+pub fn deflate_compress(input: &[u8], level: i32) -> Result<Vec<u8>, i32> {
+    let lvl = level.clamp(0, 10) as u8;
+    Ok(miniz_oxide::deflate::compress_to_vec_zlib(input, lvl))
+}
+
+pub fn host_crypto_rsa_decrypt(
+    mut env: FunctionEnvMut<HostEnv>,
+    key_ptr: i32,
+    key_len: i32,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+) -> i32 {
+    if key_ptr < 0 || key_len <= 0 || in_ptr < 0 || in_len <= 0 || out_ptr < 0 {
+        return -3;
+    }
+    let (data, store) = env.data_and_store_mut();
+    let memory = match data.memory.as_ref() {
+        Some(m) => m,
+        None => return -3,
+    };
+    let view = memory.view(&store);
+    let mem_size = view.data_size();
+
+    let key_end = (key_ptr as u64).saturating_add(key_len as u64);
+    let in_end = (in_ptr as u64).saturating_add(in_len as u64);
+    if key_end > mem_size || in_end > mem_size {
+        return -3;
+    }
+
+    let mut key_bytes = vec![0u8; key_len as usize];
+    if view.read(key_ptr as u64, &mut key_bytes).is_err() {
+        return -3;
+    }
+
+    let mut in_bytes = vec![0u8; in_len as usize];
+    if view.read(in_ptr as u64, &mut in_bytes).is_err() {
+        return -3;
+    }
+
+    let decrypted = match crypto_rsa_decrypt(&key_bytes, &in_bytes) {
+        Ok(d) => d,
+        Err(code) => return code,
+    };
+
+    let out_end = (out_ptr as u64).saturating_add(decrypted.len() as u64);
+    if out_end > mem_size {
+        return -3;
+    }
+
+    if view.write(out_ptr as u64, &decrypted).is_err() {
+        return -3;
+    }
+
+    decrypted.len() as i32
+}
+
+pub fn host_crypto_aes_cfb8(
+    mut env: FunctionEnvMut<HostEnv>,
+    key_ptr: i32,
+    iv_ptr: i32,
+    data_ptr: i32,
+    data_len: i32,
+    is_encrypt: i32,
+) -> i32 {
+    if key_ptr < 0 || iv_ptr < 0 || data_ptr < 0 || data_len < 0 {
+        return -1;
+    }
+    if data_len == 0 {
+        return 0;
+    }
+    let (data, store) = env.data_and_store_mut();
+    let memory = match data.memory.as_ref() {
+        Some(m) => m,
+        None => return -1,
+    };
+    let view = memory.view(&store);
+    let mem_size = view.data_size();
+
+    let key_end = (key_ptr as u64).saturating_add(16);
+    let iv_end = (iv_ptr as u64).saturating_add(16);
+    let data_end = (data_ptr as u64).saturating_add(data_len as u64);
+
+    if key_end > mem_size || iv_end > mem_size || data_end > mem_size {
+        return -1;
+    }
+
+    let mut key = [0u8; 16];
+    if view.read(key_ptr as u64, &mut key).is_err() {
+        return -1;
+    }
+
+    let mut iv = [0u8; 16];
+    if view.read(iv_ptr as u64, &mut iv).is_err() {
+        return -1;
+    }
+
+    let mut buf = vec![0u8; data_len as usize];
+    if view.read(data_ptr as u64, &mut buf).is_err() {
+        return -1;
+    }
+
+    if let Err(code) = crypto_aes_cfb8(&key, &mut iv, &mut buf, is_encrypt != 0) {
+        return code;
+    }
+
+    if view.write(data_ptr as u64, &buf).is_err() {
+        return -1;
+    }
+
+    if view.write(iv_ptr as u64, &iv).is_err() {
+        return -1;
+    }
+
+    0
+}
+
+pub fn host_deflate_decompress(
+    mut env: FunctionEnvMut<HostEnv>,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+    out_max_len: i32,
+) -> i32 {
+    if in_ptr < 0 || in_len < 0 || out_ptr < 0 || out_max_len < 0 {
+        return -1;
+    }
+    if in_len == 0 {
+        return 0;
+    }
+    let (data, store) = env.data_and_store_mut();
+    let memory = match data.memory.as_ref() {
+        Some(m) => m,
+        None => return -1,
+    };
+    let view = memory.view(&store);
+    let mem_size = view.data_size();
+
+    let in_end = (in_ptr as u64).saturating_add(in_len as u64);
+    if in_end > mem_size {
+        return -1;
+    }
+
+    let mut in_bytes = vec![0u8; in_len as usize];
+    if view.read(in_ptr as u64, &mut in_bytes).is_err() {
+        return -1;
+    }
+
+    let decompressed = match deflate_decompress(&in_bytes) {
+        Ok(d) => d,
+        Err(code) => return code,
+    };
+
+    if decompressed.len() > out_max_len as usize {
+        return -3;
+    }
+
+    let out_end = (out_ptr as u64).saturating_add(decompressed.len() as u64);
+    if out_end > mem_size {
+        return -3;
+    }
+
+    if view.write(out_ptr as u64, &decompressed).is_err() {
+        return -3;
+    }
+
+    decompressed.len() as i32
+}
+
+pub fn host_deflate_compress(
+    mut env: FunctionEnvMut<HostEnv>,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+    out_max_len: i32,
+    level: i32,
+) -> i32 {
+    if in_ptr < 0 || in_len < 0 || out_ptr < 0 || out_max_len < 0 {
+        return -1;
+    }
+    let (data, store) = env.data_and_store_mut();
+    let memory = match data.memory.as_ref() {
+        Some(m) => m,
+        None => return -1,
+    };
+    let view = memory.view(&store);
+    let mem_size = view.data_size();
+
+    let in_end = (in_ptr as u64).saturating_add(in_len as u64);
+    if in_end > mem_size {
+        return -1;
+    }
+
+    let mut in_bytes = vec![0u8; in_len as usize];
+    if view.read(in_ptr as u64, &mut in_bytes).is_err() {
+        return -1;
+    }
+
+    let compressed = match deflate_compress(&in_bytes, level) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+
+    if compressed.len() > out_max_len as usize {
+        return -3;
+    }
+
+    let out_end = (out_ptr as u64).saturating_add(compressed.len() as u64);
+    if out_end > mem_size {
+        return -3;
+    }
+
+    if view.write(out_ptr as u64, &compressed).is_err() {
+        return -3;
+    }
+
+    compressed.len() as i32
+}
+
+pub fn host_sym_intern(mut env: FunctionEnvMut<HostEnv>, str_ptr: i32, str_len: i32) -> i64 {
+    if str_ptr < 0 || str_len < 0 {
+        return -1;
+    }
+    let (data, store) = env.data_and_store_mut();
+    let memory = match data.memory.as_ref() {
+        Some(m) => m,
+        None => return -1,
+    };
+    let view = memory.view(&store);
+    let mem_size = view.data_size();
+
+    let end = (str_ptr as u64).saturating_add(str_len as u64);
+    if end > mem_size {
+        return -1;
+    }
+
+    let mut sym_bytes = vec![0u8; str_len as usize];
+    if view.read(str_ptr as u64, &mut sym_bytes).is_err() {
+        return -1;
+    }
+
+    let mut table = data.sym_table.lock().unwrap();
+    table.intern(&sym_bytes)
+}
+
+pub fn host_sym_resolve(
+    mut env: FunctionEnvMut<HostEnv>,
+    index: i32,
+    out_ptr: i32,
+    max_len: i32,
+) -> i32 {
+    if index <= 0 || out_ptr < 0 || max_len < 0 {
+        return -1;
+    }
+    let (data, store) = env.data_and_store_mut();
+    let memory = match data.memory.as_ref() {
+        Some(m) => m,
+        None => return -1,
+    };
+    let view = memory.view(&store);
+    let mem_size = view.data_size();
+
+    let table = data.sym_table.lock().unwrap();
+    let sym_bytes = match table.resolve(index) {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    if sym_bytes.len() > max_len as usize {
+        return -3;
+    }
+
+    let out_end = (out_ptr as u64).saturating_add(sym_bytes.len() as u64);
+    if out_end > mem_size {
+        return -2;
+    }
+
+    if view.write(out_ptr as u64, sym_bytes).is_err() {
+        return -2;
+    }
+
+    sym_bytes.len() as i32
+}
+
+pub fn create_prism_imports(store: &mut Store, env: &FunctionEnv<HostEnv>) -> wasmer::Imports {
+    let rsa_fn = Function::new_typed_with_env(store, env, host_crypto_rsa_decrypt);
+    let aes_fn = Function::new_typed_with_env(store, env, host_crypto_aes_cfb8);
+    let decompress_fn = Function::new_typed_with_env(store, env, host_deflate_decompress);
+    let compress_fn = Function::new_typed_with_env(store, env, host_deflate_compress);
+    let sym_intern_fn = Function::new_typed_with_env(store, env, host_sym_intern);
+    let sym_resolve_fn = Function::new_typed_with_env(store, env, host_sym_resolve);
+
+    imports! {
+        "prism" => {
+            "crypto_rsa_decrypt" => rsa_fn,
+            "crypto_aes_cfb8" => aes_fn,
+            "deflate_decompress" => decompress_fn,
+            "deflate_compress" => compress_fn,
+            "sym_intern" => sym_intern_fn,
+            "sym_resolve" => sym_resolve_fn,
+        },
+    }
+}
+
+pub struct WasmProtocolSession {
+    store: Store,
+    #[allow(dead_code)]
+    instance: Instance,
+    memory: Memory,
+    #[allow(dead_code)]
+    env: FunctionEnv<HostEnv>,
+    poll_fn: Option<TypedFunction<(i32, i32, i32), i64>>,
+    #[allow(dead_code)]
+    set_data_fn: Option<TypedFunction<(i32, i32), i32>>,
+    legacy_fn: Option<TypedFunction<(i32, i32), i64>>,
+    state: SessionState,
+}
+
+unsafe impl Send for WasmProtocolSession {}
+
+#[allow(dead_code)]
+impl WasmProtocolSession {
+    pub fn new(engine: &Engine, module: &Module) -> anyhow::Result<Self> {
+        let mut store = Store::new(engine.clone());
+        let env = FunctionEnv::new(&mut store, HostEnv::default());
+        let import_object = create_prism_imports(&mut store, &env);
+
+        let instance = Instance::new(&mut store, module, &import_object)
+            .context("session: instantiate wasm module")?;
 
         let memory = instance
             .exports
             .get_memory("memory")
-            .map_err(|e| anyhow::anyhow!("middleware: wasm missing exported memory 'memory': {e}"))?
+            .map_err(|e| anyhow::anyhow!("session: wasm missing exported memory 'memory': {e}"))?
             .clone();
 
-        Ok((store, instance, memory, run))
+        env.as_mut(&mut store).memory = Some(memory.clone());
+
+        let poll_fn = instance.exports.get_typed_function(&store, "poll").ok();
+        let set_data_fn = instance.exports.get_typed_function(&store, "set_data").ok();
+        let legacy_fn = instance
+            .exports
+            .get_typed_function(&store, "prism_mw_run")
+            .ok();
+
+        Ok(Self {
+            store,
+            instance,
+            memory,
+            env,
+            poll_fn,
+            set_data_fn,
+            legacy_fn,
+            state: SessionState::Handshake,
+        })
     }
 
-    fn apply_impl(
-        &self,
+    pub fn from_wat(wat: impl AsRef<[u8]>) -> anyhow::Result<Self> {
+        let engine = Engine::default();
+        let store = Store::new(engine.clone());
+        let module = Module::new(&store, wat.as_ref()).context("session: compile wat module")?;
+        Self::new(&engine, &module)
+    }
+
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+
+    pub fn set_state(&mut self, state: SessionState) {
+        self.state = state;
+    }
+
+    pub fn has_poll(&self) -> bool {
+        self.poll_fn.is_some()
+    }
+
+    pub fn has_set_data(&self) -> bool {
+        self.set_data_fn.is_some()
+    }
+
+    pub fn sym_table(&self) -> Arc<Mutex<DynamicSymbolTable>> {
+        self.env.as_ref(&self.store).sym_table.clone()
+    }
+
+    pub fn has_legacy(&self) -> bool {
+        self.legacy_fn.is_some()
+    }
+
+    pub fn memory(&self) -> &Memory {
+        &self.memory
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    pub fn store_mut(&mut self) -> &mut Store {
+        &mut self.store
+    }
+
+    pub fn instance(&self) -> &Instance {
+        &self.instance
+    }
+
+    pub fn set_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
+        let set_data_fn = match &self.set_data_fn {
+            Some(f) => f.clone(),
+            None => {
+                return Err(MiddlewareError::Fatal(
+                    "wasm module missing 'set_data' export".into(),
+                ));
+            }
+        };
+
+        let needed = (data.len() as u64).max(65536 * 4);
+        let mem_size = self.memory.view(&self.store).data_size();
+        if needed > mem_size {
+            let delta = needed - mem_size;
+            let pages = delta.div_ceil(65536);
+            self.memory
+                .grow(&mut self.store, Pages(pages as u32))
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
+        }
+
+        if !data.is_empty() {
+            self.memory
+                .view(&self.store)
+                .write(0, data)
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm write set_data failed: {e}")))?;
+        }
+
+        let code = set_data_fn
+            .call(&mut self.store, 0, data.len() as i32)
+            .map_err(|e| MiddlewareError::Fatal(format!("wasm set_data call failed: {e}")))?;
+
+        Ok(code)
+    }
+
+    pub fn poll(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
+        let poll_fn = match &self.poll_fn {
+            Some(f) => f.clone(),
+            None => {
+                if self.state == SessionState::Handshake && self.legacy_fn.is_some() {
+                    let out = self.run_legacy(buf, &MiddlewareCtx::parse());
+                    match out {
+                        Ok(out) => {
+                            self.state = SessionState::Streaming;
+                            return Ok(PollResult::Handshake(HandshakeResult::RouteMatch {
+                                host: out.host,
+                                rewrite: out.rewrite,
+                            }));
+                        }
+                        Err(MiddlewareError::NeedMoreData) => {
+                            return Ok(PollResult::Handshake(HandshakeResult::NeedMoreData));
+                        }
+                        Err(MiddlewareError::NoMatch) => {
+                            return Ok(PollResult::Handshake(HandshakeResult::NoMatch));
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                return Err(MiddlewareError::Fatal(
+                    "wasm module missing 'poll' export".into(),
+                ));
+            }
+        };
+
+        let needed = ((buf.len() as u64) + 65536).max(65536 * 4);
+        let mem_size = self.memory.view(&self.store).data_size();
+        if needed > mem_size {
+            let delta = needed - mem_size;
+            let pages = delta.div_ceil(65536);
+            self.memory
+                .grow(&mut self.store, Pages(pages as u32))
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
+        }
+
+        if !buf.is_empty() {
+            self.memory
+                .view(&self.store)
+                .write(0, buf)
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
+        }
+
+        let res = poll_fn
+            .call(&mut self.store, 0, buf.len() as i32, self.state as i32)
+            .map_err(|e| MiddlewareError::Fatal(format!("wasm poll call failed: {e}")))?;
+
+        let action = ((res as u64) >> 32) as u32;
+        let value = (res as u64 & 0xffff_ffff) as u32;
+
+        match self.state {
+            SessionState::Handshake => match action {
+                0 => Ok(PollResult::Handshake(HandshakeResult::NeedMoreData)),
+                1 => {
+                    let view = self.memory.view(&self.store);
+                    if (value as u64) + 16 > view.data_size() {
+                        return Err(MiddlewareError::Fatal(format!(
+                            "route match struct pointer out of bounds: {value}"
+                        )));
+                    }
+                    let mut header = [0u8; 16];
+                    view.read(value as u64, &mut header).map_err(|e| {
+                        MiddlewareError::Fatal(format!("read route struct failed: {e}"))
+                    })?;
+
+                    let host_ptr = u32::from_le_bytes(header[0..4].try_into().unwrap());
+                    let host_len = u32::from_le_bytes(header[4..8].try_into().unwrap());
+                    let rw_ptr = u32::from_le_bytes(header[8..12].try_into().unwrap());
+                    let rw_len = u32::from_le_bytes(header[12..16].try_into().unwrap());
+
+                    let mut host = None;
+                    if host_len > 0 {
+                        if (host_ptr as u64) + (host_len as u64) > view.data_size() {
+                            return Err(MiddlewareError::Fatal(
+                                "host pointer out of bounds".into(),
+                            ));
+                        }
+                        let mut hbuf = vec![0u8; host_len as usize];
+                        view.read(host_ptr as u64, &mut hbuf).map_err(|e| {
+                            MiddlewareError::Fatal(format!("read host failed: {e}"))
+                        })?;
+                        let h = String::from_utf8_lossy(&hbuf).trim().to_ascii_lowercase();
+                        if !h.is_empty() {
+                            host = Some(h);
+                        }
+                    }
+
+                    let mut rewrite = None;
+                    if rw_len > 0 {
+                        if (rw_ptr as u64) + (rw_len as u64) > view.data_size() {
+                            return Err(MiddlewareError::Fatal(
+                                "rewrite pointer out of bounds".into(),
+                            ));
+                        }
+                        let mut rwbuf = vec![0u8; rw_len as usize];
+                        view.read(rw_ptr as u64, &mut rwbuf).map_err(|e| {
+                            MiddlewareError::Fatal(format!("read rewrite failed: {e}"))
+                        })?;
+                        rewrite = Some(rwbuf);
+                    }
+
+                    self.state = SessionState::Streaming;
+                    Ok(PollResult::Handshake(HandshakeResult::RouteMatch {
+                        host,
+                        rewrite,
+                    }))
+                }
+                2 => Ok(PollResult::Handshake(HandshakeResult::NoMatch)),
+                other => Err(MiddlewareError::Fatal(format!(
+                    "invalid handshake action code: {other}"
+                ))),
+            },
+            SessionState::Streaming => match action {
+                0 => Ok(PollResult::Stream(StreamResult::NeedMoreData)),
+                1 => Ok(PollResult::Stream(StreamResult::Frame {
+                    len: value as usize,
+                    priority: FramePriority::Defer,
+                })),
+                2 => Ok(PollResult::Stream(StreamResult::Frame {
+                    len: value as usize,
+                    priority: FramePriority::Urgent,
+                })),
+                other => Err(MiddlewareError::Fatal(format!(
+                    "invalid streaming action code: {other}"
+                ))),
+            },
+        }
+    }
+
+    pub fn run_legacy(
+        &mut self,
         prelude: &[u8],
         ctx: &MiddlewareCtx,
     ) -> Result<MiddlewareOutput, MiddlewareError> {
-        let (mut store, _instance, memory, run) = self
-            .instantiate()
-            .map_err(|e| MiddlewareError::Fatal(e.to_string()))?;
+        let legacy_fn = match &self.legacy_fn {
+            Some(f) => f.clone(),
+            None => {
+                return Err(MiddlewareError::Fatal(
+                    "wasm module missing 'prism_mw_run' export".into(),
+                ));
+            }
+        };
 
-        // Layout: [prelude @0] [ctx struct] [ctx strings]
-        // ABI structs are little-endian.
-        // Ctx struct (v1):
-        //   u32 version (=1)
-        //   u32 phase   (=0 parse, 1 rewrite)
-        //   u32 upstream_ptr
-        //   u32 upstream_len
         const CTX_STRUCT_LEN: u32 = 16;
-
         let mut cursor: u32 = ((prelude.len() as u32) + 7) & !7; // align8
         let ctx_ptr = cursor;
         cursor = cursor
@@ -405,56 +1113,55 @@ impl WasmMiddleware {
             0
         };
 
-        // Ensure memory can fit prelude+ctx at their offsets.
         let need = cursor as u64;
-        let mut mem_size = memory.view(&store).data_size();
+        let mut mem_size = self.memory.view(&self.store).data_size();
         if need > mem_size {
             let delta = need - mem_size;
             let pages_needed = delta.div_ceil(65536);
-            memory
-                .grow(&mut store, Pages(pages_needed as u32))
+            self.memory
+                .grow(&mut self.store, Pages(pages_needed as u32))
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
-            mem_size = memory.view(&store).data_size();
+            mem_size = self.memory.view(&self.store).data_size();
         }
 
-        // Always ensure a few pages so fixed-offset middlewares can place output safely.
-        // (Rewrite outputs may be larger than the ctx struct region; wasm itself can't grow memory.)
         if mem_size < 4 * 65536 {
             let pages = (4 * 65536 - mem_size).div_ceil(65536);
-            memory
-                .grow(&mut store, Pages(pages as u32))
+            self.memory
+                .grow(&mut self.store, Pages(pages as u32))
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
         }
 
         if !prelude.is_empty() {
-            memory.view(&store).write(0, prelude).map_err(|e| {
-                MiddlewareError::Fatal(format!("wasm memory write prelude failed: {e}"))
-            })?;
+            self.memory
+                .view(&self.store)
+                .write(0, prelude)
+                .map_err(|e| {
+                    MiddlewareError::Fatal(format!("wasm memory write prelude failed: {e}"))
+                })?;
         }
 
         if !upstream.is_empty() {
-            memory
-                .view(&store)
+            self.memory
+                .view(&self.store)
                 .write(upstream_ptr as u64, upstream)
                 .map_err(|e| {
                     MiddlewareError::Fatal(format!("wasm memory write upstream failed: {e}"))
                 })?;
         }
 
-        // Write ctx struct.
         let mut ctx_buf = [0u8; CTX_STRUCT_LEN as usize];
         ctx_buf[0..4].copy_from_slice(&1u32.to_le_bytes());
         ctx_buf[4..8].copy_from_slice(&(ctx.phase as u32).to_le_bytes());
         ctx_buf[8..12].copy_from_slice(&upstream_ptr.to_le_bytes());
         ctx_buf[12..16].copy_from_slice(&(upstream.len() as u32).to_le_bytes());
 
-        memory
-            .view(&store)
+        self.memory
+            .view(&self.store)
             .write(ctx_ptr as u64, &ctx_buf)
             .map_err(|e| MiddlewareError::Fatal(format!("wasm memory write ctx failed: {e}")))?;
 
-        let out = run
-            .call(&mut store, prelude.len() as i32, ctx_ptr as i32)
+        let out = legacy_fn
+            .call(&mut self.store, prelude.len() as i32, ctx_ptr as i32)
             .map_err(|e| MiddlewareError::Fatal(format!("wasm middleware call failed: {e}")))?;
 
         if out == 0 {
@@ -471,12 +1178,11 @@ impl WasmMiddleware {
         let len = ((out as u64) >> 32) as u32;
         if len < 16 {
             return Err(MiddlewareError::Fatal(format!(
-                "wasm middleware output too small (len={len}, path={})",
-                self.path_hint
+                "wasm middleware output too small (len={len})"
             )));
         }
 
-        let view = memory.view(&store);
+        let view = self.memory.view(&self.store);
         let end = (ptr as u64)
             .checked_add(len as u64)
             .ok_or_else(|| MiddlewareError::Fatal("wasm output range overflow".into()))?;
@@ -532,6 +1238,169 @@ impl WasmMiddleware {
         }
 
         Ok(out)
+    }
+}
+
+pub struct WasmMiddleware {
+    name: String,
+    path_hint: String,
+    #[allow(dead_code)]
+    fn_name: String,
+    engine: Engine,
+    module: Module,
+}
+
+impl WasmMiddleware {
+    pub fn from_wat_path(name: &str, path: &Path) -> anyhow::Result<Self> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("middleware: empty wasm middleware name");
+        }
+        if path.as_os_str().is_empty() {
+            anyhow::bail!("middleware: empty wasm middleware path");
+        }
+
+        if path
+            .extension()
+            .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("wasm"))
+        {
+            anyhow::bail!(
+                "middleware: loading raw .wasm is disabled; provide a .wat file instead ({})",
+                path.display()
+            );
+        }
+
+        let wat_bytes = std::fs::read(path)
+            .with_context(|| format!("middleware: read wat {}", path.display()))?;
+
+        if wat_bytes.starts_with(b"\0asm") {
+            anyhow::bail!(
+                "middleware: expected WAT text input but got a wasm binary (path={})",
+                path.display()
+            );
+        }
+
+        Self::from_wat_bytes(name, path.display().to_string(), wat_bytes)
+    }
+
+    #[allow(dead_code)]
+    pub fn from_wat(name: &str, wat: impl AsRef<[u8]>) -> anyhow::Result<Self> {
+        Self::from_wat_bytes(name, name.to_string(), wat.as_ref().to_vec())
+    }
+
+    fn from_wat_bytes(name: &str, path_hint: String, wat_bytes: Vec<u8>) -> anyhow::Result<Self> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("middleware: empty wasm middleware name");
+        }
+
+        let fn_name = "prism_mw_run".to_string();
+        let engine = Engine::default();
+        let store = Store::new(engine.clone());
+        let module = Module::new(&store, wat_bytes).context("middleware: compile wat module")?;
+
+        Ok(Self {
+            name: name.to_string(),
+            path_hint,
+            fn_name,
+            engine,
+            module,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub fn from_module(name: &str, module: Module, engine: Engine) -> Self {
+        Self {
+            name: name.to_string(),
+            path_hint: name.to_string(),
+            fn_name: "prism_mw_run".to_string(),
+            engine,
+            module,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    #[allow(dead_code)]
+    pub fn module(&self) -> &Module {
+        &self.module
+    }
+
+    pub fn create_session(&self) -> anyhow::Result<WasmProtocolSession> {
+        WasmProtocolSession::new(&self.engine, &self.module)
+    }
+
+    #[allow(dead_code)]
+    pub fn instantiate(&self) -> anyhow::Result<WasmInstanceParts> {
+        let mut store = Store::new(self.engine.clone());
+        let env = FunctionEnv::new(&mut store, HostEnv::default());
+        let import_object = create_prism_imports(&mut store, &env);
+
+        let instance = Instance::new(&mut store, &self.module, &import_object)
+            .context("middleware: instantiate wasm")?;
+
+        let memory = instance
+            .exports
+            .get_memory("memory")
+            .map_err(|e| anyhow::anyhow!("middleware: wasm missing exported memory 'memory': {e}"))?
+            .clone();
+
+        env.as_mut(&mut store).memory = Some(memory.clone());
+
+        let run: TypedFunction<(i32, i32), i64> = instance
+            .exports
+            .get_typed_function(&store, &self.fn_name)
+            .with_context(|| format!("middleware: wasm missing export {:?}", self.fn_name))?;
+
+        Ok((store, instance, memory, run))
+    }
+
+    fn apply_impl(
+        &self,
+        prelude: &[u8],
+        ctx: &MiddlewareCtx,
+    ) -> Result<MiddlewareOutput, MiddlewareError> {
+        let mut session = self
+            .create_session()
+            .map_err(|e| MiddlewareError::Fatal(e.to_string()))?;
+
+        if ctx.phase == MiddlewarePhase::Parse && session.has_poll() {
+            match session.poll(prelude)? {
+                PollResult::Handshake(HandshakeResult::NeedMoreData) => {
+                    return Err(MiddlewareError::NeedMoreData);
+                }
+                PollResult::Handshake(HandshakeResult::NoMatch) => {
+                    return Err(MiddlewareError::NoMatch);
+                }
+                PollResult::Handshake(HandshakeResult::RouteMatch { host, rewrite }) => {
+                    if host.is_none() && rewrite.is_none() {
+                        return Err(MiddlewareError::NoMatch);
+                    }
+                    return Ok(MiddlewareOutput { host, rewrite });
+                }
+                PollResult::Stream(_) => {
+                    return Err(MiddlewareError::Fatal(
+                        "unexpected stream result in parse phase".into(),
+                    ));
+                }
+            }
+        }
+
+        if session.has_legacy() {
+            return session.run_legacy(prelude, ctx);
+        }
+
+        if ctx.phase == MiddlewarePhase::Rewrite && session.has_poll() {
+            return Ok(MiddlewareOutput::default());
+        }
+
+        Err(MiddlewareError::Fatal(format!(
+            "wasm middleware {} missing required export ('poll' or 'prism_mw_run')",
+            self.path_hint
+        )))
     }
 }
 
@@ -629,7 +1498,7 @@ mod tests {
             .join("..");
         let dir = root.join("middlewares");
 
-        for name in ["minecraft_handshake", "tls_sni"] {
+        for name in ["minecraft_handshake", "tls_sni", "minecraft"] {
             let wat_path = dir.join(format!("{name}.wat"));
             assert!(
                 wat_path.exists(),
@@ -990,5 +1859,700 @@ mod tests {
             .host
             .expect("host");
         assert_eq!(parsed2, "backend.local");
+    }
+
+    #[test]
+    fn host_crypto_rsa_decrypt_direct_and_wasm() {
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        use rsa::pkcs8::EncodePrivateKey;
+
+        let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 1024).expect("generate rsa");
+        let pkcs1_der = key.to_pkcs1_der().expect("encode pkcs1");
+        let pkcs8_der = key.to_pkcs8_der().expect("encode pkcs8");
+
+        let plaintext = b"Hello RSA PKCS#1 v1.5 from Prism 2026!";
+        let ciphertext = key
+            .to_public_key()
+            .encrypt(&mut rsa::rand_core::OsRng, rsa::Pkcs1v15Encrypt, plaintext)
+            .expect("encrypt");
+
+        // 1. Direct Rust tests:
+        let dec1 = crypto_rsa_decrypt(pkcs1_der.as_bytes(), &ciphertext).expect("decrypt pkcs1");
+        assert_eq!(&dec1, plaintext);
+
+        let dec8 = crypto_rsa_decrypt(pkcs8_der.as_bytes(), &ciphertext).expect("decrypt pkcs8");
+        assert_eq!(&dec8, plaintext);
+
+        // Errors: invalid key (-1), bad ciphertext (-2)
+        assert_eq!(crypto_rsa_decrypt(b"not-a-valid-key", &ciphertext), Err(-1));
+        assert_eq!(
+            crypto_rsa_decrypt(pkcs1_der.as_bytes(), b"invalid-cipher"),
+            Err(-2)
+        );
+
+        // 2. Host function execution via WASM session:
+        let test_wat = r#"(module
+          (import "prism" "crypto_rsa_decrypt"
+            (func $crypto_rsa_decrypt (param i32 i32 i32 i32 i32) (result i32)))
+          (memory (export "memory") 2)
+          (func (export "test_decrypt") (param $kp i32) (param $kl i32) (param $ip i32) (param $il i32) (param $op i32) (result i32)
+            (call $crypto_rsa_decrypt (local.get $kp) (local.get $kl) (local.get $ip) (local.get $il) (local.get $op))
+          )
+        )"#;
+
+        let engine = Engine::default();
+        let store = Store::new(engine.clone());
+        let module = Module::new(&store, test_wat).expect("compile wat");
+        let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
+
+        let key_bytes = pkcs1_der.as_bytes();
+        let key_offset = 1000u64;
+        let in_offset = 3000u64;
+        let out_offset = 5000u64;
+
+        session
+            .memory()
+            .view(session.store())
+            .write(key_offset, key_bytes)
+            .unwrap();
+        session
+            .memory()
+            .view(session.store())
+            .write(in_offset, &ciphertext)
+            .unwrap();
+
+        let test_fn: TypedFunction<(i32, i32, i32, i32, i32), i32> = session
+            .instance()
+            .exports
+            .get_typed_function(session.store(), "test_decrypt")
+            .unwrap();
+
+        let written = test_fn
+            .call(
+                session.store_mut(),
+                key_offset as i32,
+                key_bytes.len() as i32,
+                in_offset as i32,
+                ciphertext.len() as i32,
+                out_offset as i32,
+            )
+            .expect("call test_decrypt");
+
+        assert_eq!(written, plaintext.len() as i32);
+
+        let mut read_buf = vec![0u8; plaintext.len()];
+        session
+            .memory()
+            .view(session.store())
+            .read(out_offset, &mut read_buf)
+            .unwrap();
+        assert_eq!(&read_buf, plaintext);
+    }
+
+    #[test]
+    fn host_crypto_aes_cfb8_direct_and_wasm() {
+        // NIST SP 800-38A test vector
+        let key = [
+            0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
+            0x4f, 0x3c,
+        ];
+        let iv = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f,
+        ];
+        let plaintext = [
+            0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93,
+            0x17, 0x2a,
+        ];
+        let expected_ciphertext = [
+            0x3b, 0x79, 0x42, 0x4c, 0x9c, 0x0d, 0xd4, 0x36, 0xba, 0xce, 0x9e, 0x0e, 0xd4, 0x58,
+            0x6a, 0x4f,
+        ];
+
+        // 1. Direct Rust encryption:
+        let mut buf = plaintext;
+        let mut cur_iv = iv;
+        crypto_aes_cfb8(&key, &mut cur_iv, &mut buf, true).expect("encrypt");
+        assert_eq!(buf, expected_ciphertext);
+        assert_ne!(cur_iv, iv, "IV should be updated with feedback");
+
+        // 2. Direct Rust decryption:
+        let mut dec_iv = iv;
+        crypto_aes_cfb8(&key, &mut dec_iv, &mut buf, false).expect("decrypt");
+        assert_eq!(buf, plaintext);
+        assert_eq!(
+            dec_iv, cur_iv,
+            "decryption IV update should match encryption IV update"
+        );
+
+        // 3. Host function execution via WASM session:
+        let test_wat = r#"(module
+          (import "prism" "crypto_aes_cfb8"
+            (func $crypto_aes_cfb8 (param i32 i32 i32 i32 i32) (result i32)))
+          (memory (export "memory") 2)
+          (func (export "test_aes") (param $kp i32) (param $ivp i32) (param $dp i32) (param $dl i32) (param $enc i32) (result i32)
+            (call $crypto_aes_cfb8 (local.get $kp) (local.get $ivp) (local.get $dp) (local.get $dl) (local.get $enc))
+          )
+        )"#;
+
+        let engine = Engine::default();
+        let store = Store::new(engine.clone());
+        let module = Module::new(&store, test_wat).expect("compile wat");
+        let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
+
+        let key_offset = 100u64;
+        let iv_offset = 200u64;
+        let data_offset = 300u64;
+
+        session
+            .memory()
+            .view(session.store())
+            .write(key_offset, &key)
+            .unwrap();
+        session
+            .memory()
+            .view(session.store())
+            .write(iv_offset, &iv)
+            .unwrap();
+        session
+            .memory()
+            .view(session.store())
+            .write(data_offset, &plaintext)
+            .unwrap();
+
+        let test_fn: TypedFunction<(i32, i32, i32, i32, i32), i32> = session
+            .instance()
+            .exports
+            .get_typed_function(session.store(), "test_aes")
+            .unwrap();
+
+        // Encrypt in WASM
+        let res = test_fn
+            .call(
+                session.store_mut(),
+                key_offset as i32,
+                iv_offset as i32,
+                data_offset as i32,
+                plaintext.len() as i32,
+                1,
+            )
+            .expect("call test_aes encrypt");
+        assert_eq!(res, 0);
+
+        let mut read_cipher = [0u8; 16];
+        session
+            .memory()
+            .view(session.store())
+            .read(data_offset, &mut read_cipher)
+            .unwrap();
+        assert_eq!(read_cipher, expected_ciphertext);
+
+        // Reset IV in WASM memory and decrypt in WASM
+        session
+            .memory()
+            .view(session.store())
+            .write(iv_offset, &iv)
+            .unwrap();
+        let res2 = test_fn
+            .call(
+                session.store_mut(),
+                key_offset as i32,
+                iv_offset as i32,
+                data_offset as i32,
+                plaintext.len() as i32,
+                0,
+            )
+            .expect("call test_aes decrypt");
+        assert_eq!(res2, 0);
+
+        let mut read_plain = [0u8; 16];
+        session
+            .memory()
+            .view(session.store())
+            .read(data_offset, &mut read_plain)
+            .unwrap();
+        assert_eq!(read_plain, plaintext);
+    }
+
+    #[test]
+    fn host_deflate_compress_decompress_direct_and_wasm() {
+        let payload =
+            b"Prism unified WASM protocol driver traffic optimizer compression test bytes!";
+
+        // 1. Direct Rust compress and decompress:
+        let compressed = deflate_compress(payload, 6).expect("compress");
+        let decompressed = deflate_decompress(&compressed).expect("decompress");
+        assert_eq!(&decompressed, payload);
+
+        // 2. Direct raw deflate fallback:
+        let raw_deflate = miniz_oxide::deflate::compress_to_vec(payload, 6);
+        let raw_decompressed = deflate_decompress(&raw_deflate).expect("decompress raw");
+        assert_eq!(&raw_decompressed, payload);
+
+        // 3. Host function execution via WASM session:
+        let test_wat = r#"(module
+          (import "prism" "deflate_compress"
+            (func $deflate_compress (param i32 i32 i32 i32 i32) (result i32)))
+          (import "prism" "deflate_decompress"
+            (func $deflate_decompress (param i32 i32 i32 i32) (result i32)))
+          (memory (export "memory") 4)
+          (func (export "test_compress") (param $ip i32) (param $il i32) (param $op i32) (param $omax i32) (param $lvl i32) (result i32)
+            (call $deflate_compress (local.get $ip) (local.get $il) (local.get $op) (local.get $omax) (local.get $lvl))
+          )
+          (func (export "test_decompress") (param $ip i32) (param $il i32) (param $op i32) (param $omax i32) (result i32)
+            (call $deflate_decompress (local.get $ip) (local.get $il) (local.get $op) (local.get $omax))
+          )
+        )"#;
+
+        let engine = Engine::default();
+        let store = Store::new(engine.clone());
+        let module = Module::new(&store, test_wat).expect("compile wat");
+        let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
+
+        let in_offset = 1000u64;
+        let comp_offset = 3000u64;
+        let decomp_offset = 6000u64;
+
+        session
+            .memory()
+            .view(session.store())
+            .write(in_offset, payload)
+            .unwrap();
+
+        let comp_fn: TypedFunction<(i32, i32, i32, i32, i32), i32> = session
+            .instance()
+            .exports
+            .get_typed_function(session.store(), "test_compress")
+            .unwrap();
+
+        let decomp_fn: TypedFunction<(i32, i32, i32, i32), i32> = session
+            .instance()
+            .exports
+            .get_typed_function(session.store(), "test_decompress")
+            .unwrap();
+
+        let comp_len = comp_fn
+            .call(
+                session.store_mut(),
+                in_offset as i32,
+                payload.len() as i32,
+                comp_offset as i32,
+                1000,
+                6,
+            )
+            .expect("call compress");
+        assert!(comp_len > 0);
+
+        let decomp_len = decomp_fn
+            .call(
+                session.store_mut(),
+                comp_offset as i32,
+                comp_len,
+                decomp_offset as i32,
+                1000,
+            )
+            .expect("call decompress");
+        assert_eq!(decomp_len, payload.len() as i32);
+
+        let mut read_decomp = vec![0u8; payload.len()];
+        session
+            .memory()
+            .view(session.store())
+            .read(decomp_offset, &mut read_decomp)
+            .unwrap();
+        assert_eq!(&read_decomp, payload);
+    }
+
+    #[test]
+    fn wasm_protocol_session_lifecycle_poll_and_set_data() {
+        let test_wat = r#"(module
+          (import "prism" "crypto_rsa_decrypt"
+            (func $crypto_rsa_decrypt (param i32 i32 i32 i32 i32) (result i32)))
+          (import "prism" "crypto_aes_cfb8"
+            (func $crypto_aes_cfb8 (param i32 i32 i32 i32 i32) (result i32)))
+          (import "prism" "deflate_decompress"
+            (func $deflate_decompress (param i32 i32 i32 i32) (result i32)))
+          (import "prism" "deflate_compress"
+            (func $deflate_compress (param i32 i32 i32 i32 i32) (result i32)))
+
+          (memory (export "memory") 4)
+
+          (global $stored_data_len (mut i32) (i32.const 0))
+
+          (func (export "set_data") (param $ptr i32) (param $len i32) (result i32)
+            (global.set $stored_data_len (local.get $len))
+            (i32.const 42)
+          )
+
+          (func $pack (param $action i32) (param $value i32) (result i64)
+            (i64.or
+              (i64.shl (i64.extend_i32_u (local.get $action)) (i64.const 32))
+              (i64.extend_i32_u (local.get $value))
+            )
+          )
+
+          (func (export "poll") (param $buf_ptr i32) (param $buf_len i32) (param $state i32) (result i64)
+            ;; State 0: Handshake
+            (if (i32.eq (local.get $state) (i32.const 0))
+              (then
+                ;; If len < 5, NeedMoreData (action 0)
+                (if (i32.lt_s (local.get $buf_len) (i32.const 5))
+                  (then (return (call $pack (i32.const 0) (i32.const 0))))
+                )
+                ;; If first byte is 0xFF, NoMatch (action 2)
+                (if (i32.eq (i32.load8_u (local.get $buf_ptr)) (i32.const 0xFF))
+                  (then (return (call $pack (i32.const 2) (i32.const 0))))
+                )
+                ;; RouteMatch (action 1):
+                ;; Write host "game.prism.io" at offset 10000
+                (i32.store8 (i32.const 10000) (i32.const 103)) ;; 'g'
+                (i32.store8 (i32.const 10001) (i32.const 97))  ;; 'a'
+                (i32.store8 (i32.const 10002) (i32.const 109)) ;; 'm'
+                (i32.store8 (i32.const 10003) (i32.const 101)) ;; 'e'
+                (i32.store8 (i32.const 10004) (i32.const 46))  ;; '.'
+                (i32.store8 (i32.const 10005) (i32.const 112)) ;; 'p'
+                (i32.store8 (i32.const 10006) (i32.const 114)) ;; 'r'
+                (i32.store8 (i32.const 10007) (i32.const 105)) ;; 'i'
+                (i32.store8 (i32.const 10008) (i32.const 115)) ;; 's'
+                (i32.store8 (i32.const 10009) (i32.const 109)) ;; 'm'
+                (i32.store8 (i32.const 10010) (i32.const 46))  ;; '.'
+                (i32.store8 (i32.const 10011) (i32.const 105)) ;; 'i'
+                (i32.store8 (i32.const 10012) (i32.const 111)) ;; 'o'
+
+                ;; Write rewrite bytes "RW" at offset 12000
+                (i32.store8 (i32.const 12000) (i32.const 82)) ;; 'R'
+                (i32.store8 (i32.const 12001) (i32.const 87)) ;; 'W'
+
+                ;; Write struct at offset 20000: host_ptr=10000, host_len=13, rw_ptr=12000, rw_len=2
+                (i32.store (i32.const 20000) (i32.const 10000))
+                (i32.store (i32.const 20004) (i32.const 13))
+                (i32.store (i32.const 20008) (i32.const 12000))
+                (i32.store (i32.const 20012) (i32.const 2))
+
+                (return (call $pack (i32.const 1) (i32.const 20000)))
+              )
+            )
+
+            ;; State 1: Streaming
+            (if (i32.eq (local.get $state) (i32.const 1))
+              (then
+                ;; If len < 3, NeedMoreData (action 0)
+                (if (i32.lt_s (local.get $buf_len) (i32.const 3))
+                  (then (return (call $pack (i32.const 0) (i32.const 0))))
+                )
+                ;; If first byte is 0x01, FrameUrgent (action 2) with packet total len 16
+                (if (i32.eq (i32.load8_u (local.get $buf_ptr)) (i32.const 1))
+                  (then (return (call $pack (i32.const 2) (i32.const 16))))
+                )
+                ;; Else FrameDefer (action 1) with packet total len 32
+                (return (call $pack (i32.const 1) (i32.const 32)))
+              )
+            )
+
+            (call $pack (i32.const 0) (i32.const 0))
+          )
+        )"#;
+
+        let mut session = WasmProtocolSession::from_wat(test_wat).expect("create session");
+        assert_eq!(session.state(), SessionState::Handshake);
+        assert!(session.has_poll());
+        assert!(session.has_set_data());
+
+        // Test set_data
+        let res = session.set_data(b"secret_key_12345").unwrap();
+        assert_eq!(res, 42);
+
+        // Handshake: NeedMoreData
+        match session.poll(b"123").unwrap() {
+            PollResult::Handshake(HandshakeResult::NeedMoreData) => {}
+            other => panic!("expected NeedMoreData, got {other:?}"),
+        }
+        assert_eq!(session.state(), SessionState::Handshake);
+
+        // Handshake: NoMatch
+        match session.poll(&[0xFF, 1, 2, 3, 4, 5]).unwrap() {
+            PollResult::Handshake(HandshakeResult::NoMatch) => {}
+            other => panic!("expected NoMatch, got {other:?}"),
+        }
+        assert_eq!(session.state(), SessionState::Handshake);
+
+        // Handshake: RouteMatch
+        match session.poll(b"valid_handshake").unwrap() {
+            PollResult::Handshake(HandshakeResult::RouteMatch { host, rewrite }) => {
+                assert_eq!(host.as_deref(), Some("game.prism.io"));
+                assert_eq!(rewrite.as_deref(), Some(b"RW".as_slice()));
+            }
+            other => panic!("expected RouteMatch, got {other:?}"),
+        }
+        // Verify state automatically transitioned to Streaming
+        assert_eq!(session.state(), SessionState::Streaming);
+
+        // Streaming: NeedMoreData
+        match session.poll(b"12").unwrap() {
+            PollResult::Stream(StreamResult::NeedMoreData) => {}
+            other => panic!("expected NeedMoreData, got {other:?}"),
+        }
+
+        // Streaming: FrameUrgent
+        match session.poll(&[0x01, 0xAA, 0xBB, 0xCC]).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+                assert_eq!(len, 16);
+                assert_eq!(priority, FramePriority::Urgent);
+            }
+            other => panic!("expected FrameUrgent, got {other:?}"),
+        }
+
+        // Streaming: FrameDefer
+        match session.poll(&[0x02, 0xAA, 0xBB, 0xCC]).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+                assert_eq!(len, 32);
+                assert_eq!(priority, FramePriority::Defer);
+            }
+            other => panic!("expected FrameDefer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn minecraft_unified_wasm_driver_poll_and_set_data() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let wat_path = root.join("middlewares").join("minecraft.wat");
+        assert!(wat_path.exists(), "minecraft.wat does not exist");
+
+        let wat_bytes = fs::read(&wat_path).expect("read minecraft.wat");
+        let mut session = WasmProtocolSession::from_wat(&wat_bytes).expect("session");
+        let memory = session.memory().clone();
+
+        // 1. Test set_data
+        let test_key = b"RSA_PRIVATE_KEY_MOCK_DATA_1234567890";
+        // Write test key at offset 1000
+        memory.view(session.store()).write(1000, test_key).unwrap();
+        let res = session.set_data(test_key).unwrap();
+        assert_eq!(res, 0);
+
+        // Verify stored at 196608 and length at 196604
+        let mut len_bytes = [0u8; 4];
+        memory
+            .view(session.store())
+            .read(196604, &mut len_bytes)
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(len_bytes), test_key.len() as u32);
+
+        let mut read_key = vec![0u8; test_key.len()];
+        memory
+            .view(session.store())
+            .read(196608, &mut read_key)
+            .unwrap();
+        assert_eq!(&read_key, test_key);
+
+        // 2. Test poll state == 0 (Handshaking)
+        let handshake = mc_handshake_prelude("play.example.com", 25565);
+
+        // Partial buffer -> Action 0 (NEED_MORE_DATA)
+        let partial_hs = &handshake[..handshake.len() - 5];
+        match session.poll(partial_hs).unwrap() {
+            PollResult::Handshake(HandshakeResult::NeedMoreData) => {}
+            other => panic!("expected NeedMoreData, got {other:?}"),
+        }
+
+        // Complete handshake -> Action 1 (ROUTE_MATCH)
+        match session.poll(&handshake).unwrap() {
+            PollResult::Handshake(HandshakeResult::RouteMatch { host, rewrite: _ }) => {
+                assert_eq!(host.as_deref(), Some("play.example.com"));
+            }
+            other => panic!("expected RouteMatch, got {other:?}"),
+        }
+
+        // State was automatically transitioned to Streaming; reset to Handshake for further handshake tests
+        session.set_state(SessionState::Handshake);
+
+        // Handshake with NUL-delimited extra data
+        let extra = b"\0FML3\0modded-marker";
+        let handshake_extra = mc_handshake_prelude_with_extra("mc.server.net", extra, 25565);
+        match session.poll(&handshake_extra).unwrap() {
+            PollResult::Handshake(HandshakeResult::RouteMatch { host, rewrite: _ }) => {
+                assert_eq!(host.as_deref(), Some("mc.server.net"));
+            }
+            other => panic!("expected RouteMatch for handshake with extra, got {other:?}"),
+        }
+
+        // Invalid packet ID (e.g. 0x01 instead of 0x00) -> Action 2 (NO_MATCH)
+        session.set_state(SessionState::Handshake);
+        let mut bad_handshake = handshake.clone();
+        bad_handshake[1] = 0x01;
+        match session.poll(&bad_handshake).unwrap() {
+            PollResult::Handshake(HandshakeResult::NoMatch) => {}
+            other => panic!("expected NoMatch for bad handshake ID, got {other:?}"),
+        }
+
+        // 3. Test poll state == 1 (Streaming)
+        session.set_state(SessionState::Streaming);
+
+        // Partial streaming packet -> Action 0 (NEED_MORE_DATA)
+        let ping_pkt = mc_ping_packet(12345); // Ping packet ID is 0x01 (urgent)
+        let partial_ping = &ping_pkt[..ping_pkt.len() - 2];
+        match session.poll(partial_ping).unwrap() {
+            PollResult::Stream(StreamResult::NeedMoreData) => {}
+            other => panic!("expected NeedMoreData for partial streaming, got {other:?}"),
+        }
+
+        // Urgent Ping packet -> Action 2 (FRAME_URGENT), Value = total packet bytes
+        match session.poll(&ping_pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+                assert_eq!(priority, FramePriority::Urgent);
+                assert_eq!(len, ping_pkt.len());
+            }
+            other => panic!("expected FrameUrgent for Ping packet, got {other:?}"),
+        }
+
+        // KeepAlive packets: 0x21, 0x1F, 0x23, 0x0F, 0x10, 0x15
+        for keepalive_id in [0x1F, 0x21, 0x23, 0x0F, 0x10, 0x15] {
+            let mut kp = Vec::new();
+            push_varint(keepalive_id, &mut kp);
+            kp.extend_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd]); // payload
+            let mut pkt = Vec::new();
+            push_varint(kp.len() as u32, &mut pkt);
+            pkt.extend_from_slice(&kp);
+
+            match session.poll(&pkt).unwrap() {
+                PollResult::Stream(StreamResult::Frame { len, priority }) => {
+                    assert_eq!(
+                        priority,
+                        FramePriority::Urgent,
+                        "expected Urgent for KeepAlive 0x{:02X}",
+                        keepalive_id
+                    );
+                    assert_eq!(len, pkt.len());
+                }
+                other => panic!("expected FrameUrgent, got {other:?}"),
+            }
+        }
+
+        // Normal game packet: ID 0x27 (e.g. entity movement/block update) -> Action 1 (FRAME_DEFER)
+        let mut normal = Vec::new();
+        push_varint(0x27, &mut normal);
+        normal.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        let mut pkt = Vec::new();
+        push_varint(normal.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&normal);
+
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+                assert_eq!(priority, FramePriority::Defer);
+                assert_eq!(len, pkt.len());
+            }
+            other => panic!("expected FrameDefer for normal packet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_dynamic_symbol_table_intern_and_resolve() {
+        let mut table = DynamicSymbolTable::new(3);
+
+        // 1. First insert: "minecraft:chat"
+        let res1 = table.intern(b"minecraft:chat");
+        assert_eq!((res1 >> 32) as i32, 1); // 1 = newly added (0x40)
+        assert_eq!((res1 & 0xffff_ffff) as i32, 1); // index = 1
+
+        // 2. Query existing: "minecraft:chat"
+        let res2 = table.intern(b"minecraft:chat");
+        assert_eq!((res2 >> 32) as i32, 0); // 0 = already exists (0x80)
+        assert_eq!((res2 & 0xffff_ffff) as i32, 1); // index = 1
+
+        // 3. Second insert: "minecraft:chunk"
+        let res3 = table.intern(b"minecraft:chunk");
+        assert_eq!((res3 >> 32) as i32, 1); // newly added
+        assert_eq!((res3 & 0xffff_ffff) as i32, 1); // newly added at index 1
+
+        // Now:
+        // index 1 -> "minecraft:chunk"
+        // index 2 -> "minecraft:chat"
+        assert_eq!(table.resolve(1), Some(b"minecraft:chunk".as_slice()));
+        assert_eq!(table.resolve(2), Some(b"minecraft:chat".as_slice()));
+
+        // 4. Query "minecraft:chat" again -> index should now be 2
+        let res4 = table.intern(b"minecraft:chat");
+        assert_eq!((res4 >> 32) as i32, 0); // already exists
+        assert_eq!((res4 & 0xffff_ffff) as i32, 2);
+
+        // 5. Insert 3rd: "minecraft:block"
+        let res5 = table.intern(b"minecraft:block");
+        assert_eq!((res5 >> 32) as i32, 1);
+        assert_eq!(table.len(), 3);
+
+        // 6. Insert 4th: "minecraft:sound" -> exceeds capacity (3), "minecraft:chat" evicted
+        let res6 = table.intern(b"minecraft:sound");
+        assert_eq!((res6 >> 32) as i32, 1);
+        assert_eq!(table.len(), 3);
+
+        // "minecraft:sound" is at index 1
+        assert_eq!(table.resolve(1), Some(b"minecraft:sound".as_slice()));
+        // Oldest ("minecraft:chat") is evicted
+        assert_eq!(table.resolve(4), None);
+        // Interning "minecraft:chat" now treats it as newly added
+        let res7 = table.intern(b"minecraft:chat");
+        assert_eq!((res7 >> 32) as i32, 1);
+    }
+
+    #[test]
+    fn test_host_sym_intern_and_resolve_via_wasm() {
+        let wat = r#"
+            (module
+                (import "prism" "sym_intern" (func $sym_intern (param i32 i32) (result i64)))
+                (import "prism" "sym_resolve" (func $sym_resolve (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+
+                ;; test_intern: writes string to memory at 0, calls $sym_intern
+                (func (export "test_intern") (param $str_len i32) (result i64)
+                    (call $sym_intern (i32.const 0) (local.get $str_len))
+                )
+
+                ;; test_resolve: calls $sym_resolve, writes string to memory at 100
+                (func (export "test_resolve") (param $index i32) (result i32)
+                    (call $sym_resolve (local.get $index) (i32.const 100) (i32.const 100))
+                )
+            )
+        "#;
+
+        let engine = Engine::default();
+        let mut store = Store::new(engine.clone());
+        let module = Module::new(&store, wat).unwrap();
+        let env = FunctionEnv::new(&mut store, HostEnv::default());
+        let imports = create_prism_imports(&mut store, &env);
+        let instance = Instance::new(&mut store, &module, &imports).unwrap();
+        let memory = instance.exports.get_memory("memory").unwrap().clone();
+        env.as_mut(&mut store).memory = Some(memory.clone());
+
+        let test_intern: TypedFunction<i32, i64> = instance
+            .exports
+            .get_typed_function(&store, "test_intern")
+            .unwrap();
+        let test_resolve: TypedFunction<i32, i32> = instance
+            .exports
+            .get_typed_function(&store, "test_resolve")
+            .unwrap();
+
+        // Write "minecraft:brand" to memory at offset 0
+        let symbol = b"minecraft:brand";
+        memory.view(&store).write(0, symbol).unwrap();
+
+        // Call test_intern -> should be newly added (1 << 32) | 1
+        let res = test_intern.call(&mut store, symbol.len() as i32).unwrap();
+        assert_eq!((res >> 32) as i32, 1);
+        assert_eq!((res & 0xffff_ffff) as i32, 1);
+
+        // Call test_resolve(1) -> writes symbol to memory at offset 100
+        let written = test_resolve.call(&mut store, 1).unwrap();
+        assert_eq!(written, symbol.len() as i32);
+
+        let mut read_back = vec![0u8; symbol.len()];
+        memory.view(&store).read(100, &mut read_back).unwrap();
+        assert_eq!(&read_back, symbol);
+
+        // Call test_intern again -> should return existing (0 << 32) | 1
+        let res2 = test_intern.call(&mut store, symbol.len() as i32).unwrap();
+        assert_eq!((res2 >> 32) as i32, 0);
+        assert_eq!((res2 & 0xffff_ffff) as i32, 1);
     }
 }

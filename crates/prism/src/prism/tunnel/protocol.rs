@@ -7,7 +7,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 const MAGIC_REGISTER: &[u8; 4] = b"PRRG"; // Prism Reverse Register
 const MAGIC_PROXY_TCP: &[u8; 4] = b"PRPX"; // Prism Reverse Proxy (TCP stream)
 const MAGIC_PROXY_UDP: &[u8; 4] = b"PRPU"; // Prism Reverse Proxy (UDP datagram stream)
+pub const MAGIC_SERVICE_CATALOG: &[u8; 4] = b"PRSC"; // Prism Reverse Service Catalog
 const PROTOCOL_V1: u8 = 1;
+
+pub const FLAG_RAW: u8 = 0x00;
+pub const FLAG_TRAFFIC_OPTIMIZER: u8 = 0x01;
 
 pub const MAX_REGISTER_JSON_BYTES: u32 = 1 << 20; // 1 MiB
 pub const MAX_DATAGRAM_BYTES: u32 = 1 << 20; // 1 MiB
@@ -28,15 +32,41 @@ pub enum ProtocolError {
     Json(#[from] serde_json::Error),
 }
 
+fn default_client_type() -> String {
+    "connector".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterRequest {
+    #[serde(default = "default_client_type")]
+    pub client_type: String,
     #[serde(default)]
     pub token: String,
     #[serde(default)]
     pub services: Vec<RegisteredService>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for RegisterRequest {
+    fn default() -> Self {
+        Self {
+            client_type: default_client_type(),
+            token: String::new(),
+            services: Vec::new(),
+        }
+    }
+}
+
+impl RegisterRequest {
+    pub fn is_client(&self) -> bool {
+        self.client_type.trim().eq_ignore_ascii_case("client")
+    }
+
+    pub fn is_connector(&self) -> bool {
+        !self.is_client()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisteredService {
     pub name: String,
     #[serde(default)]
@@ -51,6 +81,10 @@ pub struct RegisteredService {
     /// (tunnel:<service>). This supports $1, $2... substitutions from route wildcard captures.
     #[serde(default)]
     pub masquerade_host: String,
+    #[serde(default)]
+    pub middleware: Option<String>,
+    #[serde(default)]
+    pub traffic_optimizer: Option<crate::prism::config::TrafficOptimizerConfig>,
 }
 
 impl RegisteredService {
@@ -69,6 +103,10 @@ impl RegisteredService {
         if self.route_only {
             self.remote_addr.clear();
         }
+        self.middleware = self
+            .middleware
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
         Some(self)
     }
 }
@@ -126,10 +164,11 @@ pub enum ProxyStreamKind {
     Udp,
 }
 
-pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(
+pub async fn write_proxy_stream_header_with_flags<W: AsyncWrite + Unpin>(
     w: &mut W,
     kind: ProxyStreamKind,
     service: &str,
+    flags: u8,
 ) -> Result<(), ProtocolError> {
     let service = service.trim();
     if service.is_empty() {
@@ -141,13 +180,22 @@ pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(
         ProxyStreamKind::Udp => w.write_all(MAGIC_PROXY_UDP).await?,
     }
     w.write_u8(PROTOCOL_V1).await?;
+    w.write_u8(flags).await?;
     write_mc_string(w, service).await?;
     Ok(())
 }
 
-pub async fn read_proxy_stream_header<R: AsyncRead + Unpin>(
+pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    kind: ProxyStreamKind,
+    service: &str,
+) -> Result<(), ProtocolError> {
+    write_proxy_stream_header_with_flags(w, kind, service, FLAG_RAW).await
+}
+
+pub async fn read_proxy_stream_header_with_flags<R: AsyncRead + Unpin>(
     r: &mut R,
-) -> Result<(ProxyStreamKind, String), ProtocolError> {
+) -> Result<(ProxyStreamKind, String, u8), ProtocolError> {
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic).await?;
 
@@ -164,12 +212,67 @@ pub async fn read_proxy_stream_header<R: AsyncRead + Unpin>(
         return Err(ProtocolError::BadVersion);
     }
 
+    let flags = r.read_u8().await?;
+
     let s = read_mc_string(r).await?;
     let s = s.trim().to_string();
     if s.is_empty() {
         return Err(ProtocolError::EmptyService);
     }
+    Ok((kind, s, flags))
+}
+
+pub async fn read_proxy_stream_header<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<(ProxyStreamKind, String), ProtocolError> {
+    let (kind, s, _flags) = read_proxy_stream_header_with_flags(r).await?;
     Ok((kind, s))
+}
+
+pub async fn write_service_catalog<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    services: &[RegisteredService],
+) -> Result<(), ProtocolError> {
+    w.write_all(MAGIC_SERVICE_CATALOG).await?;
+    w.write_u8(PROTOCOL_V1).await?;
+
+    let b = serde_json::to_vec(services)?;
+    let n: u32 = b.len().try_into().unwrap_or(u32::MAX);
+    w.write_u32(n).await?;
+    w.write_all(&b).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+pub async fn read_service_catalog<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<Vec<RegisteredService>, ProtocolError> {
+    let mut magic = [0u8; 4];
+    r.read_exact(&mut magic).await?;
+    if &magic != MAGIC_SERVICE_CATALOG {
+        return Err(ProtocolError::BadMagic);
+    }
+
+    let ver = r.read_u8().await?;
+    if ver != PROTOCOL_V1 {
+        return Err(ProtocolError::BadVersion);
+    }
+
+    let n = r.read_u32().await?;
+    if n > MAX_REGISTER_JSON_BYTES {
+        return Err(ProtocolError::PayloadTooLarge(n));
+    }
+
+    let mut buf = vec![0u8; n as usize];
+    r.read_exact(&mut buf).await?;
+    let mut svcs: Vec<RegisteredService> = serde_json::from_slice(&buf)?;
+    let mut normalized = Vec::with_capacity(svcs.len());
+    for s in svcs.drain(..) {
+        if let Some(ns) = s.normalize() {
+            normalized.push(ns);
+        }
+    }
+    Ok(normalized)
 }
 
 async fn write_mc_string<W: AsyncWrite + Unpin>(w: &mut W, s: &str) -> Result<(), ProtocolError> {
@@ -245,6 +348,13 @@ mod tests {
                     route_only: false,
                     remote_addr: " 127.0.0.1:0 ".into(),
                     masquerade_host: "  $1.edge.internal  ".into(),
+                    middleware: Some("  minecraft.wat  ".into()),
+                    traffic_optimizer: Some(crate::prism::config::TrafficOptimizerConfig {
+                        enabled: true,
+                        flush_interval_ms: Some(20),
+                        zstd_window_log: Some(23),
+                        zstd_level: Some(3),
+                    }),
                 },
                 RegisteredService {
                     name: "   ".into(),
@@ -253,6 +363,8 @@ mod tests {
                     route_only: false,
                     remote_addr: "".into(),
                     masquerade_host: "".into(),
+                    middleware: None,
+                    traffic_optimizer: None,
                 },
                 RegisteredService {
                     name: "svc2".into(),
@@ -261,8 +373,11 @@ mod tests {
                     route_only: true,
                     remote_addr: "127.0.0.1:9999".into(),
                     masquerade_host: "svc2.internal".into(),
+                    middleware: Some("".into()),
+                    traffic_optimizer: None,
                 },
             ],
+            ..Default::default()
         };
 
         let w = tokio::spawn(async move { write_register_request(&mut a, &req).await });
@@ -271,6 +386,9 @@ mod tests {
 
         let got = r.unwrap();
         assert_eq!(got.token, " t "); // token is not normalized by design
+        assert_eq!(got.client_type, "connector");
+        assert!(got.is_connector());
+        assert!(!got.is_client());
 
         assert_eq!(got.services.len(), 2);
         assert_eq!(got.services[0].name, "svc1");
@@ -278,6 +396,8 @@ mod tests {
         assert_eq!(got.services[0].local_addr, "127.0.0.1:25565");
         assert_eq!(got.services[0].remote_addr, "127.0.0.1:0");
         assert_eq!(got.services[0].masquerade_host, "$1.edge.internal");
+        assert_eq!(got.services[0].middleware.as_deref(), Some("minecraft.wat"));
+        assert!(got.services[0].traffic_optimizer.as_ref().unwrap().enabled);
 
         assert_eq!(got.services[1].name, "svc2");
         assert_eq!(got.services[1].proto, "udp");
@@ -285,6 +405,7 @@ mod tests {
         // route_only clears remote_addr
         assert_eq!(got.services[1].remote_addr, "");
         assert_eq!(got.services[1].masquerade_host, "svc2.internal");
+        assert_eq!(got.services[1].middleware, None);
     }
 
     #[tokio::test]
@@ -315,5 +436,71 @@ mod tests {
         let (kind, svc) = read_proxy_stream_header(&mut b).await.unwrap();
         assert_eq!(kind, ProxyStreamKind::Tcp);
         assert_eq!(svc, "svc");
+    }
+
+    #[tokio::test]
+    async fn proxy_header_with_flags_roundtrip() {
+        let (mut a, mut b) = tokio::io::duplex(128);
+        tokio::spawn(async move {
+            write_proxy_stream_header_with_flags(
+                &mut a,
+                ProxyStreamKind::Tcp,
+                "  game-svc  ",
+                FLAG_TRAFFIC_OPTIMIZER,
+            )
+            .await
+        });
+
+        let (kind, svc, flags) = read_proxy_stream_header_with_flags(&mut b).await.unwrap();
+        assert_eq!(kind, ProxyStreamKind::Tcp);
+        assert_eq!(svc, "game-svc");
+        assert_eq!(flags, FLAG_TRAFFIC_OPTIMIZER);
+    }
+
+    #[tokio::test]
+    async fn register_request_client_type_detection() {
+        let req = RegisterRequest {
+            client_type: "client".into(),
+            token: "tok".into(),
+            services: vec![],
+        };
+        assert!(req.is_client());
+        assert!(!req.is_connector());
+
+        let json = r#"{"token":"abc"}"#;
+        let parsed: RegisterRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.client_type, "connector");
+        assert!(parsed.is_connector());
+    }
+
+    #[tokio::test]
+    async fn service_catalog_roundtrip() {
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        let services = vec![RegisteredService {
+            name: "web".into(),
+            proto: "tcp".into(),
+            local_addr: "127.0.0.1:8080".into(),
+            route_only: false,
+            remote_addr: "".into(),
+            masquerade_host: "".into(),
+            middleware: Some("minecraft.wat".into()),
+            traffic_optimizer: Some(crate::prism::config::TrafficOptimizerConfig {
+                enabled: true,
+                flush_interval_ms: Some(20),
+                zstd_window_log: Some(23),
+                zstd_level: Some(3),
+            }),
+        }];
+
+        let svcs_clone = services.clone();
+        tokio::spawn(async move {
+            write_service_catalog(&mut a, &svcs_clone).await.unwrap();
+        });
+
+        let received = read_service_catalog(&mut b).await.unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].name, "web");
+        assert_eq!(received[0].middleware.as_deref(), Some("minecraft.wat"));
+        assert!(received[0].traffic_optimizer.as_ref().unwrap().enabled);
     }
 }

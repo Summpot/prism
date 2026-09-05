@@ -48,3 +48,9 @@ wasmer = { version = "7.2", default-features = false, features = ["singlepass", 
 tokio-yamux = "0.3"
 rust-embed = "8"
 mime_guess = "2"
+rsa = "0.9"
+aes = "0.8"
+cfb-mode = "0.8"
+miniz_oxide = { version = "0.8", features = ["simd"] }
+zstd = "0.13"
+base64 = "0.23"

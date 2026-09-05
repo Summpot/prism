@@ -59,24 +59,46 @@ tunnel:
         cert_file: ""
         key_file: ""
 
-  # Optional: tunnel client role (uncomment to enable).
-  # client:
-  #   server_addr: "127.0.0.1:7000"
-  #   transport: "tcp" # tcp | udp | quic
+  # Optional: tunnel connector host role (uncomment to expose private services).
+  # connector:
+  #   server_addr: "relay.example.com:7000"
+  #   transport: "quic" # tcp | udp | quic
+  #   auth_token: "cluster-secret-token"
   #   dial_timeout_ms: 5000
   #   quic:
-  #     server_name: "localhost"
-  #     insecure_skip_verify: true
+  #     server_name: "relay.example.com"
+  #     insecure_skip_verify: false
   #
   # services:
-  #   - name: "home-mc"
+  #   - name: "minecraft-survival"
   #     proto: "tcp" # tcp | udp
   #     local_addr: "127.0.0.1:25565"
-  #     route_only: true # optional. If true, only reachable via routes (tunnel:home-mc).
-  #     remote_addr: ":25565" # optional (frp-like). If set, prisms opens this listener automatically.
-  #     masquerade_host: "" # advanced. If set, rewrite middlewares use this host for tunnel:home-mc.
+  #     middleware: "minecraft" # standard Prism middleware name
+  #     route_only: false # optional. If true, only reachable via routes (tunnel:minecraft-survival).
+  #     remote_addr: ":25565" # optional (frp-like). If set, prism server auto-opens this listener.
+  #     masquerade_host: "" # advanced. If set, rewrite middlewares use this host for tunnel:minecraft-survival.
   #     # Leave empty for normal Minecraft tunnel routing to preserve the client's handshake host.
   #     # Supports $1, $2... substitutions from route wildcard capture groups.
+  #     traffic_optimizer:
+  #       enabled: true
+  #       flush_interval_ms: 20
+  #       zstd_window_log: 23
+  #       zstd_level: 3
+  #
+  # Optional: terminal client sidecar role (uncomment to enable client access).
+  # client:
+  #   server_addr: "relay.example.com:7000"
+  #   transport: "quic" # tcp | quic | kcp
+  #   auth_token: "cluster-secret-token"
+  #   listen_addr: "127.0.0.1:25565"
+  #   middleware: "minecraft"
+  #   traffic_optimizer:
+  #     enabled: true
+  #     zstd_window_log: 23
+  #   discovery:
+  #     minecraft_lan:
+  #       enabled: true
+  #       motd_prefix: "[Prism] "
 
 timeouts:
   handshake_timeout_ms: 3000

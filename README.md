@@ -416,3 +416,7 @@ The repository ships `prism.schema.json` for config validation and completion.
 	}
 }
 ```
+
+## Acknowledgements
+
+- **[NotEnoughBandwidth (NEB)](https://github.com/USS-Shenzhou/NotEnoughBandwidth)**: We extend our gratitude to [USS_Shenzhou](https://github.com/USS-Shenzhou) for pioneering the time-slice batch aggregation and continuous sliding-window compression design for game network streams, which inspired Prism's native traffic optimizer and sliding dictionary pipeline.

@@ -78,6 +78,7 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/managed/worker/sync", post(managed_worker_sync))
         .route("/managed/worker/status", get(worker_status))
         .route("/managed/worker/config", put(worker_apply_config))
+        .route("/middlewares/{name}/data", post(post_middleware_data))
         .fallback(serve_frontend)
         .with_state(shared)
         .layer(CorsLayer::permissive())
@@ -306,6 +307,47 @@ async fn worker_apply_config(
     Ok((StatusCode::OK, Json(response)))
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct MiddlewareDataPayload {
+    pub port: Option<u16>,
+    pub data: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct MiddlewareDataResponse {
+    pub status: String,
+    pub name: String,
+    pub bytes_received: usize,
+}
+
+async fn post_middleware_data(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+    AxumPath(name): AxumPath<String>,
+    Json(payload): Json<MiddlewareDataPayload>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st)?;
+
+    use base64::Engine;
+    let trimmed = payload.data.trim();
+    let raw_bytes = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed))
+        .map_err(|e| ApiError::bad_request(anyhow::anyhow!("invalid base64 data: {e}")))?;
+
+    let bytes_received = raw_bytes.len();
+    crate::prism::middleware::set_injected_middleware_data(&name, payload.port, raw_bytes);
+
+    Ok((
+        StatusCode::OK,
+        Json(MiddlewareDataResponse {
+            status: "ok".to_string(),
+            name,
+            bytes_received,
+        }),
+    ))
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
@@ -396,4 +438,76 @@ fn require_bearer(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
         return Err(ApiError::unauthorized("invalid bearer token"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_post_middleware_data_success_and_retrieval() {
+        let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let state = AdminState {
+            sessions: Arc::new(telemetry::SessionRegistry::new()),
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth {
+                panel_token: Some("secret123".to_string()),
+                worker_token: None,
+            },
+            management: None,
+            worker: None,
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let mut rx = shutdown_rx;
+                    while rx.changed().await.is_ok() {
+                        if *rx.borrow() {
+                            break;
+                        }
+                    }
+                })
+                .await
+                .ok();
+        });
+
+        use base64::Engine;
+        let test_payload = b"test-rsa-private-key-der-bytes";
+        let b64_payload = base64::engine::general_purpose::STANDARD.encode(test_payload);
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/middlewares/minecraft/data"))
+            .header("Authorization", "Bearer secret123")
+            .json(&MiddlewareDataPayload {
+                port: Some(25565),
+                data: b64_payload,
+            })
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+        let resp_json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(resp_json["status"], "ok");
+        assert_eq!(resp_json["name"], "minecraft");
+        assert_eq!(resp_json["bytes_received"], test_payload.len());
+
+        // Verify retrieval in middleware store
+        let retrieved =
+            crate::prism::middleware::get_injected_middleware_data("minecraft", Some(25565));
+        assert_eq!(retrieved, Some(test_payload.to_vec()));
+
+        let _ = shutdown_tx.send(true);
+    }
 }

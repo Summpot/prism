@@ -26,10 +26,12 @@ use crate::prism::tunnel::protocol::{
 };
 use crate::prism::tunnel::traffic_optimizer::{
     BatcherConfig, CompressorConfig, DecompressorConfig, OptimizedReader, OptimizedWriter,
+    SharedTrafficStats, TrafficStats, TrafficStatsSnapshot,
 };
 use crate::prism::tunnel::transport::{
     QuicDialOptions, TransportDialOptions, TransportSession, transport_by_name,
 };
+use serde::{Deserialize, Serialize};
 
 /// Terminal user sidecar client.
 pub struct Client {
@@ -41,6 +43,7 @@ pub struct Client {
     broadcaster: Option<Arc<FakeLanBroadcaster>>,
     current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
     dial_timeout: Duration,
+    traffic_stats: SharedTrafficStats,
 }
 
 impl Client {
@@ -55,6 +58,8 @@ impl Client {
             None
         };
 
+        let traffic_stats = Arc::new(TrafficStats::new());
+
         Ok(Self {
             config,
             middleware_dir: None,
@@ -64,6 +69,7 @@ impl Client {
             broadcaster,
             current_sess: Arc::new(RwLock::new(None)),
             dial_timeout: Duration::from_secs(5),
+            traffic_stats,
         })
     }
 
@@ -88,6 +94,7 @@ impl Client {
     }
 
     /// Returns a reference to the active advertised services in the Fake LAN broadcaster, if enabled.
+    #[allow(dead_code)]
     pub fn broadcaster(&self) -> Option<&Arc<FakeLanBroadcaster>> {
         self.broadcaster.as_ref()
     }
@@ -95,6 +102,44 @@ impl Client {
     /// Returns the currently known active services snapshot.
     pub async fn known_services(&self) -> Vec<RegisteredService> {
         self.known_services.read().await.clone()
+    }
+
+    /// Returns a reference to the traffic stats accumulator.
+    #[allow(dead_code)]
+    pub fn traffic_stats(&self) -> &SharedTrafficStats {
+        &self.traffic_stats
+    }
+
+    /// Checks if currently connected to tunnel server.
+    pub async fn is_connected(&self) -> bool {
+        self.current_sess.read().await.is_some()
+    }
+
+    /// Returns the active configuration.
+    #[allow(dead_code)]
+    pub fn config(&self) -> &TunnelClientConfig {
+        &self.config
+    }
+
+    /// Returns a status snapshot of the client.
+    pub async fn status(&self) -> ClientStatusSnapshot {
+        let connected = self.is_connected().await;
+        let services = self.known_services().await;
+        let stats = self.traffic_stats.snapshot();
+        ClientStatusSnapshot {
+            running: true,
+            state: if connected {
+                "connected".to_string()
+            } else {
+                "connecting".to_string()
+            },
+            server_addr: self.config.server_addr.clone(),
+            transport: self.config.transport.clone(),
+            listen_addr: self.config.listen_addr.clone(),
+            fake_lan_broadcast: self.config.fake_lan_broadcast,
+            known_services: services,
+            stats,
+        }
     }
 
     fn try_compile_middleware(
@@ -190,6 +235,7 @@ impl Client {
             let wasm_engine = self.wasm_engine.clone();
             let wasm_module = self.wasm_module.clone();
             let config = self.config.clone();
+            let traffic_stats = self.traffic_stats.clone();
             let mut player_shutdown = shutdown.clone();
 
             tokio::spawn(async move {
@@ -208,6 +254,7 @@ impl Client {
                                     let wasm_engine = wasm_engine.clone();
                                     let wasm_module = wasm_module.clone();
                                     let config = config.clone();
+                                    let traffic_stats = traffic_stats.clone();
 
                                     tokio::spawn(async move {
                                         if let Err(err) = handle_player_connection(
@@ -218,6 +265,7 @@ impl Client {
                                             wasm_engine,
                                             wasm_module,
                                             config,
+                                            traffic_stats,
                                         ).await {
                                             tracing::debug!(peer = %peer_addr, err = %err, "tunnel client: player connection closed");
                                         }
@@ -430,6 +478,7 @@ async fn handle_player_connection(
     wasm_engine: wasmer::Engine,
     wasm_module: Option<Arc<wasmer::Module>>,
     config: TunnelClientConfig,
+    traffic_stats: SharedTrafficStats,
 ) -> anyhow::Result<()> {
     tracing::debug!(peer = %peer_addr, "tunnel client: new player connected");
 
@@ -543,7 +592,8 @@ async fn handle_player_connection(
         let (prpx_rd, prpx_wr) = tokio::io::split(prpx_stream);
 
         let mut opt_reader = OptimizedReader::new(prpx_rd, decompressor_config)?;
-        let mut opt_writer = OptimizedWriter::new(prpx_wr, batcher_config, compressor_config)?;
+        let mut opt_writer = OptimizedWriter::new(prpx_wr, batcher_config, compressor_config)?
+            .with_stats(traffic_stats);
 
         // Write initial handshake bytes if any
         if !initial_bytes.is_empty() {
@@ -653,6 +703,114 @@ async fn handle_player_connection(
     }
 
     Ok(())
+}
+
+/// Status snapshot for the terminal client sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ClientStatusSnapshot {
+    pub running: bool,
+    pub state: String,
+    pub server_addr: String,
+    pub transport: String,
+    pub listen_addr: String,
+    pub fake_lan_broadcast: bool,
+    pub known_services: Vec<RegisteredService>,
+    pub stats: TrafficStatsSnapshot,
+}
+
+impl Default for ClientStatusSnapshot {
+    fn default() -> Self {
+        Self {
+            running: false,
+            state: "idle".to_string(),
+            server_addr: String::new(),
+            transport: "quic".to_string(),
+            listen_addr: "127.0.0.1:25565".to_string(),
+            fake_lan_broadcast: true,
+            known_services: Vec::new(),
+            stats: TrafficStatsSnapshot::default(),
+        }
+    }
+}
+
+struct ActiveClientInstance {
+    client: Arc<Client>,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+}
+
+/// Dynamic lifecycle controller for terminal client sidecar.
+#[derive(Clone)]
+pub struct ClientController {
+    active: Arc<RwLock<Option<ActiveClientInstance>>>,
+    middleware_dir: Option<PathBuf>,
+}
+
+impl ClientController {
+    /// Creates a new client controller.
+    pub fn new(middleware_dir: Option<PathBuf>) -> Self {
+        Self {
+            active: Arc::new(RwLock::new(None)),
+            middleware_dir,
+        }
+    }
+
+    /// Attaches an already running Client instance.
+    pub async fn attach(&self, client: Arc<Client>, shutdown_tx: tokio::sync::watch::Sender<bool>) {
+        *self.active.write().await = Some(ActiveClientInstance {
+            client,
+            shutdown_tx,
+        });
+    }
+
+    /// Starts or restarts the client sidecar with the given configuration.
+    pub async fn start(&self, config: TunnelClientConfig) -> anyhow::Result<()> {
+        self.stop().await;
+
+        let mut client = Client::new(config)?;
+        if let Some(ref dir) = self.middleware_dir {
+            client = client.with_middleware_dir(dir.clone());
+        }
+        let client = Arc::new(client);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+        let c = client.clone();
+        tokio::spawn(async move {
+            if let Err(err) = c.run(shutdown_rx).await {
+                tracing::warn!(err = %err, "tunnel client: run exited with error");
+            }
+        });
+
+        *self.active.write().await = Some(ActiveClientInstance {
+            client,
+            shutdown_tx,
+        });
+
+        Ok(())
+    }
+
+    /// Stops the currently running client sidecar, if any.
+    pub async fn stop(&self) {
+        let mut guard = self.active.write().await;
+        if let Some(instance) = guard.take() {
+            let _ = instance.shutdown_tx.send(true);
+        }
+    }
+
+    /// Returns a real-time status snapshot of the client.
+    pub async fn status(&self) -> ClientStatusSnapshot {
+        let guard = self.active.read().await;
+        if let Some(instance) = guard.as_ref() {
+            instance.client.status().await
+        } else {
+            ClientStatusSnapshot::default()
+        }
+    }
+
+    /// Returns true if a client instance is actively running.
+    #[allow(dead_code)]
+    pub async fn is_running(&self) -> bool {
+        self.active.read().await.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -797,6 +955,7 @@ mod tests {
                     insecure_skip_verify: true,
                 },
                 middleware_dir: None,
+                traffic: None,
             },
         )
         .unwrap();
@@ -869,5 +1028,40 @@ mod tests {
 
         // Shutdown everything
         shutdown_tx.send(true).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_client_controller_lifecycle() {
+        let controller = ClientController::new(None);
+        let status = controller.status().await;
+        assert!(!status.running);
+        assert_eq!(status.state, "idle");
+        assert!(!controller.is_running().await);
+
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        drop(l);
+
+        let cfg = TunnelClientConfig {
+            server_addr: "127.0.0.1:9999".into(),
+            transport: "tcp".into(),
+            auth_token: "tok".into(),
+            listen_addr: format!("127.0.0.1:{port}"),
+            middleware: None,
+            fake_lan_broadcast: false,
+            motd_prefix: "".into(),
+            traffic_optimizer: None,
+        };
+
+        controller.start(cfg).await.unwrap();
+        assert!(controller.is_running().await);
+
+        let status = controller.status().await;
+        assert!(status.running);
+        assert_eq!(status.server_addr, "127.0.0.1:9999");
+        assert_eq!(status.transport, "tcp");
+
+        controller.stop().await;
+        assert!(!controller.is_running().await);
     }
 }

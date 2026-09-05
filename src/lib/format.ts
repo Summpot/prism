@@ -56,3 +56,21 @@ export function formatRelative(unixMs: number) {
 	}
 	return formatTime(unixMs, "short");
 }
+
+export function formatBytes(bytes: number | undefined | null): string {
+	if (!bytes || bytes <= 0) {
+		return "0 B";
+	}
+	const units = ["B", "KB", "MB", "GB", "TB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(1024));
+	const idx = Math.min(i, units.length - 1);
+	const val = bytes / 1024 ** idx;
+	return `${val >= 10 || idx === 0 ? val.toFixed(0) : val.toFixed(1)} ${units[idx]}`;
+}
+
+export function formatPercentage(ratio: number | undefined | null): string {
+	if (!ratio || ratio <= 0) {
+		return "0%";
+	}
+	return `${(ratio * 100).toFixed(1)}%`;
+}

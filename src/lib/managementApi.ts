@@ -95,6 +95,23 @@ export interface SessionInfo {
 	host: string;
 	upstream: string;
 	started_at_unix_ms: number;
+	raw_bytes?: number;
+	wire_bytes?: number;
+}
+
+export interface TrafficStatsSnapshot {
+	raw_bytes: number;
+	wire_bytes: number;
+	saved_bytes: number;
+	saved_ratio: number;
+	urgent_batches: number;
+	timer_batches: number;
+	threshold_batches: number;
+}
+
+export interface TrafficOverviewResponse {
+	global: TrafficStatsSnapshot;
+	services: Record<string, TrafficStatsSnapshot>;
 }
 
 export interface RegisteredService {
@@ -216,6 +233,10 @@ export function getConnections(connection: PanelConnection) {
 	return apiRequest<SessionInfo[]>(connection, "/conns");
 }
 
+export function getTrafficStats(connection: PanelConnection) {
+	return apiRequest<TrafficOverviewResponse>(connection, "/stats/traffic");
+}
+
 export function getTunnelServices(connection: PanelConnection) {
 	return apiRequest<ServiceSnapshot[]>(connection, "/tunnel/services");
 }
@@ -232,4 +253,82 @@ export function getHealth(connection: PanelConnection) {
 
 export function getConfigPath(connection: PanelConnection) {
 	return apiRequest<ConfigPathResponse>(connection, "/config");
+}
+
+export interface ClientTrafficStats {
+	raw_bytes: number;
+	wire_bytes: number;
+	saved_bytes: number;
+	saved_ratio: number;
+	urgent_batches: number;
+	timer_batches: number;
+	threshold_batches: number;
+}
+
+export interface ClientRegisteredService {
+	name: string;
+	proto: string;
+	local_addr: string;
+	route_only: boolean;
+	remote_addr: string;
+	masquerade_host: string;
+	middleware?: string | null;
+}
+
+export interface ClientStatusResponse {
+	running: boolean;
+	state: string; // "idle" | "connecting" | "connected" | "disconnected"
+	server_addr: string;
+	transport: string;
+	listen_addr: string;
+	fake_lan_broadcast: boolean;
+	known_services: ClientRegisteredService[];
+	stats: ClientTrafficStats;
+}
+
+export interface StartClientPayload {
+	server_addr: string;
+	transport?: string;
+	auth_token?: string;
+	listen_addr?: string;
+	fake_lan_broadcast?: boolean;
+	motd_prefix?: string;
+}
+
+export interface ClientProfile {
+	id: string;
+	name: string;
+	server_addr: string;
+	transport: string;
+	auth_token: string;
+	listen_addr: string;
+	fake_lan_broadcast: boolean;
+}
+
+export function getClientStatus(connection: PanelConnection) {
+	return apiRequest<ClientStatusResponse>(connection, "/client/status");
+}
+
+export function startClient(connection: PanelConnection, payload: StartClientPayload) {
+	return apiRequest<{ ok: boolean }>(connection, "/client/start", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+}
+
+export function stopClient(connection: PanelConnection) {
+	return apiRequest<{ ok: boolean }>(connection, "/client/stop", {
+		method: "POST",
+	});
+}
+
+export function getClientProfiles(connection: PanelConnection) {
+	return apiRequest<ClientProfile[]>(connection, "/client/profiles");
+}
+
+export function saveClientProfiles(connection: PanelConnection, profiles: ClientProfile[]) {
+	return apiRequest<{ ok: boolean }>(connection, "/client/profiles", {
+		method: "POST",
+		body: JSON.stringify(profiles),
+	});
 }

@@ -3,7 +3,23 @@ name = "prism"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "prism"
+path = "src/lib.rs"
+
+[[bin]]
+name = "prism"
+path = "src/main.rs"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:tauri-build"]
+
+[build-dependencies]
+tauri-build = { version = "2", default-features = false, optional = true }
+
 [dependencies]
+tauri = { version = "2", features = ["tray-icon"], optional = true }
 anyhow = "1.0"
 arc-swap = "1.9"
 async-trait = "0.1"

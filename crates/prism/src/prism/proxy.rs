@@ -265,6 +265,8 @@ impl UdpSession {
             host: "".into(),
             upstream: upstream.clone(),
             started_at_unix_ms: telemetry::now_unix_ms(),
+            raw_bytes: 0,
+            wire_bytes: 0,
         });
 
         tokio::spawn(async move {
@@ -418,6 +420,8 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         host: "".into(),
         upstream: upstream_used.clone(),
         started_at_unix_ms: telemetry::now_unix_ms(),
+        raw_bytes: 0,
+        wire_bytes: 0,
     });
 
     let mut up = up;
@@ -628,6 +632,8 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         host: host.clone(),
         upstream: upstream_used.clone(),
         started_at_unix_ms: telemetry::now_unix_ms(),
+        raw_bytes: 0,
+        wire_bytes: 0,
     });
 
     // Apply any middleware prelude overrides from parse phase, then allow a rewrite pass based on

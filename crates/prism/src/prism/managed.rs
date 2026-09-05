@@ -739,6 +739,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let state = admin::AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
+            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
             config_path: PathBuf::from("managed.json"),
             reload_tx,
             tunnel: None,
@@ -748,6 +749,7 @@ mod tests {
             },
             management: Some(plane),
             worker: None,
+            client: None,
         };
 
         let app: Router = admin::build_router(state);

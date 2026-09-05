@@ -142,6 +142,7 @@ pub async fn run(
 
     // Shared state for admin endpoints.
     let sessions = Arc::new(telemetry::SessionRegistry::new());
+    let traffic = Arc::new(telemetry::TrafficStatsRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
 
     // Routing stack.
@@ -191,6 +192,10 @@ pub async fn run(
         });
     }
 
+    let client_controller = Arc::new(tunnel::client::ClientController::new(Some(
+        paths.middleware_dir.clone(),
+    )));
+
     // Admin server.
     if admin_enabled {
         let admin_addr = net::normalize_bind_addr(&cfg.admin_addr);
@@ -200,6 +205,7 @@ pub async fn run(
 
         let admin_state = admin::AdminState {
             sessions: sessions.clone(),
+            traffic: traffic.clone(),
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
             tunnel: Some(tunnel_manager.clone()),
@@ -217,6 +223,7 @@ pub async fn run(
             },
             management: management_plane.clone(),
             worker: worker_agent.clone(),
+            client: Some(client_controller.clone()),
         };
 
         let shutdown = shutdown_rx.clone();
@@ -347,6 +354,7 @@ pub async fn run(
             dial_timeout: conn.dial_timeout,
             quic: quic_opts,
             middleware_dir: Some(paths.middleware_dir.clone()),
+            traffic: Some(traffic.clone()),
         })?;
 
         let connector = Arc::new(connector);
@@ -444,8 +452,17 @@ pub async fn run(
         let client = tunnel::client::Client::new(tc.clone())?
             .with_middleware_dir(paths.middleware_dir.clone());
         let client = Arc::new(client);
-        let shutdown = shutdown_rx.clone();
-        tasks.spawn(async move { client.run(shutdown).await });
+        let (client_shutdown_tx, client_shutdown_rx) = tokio::sync::watch::channel(false);
+        client_controller
+            .attach(client.clone(), client_shutdown_tx)
+            .await;
+        let mut shutdown = shutdown_rx.clone();
+        tasks.spawn(async move {
+            tokio::select! {
+                res = client.run(client_shutdown_rx) => res,
+                _ = shutdown.changed() => Ok(()),
+            }
+        });
     }
 
     if let Some(worker_agent) = &worker_agent {

@@ -3,6 +3,7 @@ import {
 	Activity,
 	Box,
 	Cable,
+	Gamepad2,
 	Gauge,
 	LogOut,
 	Menu,
@@ -18,6 +19,7 @@ import { usePanelSession } from "@/lib/panelSession";
 
 const navItems = [
 	{ to: "/", label: "Overview", icon: <Activity className="h-4 w-4" /> },
+	{ to: "/client", label: "Client GUI", icon: <Gamepad2 className="h-4 w-4" /> },
 	{ to: "/nodes", label: "Nodes", icon: <Box className="h-4 w-4" /> },
 	{ to: "/connections", label: "Connections", icon: <Cable className="h-4 w-4" /> },
 	{ to: "/tunnel-services", label: "Tunnel Services", icon: <Unplug className="h-4 w-4" /> },

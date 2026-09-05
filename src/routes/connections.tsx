@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Cable, Wifi } from "lucide-react";
+import { Cable, Wifi, Zap } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import {
@@ -11,8 +11,13 @@ import {
 	StateCard,
 	ToggleChip,
 } from "@/components/ui";
-import { formatDuration, formatTime } from "@/lib/format";
-import { getConnections, type SessionInfo } from "@/lib/managementApi";
+import { formatBytes, formatDuration, formatPercentage, formatTime } from "@/lib/format";
+import {
+	getConnections,
+	getTrafficStats,
+	type SessionInfo,
+	type TrafficOverviewResponse,
+} from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
 
@@ -23,6 +28,7 @@ export const Route = createFileRoute("/connections")({
 function ConnectionsPage() {
 	const { connection, ready } = usePanelSession();
 	const [conns, setConns] = useState<SessionInfo[]>([]);
+	const [trafficStats, setTrafficStats] = useState<TrafficOverviewResponse | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
@@ -31,15 +37,17 @@ function ConnectionsPage() {
 	const fetchConns = useCallback(() => {
 		if (!connection) {
 			setConns([]);
+			setTrafficStats(null);
 			return;
 		}
 
 		setLoading(true);
 		setError(null);
 
-		getConnections(connection)
-			.then((response) => {
-				setConns(response);
+		Promise.all([getConnections(connection), getTrafficStats(connection).catch(() => null)])
+			.then(([connsResp, statsResp]) => {
+				setConns(connsResp);
+				setTrafficStats(statsResp);
 			})
 			.catch((nextError) => {
 				setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -81,6 +89,15 @@ function ConnectionsPage() {
 							Auto-refresh {autoRefresh ? "on" : "off"}
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
+						{trafficStats?.global && trafficStats.global.raw_bytes > 0 ? (
+							<div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+								<Zap className="h-4 w-4 text-emerald-400" />
+								<span>
+									Saved {formatBytes(trafficStats.global.saved_bytes)} (
+									{formatPercentage(trafficStats.global.saved_ratio)})
+								</span>
+							</div>
+						) : null}
 						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
 							<Cable className="h-4 w-4 text-cyan-300" />
 							{loading
@@ -108,6 +125,7 @@ function ConnectionsPage() {
 									<th className="px-5 py-4 text-left font-medium">Client</th>
 									<th className="px-5 py-4 text-left font-medium">Host</th>
 									<th className="px-5 py-4 text-left font-medium">Upstream</th>
+									<th className="px-5 py-4 text-left font-medium">Traffic</th>
 									<th className="px-5 py-4 text-left font-medium">Started</th>
 									<th className="px-5 py-4 text-left font-medium">Duration</th>
 								</tr>
@@ -118,6 +136,24 @@ function ConnectionsPage() {
 										<td className="px-5 py-4 font-mono text-cyan-200/85">{conn.client}</td>
 										<td className="px-5 py-4 text-white">{conn.host || "—"}</td>
 										<td className="px-5 py-4 font-mono text-slate-300">{conn.upstream}</td>
+										<td className="px-5 py-4 font-mono text-xs">
+											{conn.raw_bytes || conn.wire_bytes ? (
+												<div className="flex items-center gap-1.5">
+													<span className="text-slate-400">{formatBytes(conn.raw_bytes)}</span>
+													<span className="text-slate-600">→</span>
+													<span className="font-medium text-cyan-300">
+														{formatBytes(conn.wire_bytes)}
+													</span>
+													{conn.raw_bytes && conn.wire_bytes && conn.raw_bytes > conn.wire_bytes ? (
+														<span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
+															-{formatPercentage(1 - conn.wire_bytes / conn.raw_bytes)}
+														</span>
+													) : null}
+												</div>
+											) : (
+												<span className="text-slate-600">—</span>
+											)}
+										</td>
 										<td className="px-5 py-4 text-slate-400">
 											{formatTime(conn.started_at_unix_ms)}
 										</td>
@@ -139,7 +175,14 @@ function ConnectionsPage() {
 								<div className="grid grid-cols-2 gap-3">
 									<MiniValue label="Host" value={conn.host || "—"} />
 									<MiniValue label="Upstream" value={conn.upstream} />
-									<MiniValue label="Started" value={formatTime(conn.started_at_unix_ms)} />
+									<MiniValue
+										label="Traffic"
+										value={
+											conn.raw_bytes || conn.wire_bytes
+												? `${formatBytes(conn.raw_bytes)} → ${formatBytes(conn.wire_bytes)}`
+												: "—"
+										}
+									/>
 									<MiniValue label="Duration" value={formatDuration(conn.started_at_unix_ms)} />
 								</div>
 							</div>

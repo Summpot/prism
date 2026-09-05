@@ -14,6 +14,7 @@ import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as NodesRouteImport } from './routes/nodes'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ConnectionsRouteImport } from './routes/connections'
+import { Route as ClientRouteImport } from './routes/client'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NodesIndexRouteImport } from './routes/nodes.index'
 import { Route as NodesNodeIdRouteImport } from './routes/nodes.$nodeId'
@@ -43,6 +44,11 @@ const ConnectionsRoute = ConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClientRoute = ClientRouteImport.update({
+  id: '/client',
+  path: '/client',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -61,6 +67,7 @@ const NodesNodeIdRoute = NodesNodeIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/client': typeof ClientRoute
   '/connections': typeof ConnectionsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRouteWithChildren
@@ -71,6 +78,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/client': typeof ClientRoute
   '/connections': typeof ConnectionsRoute
   '/login': typeof LoginRoute
   '/runtime': typeof RuntimeRoute
@@ -81,6 +89,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/client': typeof ClientRoute
   '/connections': typeof ConnectionsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRouteWithChildren
@@ -93,6 +102,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/client'
     | '/connections'
     | '/login'
     | '/nodes'
@@ -103,6 +113,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/client'
     | '/connections'
     | '/login'
     | '/runtime'
@@ -112,6 +123,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/client'
     | '/connections'
     | '/login'
     | '/nodes'
@@ -123,6 +135,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ClientRoute: typeof ClientRoute
   ConnectionsRoute: typeof ConnectionsRoute
   LoginRoute: typeof LoginRoute
   NodesRoute: typeof NodesRouteWithChildren
@@ -167,6 +180,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/client': {
+      id: '/client'
+      path: '/client'
+      fullPath: '/client'
+      preLoaderRoute: typeof ClientRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -205,6 +225,7 @@ const NodesRouteWithChildren = NodesRoute._addFileChildren(NodesRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ClientRoute: ClientRoute,
   ConnectionsRoute: ConnectionsRoute,
   LoginRoute: LoginRoute,
   NodesRoute: NodesRouteWithChildren,

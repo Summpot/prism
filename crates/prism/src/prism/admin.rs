@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post, put},
 };
 use rust_embed::Embed;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tower_http::cors::CorsLayer;
 
@@ -28,12 +28,14 @@ pub struct AdminAuth {
 #[derive(Clone)]
 pub struct AdminState {
     pub sessions: telemetry::SharedSessions,
+    pub traffic: telemetry::SharedTrafficRegistry,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
     pub tunnel: Option<Arc<tunnel::manager::Manager>>,
     pub auth: AdminAuth,
     pub management: Option<Arc<managed::ManagementPlane>>,
     pub worker: Option<Arc<managed::WorkerAgent>>,
+    pub client: Option<Arc<tunnel::client::ClientController>>,
 }
 
 #[allow(dead_code)]
@@ -78,6 +80,14 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/managed/worker/sync", post(managed_worker_sync))
         .route("/managed/worker/status", get(worker_status))
         .route("/managed/worker/config", put(worker_apply_config))
+        .route("/stats/traffic", get(stats_traffic))
+        .route("/client/status", get(client_status))
+        .route("/client/start", post(client_start))
+        .route("/client/stop", post(client_stop))
+        .route(
+            "/client/profiles",
+            get(client_get_profiles).post(client_save_profiles),
+        )
         .route("/middlewares/{name}/data", post(post_middleware_data))
         .fallback(serve_frontend)
         .with_state(shared)
@@ -146,6 +156,167 @@ async fn tunnel_services(State(st): State<Arc<AdminState>>) -> impl IntoResponse
         Vec::new()
     };
     (StatusCode::OK, Json(snap))
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrafficOverviewResponse {
+    pub global: tunnel::traffic_optimizer::TrafficStatsSnapshot,
+    pub services:
+        std::collections::HashMap<String, tunnel::traffic_optimizer::TrafficStatsSnapshot>,
+}
+
+async fn stats_traffic(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let (global, services) = st.traffic.snapshot();
+    (
+        StatusCode::OK,
+        Json(TrafficOverviewResponse { global, services }),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StartClientRequest {
+    pub server_addr: String,
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    #[serde(default)]
+    pub auth_token: String,
+    #[serde(default = "default_listen_addr")]
+    pub listen_addr: String,
+    #[serde(default)]
+    pub middleware: Option<String>,
+    #[serde(default = "default_true")]
+    pub fake_lan_broadcast: bool,
+    #[serde(default = "default_motd_prefix")]
+    pub motd_prefix: String,
+    #[serde(default)]
+    pub traffic_optimizer: Option<crate::prism::config::TrafficOptimizerClientConfig>,
+}
+
+fn default_transport() -> String {
+    "quic".to_string()
+}
+fn default_listen_addr() -> String {
+    "127.0.0.1:25565".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_motd_prefix() -> String {
+    "[Prism] ".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientProfile {
+    pub id: String,
+    pub name: String,
+    pub server_addr: String,
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    #[serde(default)]
+    pub auth_token: String,
+    #[serde(default = "default_listen_addr")]
+    pub listen_addr: String,
+    #[serde(default = "default_true")]
+    pub fake_lan_broadcast: bool,
+}
+
+fn profiles_path() -> PathBuf {
+    if let Some(proj) = directories::ProjectDirs::from("com", "prism", "prism") {
+        let dir = proj.config_dir();
+        let _ = std::fs::create_dir_all(dir);
+        dir.join("profiles.json")
+    } else {
+        PathBuf::from("profiles.json")
+    }
+}
+
+async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(ref client) = st.client {
+        let status = client.status().await;
+        (
+            StatusCode::OK,
+            Json(serde_json::to_value(status).unwrap_or_default()),
+        )
+            .into_response()
+    } else {
+        (
+            StatusCode::OK,
+            Json(
+                serde_json::to_value(tunnel::client::ClientStatusSnapshot::default())
+                    .unwrap_or_default(),
+            ),
+        )
+            .into_response()
+    }
+}
+
+async fn client_start(
+    State(st): State<Arc<AdminState>>,
+    Json(payload): Json<StartClientRequest>,
+) -> impl IntoResponse {
+    let Some(ref client) = st.client else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "client controller not enabled" })),
+        )
+            .into_response();
+    };
+
+    let cfg = crate::prism::config::TunnelClientConfig {
+        server_addr: payload.server_addr,
+        transport: payload.transport,
+        auth_token: payload.auth_token,
+        listen_addr: payload.listen_addr,
+        middleware: payload.middleware,
+        fake_lan_broadcast: payload.fake_lan_broadcast,
+        motd_prefix: payload.motd_prefix,
+        traffic_optimizer: payload.traffic_optimizer,
+    };
+
+    match client.start(cfg).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(ref client) = st.client {
+        client.stop().await;
+        (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+    } else {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "client controller not enabled" })),
+        )
+            .into_response()
+    }
+}
+
+async fn client_get_profiles() -> impl IntoResponse {
+    let path = profiles_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(profiles) = serde_json::from_str::<Vec<ClientProfile>>(&data) {
+            return (StatusCode::OK, Json(profiles));
+        }
+    }
+    (StatusCode::OK, Json(Vec::<ClientProfile>::new()))
+}
+
+async fn client_save_profiles(Json(profiles): Json<Vec<ClientProfile>>) -> impl IntoResponse {
+    let path = profiles_path();
+    if let Ok(data) = serde_json::to_string_pretty(&profiles) {
+        if let Err(err) = std::fs::write(&path, data) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            );
+        }
+    }
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Debug, Serialize)]
@@ -451,6 +622,7 @@ mod tests {
 
         let state = AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
+            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
@@ -460,6 +632,7 @@ mod tests {
             },
             management: None,
             worker: None,
+            client: None,
         };
 
         let app = build_router(state);
@@ -507,6 +680,158 @@ mod tests {
         let retrieved =
             crate::prism::middleware::get_injected_middleware_data("minecraft", Some(25565));
         assert_eq!(retrieved, Some(test_payload.to_vec()));
+
+        let _ = shutdown_tx.send(true);
+    }
+
+    #[tokio::test]
+    async fn test_stats_traffic_endpoint() {
+        let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let traffic = Arc::new(telemetry::TrafficStatsRegistry::new());
+
+        // Populate some sample traffic
+        let svc_stats = traffic.service("gto");
+        svc_stats.add_raw_bytes(1000);
+        svc_stats.add_wire_bytes(200);
+        svc_stats.inc_urgent();
+        svc_stats.inc_timer();
+
+        let global_stats = traffic.global();
+        global_stats.add_raw_bytes(1000);
+        global_stats.add_wire_bytes(200);
+        global_stats.inc_urgent();
+        global_stats.inc_timer();
+
+        let state = AdminState {
+            sessions: Arc::new(telemetry::SessionRegistry::new()),
+            traffic,
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth::default(),
+            management: None,
+            worker: None,
+            client: None,
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(wait_shutdown(shutdown_rx))
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{addr}/stats/traffic"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let resp_json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(resp_json["global"]["raw_bytes"], 1000);
+        assert_eq!(resp_json["global"]["wire_bytes"], 200);
+        assert_eq!(resp_json["global"]["saved_bytes"], 800);
+        assert_eq!(resp_json["global"]["saved_ratio"], 0.8);
+        assert_eq!(resp_json["services"]["gto"]["raw_bytes"], 1000);
+        assert_eq!(resp_json["services"]["gto"]["urgent_batches"], 1);
+
+        let _ = shutdown_tx.send(true);
+    }
+
+    #[tokio::test]
+    async fn test_client_endpoints() {
+        let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let client_controller = Arc::new(tunnel::client::ClientController::new(None));
+
+        let state = AdminState {
+            sessions: Arc::new(telemetry::SessionRegistry::new()),
+            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth::default(),
+            management: None,
+            worker: None,
+            client: Some(client_controller),
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(wait_shutdown(shutdown_rx))
+                .await
+                .unwrap();
+        });
+
+        let http = reqwest::Client::new();
+
+        // 1. Check status when idle
+        let resp = http
+            .get(format!("http://{addr}/client/status"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let status: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(status["running"], false);
+        assert_eq!(status["state"], "idle");
+
+        // 2. Start client with dummy port
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let free_port = l.local_addr().unwrap().port();
+        drop(l);
+
+        let start_req = serde_json::json!({
+            "server_addr": "127.0.0.1:9999",
+            "transport": "tcp",
+            "listen_addr": format!("127.0.0.1:{free_port}"),
+            "fake_lan_broadcast": false,
+        });
+        let resp = http
+            .post(format!("http://{addr}/client/start"))
+            .json(&start_req)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+        // 3. Check status when running
+        let resp = http
+            .get(format!("http://{addr}/client/status"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let status: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(status["running"], true);
+        assert_eq!(status["server_addr"], "127.0.0.1:9999");
+
+        // 4. Stop client
+        let resp = http
+            .post(format!("http://{addr}/client/stop"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+        let resp = http
+            .get(format!("http://{addr}/client/status"))
+            .send()
+            .await
+            .unwrap();
+        let status: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(status["running"], false);
 
         let _ = shutdown_tx.send(true);
     }

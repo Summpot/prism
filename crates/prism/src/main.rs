@@ -20,6 +20,14 @@ struct Cli {
     /// Directory to load middleware .wat files from. Defaults to "<config_dir>/middlewares" (Linux default: /etc/prism/middlewares).
     #[arg(long, env = "PRISM_MIDDLEWARE_DIR")]
     middleware_dir: Option<std::path::PathBuf>,
+
+    /// Run in headless server mode without desktop GUI, even if no config file was passed.
+    #[arg(long)]
+    headless: bool,
+
+    /// Force launch desktop GUI client.
+    #[arg(long)]
+    gui: bool,
 }
 
 #[tokio::main]
@@ -33,5 +41,21 @@ async fn main() -> anyhow::Result<()> {
         .expect("install rustls CryptoProvider");
 
     let cli = Cli::parse();
+
+    #[cfg(feature = "desktop")]
+    {
+        let should_launch_gui = cli.gui || (cli.config.is_none() && !cli.headless);
+        if should_launch_gui {
+            return prism::desktop::run().await;
+        }
+    }
+
+    #[cfg(not(feature = "desktop"))]
+    {
+        if cli.gui {
+            anyhow::bail!("Prism was compiled without desktop GUI support");
+        }
+    }
+
     prism::run(cli.config, cli.workdir, cli.middleware_dir).await
 }

@@ -7,10 +7,13 @@
 
 use std::io;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use pin_project_lite::pin_project;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder, InBuffer, Operation, OutBuffer};
 
@@ -99,6 +102,80 @@ impl From<&TrafficOptimizerClientConfig> for TrafficOptimizerConfig {
         }
     }
 }
+
+// ============================================================================
+// Traffic Observability & Statistics
+// ============================================================================
+
+/// Detailed snapshot of traffic optimization metrics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TrafficStatsSnapshot {
+    pub raw_bytes: u64,
+    pub wire_bytes: u64,
+    pub saved_bytes: u64,
+    pub saved_ratio: f64,
+    pub urgent_batches: u64,
+    pub timer_batches: u64,
+    pub threshold_batches: u64,
+}
+
+/// Lock-free atomic traffic statistics counter.
+#[derive(Debug, Default)]
+pub struct TrafficStats {
+    pub raw_bytes: AtomicU64,
+    pub wire_bytes: AtomicU64,
+    pub urgent_batches: AtomicU64,
+    pub timer_batches: AtomicU64,
+    pub threshold_batches: AtomicU64,
+}
+
+impl TrafficStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_raw_bytes(&self, bytes: u64) {
+        self.raw_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn add_wire_bytes(&self, bytes: u64) {
+        self.wire_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn inc_urgent(&self) {
+        self.urgent_batches.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_timer(&self) {
+        self.timer_batches.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_threshold(&self) {
+        self.threshold_batches.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> TrafficStatsSnapshot {
+        let raw = self.raw_bytes.load(Ordering::Relaxed);
+        let wire = self.wire_bytes.load(Ordering::Relaxed);
+        let saved_bytes = raw.saturating_sub(wire);
+        let saved_ratio = if raw > 0 {
+            (saved_bytes as f64) / (raw as f64)
+        } else {
+            0.0
+        };
+        TrafficStatsSnapshot {
+            raw_bytes: raw,
+            wire_bytes: wire,
+            saved_bytes,
+            saved_ratio,
+            urgent_batches: self.urgent_batches.load(Ordering::Relaxed),
+            timer_batches: self.timer_batches.load(Ordering::Relaxed),
+            threshold_batches: self.threshold_batches.load(Ordering::Relaxed),
+        }
+    }
+}
+
+pub type SharedTrafficStats = Arc<TrafficStats>;
 
 // ============================================================================
 // Component 1: Batcher (Time-slice aggregator)
@@ -526,6 +603,7 @@ pin_project! {
         compressor: ZstdStreamCompressor,
         write_buf: Vec<u8>,
         write_pos: usize,
+        stats: Vec<SharedTrafficStats>,
     }
 }
 
@@ -542,12 +620,59 @@ impl<W> OptimizedWriter<W> {
             compressor: ZstdStreamCompressor::new(compressor_config)?,
             write_buf: Vec::new(),
             write_pos: 0,
+            stats: Vec::new(),
         })
     }
 
     /// Creates a new `OptimizedWriter` with default configurations.
     pub fn with_defaults(inner: W) -> io::Result<Self> {
         Self::new(inner, BatcherConfig::default(), CompressorConfig::default())
+    }
+
+    /// Attaches a shared traffic statistics collector to this writer.
+    pub fn add_stats(&mut self, stats: SharedTrafficStats) {
+        self.stats.push(stats);
+    }
+
+    /// Builder method to attach a shared traffic statistics collector.
+    pub fn with_stats(mut self, stats: SharedTrafficStats) -> Self {
+        self.stats.push(stats);
+        self
+    }
+
+    /// Returns references to attached traffic statistics collectors.
+    pub fn stats(&self) -> &[SharedTrafficStats] {
+        &self.stats
+    }
+
+    fn record_raw(&self, bytes: usize) {
+        for s in &self.stats {
+            s.add_raw_bytes(bytes as u64);
+        }
+    }
+
+    fn record_wire(&self, bytes: usize) {
+        for s in &self.stats {
+            s.add_wire_bytes(bytes as u64);
+        }
+    }
+
+    fn record_urgent(&self) {
+        for s in &self.stats {
+            s.inc_urgent();
+        }
+    }
+
+    fn record_timer(&self) {
+        for s in &self.stats {
+            s.inc_timer();
+        }
+    }
+
+    fn record_threshold(&self) {
+        for s in &self.stats {
+            s.inc_threshold();
+        }
     }
 
     /// Returns a reference to the inner writer.
@@ -580,8 +705,15 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         // Flush any pending write_buf
         self.flush_pending_write_buf().await?;
 
+        self.record_raw(frame.len());
+
         if let Some(batch) = self.batcher.push(frame, priority) {
-            encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            match priority {
+                FramePriority::Urgent => self.record_urgent(),
+                FramePriority::Defer => self.record_threshold(),
+            }
+            let encoded = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            self.record_wire(encoded);
             self.flush_pending_write_buf().await?;
         }
         Ok(())
@@ -593,7 +725,9 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
 
         if !self.batcher.is_empty() {
             let batch = self.batcher.flush();
-            encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            self.record_threshold();
+            let encoded = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            self.record_wire(encoded);
             self.flush_pending_write_buf().await?;
         }
 
@@ -606,7 +740,9 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
     pub async fn flush_if_due(&mut self) -> io::Result<bool> {
         if let Some(batch) = self.batcher.check_timer() {
             self.flush_pending_write_buf().await?;
-            encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            self.record_timer();
+            let encoded = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            self.record_wire(encoded);
             self.flush_pending_write_buf().await?;
             Ok(true)
         } else {
@@ -674,11 +810,23 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
             return Poll::Ready(Err(e));
         }
 
+        for s in this.stats.iter() {
+            s.add_raw_bytes(buf.len() as u64);
+        }
+
         // 2. Add incoming bytes to batcher with defer priority
         let flushed = this.batcher.push(buf, FramePriority::Defer);
         if let Some(batch) = flushed {
+            for s in this.stats.iter() {
+                s.inc_threshold();
+            }
+            let prev_len = this.write_buf.len();
             if let Err(e) = encode_batch_into(this.compressor, &batch, this.write_buf) {
                 return Poll::Ready(Err(e));
+            }
+            let encoded = this.write_buf.len() - prev_len;
+            for s in this.stats.iter() {
+                s.add_wire_bytes(encoded as u64);
             }
             *this.write_pos = 0;
             // Best effort immediate write
@@ -705,8 +853,16 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
         // Flush batcher if non-empty
         if !this.batcher.is_empty() {
             let batch = this.batcher.flush();
+            for s in this.stats.iter() {
+                s.inc_threshold();
+            }
+            let prev_len = this.write_buf.len();
             if let Err(e) = encode_batch_into(this.compressor, &batch, this.write_buf) {
                 return Poll::Ready(Err(e));
+            }
+            let encoded = this.write_buf.len() - prev_len;
+            for s in this.stats.iter() {
+                s.add_wire_bytes(encoded as u64);
             }
             *this.write_pos = 0;
             match poll_flush_write_buf_pinned(
@@ -1208,5 +1364,44 @@ mod tests {
         let client_cfg = TrafficOptimizerConfig::from(&client_doc);
         assert!(client_cfg.enabled);
         assert_eq!(client_cfg.zstd_window_log, 21);
+    }
+
+    #[tokio::test]
+    async fn test_traffic_stats_collection() {
+        let stats = Arc::new(TrafficStats::new());
+        let mut sink = Vec::new();
+        let mut writer = OptimizedWriter::with_defaults(&mut sink)
+            .unwrap()
+            .with_stats(stats.clone());
+
+        // 1. Write an urgent frame
+        let urgent_msg = b"URGENT_PACKET_PING";
+        writer
+            .write_frame(urgent_msg, FramePriority::Urgent)
+            .await
+            .unwrap();
+
+        let snap1 = stats.snapshot();
+        assert_eq!(snap1.raw_bytes, urgent_msg.len() as u64);
+        assert!(snap1.wire_bytes > 0);
+        assert_eq!(snap1.urgent_batches, 1);
+        assert_eq!(snap1.threshold_batches, 0);
+        assert_eq!(snap1.timer_batches, 0);
+
+        // 2. Write defer frames that accumulate, then flush
+        let defer_msg = vec![0x42u8; 1000];
+        writer
+            .write_frame(&defer_msg, FramePriority::Defer)
+            .await
+            .unwrap();
+        // Check timer/threshold not triggered yet
+        assert_eq!(stats.snapshot().threshold_batches, 0);
+
+        writer.flush_batch().await.unwrap();
+        let snap2 = stats.snapshot();
+        assert_eq!(snap2.raw_bytes, (urgent_msg.len() + defer_msg.len()) as u64);
+        assert_eq!(snap2.threshold_batches, 1);
+        assert!(snap2.saved_bytes > 0);
+        assert!(snap2.saved_ratio > 0.0);
     }
 }

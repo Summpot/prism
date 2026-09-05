@@ -39,6 +39,7 @@ pub struct ConnectorOptions {
     pub dial_timeout: Duration,
     pub quic: QuicConnectorOptions,
     pub middleware_dir: Option<PathBuf>,
+    pub traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
 }
 
 pub struct Connector {
@@ -164,8 +165,9 @@ impl Connector {
                     let st = st?;
                     let map = self.local_map.clone();
                     let mw_dir = self.opts.middleware_dir.clone();
+                    let traffic = self.opts.traffic.clone();
                     tokio::spawn(async move {
-                        if let Err(err) = handle_stream(map, mw_dir, st).await {
+                        if let Err(err) = handle_stream(map, mw_dir, traffic, st).await {
                             tracing::debug!(err=%err, "tunnel: connector stream ended");
                         }
                     });
@@ -178,6 +180,7 @@ impl Connector {
 pub async fn handle_stream(
     local_map: Arc<HashMap<String, RegisteredService>>,
     middleware_dir: Option<PathBuf>,
+    traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
     mut st: BoxedStream,
 ) -> anyhow::Result<()> {
     let (kind, svc, flags) = protocol::read_proxy_stream_header_with_flags(&mut st).await?;
@@ -198,7 +201,14 @@ pub async fn handle_stream(
                 || meta.traffic_optimizer.as_ref().is_some_and(|to| to.enabled);
 
             if optimizer_enabled {
-                run_optimized_tcp_pipeline(st, local_sock, meta, middleware_dir.as_deref()).await?;
+                run_optimized_tcp_pipeline(
+                    st,
+                    local_sock,
+                    meta,
+                    middleware_dir.as_deref(),
+                    traffic,
+                )
+                .await?;
             } else {
                 let mut up = local_sock;
                 let mut st = st;
@@ -218,6 +228,7 @@ pub async fn run_optimized_tcp_pipeline(
     local_sock: tokio::net::TcpStream,
     meta: RegisteredService,
     middleware_dir: Option<&Path>,
+    traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
 ) -> anyhow::Result<()> {
     let (st_read, st_write) = tokio::io::split(st);
     let (mut local_read, mut local_write) = local_sock.into_split();
@@ -262,6 +273,10 @@ pub async fn run_optimized_tcp_pipeline(
         window_log,
     };
     let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?;
+    if let Some(ref traffic) = traffic {
+        opt_writer.add_stats(traffic.service(&meta.name));
+        opt_writer.add_stats(traffic.global());
+    }
     let mut wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
 
     let outbound_task = tokio::spawn(async move {
@@ -529,7 +544,9 @@ mod tests {
 
         let (mut client_st, server_st) = tokio::io::duplex(4096);
         let h =
-            tokio::spawn(async move { handle_stream(local_map, None, Box::new(server_st)).await });
+            tokio::spawn(
+                async move { handle_stream(local_map, None, None, Box::new(server_st)).await },
+            );
 
         // Write header without flags
         protocol::write_proxy_stream_header(&mut client_st, ProxyStreamKind::Tcp, "echo-svc")
@@ -587,7 +604,9 @@ mod tests {
         let (mut client_read, mut client_write) = tokio::io::split(client_st);
 
         let h =
-            tokio::spawn(async move { handle_stream(local_map, None, Box::new(server_st)).await });
+            tokio::spawn(
+                async move { handle_stream(local_map, None, None, Box::new(server_st)).await },
+            );
 
         // Write PRPX header with FLAG_TRAFFIC_OPTIMIZER
         protocol::write_proxy_stream_header_with_flags(

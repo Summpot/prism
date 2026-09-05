@@ -8,6 +8,7 @@ import {
 	RotateCcw,
 	ServerCog,
 	Unplug,
+	Zap,
 } from "lucide-react";
 import { useCallback, useState } from "react";
 
@@ -21,14 +22,16 @@ import {
 	StateCard,
 	ToggleChip,
 } from "@/components/ui";
-import { formatRelative } from "@/lib/format";
+import { formatBytes, formatPercentage, formatRelative } from "@/lib/format";
 import {
 	getConnections,
 	getManagedNodes,
 	getManagementStatus,
+	getTrafficStats,
 	getTunnelServices,
 	type ManagedNodeSnapshot,
 	type ManagementStatusResponse,
+	type TrafficOverviewResponse,
 	triggerReload,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
@@ -40,6 +43,7 @@ function DashboardPage() {
 	const { connection, ready } = usePanelSession();
 	const [status, setStatus] = useState<ManagementStatusResponse | null>(null);
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
+	const [trafficStats, setTrafficStats] = useState<TrafficOverviewResponse | null>(null);
 	const [connectionCount, setConnectionCount] = useState(0);
 	const [serviceCount, setServiceCount] = useState(0);
 	const [error, setError] = useState<string | null>(null);
@@ -52,6 +56,7 @@ function DashboardPage() {
 		if (!connection) {
 			setStatus(null);
 			setNodes([]);
+			setTrafficStats(null);
 			setConnectionCount(0);
 			setServiceCount(0);
 			return;
@@ -67,12 +72,14 @@ function DashboardPage() {
 			getTunnelServices(connection).catch(
 				() => [] as Awaited<ReturnType<typeof getTunnelServices>>,
 			),
+			getTrafficStats(connection).catch(() => null),
 		])
-			.then(([nextStatus, nextNodes, nextConns, nextServices]) => {
+			.then(([nextStatus, nextNodes, nextConns, nextServices, nextTraffic]) => {
 				setStatus(nextStatus);
 				setNodes(nextNodes);
 				setConnectionCount(nextConns.length);
 				setServiceCount(nextServices.length);
+				setTrafficStats(nextTraffic);
 			})
 			.catch((nextError) => {
 				setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -181,6 +188,15 @@ function DashboardPage() {
 					label="Tunnel services"
 					value={serviceCount}
 					icon={<Unplug className="h-5 w-5" />}
+				/>
+				<MetricCard
+					label="Bandwidth saved"
+					value={
+						trafficStats?.global && trafficStats.global.raw_bytes > 0
+							? `${formatBytes(trafficStats.global.saved_bytes)} (${formatPercentage(trafficStats.global.saved_ratio)})`
+							: "0 B"
+					}
+					icon={<Zap className="h-5 w-5" />}
 				/>
 				<MetricCard
 					label="State file"

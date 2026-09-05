@@ -35,10 +35,12 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/prism/Cargo.toml crates/prism/Cargo.toml
 
 # Cargo requires at least one target file (src/main.rs or src/lib.rs) to exist
-# when parsing a package manifest. Create a tiny placeholder so `cargo fetch`
+# when parsing a package manifest. Create placeholder files so `cargo fetch`
 # can run before we copy the full source tree.
 RUN mkdir -p crates/prism/src \
-    && printf 'fn main() {}\n' > crates/prism/src/main.rs
+    && printf 'fn main() {}\n' > crates/prism/src/main.rs \
+    && touch crates/prism/src/lib.rs \
+    && printf 'fn main() {}\n' > crates/prism/build.rs
 
 RUN --mount=type=cache,target=/home/rust/.cargo/registry \
     --mount=type=cache,target=/home/rust/src/target \
@@ -51,9 +53,10 @@ COPY . ./
 COPY --from=frontend /app/dist/client/ crates/prism/frontend-dist/
 
 ARG MUSL_TARGET
+# Docker containers run as headless servers and do not need desktop GUI (Tauri/GTK).
 RUN --mount=type=cache,target=/home/rust/.cargo/registry \
     --mount=type=cache,target=/home/rust/src/target \
-    cargo build --release -p prism --target ${MUSL_TARGET} \
+    cargo build --release -p prism --no-default-features --target ${MUSL_TARGET} \
     && cp -f /home/rust/src/target/${MUSL_TARGET}/release/prism /home/rust/prism
 
 # ---------- Stage 3: minimal runtime image ----------

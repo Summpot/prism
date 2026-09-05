@@ -25,7 +25,7 @@ jobs:
           shared-key: rust-tests
 
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-default-features
 
   test-frontend:
     runs-on: ubuntu-latest
@@ -117,7 +117,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release -p prism --target "${{ matrix.target }}"
+          cargo build --release -p prism --no-default-features --target "${{ matrix.target }}"
 
       - name: Build (release) (windows)
         if: runner.os == 'Windows'

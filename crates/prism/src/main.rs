@@ -44,7 +44,19 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "desktop")]
     {
-        let should_launch_gui = cli.gui || (cli.config.is_none() && !cli.headless);
+        let has_display = {
+            #[cfg(target_os = "linux")]
+            {
+                std::env::var_os("DISPLAY").is_some()
+                    || std::env::var_os("WAYLAND_DISPLAY").is_some()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                true
+            }
+        };
+
+        let should_launch_gui = cli.gui || (cli.config.is_none() && !cli.headless && has_display);
         if should_launch_gui {
             return prism::desktop::run().await;
         }

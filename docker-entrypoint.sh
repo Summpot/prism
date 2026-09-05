@@ -99,6 +99,10 @@ ensure_dir() {
   mkdir -p "$d" 2>/dev/null || true
 }
 
+if [ "$#" -eq 0 ]; then
+  set -- --config "$CONFIG_PATH"
+fi
+
 if [ "$(id -u)" -eq 0 ]; then
   uidgid="$(pick_uid_gid)"
 

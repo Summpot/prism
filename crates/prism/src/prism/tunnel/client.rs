@@ -25,8 +25,8 @@ use crate::prism::tunnel::protocol::{
     self, FLAG_RAW, FLAG_TRAFFIC_OPTIMIZER, ProxyStreamKind, RegisterRequest, RegisteredService,
 };
 use crate::prism::tunnel::traffic_optimizer::{
-    BatcherConfig, CompressorConfig, DecompressorConfig, OptimizedReader, OptimizedWriter,
-    SharedTrafficStats, TrafficStats, TrafficStatsSnapshot,
+    BatcherConfig, CompressorConfig, DEFAULT_BUFFER_THRESHOLD, DecompressorConfig, OptimizedReader,
+    OptimizedWriter, SharedTrafficStats, TrafficStats, TrafficStatsSnapshot,
 };
 use crate::prism::tunnel::transport::{
     QuicDialOptions, TransportDialOptions, TransportSession, transport_by_name,
@@ -271,7 +271,7 @@ impl Client {
                                             config,
                                             traffic_stats,
                                         ).await {
-                                            tracing::debug!(peer = %peer_addr, err = %err, "tunnel client: player connection closed");
+                                            tracing::warn!(peer = %peer_addr, err = %err, "tunnel client: player connection error");
                                         }
                                     });
                                 }
@@ -565,7 +565,11 @@ async fn handle_player_connection(
     let use_optimizer = config
         .traffic_optimizer
         .as_ref()
-        .map_or(false, |t| t.enabled);
+        .map_or(false, |t| t.enabled)
+        || target_service
+            .traffic_optimizer
+            .as_ref()
+            .map_or(false, |t| t.enabled);
 
     let flags = if use_optimizer {
         FLAG_TRAFFIC_OPTIMIZER
@@ -594,16 +598,38 @@ async fn handle_player_connection(
             .traffic_optimizer
             .as_ref()
             .and_then(|t| t.zstd_window_log)
+            .or_else(|| {
+                target_service
+                    .traffic_optimizer
+                    .as_ref()
+                    .and_then(|t| t.zstd_window_log)
+            })
             .unwrap_or(23);
 
+        let zstd_level = target_service
+            .traffic_optimizer
+            .as_ref()
+            .and_then(|t| t.zstd_level)
+            .unwrap_or(3);
+
+        let flush_interval = target_service
+            .traffic_optimizer
+            .as_ref()
+            .and_then(|t| t.flush_interval_ms)
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| Duration::from_millis(20));
+
         let compressor_config = CompressorConfig {
-            compression_level: 3,
+            compression_level: zstd_level,
             window_log: zstd_window_log,
         };
         let decompressor_config = DecompressorConfig {
             window_log: zstd_window_log,
         };
-        let batcher_config = BatcherConfig::default();
+        let batcher_config = BatcherConfig {
+            flush_interval,
+            buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
+        };
 
         let (player_rd, mut player_wr) = player_socket.into_split();
         let (prpx_rd, prpx_wr) = tokio::io::split(prpx_stream);
@@ -1115,5 +1141,147 @@ mod tests {
 
         controller.clear_logs().await;
         assert!(controller.logs(100).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_client_e2e_auto_adopt_service_traffic_optimizer() {
+        use crate::prism::config::TrafficOptimizerConfig;
+        use crate::prism::tunnel::manager::Manager;
+        use crate::prism::tunnel::server::{QuicServerOptions, Server, ServerOptions};
+
+        // 1. Backend server
+        let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap().to_string();
+
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = backend_listener.accept().await {
+                tokio::spawn(async move {
+                    let (mut rd, mut wr) = socket.split();
+                    let _ = tokio::io::copy(&mut rd, &mut wr).await;
+                });
+            }
+        });
+
+        // 2. Tunnel server
+        let server_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server_listener.local_addr().unwrap().to_string();
+        drop(server_listener);
+
+        let mgr = Arc::new(Manager::new());
+        let server = Server::new(ServerOptions {
+            listen_addr: server_addr.clone(),
+            transport: "tcp".into(),
+            auth_token: "secret".into(),
+            quic: QuicServerOptions {
+                cert_file: "".into(),
+                key_file: "".into(),
+            },
+            manager: mgr.clone(),
+            auth_manager: None,
+        })
+        .unwrap();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let srv_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let _ = server.listen_and_serve(srv_shutdown).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // 3. Connector registers service with traffic_optimizer ENABLED
+        let connector = crate::prism::tunnel::connector::Connector::new(
+            crate::prism::tunnel::connector::ConnectorOptions {
+                server_addr: server_addr.clone(),
+                transport: "tcp".into(),
+                auth_token: "secret".into(),
+                services: vec![RegisteredService {
+                    name: "mc-opt".into(),
+                    proto: "tcp".into(),
+                    local_addr: backend_addr,
+                    route_only: false,
+                    remote_addr: "".into(),
+                    masquerade_host: "".into(),
+                    middleware: None,
+                    traffic_optimizer: Some(TrafficOptimizerConfig {
+                        enabled: true,
+                        flush_interval_ms: Some(20),
+                        zstd_window_log: Some(23),
+                        zstd_level: Some(3),
+                    }),
+                }],
+                dial_timeout: Duration::from_secs(2),
+                quic: crate::prism::tunnel::connector::QuicConnectorOptions {
+                    server_name: "".into(),
+                    insecure_skip_verify: true,
+                },
+                middleware_dir: None,
+                traffic: None,
+            },
+        )
+        .unwrap();
+
+        let conn_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let _ = connector.run(conn_shutdown).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 4. Client starts with traffic_optimizer NONE (as in desktop UI client)
+        let client_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client_listen_addr = client_listener.local_addr().unwrap().to_string();
+        drop(client_listener);
+
+        let client = Client::new(TunnelClientConfig {
+            server_addr: server_addr.clone(),
+            transport: "tcp".into(),
+            auth_token: "secret".into(),
+            listen_addr: client_listen_addr.clone(),
+            middleware: None,
+            fake_lan_broadcast: true,
+            motd_prefix: "[Prism] ".into(),
+            traffic_optimizer: None, // None! Must auto-adopt from service catalog
+        })
+        .unwrap();
+
+        let client_arc = Arc::new(client);
+        let client_shutdown = shutdown_rx.clone();
+        let c_clone = client_arc.clone();
+        tokio::spawn(async move {
+            let _ = c_clone.run(client_shutdown).await;
+        });
+
+        // Wait for client to connect and receive catalog
+        let mut waited = 0;
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited += 50;
+            if client_arc.is_connected().await {
+                let svcs = client_arc.known_services().await;
+                if svcs.iter().any(|s| s.name == "mc-opt") {
+                    break;
+                }
+            }
+            if waited > 3000 {
+                panic!("timed out waiting for client to connect and receive catalog");
+            }
+        }
+
+        // 5. Connect as Player to Client's listen_addr
+        let mut player = tokio::net::TcpStream::connect(&client_listen_addr)
+            .await
+            .expect("player should connect to client listen_addr");
+
+        // Send data
+        let message = b"Hello from Minecraft Player via auto-adopted optimized tunnel!";
+        player.write_all(message).await.unwrap();
+
+        let mut received = vec![0u8; message.len()];
+        player.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, message);
+
+        // Shutdown everything
+        shutdown_tx.send(true).unwrap();
     }
 }

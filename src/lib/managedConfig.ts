@@ -71,6 +71,13 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 						key_file: endpoint.quic.key_file?.trim() || "",
 					}
 				: undefined,
+			websocket: endpoint.websocket
+				? {
+						cert_file: endpoint.websocket.cert_file?.trim() || "",
+						key_file: endpoint.websocket.key_file?.trim() || "",
+						url_path: endpoint.websocket.url_path?.trim() || "",
+					}
+				: undefined,
 		}))
 		.filter((endpoint) => endpoint.listen_addr);
 
@@ -94,6 +101,11 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 					? {
 							server_name: tunnel.client.quic.server_name?.trim() || "",
 							insecure_skip_verify: tunnel.client.quic.insecure_skip_verify,
+						}
+					: undefined,
+				websocket: tunnel.client.websocket
+					? {
+							insecure_skip_verify: tunnel.client.websocket.insecure_skip_verify,
 						}
 					: undefined,
 			}
@@ -225,10 +237,10 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 					message: "Tunnel endpoint address is required.",
 				});
 			}
-			if (!["tcp", "udp", "quic"].includes(endpoint.transport)) {
+			if (!["tcp", "udp", "quic", "websocket", "ws", "wss"].includes(endpoint.transport)) {
 				issues.push({
 					path: `tunnel.endpoints.${index}.transport`,
-					message: "Transport must be tcp, udp, or quic.",
+					message: "Transport must be tcp, udp, quic, or websocket.",
 				});
 			}
 		});
@@ -240,10 +252,13 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 			});
 		}
 
-		if (tunnel.client && !["tcp", "udp", "quic"].includes(tunnel.client.transport)) {
+		if (
+			tunnel.client &&
+			!["tcp", "udp", "quic", "websocket", "ws", "wss"].includes(tunnel.client.transport)
+		) {
 			issues.push({
 				path: "tunnel.client.transport",
-				message: "Client transport must be tcp, udp, or quic.",
+				message: "Client transport must be tcp, udp, quic, or websocket.",
 			});
 		}
 
@@ -347,7 +362,7 @@ export function createEmptyTunnel(): ManagedTunnelDocument {
 }
 
 export function createEmptyTunnelEndpoint(): ManagedTunnelEndpointDocument {
-	return { listen_addr: "", transport: "tcp", quic: null };
+	return { listen_addr: "", transport: "tcp", quic: null, websocket: null };
 }
 
 export function createEmptyTunnelService(): ManagedTunnelServiceDocument {
@@ -367,6 +382,7 @@ export function createEmptyTunnelClient(): ManagedTunnelClientDocument {
 		transport: "tcp",
 		dial_timeout_ms: 5000,
 		quic: null,
+		websocket: null,
 	};
 }
 

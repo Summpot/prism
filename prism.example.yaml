@@ -62,7 +62,7 @@ tunnel:
   auto_listen_services: true
   endpoints:
     - listen_addr: ":7000"
-      transport: "tcp" # tcp | udp | quic
+      transport: "tcp" # tcp | udp | quic | websocket | wss
     - listen_addr: ":7001"
       transport: "quic"
       quic:
@@ -70,14 +70,22 @@ tunnel:
         # certificate at startup.
         cert_file: ""
         key_file: ""
+    # - listen_addr: ":7002"
+    #   transport: "websocket" # or "wss"
+    #   websocket:
+    #     cert_file: ""
+    #     key_file: ""
 
   # Optional: tunnel connector host role (uncomment to expose private services).
   # connector:
   #   server_addr: "relay.example.com:7000"
-  #   transport: "quic" # tcp | udp | quic
+  #   transport: "quic" # tcp | udp | quic | websocket | wss
   #   auth_token: "cluster-secret-token"
   #   dial_timeout_ms: 5000
   #   quic:
+  #     server_name: "relay.example.com"
+  #     insecure_skip_verify: false
+  #   websocket:
   #     server_name: "relay.example.com"
   #     insecure_skip_verify: false
   #
@@ -100,7 +108,7 @@ tunnel:
   # Optional: terminal client sidecar role (uncomment to enable client access).
   # client:
   #   server_addr: "relay.example.com:7000"
-  #   transport: "quic" # tcp | quic | kcp
+  #   transport: "quic" # tcp | quic | kcp | websocket | wss
   #   auth_token: "cluster-secret-token"
   #   listen_addr: "127.0.0.1:25565"
   #   middleware: "minecraft"

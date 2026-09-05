@@ -116,4 +116,41 @@ describe("managedConfig helpers", () => {
 		b.max_header_bytes = 1;
 		expect(managedConfigFingerprint(a)).not.toEqual(managedConfigFingerprint(b));
 	});
+
+	it("validates and normalizes websocket tunnel endpoints and client", () => {
+		const doc = createEmptyManagedConfig();
+		doc.tunnel = {
+			auth_token: "secret",
+			auto_listen_services: false,
+			endpoints: [
+				{
+					listen_addr: ":8080",
+					transport: "websocket",
+					websocket: {
+						cert_file: "cert.pem",
+						key_file: "key.pem",
+						url_path: "/ws",
+					},
+				},
+			],
+			client: {
+				server_addr: "127.0.0.1:8080",
+				transport: "wss",
+				dial_timeout_ms: 3000,
+				websocket: {
+					insecure_skip_verify: true,
+				},
+			},
+			services: [],
+		};
+
+		const issues = validateManagedConfig(doc);
+		expect(issues).toHaveLength(0);
+
+		const normalized = normalizeManagedConfig(doc);
+		expect(normalized.tunnel?.endpoints[0].transport).toBe("websocket");
+		expect(normalized.tunnel?.endpoints[0].websocket?.url_path).toBe("/ws");
+		expect(normalized.tunnel?.client?.transport).toBe("wss");
+		expect(normalized.tunnel?.client?.websocket?.insecure_skip_verify).toBe(true);
+	});
 });

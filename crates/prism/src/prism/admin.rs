@@ -302,6 +302,7 @@ async fn client_start(
         fake_lan_broadcast: payload.fake_lan_broadcast,
         motd_prefix: payload.motd_prefix,
         traffic_optimizer: payload.traffic_optimizer,
+        websocket: None,
     };
 
     match client.start(cfg).await {

@@ -29,7 +29,8 @@ use crate::prism::tunnel::traffic_optimizer::{
     OptimizedWriter, SharedTrafficStats, TrafficStats, TrafficStatsSnapshot,
 };
 use crate::prism::tunnel::transport::{
-    QuicDialOptions, TransportDialOptions, TransportSession, transport_by_name,
+    QuicDialOptions, TransportDialOptions, TransportSession, WebSocketDialOptions,
+    transport_by_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -358,6 +359,20 @@ impl Client {
                         server_name: String::new(),
                         insecure_skip_verify: true,
                         next_protos: vec![],
+                    },
+                    websocket: WebSocketDialOptions {
+                        server_name: self
+                            .config
+                            .websocket
+                            .as_ref()
+                            .map(|w| w.server_name.clone())
+                            .unwrap_or_default(),
+                        insecure_skip_verify: self
+                            .config
+                            .websocket
+                            .as_ref()
+                            .map(|w| w.insecure_skip_verify)
+                            .unwrap_or(true),
                     },
                 },
             )
@@ -950,6 +965,7 @@ mod tests {
             fake_lan_broadcast: true,
             motd_prefix: "[Prism] ".into(),
             traffic_optimizer: None,
+            websocket: None,
         };
 
         let client = Client::new(cfg).expect("should initialize and compile builtin middleware");
@@ -990,6 +1006,7 @@ mod tests {
                 cert_file: "".into(),
                 key_file: "".into(),
             },
+            websocket: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
         })
@@ -1024,6 +1041,7 @@ mod tests {
                     server_name: "".into(),
                     insecure_skip_verify: true,
                 },
+                websocket: Default::default(),
                 middleware_dir: None,
                 traffic: None,
             },
@@ -1054,6 +1072,7 @@ mod tests {
                 enabled: true,
                 zstd_window_log: Some(23),
             }),
+            websocket: None,
         })
         .unwrap();
 
@@ -1122,6 +1141,7 @@ mod tests {
             fake_lan_broadcast: false,
             motd_prefix: "".into(),
             traffic_optimizer: None,
+            websocket: None,
         };
 
         controller.start(cfg).await.unwrap();
@@ -1176,6 +1196,7 @@ mod tests {
                 cert_file: "".into(),
                 key_file: "".into(),
             },
+            websocket: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
         })
@@ -1215,6 +1236,7 @@ mod tests {
                     server_name: "".into(),
                     insecure_skip_verify: true,
                 },
+                websocket: Default::default(),
                 middleware_dir: None,
                 traffic: None,
             },
@@ -1242,6 +1264,7 @@ mod tests {
             fake_lan_broadcast: true,
             motd_prefix: "[Prism] ".into(),
             traffic_optimizer: None, // None! Must auto-adopt from service catalog
+            websocket: None,
         })
         .unwrap();
 

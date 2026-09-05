@@ -30,6 +30,12 @@ pub struct QuicConnectorOptions {
     pub insecure_skip_verify: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct WebSocketConnectorOptions {
+    pub server_name: String,
+    pub insecure_skip_verify: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConnectorOptions {
     pub server_addr: String,
@@ -38,6 +44,7 @@ pub struct ConnectorOptions {
     pub services: Vec<RegisteredService>,
     pub dial_timeout: Duration,
     pub quic: QuicConnectorOptions,
+    pub websocket: WebSocketConnectorOptions,
     pub middleware_dir: Option<PathBuf>,
     pub traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
 }
@@ -127,6 +134,10 @@ impl Connector {
                         server_name: self.opts.quic.server_name.clone(),
                         insecure_skip_verify: self.opts.quic.insecure_skip_verify,
                         next_protos: vec![],
+                    },
+                    websocket: crate::prism::tunnel::transport::WebSocketDialOptions {
+                        server_name: self.opts.websocket.server_name.clone(),
+                        insecure_skip_verify: self.opts.websocket.insecure_skip_verify,
                     },
                 },
             )

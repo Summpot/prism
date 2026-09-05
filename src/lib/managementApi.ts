@@ -25,6 +25,11 @@ export interface ManagedTunnelEndpointDocument {
 		cert_file?: string | null;
 		key_file?: string | null;
 	} | null;
+	websocket?: {
+		cert_file?: string | null;
+		key_file?: string | null;
+		url_path?: string | null;
+	} | null;
 }
 
 export interface ManagedTunnelClientDocument {
@@ -33,6 +38,9 @@ export interface ManagedTunnelClientDocument {
 	dial_timeout_ms?: number | null;
 	quic?: {
 		server_name?: string | null;
+		insecure_skip_verify: boolean;
+	} | null;
+	websocket?: {
 		insecure_skip_verify: boolean;
 	} | null;
 }

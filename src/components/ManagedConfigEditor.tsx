@@ -845,6 +845,7 @@ function TunnelSection({
 										<option value="tcp">tcp</option>
 										<option value="udp">udp (KCP)</option>
 										<option value="quic">quic</option>
+										<option value="websocket">websocket</option>
 									</select>
 								</Field>
 								<div className="flex items-end">
@@ -893,6 +894,67 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
+											className={fieldClassName}
+										/>
+									</Field>
+								</div>
+							) : null}
+							{endpoint.transport === "websocket" ||
+							endpoint.transport === "ws" ||
+							endpoint.transport === "wss" ? (
+								<div className="mt-4 grid gap-4 md:grid-cols-3">
+									<Field title="WebSocket cert file" hint="Empty = auto self-signed for WSS">
+										<input
+											value={endpoint.websocket?.cert_file ?? ""}
+											onChange={(event) => {
+												const endpoints = [...tunnel.endpoints];
+												endpoints[index] = {
+													...endpoint,
+													websocket: {
+														cert_file: event.target.value,
+														key_file: endpoint.websocket?.key_file ?? "",
+														url_path: endpoint.websocket?.url_path ?? "",
+													},
+												};
+												updateTunnel({ endpoints });
+											}}
+											className={fieldClassName}
+										/>
+									</Field>
+									<Field title="WebSocket key file" hint="TLS private key path">
+										<input
+											value={endpoint.websocket?.key_file ?? ""}
+											onChange={(event) => {
+												const endpoints = [...tunnel.endpoints];
+												endpoints[index] = {
+													...endpoint,
+													websocket: {
+														cert_file: endpoint.websocket?.cert_file ?? "",
+														key_file: event.target.value,
+														url_path: endpoint.websocket?.url_path ?? "",
+													},
+												};
+												updateTunnel({ endpoints });
+											}}
+											className={fieldClassName}
+										/>
+									</Field>
+									<Field title="WebSocket URL path" hint="Optional endpoint path (e.g. /ws)">
+										<input
+											value={endpoint.websocket?.url_path ?? ""}
+											onChange={(event) => {
+												const endpoints = [...tunnel.endpoints];
+												endpoints[index] = {
+													...endpoint,
+													websocket: {
+														cert_file: endpoint.websocket?.cert_file ?? "",
+														key_file: endpoint.websocket?.key_file ?? "",
+														url_path: event.target.value,
+													},
+												};
+												updateTunnel({ endpoints });
+											}}
+											placeholder="/ws"
 											className={fieldClassName}
 										/>
 									</Field>
@@ -960,6 +1022,7 @@ function TunnelSection({
 										<option value="tcp">tcp</option>
 										<option value="udp">udp (KCP)</option>
 										<option value="quic">quic</option>
+										<option value="websocket">websocket</option>
 									</select>
 								</Field>
 								<Field title="Dial timeout (ms)" hint="Connection timeout">
@@ -1025,6 +1088,31 @@ function TunnelSection({
 											className="h-4 w-4 accent-cyan-400"
 										/>
 										Skip TLS certificate verification
+									</label>
+								</div>
+							) : null}
+							{tunnel.client.transport === "websocket" ||
+							tunnel.client.transport === "ws" ||
+							tunnel.client.transport === "wss" ? (
+								<div className="mt-4">
+									<label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+										<input
+											type="checkbox"
+											checked={tunnel.client.websocket?.insecure_skip_verify ?? false}
+											onChange={(event) =>
+												tunnel.client &&
+												updateTunnel({
+													client: {
+														...tunnel.client,
+														websocket: {
+															insecure_skip_verify: event.target.checked,
+														},
+													},
+												})
+											}
+											className="h-4 w-4 accent-cyan-400"
+										/>
+										Skip TLS certificate verification (WSS)
 									</label>
 								</div>
 							) : null}

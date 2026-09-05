@@ -26,13 +26,28 @@ pub struct QuicDialOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct WebSocketListenOptions {
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebSocketDialOptions {
+    #[allow(dead_code)]
+    pub server_name: String,
+    pub insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct TransportListenOptions {
     pub quic: QuicListenOptions,
+    pub websocket: WebSocketListenOptions,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TransportDialOptions {
     pub quic: QuicDialOptions,
+    pub websocket: WebSocketDialOptions,
 }
 
 #[async_trait]
@@ -75,7 +90,11 @@ pub fn parse_transport(name: &str) -> anyhow::Result<String> {
     }
     match n.as_str() {
         "tcp" | "udp" | "quic" => Ok(n),
-        _ => anyhow::bail!("tunnel: unknown transport {name:?} (expected tcp|udp|quic)"),
+        "ws" | "websocket" => Ok("websocket".into()),
+        "wss" => Ok("wss".into()),
+        _ => anyhow::bail!(
+            "tunnel: unknown transport {name:?} (expected tcp|udp|quic|websocket|ws|wss)"
+        ),
     }
 }
 
@@ -89,6 +108,7 @@ pub fn default_alpn(next: &[Vec<u8>]) -> Vec<Vec<u8>> {
 pub mod quic;
 pub mod tcp;
 pub mod udp;
+pub mod websocket;
 
 pub fn transport_by_name(name: &str) -> anyhow::Result<Arc<dyn Transport>> {
     let n = parse_transport(name)?;
@@ -96,6 +116,34 @@ pub fn transport_by_name(name: &str) -> anyhow::Result<Arc<dyn Transport>> {
         "tcp" => Ok(Arc::new(tcp::TcpTransport::new())),
         "quic" => Ok(Arc::new(quic::QuicTransport::new())),
         "udp" => Ok(Arc::new(udp::UdpTransport::new())),
+        "websocket" => Ok(Arc::new(websocket::WsTransport::new(false))),
+        "wss" => Ok(Arc::new(websocket::WsTransport::new(true))),
         _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_transport_websocket_variants() {
+        assert_eq!(parse_transport("").unwrap(), "tcp");
+        assert_eq!(parse_transport("tcp").unwrap(), "tcp");
+        assert_eq!(parse_transport("udp").unwrap(), "udp");
+        assert_eq!(parse_transport("quic").unwrap(), "quic");
+        assert_eq!(parse_transport("ws").unwrap(), "websocket");
+        assert_eq!(parse_transport("websocket").unwrap(), "websocket");
+        assert_eq!(parse_transport("  WebSocket  ").unwrap(), "websocket");
+        assert_eq!(parse_transport("wss").unwrap(), "wss");
+        assert_eq!(parse_transport("  WSS  ").unwrap(), "wss");
+        assert!(parse_transport("unknown").is_err());
+    }
+
+    #[test]
+    fn test_transport_by_name_lookup() {
+        assert_eq!(transport_by_name("ws").unwrap().name(), "websocket");
+        assert_eq!(transport_by_name("websocket").unwrap().name(), "websocket");
+        assert_eq!(transport_by_name("wss").unwrap().name(), "wss");
     }
 }

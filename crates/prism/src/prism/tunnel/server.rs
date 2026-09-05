@@ -8,8 +8,14 @@ use crate::prism::tunnel::{
     transport::{TransportListenOptions, transport_by_name},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct QuicServerOptions {
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebSocketServerOptions {
     pub cert_file: String,
     pub key_file: String,
 }
@@ -20,6 +26,7 @@ pub struct ServerOptions {
     pub transport: String,
     pub auth_token: String,
     pub quic: QuicServerOptions,
+    pub websocket: WebSocketServerOptions,
     pub manager: Arc<Manager>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
 }
@@ -52,6 +59,10 @@ impl Server {
                         cert_file: self.opts.quic.cert_file.clone(),
                         key_file: self.opts.quic.key_file.clone(),
                         next_protos: vec![],
+                    },
+                    websocket: crate::prism::tunnel::transport::WebSocketListenOptions {
+                        cert_file: self.opts.websocket.cert_file.clone(),
+                        key_file: self.opts.websocket.key_file.clone(),
                     },
                 },
             )

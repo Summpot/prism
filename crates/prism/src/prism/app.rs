@@ -304,6 +304,10 @@ pub async fn run(
                     cert_file: ep.quic.cert_file.clone(),
                     key_file: ep.quic.key_file.clone(),
                 },
+                websocket: tunnel::server::WebSocketServerOptions {
+                    cert_file: ep.websocket.cert_file.clone(),
+                    key_file: ep.websocket.key_file.clone(),
+                },
                 manager: tunnel_manager.clone(),
                 auth_manager: Some(auth_manager.clone()),
             })?;
@@ -353,6 +357,18 @@ pub async fn run(
                 insecure_skip_verify: false,
             });
 
+        let ws_opts = conn
+            .websocket
+            .as_ref()
+            .map(|w| tunnel::connector::WebSocketConnectorOptions {
+                server_name: w.server_name.clone(),
+                insecure_skip_verify: w.insecure_skip_verify,
+            })
+            .unwrap_or_else(|| tunnel::connector::WebSocketConnectorOptions {
+                server_name: String::new(),
+                insecure_skip_verify: false,
+            });
+
         let connector = tunnel::connector::Connector::new(tunnel::connector::ConnectorOptions {
             server_addr: conn.server_addr.clone(),
             transport: conn.transport.clone(),
@@ -360,6 +376,7 @@ pub async fn run(
             services,
             dial_timeout: conn.dial_timeout,
             quic: quic_opts,
+            websocket: ws_opts,
             middleware_dir: Some(paths.middleware_dir.clone()),
             traffic: Some(traffic.clone()),
         })?;

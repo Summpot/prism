@@ -1359,6 +1359,7 @@ function ClientDashboardPage() {
 											<option value="quic">QUIC (Fast & Resilient)</option>
 											<option value="kcp">KCP (Low Latency UDP)</option>
 											<option value="tcp">TCP (Standard)</option>
+											<option value="websocket">WebSocket (WS / WSS)</option>
 										</select>
 									</div>
 

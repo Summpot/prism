@@ -242,8 +242,9 @@ Supported tunnel transports:
 - `tcp` → TCP + yamux multiplexing
 - `udp` → KCP over UDP + yamux multiplexing
 - `quic` → QUIC streams over UDP
+- `websocket` (or `ws`, `wss`) → WebSocket stream + yamux multiplexing
 
-For QUIC endpoints, Prism can auto-generate a self-signed certificate when
+For QUIC and WebSocket (WSS) endpoints, Prism can auto-generate a self-signed certificate when
 `cert_file` and `key_file` are both empty.
 
 ## Admin API

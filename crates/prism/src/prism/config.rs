@@ -424,6 +424,7 @@ pub struct ManagedTunnelEndpointDocument {
     #[serde(default)]
     pub transport: String,
     pub quic: Option<ManagedQuicServerDocument>,
+    pub websocket: Option<ManagedWebSocketServerDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -436,6 +437,7 @@ pub struct ManagedTunnelConnectorDocument {
     pub auth_token: String,
     pub dial_timeout_ms: Option<i64>,
     pub quic: Option<ManagedQuicClientDocument>,
+    pub websocket: Option<ManagedWebSocketClientDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -455,6 +457,7 @@ pub struct ManagedTunnelClientDocument {
     pub motd_prefix: String,
     pub traffic_optimizer: Option<ManagedTrafficOptimizerClientDocument>,
     pub discovery: Option<ManagedClientDiscoveryDocument>,
+    pub websocket: Option<ManagedWebSocketClientDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -489,6 +492,21 @@ pub struct ManagedQuicServerDocument {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedQuicClientDocument {
+    pub server_name: Option<String>,
+    #[serde(default)]
+    pub insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedWebSocketServerDocument {
+    pub cert_file: Option<String>,
+    pub key_file: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedWebSocketClientDocument {
     pub server_name: Option<String>,
     #[serde(default)]
     pub insecure_skip_verify: bool,
@@ -603,6 +621,7 @@ pub struct TunnelEndpointConfig {
     pub listen_addr: String,
     pub transport: String,
     pub quic: QuicServerConfig,
+    pub websocket: WebSocketServerConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -613,6 +632,7 @@ pub struct TunnelConnectorConfig {
     pub dial_timeout_ms: Option<i64>,
     pub dial_timeout: Duration,
     pub quic: Option<QuicClientConfig>,
+    pub websocket: Option<WebSocketClientConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -625,6 +645,7 @@ pub struct TunnelClientConfig {
     pub fake_lan_broadcast: bool,
     pub motd_prefix: String,
     pub traffic_optimizer: Option<TrafficOptimizerClientConfig>,
+    pub websocket: Option<WebSocketClientConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -657,6 +678,18 @@ pub struct QuicServerConfig {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuicClientConfig {
+    pub server_name: String,
+    pub insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WebSocketServerConfig {
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WebSocketClientConfig {
     pub server_name: String,
     pub insecure_skip_verify: bool,
 }
@@ -855,6 +888,7 @@ struct FileTunnelEndpoint {
     listen_addr: String,
     transport: Option<String>,
     quic: Option<FileQuicServer>,
+    websocket: Option<FileWebSocketServer>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -864,6 +898,7 @@ struct FileTunnelConnector {
     auth_token: Option<String>,
     dial_timeout_ms: Option<i64>,
     quic: Option<FileQuicClient>,
+    websocket: Option<FileWebSocketClient>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -878,6 +913,7 @@ struct FileTunnelClient {
     motd_prefix: Option<String>,
     traffic_optimizer: Option<FileTrafficOptimizerClient>,
     discovery: Option<FileClientDiscovery>,
+    websocket: Option<FileWebSocketClient>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -907,6 +943,19 @@ struct FileQuicServer {
 
 #[derive(Debug, Deserialize)]
 struct FileQuicClient {
+    server_name: Option<String>,
+    #[serde(default)]
+    insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileWebSocketServer {
+    cert_file: Option<String>,
+    key_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileWebSocketClient {
     server_name: Option<String>,
     #[serde(default)]
     insecure_skip_verify: bool,
@@ -1192,6 +1241,22 @@ impl Config {
                                 .trim()
                                 .to_string(),
                         },
+                        websocket: WebSocketServerConfig {
+                            cert_file: ep
+                                .websocket
+                                .as_ref()
+                                .and_then(|w| w.cert_file.clone())
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                            key_file: ep
+                                .websocket
+                                .as_ref()
+                                .and_then(|w| w.key_file.clone())
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                        },
                     });
                 }
             }
@@ -1222,6 +1287,10 @@ impl Config {
                     quic: conn.quic.as_ref().map(|q| QuicClientConfig {
                         server_name: q.server_name.clone().unwrap_or_default().trim().to_string(),
                         insecure_skip_verify: q.insecure_skip_verify,
+                    }),
+                    websocket: conn.websocket.as_ref().map(|w| WebSocketClientConfig {
+                        server_name: w.server_name.clone().unwrap_or_default().trim().to_string(),
+                        insecure_skip_verify: w.insecure_skip_verify,
                     }),
                 });
             }
@@ -1279,6 +1348,10 @@ impl Config {
                     fake_lan_broadcast,
                     motd_prefix,
                     traffic_optimizer,
+                    websocket: c.websocket.as_ref().map(|w| WebSocketClientConfig {
+                        server_name: w.server_name.clone().unwrap_or_default().trim().to_string(),
+                        insecure_skip_verify: w.insecure_skip_verify,
+                    }),
                 });
             }
 
@@ -1602,6 +1675,10 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                             cert_file: quic.cert_file.clone(),
                             key_file: quic.key_file.clone(),
                         }),
+                        websocket: endpoint.websocket.as_ref().map(|ws| FileWebSocketServer {
+                            cert_file: ws.cert_file.clone(),
+                            key_file: ws.key_file.clone(),
+                        }),
                     })
                     .collect(),
             ),
@@ -1624,6 +1701,10 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                     quic: connector.quic.as_ref().map(|quic| FileQuicClient {
                         server_name: quic.server_name.clone(),
                         insecure_skip_verify: quic.insecure_skip_verify,
+                    }),
+                    websocket: connector.websocket.as_ref().map(|ws| FileWebSocketClient {
+                        server_name: ws.server_name.clone(),
+                        insecure_skip_verify: ws.insecure_skip_verify,
                     }),
                 }),
             client: tunnel.client.as_ref().map(|client| FileTunnelClient {
@@ -1664,6 +1745,10 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                             enabled: mc.enabled,
                             motd_prefix: mc.motd_prefix.clone(),
                         }),
+                }),
+                websocket: client.websocket.as_ref().map(|ws| FileWebSocketClient {
+                    server_name: ws.server_name.clone(),
+                    insecure_skip_verify: ws.insecure_skip_verify,
                 }),
             }),
             services: Some(
@@ -2291,6 +2376,7 @@ enabled = true
                     auth_token: "token1".into(),
                     dial_timeout_ms: Some(5000),
                     quic: None,
+                    websocket: None,
                 }),
                 client: Some(ManagedTunnelClientDocument {
                     server_addr: "relay.example.com:7000".into(),
@@ -2302,6 +2388,7 @@ enabled = true
                     motd_prefix: "[Prism] ".into(),
                     traffic_optimizer: None,
                     discovery: None,
+                    websocket: None,
                 }),
                 ..Default::default()
             }),
@@ -2317,6 +2404,7 @@ enabled = true
                     auth_token: "token1".into(),
                     dial_timeout_ms: Some(5000),
                     quic: None,
+                    websocket: None,
                 }),
                 client: Some(ManagedTunnelClientDocument {
                     server_addr: "relay.example.com:7000".into(),
@@ -2328,6 +2416,7 @@ enabled = true
                     motd_prefix: "[Prism] ".into(),
                     traffic_optimizer: None,
                     discovery: None,
+                    websocket: None,
                 }),
                 ..Default::default()
             }),
@@ -2343,6 +2432,7 @@ enabled = true
                     auth_token: "token1".into(),
                     dial_timeout_ms: Some(5000),
                     quic: None,
+                    websocket: None,
                 }),
                 client: Some(ManagedTunnelClientDocument {
                     server_addr: "relay.example.com:7000".into(),
@@ -2354,6 +2444,7 @@ enabled = true
                     motd_prefix: "[Prism] ".into(),
                     traffic_optimizer: None,
                     discovery: None,
+                    websocket: None,
                 }),
                 ..Default::default()
             }),

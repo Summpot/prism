@@ -377,10 +377,27 @@
 				"listen_addr": { "$ref": "#/$defs/nonEmptyString" },
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "udp", "quic"],
+					"enum": ["tcp", "udp", "quic", "websocket", "ws", "wss"],
 					"default": "tcp"
 				},
-				"quic": { "$ref": "#/$defs/quicServer" }
+				"quic": { "$ref": "#/$defs/quicServer" },
+				"websocket": { "$ref": "#/$defs/websocketServer" }
+			}
+		},
+		"websocketServer": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"cert_file": {
+					"type": "string",
+					"description": "Path to TLS certificate PEM file for WSS. If empty, Prism may generate a self-signed cert.",
+					"default": ""
+				},
+				"key_file": {
+					"type": "string",
+					"description": "Path to TLS private key PEM file for WSS. If empty, Prism may generate a self-signed key.",
+					"default": ""
+				}
 			}
 		},
 		"quicServer": {
@@ -410,7 +427,7 @@
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "udp", "quic", "kcp"],
+					"enum": ["tcp", "udp", "quic", "kcp", "websocket", "ws", "wss"],
 					"default": "tcp"
 				},
 				"auth_token": {
@@ -423,7 +440,8 @@
 					"description": "Dial timeout for connecting to the tunnel server.",
 					"default": 5000
 				},
-				"quic": { "$ref": "#/$defs/quicClient" }
+				"quic": { "$ref": "#/$defs/quicClient" },
+				"websocket": { "$ref": "#/$defs/websocketClient" }
 			}
 		},
 		"tunnelClient": {
@@ -437,7 +455,7 @@
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "quic", "kcp", "udp"],
+					"enum": ["tcp", "quic", "kcp", "udp", "websocket", "ws", "wss"],
 					"default": "tcp"
 				},
 				"auth_token": {
@@ -486,7 +504,8 @@
 							}
 						}
 					}
-				}
+				},
+				"websocket": { "$ref": "#/$defs/websocketClient" }
 			}
 		},
 		"trafficOptimizerClient": {
@@ -519,6 +538,22 @@
 				"insecure_skip_verify": {
 					"type": "boolean",
 					"description": "Skip TLS verification (dev/testing only).",
+					"default": false
+				}
+			}
+		},
+		"websocketClient": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"server_name": {
+					"type": "string",
+					"description": "TLS SNI / server name used for WSS.",
+					"default": ""
+				},
+				"insecure_skip_verify": {
+					"type": "boolean",
+					"description": "Skip TLS certificate verification for WSS (dev/testing only).",
 					"default": false
 				}
 			}

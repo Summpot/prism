@@ -71,7 +71,7 @@ auto_listen_services = true
 
 [[tunnel.endpoints]]
 listen_addr = ":7000"
-transport = "tcp" # tcp | udp | quic
+transport = "tcp" # tcp | udp | quic | websocket (ws) | wss
 
 [[tunnel.endpoints]]
 listen_addr = ":7001"
@@ -83,15 +83,27 @@ transport = "quic"
 cert_file = ""
 key_file = ""
 
+# Example WebSocket tunnel endpoint (ws or wss):
+# [[tunnel.endpoints]]
+# listen_addr = ":7002"
+# transport = "websocket" # or "wss"
+# [tunnel.endpoints.websocket]
+# cert_file = ""
+# key_file = ""
+
 # Optional: tunnel connector host role (uncomment to expose private services).
 #
 # [tunnel.connector]
 # server_addr = "relay.example.com:7000"
-# transport = "quic" # tcp | udp | quic
+# transport = "quic" # tcp | udp | quic | websocket | wss
 # auth_token = "cluster-secret-token"
 # dial_timeout_ms = 5000
 #
 # [tunnel.connector.quic]
+# server_name = "relay.example.com"
+# insecure_skip_verify = false
+#
+# [tunnel.connector.websocket]
 # server_name = "relay.example.com"
 # insecure_skip_verify = false
 #
@@ -116,7 +128,7 @@ key_file = ""
 #
 # [tunnel.client]
 # server_addr = "relay.example.com:7000"
-# transport = "quic" # tcp | quic | kcp
+# transport = "quic" # tcp | quic | kcp | websocket | wss
 # auth_token = "cluster-secret-token"
 # listen_addr = "127.0.0.1:25565"
 # middleware = "minecraft"

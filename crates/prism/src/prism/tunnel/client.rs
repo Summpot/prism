@@ -4,7 +4,7 @@
 //! - Zero configuration, automatic service catalog synchronization from Server.
 //! - Optional Fake LAN multicast broadcaster (`fake_lan.rs`) for Minecraft.
 //! - Local L7 ingress listener extracting host from Packet 0 using WASM protocol driver.
-//! - PRPX proxy stream bridging with stateful traffic optimizer (`traffic_optimizer.rs`).
+//! - PRPX proxy stream bridging with stateful optimizer (`optimizer.rs`).
 //! - Exponential backoff reconnect loop on network interruption.
 
 use std::path::{Path, PathBuf};
@@ -21,12 +21,13 @@ use crate::prism::middleware::{
 };
 use crate::prism::net;
 use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
-use crate::prism::tunnel::protocol::{
-    self, FLAG_RAW, FLAG_TRAFFIC_OPTIMIZER, ProxyStreamKind, RegisterRequest, RegisteredService,
-};
-use crate::prism::tunnel::traffic_optimizer::{
+use crate::prism::tunnel::optimizer::{
     BatcherConfig, CompressorConfig, DEFAULT_BUFFER_THRESHOLD, DecompressorConfig, OptimizedReader,
-    OptimizedWriter, SharedTrafficStats, TrafficStats, TrafficStatsSnapshot,
+    OptimizedWriter, OptimizerStats, OptimizerStatsSnapshot, SharedOptimizerStats,
+    TrafficDirection,
+};
+use crate::prism::tunnel::protocol::{
+    self, FLAG_OPTIMIZER, FLAG_RAW, ProxyStreamKind, RegisterRequest, RegisteredService,
 };
 use crate::prism::tunnel::transport::{
     QuicDialOptions, TransportDialOptions, TransportSession, WebSocketDialOptions,
@@ -48,7 +49,7 @@ pub struct Client {
     current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
     admin_bridge: Arc<RwLock<Option<AdminTunnelBridge>>>,
     dial_timeout: Duration,
-    traffic_stats: SharedTrafficStats,
+    optimizer_stats: SharedOptimizerStats,
 }
 
 impl Client {
@@ -63,7 +64,7 @@ impl Client {
             None
         };
 
-        let traffic_stats = Arc::new(TrafficStats::new());
+        let optimizer_stats = Arc::new(OptimizerStats::new());
 
         Ok(Self {
             config,
@@ -75,7 +76,7 @@ impl Client {
             current_sess: Arc::new(RwLock::new(None)),
             admin_bridge: Arc::new(RwLock::new(None)),
             dial_timeout: Duration::from_secs(5),
-            traffic_stats,
+            optimizer_stats,
         })
     }
 
@@ -110,25 +111,28 @@ impl Client {
         self.known_services.read().await.clone()
     }
 
-    /// Returns a reference to the traffic stats accumulator.
+    /// Returns a reference to the optimizer stats accumulator.
     #[allow(dead_code)]
-    pub fn traffic_stats(&self) -> &SharedTrafficStats {
-        &self.traffic_stats
+    pub fn optimizer_stats(&self) -> &SharedOptimizerStats {
+        &self.optimizer_stats
     }
 
     /// Checks if currently connected to tunnel server.
     pub async fn is_connected(&self) -> bool {
-        self.current_sess.read().await.is_some()
+        let current = self.current_sess.read().await;
+        current.is_some()
     }
 
-    /// Opens an in-band administrative stream over the active tunnel session.
+    /// Opens an in-band admin control stream targeting the server's local admin API.
     pub async fn open_admin_stream(
         &self,
     ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
-        let guard = self.current_sess.read().await;
-        let sess = match guard.as_ref() {
-            Some(s) => s.clone(),
-            None => anyhow::bail!("tunnel client is not currently connected to server"),
+        let sess = {
+            let current = self.current_sess.read().await;
+            current
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("tunnel client: not connected to server"))?
         };
 
         let mut stream = sess.open_stream().await?;
@@ -153,7 +157,7 @@ impl Client {
     pub async fn status(&self) -> ClientStatusSnapshot {
         let connected = self.is_connected().await;
         let services = self.known_services().await;
-        let stats = self.traffic_stats.snapshot();
+        let stats = self.optimizer_stats.snapshot();
         let admin_url = if let Some(b) = self.admin_bridge.read().await.as_ref() {
             Some(format!("http://{}", b.addr()))
         } else {
@@ -270,7 +274,7 @@ impl Client {
             let wasm_engine = self.wasm_engine.clone();
             let wasm_module = self.wasm_module.clone();
             let config = self.config.clone();
-            let traffic_stats = self.traffic_stats.clone();
+            let optimizer_stats = self.optimizer_stats.clone();
             let mut player_shutdown = shutdown.clone();
 
             tokio::spawn(async move {
@@ -289,7 +293,7 @@ impl Client {
                                     let wasm_engine = wasm_engine.clone();
                                     let wasm_module = wasm_module.clone();
                                     let config = config.clone();
-                                    let traffic_stats = traffic_stats.clone();
+                                    let optimizer_stats = optimizer_stats.clone();
 
                                     tokio::spawn(async move {
                                         if let Err(err) = handle_player_connection(
@@ -300,7 +304,7 @@ impl Client {
                                             wasm_engine,
                                             wasm_module,
                                             config,
-                                            traffic_stats,
+                                            optimizer_stats,
                                         ).await {
                                             tracing::warn!(peer = %peer_addr, err = %err, "tunnel client: player connection error");
                                         }
@@ -552,7 +556,7 @@ async fn handle_player_connection(
     wasm_engine: wasmer::Engine,
     wasm_module: Option<Arc<wasmer::Module>>,
     config: TunnelClientConfig,
-    traffic_stats: SharedTrafficStats,
+    optimizer_stats: SharedOptimizerStats,
 ) -> anyhow::Result<()> {
     tracing::info!(peer = %peer_addr, "Incoming player connection from {peer_addr}");
 
@@ -626,17 +630,14 @@ async fn handle_player_connection(
     // 3. Open PRPX stream on transport session
     let mut prpx_stream = sess.open_stream().await?;
 
-    let use_optimizer = config
-        .traffic_optimizer
-        .as_ref()
-        .map_or(false, |t| t.enabled)
+    let use_optimizer = config.optimizer.as_ref().map_or(false, |t| t.enabled)
         || target_service
-            .traffic_optimizer
+            .optimizer
             .as_ref()
             .map_or(false, |t| t.enabled);
 
     let flags = if use_optimizer {
-        FLAG_TRAFFIC_OPTIMIZER
+        FLAG_OPTIMIZER
     } else {
         FLAG_RAW
     };
@@ -652,32 +653,32 @@ async fn handle_player_connection(
     tracing::debug!(
         peer = %peer_addr,
         service = %target_service.name,
-        traffic_optimizer = use_optimizer,
+        optimizer = use_optimizer,
         "tunnel client: bridged to PRPX stream"
     );
 
     // 4. Bridge player socket <-> PRPX stream
     if use_optimizer {
         let zstd_window_log = config
-            .traffic_optimizer
+            .optimizer
             .as_ref()
             .and_then(|t| t.zstd_window_log)
             .or_else(|| {
                 target_service
-                    .traffic_optimizer
+                    .optimizer
                     .as_ref()
                     .and_then(|t| t.zstd_window_log)
             })
             .unwrap_or(23);
 
         let zstd_level = target_service
-            .traffic_optimizer
+            .optimizer
             .as_ref()
             .and_then(|t| t.zstd_level)
             .unwrap_or(3);
 
         let flush_interval = target_service
-            .traffic_optimizer
+            .optimizer
             .as_ref()
             .and_then(|t| t.flush_interval_ms)
             .map(Duration::from_millis)
@@ -701,9 +702,11 @@ async fn handle_player_connection(
         let (prpx_rd, prpx_wr) = tokio::io::split(prpx_stream);
 
         let mut opt_reader = OptimizedReader::new(prpx_rd, decompressor_config)?
-            .with_stats_and_raw_mode(traffic_stats.clone(), !is_minecraft);
+            .with_direction(TrafficDirection::Downlink)
+            .with_stats_and_raw_mode(optimizer_stats.clone(), !is_minecraft);
         let mut opt_writer = OptimizedWriter::new(prpx_wr, batcher_config, compressor_config)?
-            .with_stats(traffic_stats.clone());
+            .with_direction(TrafficDirection::Uplink)
+            .with_stats(optimizer_stats.clone());
 
         // Write initial handshake bytes if any
         if !initial_bytes.is_empty() {
@@ -713,7 +716,7 @@ async fn handle_player_connection(
 
         // Inbound: PRPX -> Player (decompress)
         let inbound = {
-            let traffic_stats = traffic_stats.clone();
+            let optimizer_stats = optimizer_stats.clone();
             async move {
                 if is_minecraft {
                     let mut pending = Vec::new();
@@ -726,11 +729,15 @@ async fn handle_player_connection(
                         pending.extend_from_slice(&buf[..n]);
                         let written =
                             recompress_packet_stream(&mut pending, &mut player_wr, 256).await?;
-                        traffic_stats.add_raw_bytes(written as u64);
+                        optimizer_stats
+                            .add_direction_raw_bytes(TrafficDirection::Downlink, written as u64);
                     }
                     if !pending.is_empty() {
                         player_wr.write_all(&pending).await?;
-                        traffic_stats.add_raw_bytes(pending.len() as u64);
+                        optimizer_stats.add_direction_raw_bytes(
+                            TrafficDirection::Downlink,
+                            pending.len() as u64,
+                        );
                     }
                 } else {
                     tokio::io::copy(&mut opt_reader, &mut player_wr).await?;
@@ -936,7 +943,7 @@ pub struct ClientStatusSnapshot {
     pub listen_addr: String,
     pub fake_lan_broadcast: bool,
     pub known_services: Vec<RegisteredService>,
-    pub stats: TrafficStatsSnapshot,
+    pub stats: OptimizerStatsSnapshot,
     #[serde(default)]
     pub admin_url: Option<String>,
 }
@@ -951,7 +958,7 @@ impl Default for ClientStatusSnapshot {
             listen_addr: "127.0.0.1:25565".to_string(),
             fake_lan_broadcast: true,
             known_services: Vec::new(),
-            stats: TrafficStatsSnapshot::default(),
+            stats: OptimizerStatsSnapshot::default(),
             admin_url: None,
         }
     }
@@ -1091,7 +1098,7 @@ mod tests {
                 remote_addr: "".into(),
                 masquerade_host: "mc.prism.gg".into(),
                 middleware: None,
-                traffic_optimizer: None,
+                optimizer: None,
             },
             RegisteredService {
                 name: "creative".into(),
@@ -1101,7 +1108,7 @@ mod tests {
                 remote_addr: "".into(),
                 masquerade_host: "".into(),
                 middleware: None,
-                traffic_optimizer: None,
+                optimizer: None,
             },
         ];
 
@@ -1143,7 +1150,7 @@ mod tests {
             middleware: Some("minecraft".into()),
             fake_lan_broadcast: true,
             motd_prefix: "[Prism] ".into(),
-            traffic_optimizer: None,
+            optimizer: None,
             websocket: None,
         };
 
@@ -1153,8 +1160,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_e2e_proxy_stream_and_traffic_optimizer() {
-        use crate::prism::config::TrafficOptimizerClientConfig;
+    async fn test_client_e2e_proxy_stream_and_optimizer() {
+        use crate::prism::config::OptimizerClientConfig;
         use crate::prism::tunnel::manager::Manager;
         use crate::prism::tunnel::server::{QuicServerOptions, Server, ServerOptions};
 
@@ -1214,7 +1221,7 @@ mod tests {
                     remote_addr: "".into(),
                     masquerade_host: "".into(),
                     middleware: None,
-                    traffic_optimizer: None,
+                    optimizer: None,
                 }],
                 dial_timeout: Duration::from_secs(2),
                 quic: crate::prism::tunnel::connector::QuicConnectorOptions {
@@ -1223,7 +1230,7 @@ mod tests {
                 },
                 websocket: Default::default(),
                 middleware_dir: None,
-                traffic: None,
+                optimizer: None,
             },
         )
         .unwrap();
@@ -1235,7 +1242,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // 4. Start Client with traffic_optimizer enabled
+        // 4. Start Client with optimizer enabled
         let client_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client_listen_addr = client_listener.local_addr().unwrap().to_string();
         drop(client_listener); // free for Client
@@ -1248,7 +1255,7 @@ mod tests {
             middleware: None,
             fake_lan_broadcast: true,
             motd_prefix: "[Prism] ".into(),
-            traffic_optimizer: Some(TrafficOptimizerClientConfig {
+            optimizer: Some(OptimizerClientConfig {
                 enabled: true,
                 zstd_window_log: Some(23),
             }),
@@ -1320,7 +1327,7 @@ mod tests {
             middleware: None,
             fake_lan_broadcast: false,
             motd_prefix: "".into(),
-            traffic_optimizer: None,
+            optimizer: None,
             websocket: None,
         };
 
@@ -1344,8 +1351,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_e2e_auto_adopt_service_traffic_optimizer() {
-        use crate::prism::config::TrafficOptimizerConfig;
+    async fn test_client_e2e_auto_adopt_service_optimizer() {
+        use crate::prism::config::OptimizerConfig;
         use crate::prism::tunnel::manager::Manager;
         use crate::prism::tunnel::server::{QuicServerOptions, Server, ServerOptions};
 
@@ -1391,7 +1398,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        // 3. Connector registers service with traffic_optimizer ENABLED
+        // 3. Connector registers service with optimizer ENABLED
         let connector = crate::prism::tunnel::connector::Connector::new(
             crate::prism::tunnel::connector::ConnectorOptions {
                 server_addr: server_addr.clone(),
@@ -1405,7 +1412,7 @@ mod tests {
                     remote_addr: "".into(),
                     masquerade_host: "".into(),
                     middleware: None,
-                    traffic_optimizer: Some(TrafficOptimizerConfig {
+                    optimizer: Some(OptimizerConfig {
                         enabled: true,
                         flush_interval_ms: Some(20),
                         zstd_window_log: Some(23),
@@ -1419,7 +1426,7 @@ mod tests {
                 },
                 websocket: Default::default(),
                 middleware_dir: None,
-                traffic: None,
+                optimizer: None,
             },
         )
         .unwrap();
@@ -1431,7 +1438,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // 4. Client starts with traffic_optimizer NONE (as in desktop UI client)
+        // 4. Client starts with optimizer NONE (as in desktop UI client)
         let client_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client_listen_addr = client_listener.local_addr().unwrap().to_string();
         drop(client_listener);
@@ -1444,7 +1451,7 @@ mod tests {
             middleware: None,
             fake_lan_broadcast: true,
             motd_prefix: "[Prism] ".into(),
-            traffic_optimizer: None, // None! Must auto-adopt from service catalog
+            optimizer: None, // None! Must auto-adopt from service catalog
             websocket: None,
         })
         .unwrap();
@@ -1542,7 +1549,7 @@ mod tests {
             middleware: None,
             fake_lan_broadcast: false,
             motd_prefix: "".into(),
-            traffic_optimizer: None,
+            optimizer: None,
             websocket: None,
         })
         .unwrap();
@@ -1631,7 +1638,7 @@ mod tests {
                 middleware: None,
                 fake_lan_broadcast: false,
                 motd_prefix: "".into(),
-                traffic_optimizer: None,
+                optimizer: None,
                 websocket: None,
             })
             .unwrap(),

@@ -18,8 +18,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder, InBuffer, Operation, OutBuffer};
 
 use crate::prism::config::{
-    ManagedTrafficOptimizerClientDocument, ManagedTrafficOptimizerDocument,
-    TrafficOptimizerClientConfig, TrafficOptimizerConfig as PrismTrafficOptimizerConfig,
+    ManagedOptimizerClientDocument, ManagedOptimizerDocument, OptimizerClientConfig,
+    OptimizerConfig as PrismOptimizerConfig,
 };
 use crate::prism::middleware::FramePriority;
 
@@ -33,9 +33,9 @@ pub const MAX_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32 MB guard limit
 // Configuration
 // ============================================================================
 
-/// Configuration for the Native Traffic Optimizer pipeline.
+/// Configuration for the Native Optimizer pipeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrafficOptimizerConfig {
+pub struct OptimizerConfig {
     pub enabled: bool,
     pub flush_interval: Duration,
     pub buffer_threshold: usize,
@@ -43,7 +43,7 @@ pub struct TrafficOptimizerConfig {
     pub zstd_window_log: u32,
 }
 
-impl Default for TrafficOptimizerConfig {
+impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -55,8 +55,8 @@ impl Default for TrafficOptimizerConfig {
     }
 }
 
-impl From<&ManagedTrafficOptimizerDocument> for TrafficOptimizerConfig {
-    fn from(doc: &ManagedTrafficOptimizerDocument) -> Self {
+impl From<&ManagedOptimizerDocument> for OptimizerConfig {
+    fn from(doc: &ManagedOptimizerDocument) -> Self {
         Self {
             enabled: doc.enabled,
             flush_interval: Duration::from_millis(doc.flush_interval_ms.unwrap_or(20)),
@@ -67,8 +67,8 @@ impl From<&ManagedTrafficOptimizerDocument> for TrafficOptimizerConfig {
     }
 }
 
-impl From<&ManagedTrafficOptimizerClientDocument> for TrafficOptimizerConfig {
-    fn from(doc: &ManagedTrafficOptimizerClientDocument) -> Self {
+impl From<&ManagedOptimizerClientDocument> for OptimizerConfig {
+    fn from(doc: &ManagedOptimizerClientDocument) -> Self {
         Self {
             enabled: doc.enabled,
             flush_interval: DEFAULT_FLUSH_INTERVAL,
@@ -79,8 +79,8 @@ impl From<&ManagedTrafficOptimizerClientDocument> for TrafficOptimizerConfig {
     }
 }
 
-impl From<&PrismTrafficOptimizerConfig> for TrafficOptimizerConfig {
-    fn from(cfg: &PrismTrafficOptimizerConfig) -> Self {
+impl From<&PrismOptimizerConfig> for OptimizerConfig {
+    fn from(cfg: &PrismOptimizerConfig) -> Self {
         Self {
             enabled: cfg.enabled,
             flush_interval: Duration::from_millis(cfg.flush_interval_ms()),
@@ -91,8 +91,8 @@ impl From<&PrismTrafficOptimizerConfig> for TrafficOptimizerConfig {
     }
 }
 
-impl From<&TrafficOptimizerClientConfig> for TrafficOptimizerConfig {
-    fn from(cfg: &TrafficOptimizerClientConfig) -> Self {
+impl From<&OptimizerClientConfig> for OptimizerConfig {
+    fn from(cfg: &OptimizerClientConfig) -> Self {
         Self {
             enabled: cfg.enabled,
             flush_interval: DEFAULT_FLUSH_INTERVAL,
@@ -107,9 +107,40 @@ impl From<&TrafficOptimizerClientConfig> for TrafficOptimizerConfig {
 // Traffic Observability & Statistics
 // ============================================================================
 
-/// Detailed snapshot of traffic optimization metrics.
+/// Direction of traffic in the optimizer pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrafficDirection {
+    /// Client -> Server (Player to upstream).
+    Uplink,
+    /// Server -> Client (Upstream to player).
+    Downlink,
+}
+
+impl Default for TrafficDirection {
+    fn default() -> Self {
+        Self::Uplink
+    }
+}
+
+/// Statistics snapshot for a single traffic direction (uplink or downlink).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct TrafficStatsSnapshot {
+pub struct DirectionStatsSnapshot {
+    pub raw_bytes: u64,
+    pub wire_bytes: u64,
+    pub saved_bytes: u64,
+    pub saved_ratio: f64,
+    pub batches: u64,
+    pub compression_time_us: u64,
+    pub decompression_time_us: u64,
+    pub est_transfer_time_saved_ms: f64,
+    pub est_processing_time_ms: f64,
+    pub net_latency_saved_ms: f64,
+}
+
+/// Detailed snapshot of traffic & latency optimization metrics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct OptimizerStatsSnapshot {
     pub raw_bytes: u64,
     pub wire_bytes: u64,
     pub saved_bytes: u64,
@@ -117,19 +148,31 @@ pub struct TrafficStatsSnapshot {
     pub urgent_batches: u64,
     pub timer_batches: u64,
     pub threshold_batches: u64,
+
+    // Directional metrics
+    pub uplink: DirectionStatsSnapshot,
+    pub downlink: DirectionStatsSnapshot,
+
+    // Latency & processing metrics
+    pub compression_time_us: u64,
+    pub decompression_time_us: u64,
+    pub batching_delay_us: u64,
+    pub est_transfer_time_saved_ms: f64,
+    pub est_processing_time_ms: f64,
+    pub net_latency_saved_ms: f64,
 }
 
-/// Lock-free atomic traffic statistics counter.
+/// Lock-free atomic directional traffic statistics counter.
 #[derive(Debug, Default)]
-pub struct TrafficStats {
+pub struct DirectionStats {
     pub raw_bytes: AtomicU64,
     pub wire_bytes: AtomicU64,
-    pub urgent_batches: AtomicU64,
-    pub timer_batches: AtomicU64,
-    pub threshold_batches: AtomicU64,
+    pub batches: AtomicU64,
+    pub compression_time_us: AtomicU64,
+    pub decompression_time_us: AtomicU64,
 }
 
-impl TrafficStats {
+impl DirectionStats {
     pub fn new() -> Self {
         Self::default()
     }
@@ -140,6 +183,129 @@ impl TrafficStats {
 
     pub fn add_wire_bytes(&self, bytes: u64) {
         self.wire_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn inc_batches(&self) {
+        self.batches.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn add_compression_time(&self, us: u64) {
+        self.compression_time_us.fetch_add(us, Ordering::Relaxed);
+    }
+
+    pub fn add_decompression_time(&self, us: u64) {
+        self.decompression_time_us.fetch_add(us, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> DirectionStatsSnapshot {
+        let raw = self.raw_bytes.load(Ordering::Relaxed);
+        let wire = self.wire_bytes.load(Ordering::Relaxed);
+        let saved_bytes = raw.saturating_sub(wire);
+        let saved_ratio = if raw > 0 {
+            (saved_bytes as f64) / (raw as f64)
+        } else {
+            0.0
+        };
+        let batches = self.batches.load(Ordering::Relaxed);
+        let comp_us = self.compression_time_us.load(Ordering::Relaxed);
+        let decomp_us = self.decompression_time_us.load(Ordering::Relaxed);
+
+        // Reference bandwidth: 20 Mbps = 2,500,000 bytes/sec = 2,500 bytes/ms
+        let est_transfer_time_saved_ms = (saved_bytes as f64) / 2500.0;
+        let est_processing_time_ms = ((comp_us + decomp_us) as f64) / 1000.0;
+        let net_latency_saved_ms = est_transfer_time_saved_ms - est_processing_time_ms;
+
+        DirectionStatsSnapshot {
+            raw_bytes: raw,
+            wire_bytes: wire,
+            saved_bytes,
+            saved_ratio,
+            batches,
+            compression_time_us: comp_us,
+            decompression_time_us: decomp_us,
+            est_transfer_time_saved_ms,
+            est_processing_time_ms,
+            net_latency_saved_ms,
+        }
+    }
+}
+
+/// Lock-free atomic traffic & latency statistics counter.
+#[derive(Debug, Default)]
+pub struct OptimizerStats {
+    pub raw_bytes: AtomicU64,
+    pub wire_bytes: AtomicU64,
+    pub urgent_batches: AtomicU64,
+    pub timer_batches: AtomicU64,
+    pub threshold_batches: AtomicU64,
+
+    pub uplink: DirectionStats,
+    pub downlink: DirectionStats,
+
+    pub compression_time_us: AtomicU64,
+    pub decompression_time_us: AtomicU64,
+    pub batching_delay_us: AtomicU64,
+}
+
+impl OptimizerStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_raw_bytes(&self, bytes: u64) {
+        self.raw_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn add_wire_bytes(&self, bytes: u64) {
+        self.wire_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn add_direction_raw_bytes(&self, dir: TrafficDirection, bytes: u64) {
+        self.add_raw_bytes(bytes);
+        match dir {
+            TrafficDirection::Uplink => self.uplink.add_raw_bytes(bytes),
+            TrafficDirection::Downlink => self.downlink.add_raw_bytes(bytes),
+        }
+    }
+
+    pub fn add_direction_wire_bytes(&self, dir: TrafficDirection, bytes: u64) {
+        self.add_wire_bytes(bytes);
+        match dir {
+            TrafficDirection::Uplink => self.uplink.add_wire_bytes(bytes),
+            TrafficDirection::Downlink => self.downlink.add_wire_bytes(bytes),
+        }
+    }
+
+    pub fn record_compression(&self, dir: TrafficDirection, duration_us: u64, queue_delay_us: u64) {
+        self.compression_time_us
+            .fetch_add(duration_us, Ordering::Relaxed);
+        self.batching_delay_us
+            .fetch_add(queue_delay_us, Ordering::Relaxed);
+        match dir {
+            TrafficDirection::Uplink => {
+                self.uplink.inc_batches();
+                self.uplink.add_compression_time(duration_us);
+            }
+            TrafficDirection::Downlink => {
+                self.downlink.inc_batches();
+                self.downlink.add_compression_time(duration_us);
+            }
+        }
+    }
+
+    pub fn record_decompression(&self, dir: TrafficDirection, duration_us: u64) {
+        self.decompression_time_us
+            .fetch_add(duration_us, Ordering::Relaxed);
+        match dir {
+            TrafficDirection::Uplink => {
+                self.uplink.inc_batches();
+                self.uplink.add_decompression_time(duration_us);
+            }
+            TrafficDirection::Downlink => {
+                self.downlink.inc_batches();
+                self.downlink.add_decompression_time(duration_us);
+            }
+        }
     }
 
     pub fn inc_urgent(&self) {
@@ -154,7 +320,7 @@ impl TrafficStats {
         self.threshold_batches.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn snapshot(&self) -> TrafficStatsSnapshot {
+    pub fn snapshot(&self) -> OptimizerStatsSnapshot {
         let raw = self.raw_bytes.load(Ordering::Relaxed);
         let wire = self.wire_bytes.load(Ordering::Relaxed);
         let saved_bytes = raw.saturating_sub(wire);
@@ -163,7 +329,16 @@ impl TrafficStats {
         } else {
             0.0
         };
-        TrafficStatsSnapshot {
+
+        let comp_us = self.compression_time_us.load(Ordering::Relaxed);
+        let decomp_us = self.decompression_time_us.load(Ordering::Relaxed);
+        let delay_us = self.batching_delay_us.load(Ordering::Relaxed);
+
+        let est_transfer_time_saved_ms = (saved_bytes as f64) / 2500.0;
+        let est_processing_time_ms = ((comp_us + decomp_us + delay_us) as f64) / 1000.0;
+        let net_latency_saved_ms = est_transfer_time_saved_ms - est_processing_time_ms;
+
+        OptimizerStatsSnapshot {
             raw_bytes: raw,
             wire_bytes: wire,
             saved_bytes,
@@ -171,11 +346,19 @@ impl TrafficStats {
             urgent_batches: self.urgent_batches.load(Ordering::Relaxed),
             timer_batches: self.timer_batches.load(Ordering::Relaxed),
             threshold_batches: self.threshold_batches.load(Ordering::Relaxed),
+            uplink: self.uplink.snapshot(),
+            downlink: self.downlink.snapshot(),
+            compression_time_us: comp_us,
+            decompression_time_us: decomp_us,
+            batching_delay_us: delay_us,
+            est_transfer_time_saved_ms,
+            est_processing_time_ms,
+            net_latency_saved_ms,
         }
     }
 }
 
-pub type SharedTrafficStats = Arc<TrafficStats>;
+pub type SharedOptimizerStats = Arc<OptimizerStats>;
 
 // ============================================================================
 // Component 1: Batcher (Time-slice aggregator)
@@ -603,7 +786,8 @@ pin_project! {
         compressor: ZstdStreamCompressor,
         write_buf: Vec<u8>,
         write_pos: usize,
-        stats: Vec<SharedTrafficStats>,
+        stats: Vec<SharedOptimizerStats>,
+        direction: TrafficDirection,
     }
 }
 
@@ -621,6 +805,7 @@ impl<W> OptimizedWriter<W> {
             write_buf: Vec::new(),
             write_pos: 0,
             stats: Vec::new(),
+            direction: TrafficDirection::Uplink,
         })
     }
 
@@ -629,31 +814,48 @@ impl<W> OptimizedWriter<W> {
         Self::new(inner, BatcherConfig::default(), CompressorConfig::default())
     }
 
+    /// Configures the traffic direction for this writer.
+    pub fn with_direction(mut self, direction: TrafficDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
+    /// Returns the configured traffic direction.
+    pub fn direction(&self) -> TrafficDirection {
+        self.direction
+    }
+
     /// Attaches a shared traffic statistics collector to this writer.
-    pub fn add_stats(&mut self, stats: SharedTrafficStats) {
+    pub fn add_stats(&mut self, stats: SharedOptimizerStats) {
         self.stats.push(stats);
     }
 
     /// Builder method to attach a shared traffic statistics collector.
-    pub fn with_stats(mut self, stats: SharedTrafficStats) -> Self {
+    pub fn with_stats(mut self, stats: SharedOptimizerStats) -> Self {
         self.stats.push(stats);
         self
     }
 
     /// Returns references to attached traffic statistics collectors.
-    pub fn stats(&self) -> &[SharedTrafficStats] {
+    pub fn stats(&self) -> &[SharedOptimizerStats] {
         &self.stats
     }
 
     fn record_raw(&self, bytes: usize) {
         for s in &self.stats {
-            s.add_raw_bytes(bytes as u64);
+            s.add_direction_raw_bytes(self.direction, bytes as u64);
         }
     }
 
     fn record_wire(&self, bytes: usize) {
         for s in &self.stats {
-            s.add_wire_bytes(bytes as u64);
+            s.add_direction_wire_bytes(self.direction, bytes as u64);
+        }
+    }
+
+    fn record_compression(&self, duration_us: u64, queue_delay_us: u64) {
+        for s in &self.stats {
+            s.record_compression(self.direction, duration_us, queue_delay_us);
         }
     }
 
@@ -715,13 +917,24 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
 
         self.record_raw(metric_raw_len);
 
+        let queue_delay = self
+            .batcher
+            .first_frame_at()
+            .map(|t| t.elapsed().as_micros() as u64)
+            .unwrap_or(0);
+
         if let Some(batch) = self.batcher.push(frame, priority) {
             match priority {
                 FramePriority::Urgent => self.record_urgent(),
                 FramePriority::Defer => self.record_threshold(),
             }
-            let encoded = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            let prev_len = self.write_buf.len();
+            let start = Instant::now();
+            encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            let comp_us = start.elapsed().as_micros() as u64;
+            let encoded = self.write_buf.len() - prev_len;
             self.record_wire(encoded);
+            self.record_compression(comp_us, queue_delay);
             self.flush_pending_write_buf().await?;
         }
         Ok(())
@@ -741,10 +954,20 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         self.flush_pending_write_buf().await?;
 
         if !self.batcher.is_empty() {
+            let queue_delay = self
+                .batcher
+                .first_frame_at()
+                .map(|t| t.elapsed().as_micros() as u64)
+                .unwrap_or(0);
             let batch = self.batcher.flush();
             self.record_threshold();
-            let encoded = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            let prev_len = self.write_buf.len();
+            let start = Instant::now();
+            encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            let comp_us = start.elapsed().as_micros() as u64;
+            let encoded = self.write_buf.len() - prev_len;
             self.record_wire(encoded);
+            self.record_compression(comp_us, queue_delay);
             self.flush_pending_write_buf().await?;
         }
 
@@ -755,11 +978,21 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
     /// Checks if a time-slice flush is due and writes the flushed batch to `inner`.
     /// Returns `true` if a batch was flushed.
     pub async fn flush_if_due(&mut self) -> io::Result<bool> {
+        let queue_delay = self
+            .batcher
+            .first_frame_at()
+            .map(|t| t.elapsed().as_micros() as u64)
+            .unwrap_or(0);
         if let Some(batch) = self.batcher.check_timer() {
             self.flush_pending_write_buf().await?;
             self.record_timer();
-            let encoded = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            let prev_len = self.write_buf.len();
+            let start = Instant::now();
+            encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
+            let comp_us = start.elapsed().as_micros() as u64;
+            let encoded = self.write_buf.len() - prev_len;
             self.record_wire(encoded);
+            self.record_compression(comp_us, queue_delay);
             self.flush_pending_write_buf().await?;
             Ok(true)
         } else {
@@ -828,8 +1061,14 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
         }
 
         for s in this.stats.iter() {
-            s.add_raw_bytes(buf.len() as u64);
+            s.add_direction_raw_bytes(*this.direction, buf.len() as u64);
         }
+
+        let queue_delay = this
+            .batcher
+            .first_frame_at()
+            .map(|t| t.elapsed().as_micros() as u64)
+            .unwrap_or(0);
 
         // 2. Add incoming bytes to batcher with defer priority
         let flushed = this.batcher.push(buf, FramePriority::Defer);
@@ -838,12 +1077,15 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
                 s.inc_threshold();
             }
             let prev_len = this.write_buf.len();
+            let start = Instant::now();
             if let Err(e) = encode_batch_into(this.compressor, &batch, this.write_buf) {
                 return Poll::Ready(Err(e));
             }
+            let comp_us = start.elapsed().as_micros() as u64;
             let encoded = this.write_buf.len() - prev_len;
             for s in this.stats.iter() {
-                s.add_wire_bytes(encoded as u64);
+                s.add_direction_wire_bytes(*this.direction, encoded as u64);
+                s.record_compression(*this.direction, comp_us, queue_delay);
             }
             *this.write_pos = 0;
             // Best effort immediate write
@@ -869,17 +1111,25 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
 
         // Flush batcher if non-empty
         if !this.batcher.is_empty() {
+            let queue_delay = this
+                .batcher
+                .first_frame_at()
+                .map(|t| t.elapsed().as_micros() as u64)
+                .unwrap_or(0);
             let batch = this.batcher.flush();
             for s in this.stats.iter() {
                 s.inc_threshold();
             }
             let prev_len = this.write_buf.len();
+            let start = Instant::now();
             if let Err(e) = encode_batch_into(this.compressor, &batch, this.write_buf) {
                 return Poll::Ready(Err(e));
             }
+            let comp_us = start.elapsed().as_micros() as u64;
             let encoded = this.write_buf.len() - prev_len;
             for s in this.stats.iter() {
-                s.add_wire_bytes(encoded as u64);
+                s.add_direction_wire_bytes(*this.direction, encoded as u64);
+                s.record_compression(*this.direction, comp_us, queue_delay);
             }
             *this.write_pos = 0;
             match poll_flush_write_buf_pinned(
@@ -919,8 +1169,9 @@ pin_project! {
         chunk_len: usize,
         payload_buf: Vec<u8>,
         payload_pos: usize,
-        stats: Vec<SharedTrafficStats>,
+        stats: Vec<SharedOptimizerStats>,
         record_raw_metrics: bool,
+        direction: TrafficDirection,
     }
 }
 
@@ -939,6 +1190,7 @@ impl<R> OptimizedReader<R> {
             payload_pos: 0,
             stats: Vec::new(),
             record_raw_metrics: true,
+            direction: TrafficDirection::Downlink,
         })
     }
 
@@ -947,13 +1199,24 @@ impl<R> OptimizedReader<R> {
         Self::new(inner, DecompressorConfig::default())
     }
 
+    /// Configures the traffic direction for this reader.
+    pub fn with_direction(mut self, direction: TrafficDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
+    /// Returns the configured traffic direction.
+    pub fn direction(&self) -> TrafficDirection {
+        self.direction
+    }
+
     /// Attaches a shared traffic statistics collector to this reader.
-    pub fn add_stats(&mut self, stats: SharedTrafficStats) {
+    pub fn add_stats(&mut self, stats: SharedOptimizerStats) {
         self.stats.push(stats);
     }
 
     /// Builder method to attach a shared traffic statistics collector.
-    pub fn with_stats(mut self, stats: SharedTrafficStats) -> Self {
+    pub fn with_stats(mut self, stats: SharedOptimizerStats) -> Self {
         self.stats.push(stats);
         self
     }
@@ -962,7 +1225,11 @@ impl<R> OptimizedReader<R> {
     /// whether raw decompressed bytes should be recorded as `raw_bytes` metric.
     /// When `record_raw` is false, only wire bytes are recorded on the reader, leaving
     /// raw metrics to be recorded after protocol recompression at egress.
-    pub fn with_stats_and_raw_mode(mut self, stats: SharedTrafficStats, record_raw: bool) -> Self {
+    pub fn with_stats_and_raw_mode(
+        mut self,
+        stats: SharedOptimizerStats,
+        record_raw: bool,
+    ) -> Self {
         self.stats.push(stats);
         self.record_raw_metrics = record_raw;
         self
@@ -974,7 +1241,7 @@ impl<R> OptimizedReader<R> {
     }
 
     /// Returns references to attached traffic statistics collectors.
-    pub fn stats(&self) -> &[SharedTrafficStats] {
+    pub fn stats(&self) -> &[SharedOptimizerStats] {
         &self.stats
     }
 
@@ -1083,18 +1350,21 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
             // Decompress payload
             this.decompressed_buf.clear();
             *this.decompressed_pos = 0;
+            let start = Instant::now();
             if let Err(e) = this
                 .decompressor
                 .decompress_chunk_into(&this.payload_buf[..len], this.decompressed_buf)
             {
                 return Poll::Ready(Err(e));
             }
+            let decomp_us = start.elapsed().as_micros() as u64;
 
             let decomp_produced = this.decompressed_buf.len();
             for s in this.stats.iter() {
-                s.add_wire_bytes((len + 4) as u64);
+                s.add_direction_wire_bytes(*this.direction, (len + 4) as u64);
+                s.record_decompression(*this.direction, decomp_us);
                 if *this.record_raw_metrics {
-                    s.add_raw_bytes(decomp_produced as u64);
+                    s.add_direction_raw_bytes(*this.direction, decomp_produced as u64);
                 }
             }
 
@@ -1405,30 +1675,30 @@ mod tests {
 
     #[test]
     fn test_config_conversions() {
-        let doc = ManagedTrafficOptimizerDocument {
+        let doc = ManagedOptimizerDocument {
             enabled: true,
             flush_interval_ms: Some(15),
             zstd_window_log: Some(22),
             zstd_level: Some(5),
         };
-        let cfg = TrafficOptimizerConfig::from(&doc);
+        let cfg = OptimizerConfig::from(&doc);
         assert!(cfg.enabled);
         assert_eq!(cfg.flush_interval, Duration::from_millis(15));
         assert_eq!(cfg.zstd_window_log, 22);
         assert_eq!(cfg.zstd_level, 5);
 
-        let client_doc = ManagedTrafficOptimizerClientDocument {
+        let client_doc = ManagedOptimizerClientDocument {
             enabled: true,
             zstd_window_log: Some(21),
         };
-        let client_cfg = TrafficOptimizerConfig::from(&client_doc);
+        let client_cfg = OptimizerConfig::from(&client_doc);
         assert!(client_cfg.enabled);
         assert_eq!(client_cfg.zstd_window_log, 21);
     }
 
     #[tokio::test]
     async fn test_traffic_stats_collection() {
-        let stats = Arc::new(TrafficStats::new());
+        let stats = Arc::new(OptimizerStats::new());
         let mut sink = Vec::new();
         let mut writer = OptimizedWriter::with_defaults(&mut sink)
             .unwrap()
@@ -1467,7 +1737,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_frame_with_metric_prevents_zip_bomb_inflation() {
-        let stats = Arc::new(TrafficStats::new());
+        let stats = Arc::new(OptimizerStats::new());
         let mut sink = Vec::new();
         let mut writer = OptimizedWriter::with_defaults(&mut sink)
             .unwrap()
@@ -1493,5 +1763,80 @@ mod tests {
             "raw_bytes must be anchored to incoming Deflate wire size to prevent zip-bomb inflation"
         );
         assert!(snap.wire_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn test_directional_and_latency_metrics() {
+        let stats = Arc::new(OptimizerStats::new());
+        let (client_tx, mut server_rx) = tokio::io::duplex(64 * 1024);
+        let (mut server_tx, client_rx) = tokio::io::duplex(64 * 1024);
+
+        // Client writer sends Uplink to server
+        let mut client_writer = OptimizedWriter::with_defaults(client_tx)
+            .unwrap()
+            .with_direction(TrafficDirection::Uplink)
+            .with_stats(stats.clone());
+
+        // Client reader receives Downlink from server
+        let mut client_reader = OptimizedReader::with_defaults(client_rx)
+            .unwrap()
+            .with_direction(TrafficDirection::Downlink)
+            .with_stats(stats.clone());
+
+        // 1. Client sends 5000 bytes Uplink
+        let up_payload = vec![0x77u8; 5000];
+        client_writer
+            .write_frame(&up_payload, FramePriority::Urgent)
+            .await
+            .unwrap();
+
+        // Server receives compressed chunks
+        let mut server_decompressor = ZstdStreamDecompressor::with_defaults().unwrap();
+        let mut server_buf = [0u8; 4096];
+        let n = server_rx.read(&mut server_buf).await.unwrap();
+        let decomp = decode_stream(&mut server_decompressor, &server_buf[..n]).unwrap();
+        assert_eq!(decomp, up_payload);
+
+        // 2. Server sends 3000 bytes Downlink to client
+        let down_payload = vec![0x88u8; 3000];
+        let mut server_compressor = ZstdStreamCompressor::with_defaults().unwrap();
+        let framed_down = encode_batch(&mut server_compressor, &down_payload).unwrap();
+        server_tx.write_all(&framed_down).await.unwrap();
+
+        let mut client_read_buf = vec![0u8; 3000];
+        client_reader
+            .read_exact(&mut client_read_buf)
+            .await
+            .unwrap();
+        assert_eq!(client_read_buf, down_payload);
+
+        let snap = stats.snapshot();
+        // Uplink: 5000 raw bytes, wire < 5000
+        assert_eq!(snap.uplink.raw_bytes, 5000);
+        assert!(snap.uplink.wire_bytes > 0);
+        assert!(snap.uplink.wire_bytes < 5000);
+        assert!(snap.uplink.saved_bytes > 0);
+        assert_eq!(snap.uplink.batches, 1);
+        assert!(snap.uplink.est_transfer_time_saved_ms > 0.0);
+
+        // Downlink: 3000 raw bytes, wire < 3000
+        assert_eq!(snap.downlink.raw_bytes, 3000);
+        assert!(snap.downlink.wire_bytes > 0);
+        assert!(snap.downlink.wire_bytes < 3000);
+        assert!(snap.downlink.saved_bytes > 0);
+        assert_eq!(snap.downlink.batches, 1);
+        assert!(snap.downlink.est_transfer_time_saved_ms > 0.0);
+
+        // Total aggregate
+        assert_eq!(snap.raw_bytes, 8000);
+        assert_eq!(
+            snap.wire_bytes,
+            snap.uplink.wire_bytes + snap.downlink.wire_bytes
+        );
+        assert_eq!(
+            snap.saved_bytes,
+            snap.uplink.saved_bytes + snap.downlink.saved_bytes
+        );
+        assert!(snap.est_transfer_time_saved_ms > 0.0);
     }
 }

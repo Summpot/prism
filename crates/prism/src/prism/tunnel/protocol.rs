@@ -12,7 +12,7 @@ pub const ADMIN_SERVICE_NAME: &str = "$admin";
 const PROTOCOL_V1: u8 = 1;
 
 pub const FLAG_RAW: u8 = 0x00;
-pub const FLAG_TRAFFIC_OPTIMIZER: u8 = 0x01;
+pub const FLAG_OPTIMIZER: u8 = 0x01;
 
 pub const MAX_REGISTER_JSON_BYTES: u32 = 1 << 20; // 1 MiB
 pub const MAX_DATAGRAM_BYTES: u32 = 1 << 20; // 1 MiB
@@ -85,7 +85,7 @@ pub struct RegisteredService {
     #[serde(default)]
     pub middleware: Option<String>,
     #[serde(default)]
-    pub traffic_optimizer: Option<crate::prism::config::TrafficOptimizerConfig>,
+    pub optimizer: Option<crate::prism::config::OptimizerConfig>,
 }
 
 impl RegisteredService {
@@ -350,7 +350,7 @@ mod tests {
                     remote_addr: " 127.0.0.1:0 ".into(),
                     masquerade_host: "  $1.edge.internal  ".into(),
                     middleware: Some("  minecraft.wat  ".into()),
-                    traffic_optimizer: Some(crate::prism::config::TrafficOptimizerConfig {
+                    optimizer: Some(crate::prism::config::OptimizerConfig {
                         enabled: true,
                         flush_interval_ms: Some(20),
                         zstd_window_log: Some(23),
@@ -365,7 +365,7 @@ mod tests {
                     remote_addr: "".into(),
                     masquerade_host: "".into(),
                     middleware: None,
-                    traffic_optimizer: None,
+                    optimizer: None,
                 },
                 RegisteredService {
                     name: "svc2".into(),
@@ -375,7 +375,7 @@ mod tests {
                     remote_addr: "127.0.0.1:9999".into(),
                     masquerade_host: "svc2.internal".into(),
                     middleware: Some("".into()),
-                    traffic_optimizer: None,
+                    optimizer: None,
                 },
             ],
             ..Default::default()
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(got.services[0].remote_addr, "127.0.0.1:0");
         assert_eq!(got.services[0].masquerade_host, "$1.edge.internal");
         assert_eq!(got.services[0].middleware.as_deref(), Some("minecraft.wat"));
-        assert!(got.services[0].traffic_optimizer.as_ref().unwrap().enabled);
+        assert!(got.services[0].optimizer.as_ref().unwrap().enabled);
 
         assert_eq!(got.services[1].name, "svc2");
         assert_eq!(got.services[1].proto, "udp");
@@ -447,7 +447,7 @@ mod tests {
                 &mut a,
                 ProxyStreamKind::Tcp,
                 "  game-svc  ",
-                FLAG_TRAFFIC_OPTIMIZER,
+                FLAG_OPTIMIZER,
             )
             .await
         });
@@ -455,7 +455,7 @@ mod tests {
         let (kind, svc, flags) = read_proxy_stream_header_with_flags(&mut b).await.unwrap();
         assert_eq!(kind, ProxyStreamKind::Tcp);
         assert_eq!(svc, "game-svc");
-        assert_eq!(flags, FLAG_TRAFFIC_OPTIMIZER);
+        assert_eq!(flags, FLAG_OPTIMIZER);
     }
 
     #[tokio::test]
@@ -485,7 +485,7 @@ mod tests {
             remote_addr: "".into(),
             masquerade_host: "".into(),
             middleware: Some("minecraft.wat".into()),
-            traffic_optimizer: Some(crate::prism::config::TrafficOptimizerConfig {
+            optimizer: Some(crate::prism::config::OptimizerConfig {
                 enabled: true,
                 flush_interval_ms: Some(20),
                 zstd_window_log: Some(23),
@@ -502,6 +502,6 @@ mod tests {
         assert_eq!(received.len(), 1);
         assert_eq!(received[0].name, "web");
         assert_eq!(received[0].middleware.as_deref(), Some("minecraft.wat"));
-        assert!(received[0].traffic_optimizer.as_ref().unwrap().enabled);
+        assert!(received[0].optimizer.as_ref().unwrap().enabled);
     }
 }

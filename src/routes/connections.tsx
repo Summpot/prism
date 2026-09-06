@@ -14,9 +14,9 @@ import {
 import { formatBytes, formatDuration, formatPercentage, formatTime } from "@/lib/format";
 import {
 	getConnections,
-	getTrafficStats,
+	getOptimizerStats,
 	type SessionInfo,
-	type TrafficOverviewResponse,
+	type OptimizerOverviewResponse,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/connections")({
 function ConnectionsPage() {
 	const { connection, ready } = usePanelSession();
 	const [conns, setConns] = useState<SessionInfo[]>([]);
-	const [trafficStats, setTrafficStats] = useState<TrafficOverviewResponse | null>(null);
+	const [optimizerStats, setOptimizerStats] = useState<OptimizerOverviewResponse | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
@@ -37,17 +37,17 @@ function ConnectionsPage() {
 	const fetchConns = useCallback(() => {
 		if (!connection) {
 			setConns([]);
-			setTrafficStats(null);
+			setOptimizerStats(null);
 			return;
 		}
 
 		setLoading(true);
 		setError(null);
 
-		Promise.all([getConnections(connection), getTrafficStats(connection).catch(() => null)])
+		Promise.all([getConnections(connection), getOptimizerStats(connection).catch(() => null)])
 			.then(([connsResp, statsResp]) => {
 				setConns(connsResp);
-				setTrafficStats(statsResp);
+				setOptimizerStats(statsResp);
 			})
 			.catch((nextError) => {
 				setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -89,12 +89,16 @@ function ConnectionsPage() {
 							Auto-refresh {autoRefresh ? "on" : "off"}
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
-						{trafficStats?.global && trafficStats.global.raw_bytes > 0 ? (
+						{optimizerStats?.global && optimizerStats.global.raw_bytes > 0 ? (
 							<div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
 								<Zap className="h-4 w-4 text-emerald-400" />
 								<span>
-									Saved {formatBytes(trafficStats.global.saved_bytes)} (
-									{formatPercentage(trafficStats.global.saved_ratio)})
+									Optimizer: Saved {formatBytes(optimizerStats.global.saved_bytes)} (
+									{formatPercentage(optimizerStats.global.saved_ratio)})
+									{optimizerStats.global.net_latency_saved_ms &&
+									optimizerStats.global.net_latency_saved_ms > 0
+										? ` · Latency -${optimizerStats.global.net_latency_saved_ms.toFixed(1)}ms`
+										: ""}
 								</span>
 							</div>
 						) : null}
@@ -125,7 +129,7 @@ function ConnectionsPage() {
 									<th className="px-5 py-4 text-left font-medium">Client</th>
 									<th className="px-5 py-4 text-left font-medium">Host</th>
 									<th className="px-5 py-4 text-left font-medium">Upstream</th>
-									<th className="px-5 py-4 text-left font-medium">Traffic</th>
+									<th className="px-5 py-4 text-left font-medium">Optimizer</th>
 									<th className="px-5 py-4 text-left font-medium">Started</th>
 									<th className="px-5 py-4 text-left font-medium">Duration</th>
 								</tr>
@@ -138,16 +142,46 @@ function ConnectionsPage() {
 										<td className="px-5 py-4 font-mono text-slate-300">{conn.upstream}</td>
 										<td className="px-5 py-4 font-mono text-xs">
 											{conn.raw_bytes || conn.wire_bytes ? (
-												<div className="flex items-center gap-1.5">
-													<span className="text-slate-400">{formatBytes(conn.raw_bytes)}</span>
-													<span className="text-slate-600">→</span>
-													<span className="font-medium text-cyan-300">
-														{formatBytes(conn.wire_bytes)}
-													</span>
-													{conn.raw_bytes && conn.wire_bytes && conn.raw_bytes > conn.wire_bytes ? (
-														<span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
-															-{formatPercentage(1 - conn.wire_bytes / conn.raw_bytes)}
-														</span>
+												<div className="space-y-1">
+													{conn.uplink_raw_bytes || conn.uplink_wire_bytes ? (
+														<div className="flex items-center gap-1.5 text-[11px]">
+															<span className="font-bold text-cyan-400">↑</span>
+															<span className="text-slate-400">
+																{formatBytes(conn.uplink_raw_bytes || 0)}
+															</span>
+															<span className="text-slate-600">→</span>
+															<span className="text-cyan-300">
+																{formatBytes(conn.uplink_wire_bytes || 0)}
+															</span>
+														</div>
+													) : null}
+													{conn.downlink_raw_bytes || conn.downlink_wire_bytes ? (
+														<div className="flex items-center gap-1.5 text-[11px]">
+															<span className="font-bold text-emerald-400">↓</span>
+															<span className="text-slate-400">
+																{formatBytes(conn.downlink_raw_bytes || 0)}
+															</span>
+															<span className="text-slate-600">→</span>
+															<span className="text-emerald-300">
+																{formatBytes(conn.downlink_wire_bytes || 0)}
+															</span>
+														</div>
+													) : null}
+													{!conn.uplink_raw_bytes && !conn.downlink_raw_bytes ? (
+														<div className="flex items-center gap-1.5">
+															<span className="text-slate-400">{formatBytes(conn.raw_bytes)}</span>
+															<span className="text-slate-600">→</span>
+															<span className="font-medium text-cyan-300">
+																{formatBytes(conn.wire_bytes)}
+															</span>
+															{conn.raw_bytes &&
+															conn.wire_bytes &&
+															conn.raw_bytes > conn.wire_bytes ? (
+																<span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
+																	-{formatPercentage(1 - conn.wire_bytes / conn.raw_bytes)}
+																</span>
+															) : null}
+														</div>
 													) : null}
 												</div>
 											) : (
@@ -176,7 +210,7 @@ function ConnectionsPage() {
 									<MiniValue label="Host" value={conn.host || "—"} />
 									<MiniValue label="Upstream" value={conn.upstream} />
 									<MiniValue
-										label="Traffic"
+										label="Optimizer"
 										value={
 											conn.raw_bytes || conn.wire_bytes
 												? `${formatBytes(conn.raw_bytes)} → ${formatBytes(conn.wire_bytes)}`

@@ -679,13 +679,13 @@ mod tests {
                 remote_addr: "".into(),
                 masquerade_host: "".into(),
                 middleware: None,
-                traffic_optimizer: None,
+                optimizer: None,
             }],
             dial_timeout: std::time::Duration::from_secs(3),
             quic: Default::default(),
             websocket: Default::default(),
             middleware_dir: None,
-            traffic: None,
+            optimizer: None,
         })?;
 
         let conn_shutdown = shutdown_rx.clone();

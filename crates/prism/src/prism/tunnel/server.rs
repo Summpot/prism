@@ -399,7 +399,7 @@ mod tests {
                 remote_addr: "".into(),
                 masquerade_host: "".into(),
                 middleware: None,
-                traffic_optimizer: None,
+                optimizer: None,
             }],
         };
 

@@ -27,11 +27,11 @@ import {
 	getConnections,
 	getManagedNodes,
 	getManagementStatus,
-	getTrafficStats,
+	getOptimizerStats,
 	getTunnelServices,
 	type ManagedNodeSnapshot,
 	type ManagementStatusResponse,
-	type TrafficOverviewResponse,
+	type OptimizerOverviewResponse,
 	triggerReload,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
@@ -43,7 +43,7 @@ function DashboardPage() {
 	const { connection, ready } = usePanelSession();
 	const [status, setStatus] = useState<ManagementStatusResponse | null>(null);
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
-	const [trafficStats, setTrafficStats] = useState<TrafficOverviewResponse | null>(null);
+	const [optimizerStats, setOptimizerStats] = useState<OptimizerOverviewResponse | null>(null);
 	const [connectionCount, setConnectionCount] = useState(0);
 	const [serviceCount, setServiceCount] = useState(0);
 	const [error, setError] = useState<string | null>(null);
@@ -56,7 +56,7 @@ function DashboardPage() {
 		if (!connection) {
 			setStatus(null);
 			setNodes([]);
-			setTrafficStats(null);
+			setOptimizerStats(null);
 			setConnectionCount(0);
 			setServiceCount(0);
 			return;
@@ -72,14 +72,14 @@ function DashboardPage() {
 			getTunnelServices(connection).catch(
 				() => [] as Awaited<ReturnType<typeof getTunnelServices>>,
 			),
-			getTrafficStats(connection).catch(() => null),
+			getOptimizerStats(connection).catch(() => null),
 		])
-			.then(([nextStatus, nextNodes, nextConns, nextServices, nextTraffic]) => {
+			.then(([nextStatus, nextNodes, nextConns, nextServices, nextOptimizer]) => {
 				setStatus(nextStatus);
 				setNodes(nextNodes);
 				setConnectionCount(nextConns.length);
 				setServiceCount(nextServices.length);
-				setTrafficStats(nextTraffic);
+				setOptimizerStats(nextOptimizer);
 			})
 			.catch((nextError) => {
 				setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -190,10 +190,15 @@ function DashboardPage() {
 					icon={<Unplug className="h-5 w-5" />}
 				/>
 				<MetricCard
-					label="Bandwidth saved"
+					label="Optimizer savings"
 					value={
-						trafficStats?.global && trafficStats.global.raw_bytes > 0
-							? `${formatBytes(trafficStats.global.saved_bytes)} (${formatPercentage(trafficStats.global.saved_ratio)})`
+						optimizerStats?.global && optimizerStats.global.raw_bytes > 0
+							? `${formatBytes(optimizerStats.global.saved_bytes)} (${formatPercentage(optimizerStats.global.saved_ratio)})${
+									optimizerStats.global.net_latency_saved_ms &&
+									optimizerStats.global.net_latency_saved_ms > 0
+										? ` · ↓ -${optimizerStats.global.net_latency_saved_ms.toFixed(1)}ms`
+										: ""
+								}`
 							: "0 B"
 					}
 					icon={<Zap className="h-5 w-5" />}

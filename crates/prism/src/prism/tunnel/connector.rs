@@ -18,10 +18,11 @@ use crate::prism::middleware::{
     frame_uncompressed_packet,
 };
 use crate::prism::tunnel::{
-    protocol::{self, ProxyStreamKind, RegisterRequest, RegisteredService},
-    traffic_optimizer::{
-        self, BatcherConfig, CompressorConfig, DecompressorConfig, OptimizedReader, OptimizedWriter,
+    optimizer::{
+        self, BatcherConfig, CompressorConfig, DecompressorConfig, OptimizedReader,
+        OptimizedWriter, TrafficDirection,
     },
+    protocol::{self, ProxyStreamKind, RegisterRequest, RegisteredService},
     transport::{BoxedStream, TransportDialOptions, transport_by_name},
 };
 
@@ -47,7 +48,7 @@ pub struct ConnectorOptions {
     pub quic: QuicConnectorOptions,
     pub websocket: WebSocketConnectorOptions,
     pub middleware_dir: Option<PathBuf>,
-    pub traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
+    pub optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
 }
 
 pub struct Connector {
@@ -177,9 +178,9 @@ impl Connector {
                     let st = st?;
                     let map = self.local_map.clone();
                     let mw_dir = self.opts.middleware_dir.clone();
-                    let traffic = self.opts.traffic.clone();
+                    let optimizer = self.opts.optimizer.clone();
                     tokio::spawn(async move {
-                        if let Err(err) = handle_stream(map, mw_dir, traffic, st).await {
+                        if let Err(err) = handle_stream(map, mw_dir, optimizer, st).await {
                             tracing::debug!(err=%err, "tunnel: connector stream ended");
                         }
                     });
@@ -192,7 +193,7 @@ impl Connector {
 pub async fn handle_stream(
     local_map: Arc<HashMap<String, RegisteredService>>,
     middleware_dir: Option<PathBuf>,
-    traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
+    optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
     mut st: BoxedStream,
 ) -> anyhow::Result<()> {
     let (kind, svc, flags) = protocol::read_proxy_stream_header_with_flags(&mut st).await?;
@@ -209,8 +210,8 @@ pub async fn handle_stream(
     match kind {
         ProxyStreamKind::Tcp => {
             let local_sock = tokio::net::TcpStream::connect(&local).await?;
-            let optimizer_enabled = (flags & protocol::FLAG_TRAFFIC_OPTIMIZER != 0)
-                || meta.traffic_optimizer.as_ref().is_some_and(|to| to.enabled);
+            let optimizer_enabled = (flags & protocol::FLAG_OPTIMIZER != 0)
+                || meta.optimizer.as_ref().is_some_and(|to| to.enabled);
 
             if optimizer_enabled {
                 run_optimized_tcp_pipeline(
@@ -218,7 +219,7 @@ pub async fn handle_stream(
                     local_sock,
                     meta,
                     middleware_dir.as_deref(),
-                    traffic,
+                    optimizer,
                 )
                 .await?;
             } else {
@@ -240,12 +241,12 @@ pub async fn run_optimized_tcp_pipeline(
     local_sock: tokio::net::TcpStream,
     meta: RegisteredService,
     middleware_dir: Option<&Path>,
-    traffic: Option<crate::prism::telemetry::SharedTrafficRegistry>,
+    optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
 ) -> anyhow::Result<()> {
     let (st_read, st_write) = tokio::io::split(st);
     let (mut local_read, mut local_write) = local_sock.into_split();
 
-    let (flush_interval, window_log, zstd_level) = if let Some(ref to) = meta.traffic_optimizer {
+    let (flush_interval, window_log, zstd_level) = if let Some(ref to) = meta.optimizer {
         (
             Duration::from_millis(to.flush_interval_ms()),
             to.zstd_window_log(),
@@ -253,18 +254,19 @@ pub async fn run_optimized_tcp_pipeline(
         )
     } else {
         (
-            traffic_optimizer::DEFAULT_FLUSH_INTERVAL,
-            traffic_optimizer::DEFAULT_ZSTD_WINDOW_LOG,
-            traffic_optimizer::DEFAULT_ZSTD_LEVEL,
+            optimizer::DEFAULT_FLUSH_INTERVAL,
+            optimizer::DEFAULT_ZSTD_WINDOW_LOG,
+            optimizer::DEFAULT_ZSTD_LEVEL,
         )
     };
 
     // Inbound: PRPX stream -> OptimizedReader -> local_write
     let decompressor_config = DecompressorConfig { window_log };
-    let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?;
-    if let Some(ref traffic) = traffic {
-        opt_reader.add_stats(traffic.service(&meta.name));
-        opt_reader.add_stats(traffic.global());
+    let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?
+        .with_direction(TrafficDirection::Uplink);
+    if let Some(ref optimizer) = optimizer {
+        opt_reader.add_stats(optimizer.service(&meta.name));
+        opt_reader.add_stats(optimizer.global());
     }
     let inbound_task = tokio::spawn(async move {
         let mut buf = vec![0u8; 64 * 1024];
@@ -282,16 +284,17 @@ pub async fn run_optimized_tcp_pipeline(
     // Outbound: local_read -> WasmProtocolSession (if configured) -> OptimizedWriter -> st_write
     let batcher_config = BatcherConfig {
         flush_interval,
-        buffer_threshold: traffic_optimizer::DEFAULT_BUFFER_THRESHOLD,
+        buffer_threshold: optimizer::DEFAULT_BUFFER_THRESHOLD,
     };
     let compressor_config = CompressorConfig {
         compression_level: zstd_level,
         window_log,
     };
-    let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?;
-    if let Some(ref traffic) = traffic {
-        opt_writer.add_stats(traffic.service(&meta.name));
-        opt_writer.add_stats(traffic.global());
+    let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
+        .with_direction(TrafficDirection::Downlink);
+    if let Some(ref optimizer) = optimizer {
+        opt_writer.add_stats(optimizer.service(&meta.name));
+        opt_writer.add_stats(optimizer.global());
     }
     let mut wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
 
@@ -564,7 +567,7 @@ mod tests {
                 remote_addr: "".into(),
                 masquerade_host: "".into(),
                 middleware: None,
-                traffic_optimizer: None,
+                optimizer: None,
             },
         );
         let local_map = Arc::new(map);
@@ -617,7 +620,7 @@ mod tests {
                 remote_addr: "".into(),
                 masquerade_host: "".into(),
                 middleware: Some("minecraft.wat".into()),
-                traffic_optimizer: Some(crate::prism::config::TrafficOptimizerConfig {
+                optimizer: Some(crate::prism::config::OptimizerConfig {
                     enabled: true,
                     flush_interval_ms: Some(20),
                     zstd_window_log: Some(23),
@@ -635,12 +638,12 @@ mod tests {
                 async move { handle_stream(local_map, None, None, Box::new(server_st)).await },
             );
 
-        // Write PRPX header with FLAG_TRAFFIC_OPTIMIZER
+        // Write PRPX header with FLAG_OPTIMIZER
         protocol::write_proxy_stream_header_with_flags(
             &mut client_write,
             ProxyStreamKind::Tcp,
             "mc-svc",
-            protocol::FLAG_TRAFFIC_OPTIMIZER,
+            protocol::FLAG_OPTIMIZER,
         )
         .await
         .unwrap();

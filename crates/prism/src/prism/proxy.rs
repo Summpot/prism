@@ -259,15 +259,12 @@ impl UdpSession {
         let sessions = self.sessions.clone();
         let tunnel_manager = self.tunnel_manager.clone();
 
-        sessions.add(telemetry::SessionInfo {
-            id: sid.clone(),
-            client: src.to_string(),
-            host: "".into(),
-            upstream: upstream.clone(),
-            started_at_unix_ms: telemetry::now_unix_ms(),
-            raw_bytes: 0,
-            wire_bytes: 0,
-        });
+        sessions.add(telemetry::SessionInfo::new(
+            sid.clone(),
+            src.to_string(),
+            "".into(),
+            upstream.clone(),
+        ));
 
         tokio::spawn(async move {
             let res = udp_session_loop(sock, src, upstream, tunnel_manager, rx).await;
@@ -414,15 +411,12 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         }
     };
 
-    opts.sessions.add(telemetry::SessionInfo {
-        id: sid.clone(),
-        client: client.clone(),
-        host: "".into(),
-        upstream: upstream_used.clone(),
-        started_at_unix_ms: telemetry::now_unix_ms(),
-        raw_bytes: 0,
-        wire_bytes: 0,
-    });
+    opts.sessions.add(telemetry::SessionInfo::new(
+        sid.clone(),
+        client.clone(),
+        "".into(),
+        upstream_used.clone(),
+    ));
 
     let mut up = up;
     if rt.proxy_protocol_v2
@@ -626,15 +620,12 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         return;
     };
 
-    opts.sessions.add(telemetry::SessionInfo {
-        id: sid.clone(),
-        client: client.clone(),
-        host: host.clone(),
-        upstream: upstream_used.clone(),
-        started_at_unix_ms: telemetry::now_unix_ms(),
-        raw_bytes: 0,
-        wire_bytes: 0,
-    });
+    opts.sessions.add(telemetry::SessionInfo::new(
+        sid.clone(),
+        client.clone(),
+        host.clone(),
+        upstream_used.clone(),
+    ));
 
     // Apply any middleware prelude overrides from parse phase, then allow a rewrite pass based on
     // the selected upstream.

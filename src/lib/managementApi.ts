@@ -105,9 +105,28 @@ export interface SessionInfo {
 	started_at_unix_ms: number;
 	raw_bytes?: number;
 	wire_bytes?: number;
+	uplink_raw_bytes?: number;
+	uplink_wire_bytes?: number;
+	downlink_raw_bytes?: number;
+	downlink_wire_bytes?: number;
+	est_latency_improvement_ms?: number;
+	est_latency_degradation_ms?: number;
 }
 
-export interface TrafficStatsSnapshot {
+export interface DirectionStatsSnapshot {
+	raw_bytes: number;
+	wire_bytes: number;
+	saved_bytes: number;
+	saved_ratio: number;
+	batches: number;
+	compression_time_us: number;
+	decompression_time_us: number;
+	est_transfer_time_saved_ms: number;
+	est_processing_time_ms: number;
+	net_latency_saved_ms: number;
+}
+
+export interface OptimizerStatsSnapshot {
 	raw_bytes: number;
 	wire_bytes: number;
 	saved_bytes: number;
@@ -115,11 +134,19 @@ export interface TrafficStatsSnapshot {
 	urgent_batches: number;
 	timer_batches: number;
 	threshold_batches: number;
+	uplink?: DirectionStatsSnapshot;
+	downlink?: DirectionStatsSnapshot;
+	compression_time_us?: number;
+	decompression_time_us?: number;
+	batching_delay_us?: number;
+	est_transfer_time_saved_ms?: number;
+	est_processing_time_ms?: number;
+	net_latency_saved_ms?: number;
 }
 
-export interface TrafficOverviewResponse {
-	global: TrafficStatsSnapshot;
-	services: Record<string, TrafficStatsSnapshot>;
+export interface OptimizerOverviewResponse {
+	global: OptimizerStatsSnapshot;
+	services: Record<string, OptimizerStatsSnapshot>;
 }
 
 export interface RegisteredService {
@@ -241,8 +268,8 @@ export function getConnections(connection: PanelConnection) {
 	return apiRequest<SessionInfo[]>(connection, "/conns");
 }
 
-export function getTrafficStats(connection: PanelConnection) {
-	return apiRequest<TrafficOverviewResponse>(connection, "/stats/traffic");
+export function getOptimizerStats(connection: PanelConnection) {
+	return apiRequest<OptimizerOverviewResponse>(connection, "/stats/optimizer");
 }
 
 export function getTunnelServices(connection: PanelConnection) {
@@ -263,15 +290,7 @@ export function getConfigPath(connection: PanelConnection) {
 	return apiRequest<ConfigPathResponse>(connection, "/config");
 }
 
-export interface ClientTrafficStats {
-	raw_bytes: number;
-	wire_bytes: number;
-	saved_bytes: number;
-	saved_ratio: number;
-	urgent_batches: number;
-	timer_batches: number;
-	threshold_batches: number;
-}
+export type ClientOptimizerStats = OptimizerStatsSnapshot;
 
 export interface ClientRegisteredService {
 	name: string;
@@ -291,7 +310,7 @@ export interface ClientStatusResponse {
 	listen_addr: string;
 	fake_lan_broadcast: boolean;
 	known_services: ClientRegisteredService[];
-	stats: ClientTrafficStats;
+	stats: ClientOptimizerStats;
 	admin_url?: string | null;
 }
 

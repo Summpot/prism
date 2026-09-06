@@ -133,7 +133,7 @@ pub async fn run(
 
     // Shared state for admin endpoints.
     let sessions = Arc::new(telemetry::SessionRegistry::new());
-    let traffic = Arc::new(telemetry::TrafficStatsRegistry::new());
+    let optimizer = Arc::new(telemetry::OptimizerStatsRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
     let auth_manager = Arc::new(crate::prism::auth::AuthManager::new(
         cfg.auth.clone(),
@@ -201,7 +201,7 @@ pub async fn run(
 
         let admin_state = admin::AdminState {
             sessions: sessions.clone(),
-            traffic: traffic.clone(),
+            optimizer: optimizer.clone(),
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
             tunnel: Some(tunnel_manager.clone()),
@@ -250,7 +250,7 @@ pub async fn run(
 
         let admin_state = admin::AdminState {
             sessions: sessions.clone(),
-            traffic: traffic.clone(),
+            optimizer: optimizer.clone(),
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
             tunnel: Some(tunnel_manager.clone()),
@@ -385,7 +385,7 @@ pub async fn run(
                 remote_addr: s.remote_addr.clone(),
                 masquerade_host: s.masquerade_host.clone(),
                 middleware: s.middleware.clone(),
-                traffic_optimizer: s.traffic_optimizer.clone(),
+                optimizer: s.optimizer.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -422,7 +422,7 @@ pub async fn run(
             quic: quic_opts,
             websocket: ws_opts,
             middleware_dir: Some(paths.middleware_dir.clone()),
-            traffic: Some(traffic.clone()),
+            optimizer: Some(optimizer.clone()),
         })?;
 
         let connector = Arc::new(connector);

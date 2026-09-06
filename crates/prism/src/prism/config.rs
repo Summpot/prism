@@ -455,7 +455,7 @@ pub struct ManagedTunnelClientDocument {
     pub fake_lan_broadcast: bool,
     #[serde(default = "default_motd_prefix")]
     pub motd_prefix: String,
-    pub traffic_optimizer: Option<ManagedTrafficOptimizerClientDocument>,
+    pub optimizer: Option<ManagedOptimizerClientDocument>,
     pub discovery: Option<ManagedClientDiscoveryDocument>,
     pub websocket: Option<ManagedWebSocketClientDocument>,
 }
@@ -476,7 +476,7 @@ pub struct ManagedMinecraftLanDiscoveryDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedTrafficOptimizerClientDocument {
+pub struct ManagedOptimizerClientDocument {
     #[serde(default)]
     pub enabled: bool,
     pub zstd_window_log: Option<u32>,
@@ -502,6 +502,7 @@ pub struct ManagedQuicClientDocument {
 pub struct ManagedWebSocketServerDocument {
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
+    pub url_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,12 +527,12 @@ pub struct ManagedTunnelServiceDocument {
     #[serde(default)]
     pub masquerade_host: String,
     pub middleware: Option<String>,
-    pub traffic_optimizer: Option<ManagedTrafficOptimizerDocument>,
+    pub optimizer: Option<ManagedOptimizerDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedTrafficOptimizerDocument {
+pub struct ManagedOptimizerDocument {
     #[serde(default)]
     pub enabled: bool,
     pub flush_interval_ms: Option<u64>,
@@ -644,17 +645,17 @@ pub struct TunnelClientConfig {
     pub middleware: Option<String>,
     pub fake_lan_broadcast: bool,
     pub motd_prefix: String,
-    pub traffic_optimizer: Option<TrafficOptimizerClientConfig>,
+    pub optimizer: Option<OptimizerClientConfig>,
     pub websocket: Option<WebSocketClientConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrafficOptimizerClientConfig {
+pub struct OptimizerClientConfig {
     pub enabled: bool,
     pub zstd_window_log: Option<u32>,
 }
 
-impl Default for TrafficOptimizerClientConfig {
+impl Default for OptimizerClientConfig {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -664,7 +665,7 @@ impl Default for TrafficOptimizerClientConfig {
 }
 
 #[allow(dead_code)]
-impl TrafficOptimizerClientConfig {
+impl OptimizerClientConfig {
     pub fn zstd_window_log(&self) -> u32 {
         self.zstd_window_log.unwrap_or(23)
     }
@@ -695,14 +696,14 @@ pub struct WebSocketClientConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrafficOptimizerConfig {
+pub struct OptimizerConfig {
     pub enabled: bool,
     pub flush_interval_ms: Option<u64>,
     pub zstd_window_log: Option<u32>,
     pub zstd_level: Option<i32>,
 }
 
-impl Default for TrafficOptimizerConfig {
+impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -714,7 +715,7 @@ impl Default for TrafficOptimizerConfig {
 }
 
 #[allow(dead_code)]
-impl TrafficOptimizerConfig {
+impl OptimizerConfig {
     pub fn flush_interval_ms(&self) -> u64 {
         self.flush_interval_ms.unwrap_or(20)
     }
@@ -740,7 +741,7 @@ pub struct TunnelServiceConfig {
     /// This supports $1, $2... substitutions from route wildcard captures.
     pub masquerade_host: String,
     pub middleware: Option<String>,
-    pub traffic_optimizer: Option<TrafficOptimizerConfig>,
+    pub optimizer: Option<OptimizerConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -911,7 +912,7 @@ struct FileTunnelClient {
     #[serde(default)]
     fake_lan_broadcast: bool,
     motd_prefix: Option<String>,
-    traffic_optimizer: Option<FileTrafficOptimizerClient>,
+    optimizer: Option<FileOptimizerClient>,
     discovery: Option<FileClientDiscovery>,
     websocket: Option<FileWebSocketClient>,
 }
@@ -929,7 +930,7 @@ struct FileMinecraftLanDiscovery {
 }
 
 #[derive(Debug, Deserialize)]
-struct FileTrafficOptimizerClient {
+struct FileOptimizerClient {
     #[serde(default)]
     enabled: bool,
     zstd_window_log: Option<u32>,
@@ -971,11 +972,11 @@ struct FileTunnelService {
     remote_addr: Option<String>,
     masquerade_host: Option<String>,
     middleware: Option<String>,
-    traffic_optimizer: Option<FileTrafficOptimizer>,
+    optimizer: Option<FileOptimizer>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FileTrafficOptimizer {
+struct FileOptimizer {
     #[serde(default)]
     enabled: bool,
     flush_interval_ms: Option<u64>,
@@ -1307,13 +1308,10 @@ impl Config {
                     ),
                     _ => None,
                 };
-                let traffic_optimizer =
-                    c.traffic_optimizer
-                        .as_ref()
-                        .map(|to| TrafficOptimizerClientConfig {
-                            enabled: to.enabled,
-                            zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
-                        });
+                let optimizer = c.optimizer.as_ref().map(|to| OptimizerClientConfig {
+                    enabled: to.enabled,
+                    zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
+                });
 
                 let (fake_lan_broadcast, motd_prefix) = if let Some(ref d) = c.discovery {
                     if let Some(ref mc) = d.minecraft_lan {
@@ -1347,7 +1345,7 @@ impl Config {
                     middleware,
                     fake_lan_broadcast,
                     motd_prefix,
-                    traffic_optimizer,
+                    optimizer,
                     websocket: c.websocket.as_ref().map(|w| WebSocketClientConfig {
                         server_name: w.server_name.clone().unwrap_or_default().trim().to_string(),
                         insecure_skip_verify: w.insecure_skip_verify,
@@ -1365,15 +1363,12 @@ impl Config {
                         }
                         _ => None,
                     };
-                    let traffic_optimizer =
-                        s.traffic_optimizer
-                            .as_ref()
-                            .map(|to| TrafficOptimizerConfig {
-                                enabled: to.enabled,
-                                flush_interval_ms: Some(to.flush_interval_ms.unwrap_or(20)),
-                                zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
-                                zstd_level: Some(to.zstd_level.unwrap_or(3)),
-                            });
+                    let optimizer = s.optimizer.as_ref().map(|to| OptimizerConfig {
+                        enabled: to.enabled,
+                        flush_interval_ms: Some(to.flush_interval_ms.unwrap_or(20)),
+                        zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
+                        zstd_level: Some(to.zstd_level.unwrap_or(3)),
+                    });
 
                     cfg.tunnel.services.push(TunnelServiceConfig {
                         name: s.name.trim().to_string(),
@@ -1393,7 +1388,7 @@ impl Config {
                             .trim()
                             .to_string(),
                         middleware,
-                        traffic_optimizer,
+                        optimizer,
                     });
                 }
             }
@@ -1731,11 +1726,9 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 } else {
                     Some(client.motd_prefix.clone())
                 },
-                traffic_optimizer: client.traffic_optimizer.as_ref().map(|to| {
-                    FileTrafficOptimizerClient {
-                        enabled: to.enabled,
-                        zstd_window_log: to.zstd_window_log,
-                    }
+                optimizer: client.optimizer.as_ref().map(|to| FileOptimizerClient {
+                    enabled: to.enabled,
+                    zstd_window_log: to.zstd_window_log,
                 }),
                 discovery: client.discovery.as_ref().map(|d| FileClientDiscovery {
                     minecraft_lan: d
@@ -1775,13 +1768,11 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                             Some(service.masquerade_host.clone())
                         },
                         middleware: service.middleware.clone(),
-                        traffic_optimizer: service.traffic_optimizer.as_ref().map(|to| {
-                            FileTrafficOptimizer {
-                                enabled: to.enabled,
-                                flush_interval_ms: to.flush_interval_ms,
-                                zstd_window_log: to.zstd_window_log,
-                                zstd_level: to.zstd_level,
-                            }
+                        optimizer: service.optimizer.as_ref().map(|to| FileOptimizer {
+                            enabled: to.enabled,
+                            flush_interval_ms: to.flush_interval_ms,
+                            zstd_window_log: to.zstd_window_log,
+                            zstd_level: to.zstd_level,
                         }),
                     })
                     .collect(),
@@ -2236,7 +2227,7 @@ proto = "tcp"
 local_addr = "127.0.0.1:25565"
 middleware = "minecraft"
 
-[tunnel.services.traffic_optimizer]
+[tunnel.services.optimizer]
 enabled = true
 flush_interval_ms = 20
 zstd_window_log = 23
@@ -2263,10 +2254,7 @@ zstd_level = 3
         assert_eq!(svc.local_addr, "127.0.0.1:25565");
         assert_eq!(svc.middleware, Some("minecraft".to_string()));
 
-        let opt = svc
-            .traffic_optimizer
-            .as_ref()
-            .expect("traffic optimizer configured");
+        let opt = svc.optimizer.as_ref().expect("optimizer configured");
         assert!(opt.enabled);
         assert_eq!(opt.flush_interval_ms, Some(20));
         assert_eq!(opt.zstd_window_log, Some(23));
@@ -2295,7 +2283,7 @@ middleware = "minecraft"
 fake_lan_broadcast = true
 motd_prefix = "[Prism] "
 
-[tunnel.client.traffic_optimizer]
+[tunnel.client.optimizer]
 enabled = true
 zstd_window_log = 23
 "#;
@@ -2313,9 +2301,9 @@ zstd_window_log = 23
         assert_eq!(client.motd_prefix, "[Prism] ");
 
         let opt = client
-            .traffic_optimizer
+            .optimizer
             .as_ref()
-            .expect("client traffic optimizer configured");
+            .expect("client optimizer configured");
         assert!(opt.enabled);
         assert_eq!(opt.zstd_window_log, Some(23));
         assert_eq!(opt.zstd_window_log(), 23);
@@ -2324,7 +2312,7 @@ zstd_window_log = 23
     }
 
     #[test]
-    fn tunnel_traffic_optimizer_defaults() {
+    fn tunnel_optimizer_defaults() {
         let dir = temp_dir("optimizer_defaults");
         let cfg_path = dir.join("prism.toml");
 
@@ -2334,14 +2322,14 @@ admin_addr = ":8080"
 [tunnel.client]
 server_addr = "relay.example.com:7000"
 
-[tunnel.client.traffic_optimizer]
+[tunnel.client.optimizer]
 enabled = true
 
 [[tunnel.services]]
 name = "minecraft-survival"
 local_addr = "127.0.0.1:25565"
 
-[tunnel.services.traffic_optimizer]
+[tunnel.services.optimizer]
 enabled = true
 "#;
 
@@ -2352,16 +2340,60 @@ enabled = true
         assert_eq!(client.transport, "tcp");
         assert!(!client.fake_lan_broadcast);
         assert_eq!(client.motd_prefix, "[Prism] ");
-        let c_opt = client.traffic_optimizer.as_ref().expect("client optimizer");
+        let c_opt = client.optimizer.as_ref().expect("client optimizer");
         assert!(c_opt.enabled);
         assert_eq!(c_opt.zstd_window_log, Some(23));
 
         let svc = &cfg.tunnel.services[0];
-        let s_opt = svc.traffic_optimizer.as_ref().expect("service optimizer");
+        let s_opt = svc.optimizer.as_ref().expect("service optimizer");
         assert!(s_opt.enabled);
         assert_eq!(s_opt.flush_interval_ms, Some(20));
         assert_eq!(s_opt.zstd_window_log, Some(23));
         assert_eq!(s_opt.zstd_level, Some(3));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_optimizer_custom_config() {
+        let dir = temp_dir("optimizer_custom_config");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+
+[tunnel.client.optimizer]
+enabled = true
+zstd_window_log = 22
+
+[[tunnel.services]]
+name = "minecraft-survival"
+local_addr = "127.0.0.1:25565"
+
+[tunnel.services.optimizer]
+enabled = true
+flush_interval_ms = 15
+zstd_window_log = 22
+zstd_level = 4
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+
+        let client = cfg.tunnel.client.as_ref().expect("client");
+        let c_opt = client.optimizer.as_ref().expect("client optimizer");
+        assert!(c_opt.enabled);
+        assert_eq!(c_opt.zstd_window_log, Some(22));
+
+        let svc = &cfg.tunnel.services[0];
+        let s_opt = svc.optimizer.as_ref().expect("service optimizer");
+        assert!(s_opt.enabled);
+        assert_eq!(s_opt.flush_interval_ms, Some(15));
+        assert_eq!(s_opt.zstd_window_log, Some(22));
+        assert_eq!(s_opt.zstd_level, Some(4));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2386,7 +2418,7 @@ enabled = true
                     middleware: Some("minecraft".into()),
                     fake_lan_broadcast: false,
                     motd_prefix: "[Prism] ".into(),
-                    traffic_optimizer: None,
+                    optimizer: None,
                     discovery: None,
                     websocket: None,
                 }),
@@ -2414,7 +2446,7 @@ enabled = true
                     middleware: Some("minecraft".into()),
                     fake_lan_broadcast: false,
                     motd_prefix: "[Prism] ".into(),
-                    traffic_optimizer: None,
+                    optimizer: None,
                     discovery: None,
                     websocket: None,
                 }),
@@ -2442,7 +2474,7 @@ enabled = true
                     middleware: Some("minecraft".into()),
                     fake_lan_broadcast: true,
                     motd_prefix: "[Prism] ".into(),
-                    traffic_optimizer: None,
+                    optimizer: None,
                     discovery: None,
                     websocket: None,
                 }),
@@ -2533,7 +2565,7 @@ auth_token = "secret"
 listen_addr = "127.0.0.1:25565"
 middleware = "minecraft"
 
-[tunnel.client.traffic_optimizer]
+[tunnel.client.optimizer]
 enabled = true
 zstd_window_log = 23
 
@@ -2552,7 +2584,7 @@ motd_prefix = "[Custom] "
         assert!(client.fake_lan_broadcast);
         assert_eq!(client.motd_prefix, "[Custom] ");
 
-        let opt = client.traffic_optimizer.expect("traffic optimizer");
+        let opt = client.optimizer.expect("traffic optimizer");
         assert!(opt.enabled);
         assert_eq!(opt.zstd_window_log(), 23);
 

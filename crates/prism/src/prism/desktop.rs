@@ -42,7 +42,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     let admin_state = crate::prism::admin::AdminState {
         sessions: Arc::new(crate::prism::telemetry::SessionRegistry::new()),
-        traffic: Arc::new(crate::prism::telemetry::TrafficStatsRegistry::new()),
+        optimizer: Arc::new(crate::prism::telemetry::OptimizerStatsRegistry::new()),
         config_path: actual_config_path,
         reload_tx,
         tunnel: None,

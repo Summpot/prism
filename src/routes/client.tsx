@@ -950,6 +950,56 @@ function ClientDashboardPage() {
 								</div>
 							</div>
 
+							{/* Optimizer Directional & Latency Breakdown */}
+							<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+								<div className="rounded bg-muted/25 px-1.5 py-1 border border-border/40 flex items-center justify-between">
+									<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
+										<span className="text-primary font-bold">↑</span> Up
+									</span>
+									<span className="font-semibold text-foreground truncate ml-1">
+										{formatBytes(status?.stats.uplink?.wire_bytes ?? 0)}
+										<span className="text-muted-foreground font-normal text-[9px] ml-1">
+											({((status?.stats.uplink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
+										</span>
+									</span>
+								</div>
+								<div className="rounded bg-muted/25 px-1.5 py-1 border border-border/40 flex items-center justify-between">
+									<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
+										<span className="text-primary font-bold">↓</span> Down
+									</span>
+									<span className="font-semibold text-foreground truncate ml-1">
+										{formatBytes(status?.stats.downlink?.wire_bytes ?? 0)}
+										<span className="text-muted-foreground font-normal text-[9px] ml-1">
+											({((status?.stats.downlink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
+										</span>
+									</span>
+								</div>
+								<div
+									className="rounded bg-muted/25 px-1.5 py-1 border border-border/40 flex items-center justify-between"
+									title={`Est. transfer saved: -${(status?.stats.est_transfer_time_saved_ms ?? 0).toFixed(1)}ms, CPU processing: +${(status?.stats.est_processing_time_ms ?? 0).toFixed(1)}ms`}
+								>
+									<span className="text-[9px] font-sans font-medium text-muted-foreground">
+										Latency
+									</span>
+									<span
+										className={cn(
+											"font-semibold text-[10px]",
+											(status?.stats.net_latency_saved_ms ?? 0) > 0
+												? "text-emerald-500"
+												: (status?.stats.net_latency_saved_ms ?? 0) < 0
+													? "text-amber-500"
+													: "text-muted-foreground",
+										)}
+									>
+										{(status?.stats.net_latency_saved_ms ?? 0) > 0
+											? `-${(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
+											: (status?.stats.net_latency_saved_ms ?? 0) < 0
+												? `+${Math.abs(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
+												: "0.0ms"}
+									</span>
+								</div>
+							</div>
+
 							{/* Throughput and LAN bar */}
 							<div className="flex items-center justify-between gap-2 px-0.5 text-[10px] text-muted-foreground">
 								<div className="flex items-center gap-1.5 flex-1 min-w-0">

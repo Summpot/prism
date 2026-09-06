@@ -28,7 +28,7 @@ pub struct AdminAuth {
 #[derive(Clone)]
 pub struct AdminState {
     pub sessions: telemetry::SharedSessions,
-    pub traffic: telemetry::SharedTrafficRegistry,
+    pub optimizer: telemetry::SharedOptimizerRegistry,
     pub config_path: PathBuf,
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
     pub tunnel: Option<Arc<tunnel::manager::Manager>>,
@@ -91,7 +91,7 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/managed/worker/sync", post(managed_worker_sync))
         .route("/managed/worker/status", get(worker_status))
         .route("/managed/worker/config", put(worker_apply_config))
-        .route("/stats/traffic", get(stats_traffic))
+        .route("/stats/optimizer", get(stats_optimizer))
         .route("/client/status", get(client_status))
         .route("/client/start", post(client_start))
         .route("/client/stop", post(client_stop))
@@ -190,17 +190,16 @@ async fn tunnel_services(State(st): State<Arc<AdminState>>) -> impl IntoResponse
 }
 
 #[derive(Debug, Serialize)]
-pub struct TrafficOverviewResponse {
-    pub global: tunnel::traffic_optimizer::TrafficStatsSnapshot,
-    pub services:
-        std::collections::HashMap<String, tunnel::traffic_optimizer::TrafficStatsSnapshot>,
+pub struct OptimizerOverviewResponse {
+    pub global: tunnel::optimizer::OptimizerStatsSnapshot,
+    pub services: std::collections::HashMap<String, tunnel::optimizer::OptimizerStatsSnapshot>,
 }
 
-async fn stats_traffic(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let (global, services) = st.traffic.snapshot();
+async fn stats_optimizer(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let (global, services) = st.optimizer.snapshot();
     (
         StatusCode::OK,
-        Json(TrafficOverviewResponse { global, services }),
+        Json(OptimizerOverviewResponse { global, services }),
     )
 }
 
@@ -220,7 +219,7 @@ pub struct StartClientRequest {
     #[serde(default = "default_motd_prefix")]
     pub motd_prefix: String,
     #[serde(default)]
-    pub traffic_optimizer: Option<crate::prism::config::TrafficOptimizerClientConfig>,
+    pub optimizer: Option<crate::prism::config::OptimizerClientConfig>,
 }
 
 fn default_transport() -> String {
@@ -301,7 +300,7 @@ async fn client_start(
         middleware: payload.middleware,
         fake_lan_broadcast: payload.fake_lan_broadcast,
         motd_prefix: payload.motd_prefix,
-        traffic_optimizer: payload.traffic_optimizer,
+        optimizer: payload.optimizer,
         websocket: None,
     };
 
@@ -1012,7 +1011,7 @@ mod tests {
 
         let state = AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
-            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
+            optimizer: Arc::new(telemetry::OptimizerStatsRegistry::new()),
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
@@ -1077,19 +1076,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stats_traffic_endpoint() {
+    async fn test_stats_optimizer_endpoint() {
         let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let traffic = Arc::new(telemetry::TrafficStatsRegistry::new());
+        let optimizer = Arc::new(telemetry::OptimizerStatsRegistry::new());
 
-        // Populate some sample traffic
-        let svc_stats = traffic.service("gto");
+        // Populate some sample optimizer stats
+        let svc_stats = optimizer.service("gto");
         svc_stats.add_raw_bytes(1000);
         svc_stats.add_wire_bytes(200);
         svc_stats.inc_urgent();
         svc_stats.inc_timer();
 
-        let global_stats = traffic.global();
+        let global_stats = optimizer.global();
         global_stats.add_raw_bytes(1000);
         global_stats.add_wire_bytes(200);
         global_stats.inc_urgent();
@@ -1097,7 +1096,7 @@ mod tests {
 
         let state = AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
-            traffic,
+            optimizer,
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
@@ -1122,7 +1121,7 @@ mod tests {
 
         let client = reqwest::Client::new();
         let resp = client
-            .get(format!("http://{addr}/stats/traffic"))
+            .get(format!("http://{addr}/stats/optimizer"))
             .send()
             .await
             .unwrap();
@@ -1148,7 +1147,7 @@ mod tests {
 
         let state = AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
-            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
+            optimizer: Arc::new(telemetry::OptimizerStatsRegistry::new()),
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
@@ -1266,7 +1265,7 @@ mod tests {
 
         let state = AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
-            traffic: Arc::new(telemetry::TrafficStatsRegistry::new()),
+            optimizer: Arc::new(telemetry::OptimizerStatsRegistry::new()),
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,

@@ -118,7 +118,7 @@ key_file = ""
 # # Leave empty for normal Minecraft tunnel routing to preserve the client's handshake host.
 # # Supports $1, $2... substitutions from route wildcard capture groups.
 #
-# [tunnel.services.traffic_optimizer]
+# [tunnel.services.optimizer]
 # enabled = true
 # flush_interval_ms = 20
 # zstd_window_log = 23
@@ -133,7 +133,7 @@ key_file = ""
 # listen_addr = "127.0.0.1:25565"
 # middleware = "minecraft"
 #
-# [tunnel.client.traffic_optimizer]
+# [tunnel.client.optimizer]
 # enabled = true
 # zstd_window_log = 23
 #

@@ -482,7 +482,7 @@
 					"description": "MOTD prefix for LAN broadcast reflection.",
 					"default": "[Prism] "
 				},
-				"traffic_optimizer": { "$ref": "#/$defs/trafficOptimizerClient" },
+				"optimizer": { "$ref": "#/$defs/optimizerClient" },
 				"discovery": {
 					"type": "object",
 					"additionalProperties": false,
@@ -508,13 +508,13 @@
 				"websocket": { "$ref": "#/$defs/websocketClient" }
 			}
 		},
-		"trafficOptimizerClient": {
+		"optimizerClient": {
 			"type": "object",
 			"additionalProperties": false,
 			"properties": {
 				"enabled": {
 					"type": "boolean",
-					"description": "Enable traffic optimizer decoding on client sidecar.",
+					"description": "Enable optimizer decoding on client sidecar.",
 					"default": false
 				},
 				"zstd_window_log": {
@@ -590,7 +590,7 @@
 					"type": "string",
 					"description": "Standard Prism middleware name (e.g. 'minecraft')."
 				},
-				"traffic_optimizer": { "$ref": "#/$defs/trafficOptimizer" }
+				"optimizer": { "$ref": "#/$defs/optimizer" }
 			},
 			"allOf": [
 				{
@@ -604,13 +604,13 @@
 				}
 			]
 		},
-		"trafficOptimizer": {
+		"optimizer": {
 			"type": "object",
 			"additionalProperties": false,
 			"properties": {
 				"enabled": {
 					"type": "boolean",
-					"description": "Enable native traffic optimizer (batching and zstd continuous stream compression).",
+					"description": "Enable native optimizer (batching and zstd continuous stream compression).",
 					"default": false
 				},
 				"flush_interval_ms": {

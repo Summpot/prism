@@ -324,8 +324,8 @@ impl Manager {
         };
 
         let mut effective_flags = flags;
-        if svc.traffic_optimizer.as_ref().is_some_and(|to| to.enabled) {
-            effective_flags |= protocol::FLAG_TRAFFIC_OPTIMIZER;
+        if svc.optimizer.as_ref().is_some_and(|to| to.enabled) {
+            effective_flags |= protocol::FLAG_OPTIMIZER;
         }
 
         let mut st = sess

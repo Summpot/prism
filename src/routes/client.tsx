@@ -75,13 +75,12 @@ export const Route = createFileRoute("/client")({
 function ClientDashboardPage() {
 	const { connection, saveConnection } = usePanelSession();
 	const isDesktop = useMemo(() => isDesktopApp(), []);
-	const effectiveConnection = useMemo(
-		() =>
-			connection ?? {
-				baseUrl: isDesktop ? "http://127.0.0.1:8080" : "",
-				token: "",
-			},
-		[connection, isDesktop],
+	const clientConnection = useMemo<PanelConnection>(
+		() => ({
+			baseUrl: isDesktop ? "http://127.0.0.1:8080" : "",
+			token: "",
+		}),
+		[isDesktop],
 	);
 
 	const [status, setStatus] = useState<ClientStatusResponse | null>(null);
@@ -161,7 +160,7 @@ function ClientDashboardPage() {
 
 	// Fetch status
 	const fetchStatus = useCallback(() => {
-		getClientStatus(effectiveConnection)
+		getClientStatus(clientConnection)
 			.then((resp) => {
 				setStatus(resp);
 				if (resp.running && resp.server_addr) {
@@ -171,11 +170,11 @@ function ClientDashboardPage() {
 			.catch((err) => {
 				console.debug("Failed to fetch client status:", err);
 			});
-	}, [effectiveConnection]);
+	}, [clientConnection]);
 
 	// Fetch profiles
 	const fetchProfiles = useCallback(() => {
-		getClientProfiles(effectiveConnection)
+		getClientProfiles(clientConnection)
 			.then((list) => {
 				setProfiles(list);
 				if (list.length > 0 && !selectedProfileId) {
@@ -190,11 +189,11 @@ function ClientDashboardPage() {
 				}
 			})
 			.catch(() => {});
-	}, [effectiveConnection, selectedProfileId]);
+	}, [clientConnection, selectedProfileId]);
 
 	// Fetch logs with deduplication to avoid unnecessary re-renders
 	const fetchLogs = useCallback(() => {
-		getClientLogs(effectiveConnection, 300)
+		getClientLogs(clientConnection, 300)
 			.then((entries) => {
 				setLogs((prev) => {
 					if (prev.length === entries.length) {
@@ -214,7 +213,7 @@ function ClientDashboardPage() {
 				});
 			})
 			.catch(() => {});
-	}, [effectiveConnection]);
+	}, [clientConnection]);
 
 	useEffect(() => {
 		fetchStatus();
@@ -428,7 +427,7 @@ function ClientDashboardPage() {
 
 		setProfiles(updated);
 		setSelectedProfileId(id);
-		await saveClientProfiles(effectiveConnection, updated).catch(() => {});
+		await saveClientProfiles(clientConnection, updated).catch(() => {});
 	};
 
 	// Delete Profile
@@ -438,7 +437,7 @@ function ClientDashboardPage() {
 		if (selectedProfileId === id) {
 			setSelectedProfileId(updated[0]?.id || "");
 		}
-		await saveClientProfiles(effectiveConnection, updated).catch(() => {});
+		await saveClientProfiles(clientConnection, updated).catch(() => {});
 	};
 
 	// Connect / Disconnect Handlers
@@ -446,7 +445,7 @@ function ClientDashboardPage() {
 		setActionLoading(true);
 		setError(null);
 		try {
-			await startClient(effectiveConnection, {
+			await startClient(clientConnection, {
 				server_addr: serverAddr,
 				transport,
 				auth_token: authToken,
@@ -466,7 +465,7 @@ function ClientDashboardPage() {
 		setActionLoading(true);
 		setError(null);
 		try {
-			await stopClient(effectiveConnection);
+			await stopClient(clientConnection);
 			fetchStatus();
 			fetchLogs();
 		} catch (err) {
@@ -488,7 +487,7 @@ function ClientDashboardPage() {
 	// Clear Logs Handler
 	const handleClearLogs = async () => {
 		try {
-			await clearClientLogs(effectiveConnection);
+			await clearClientLogs(clientConnection);
 			setLogs([]);
 		} catch (err) {
 			console.error("Failed to clear logs:", err);

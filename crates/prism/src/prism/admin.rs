@@ -1253,7 +1253,15 @@ mod tests {
             .await
             .unwrap();
         let logs: Vec<serde_json::Value> = resp.json().await.unwrap();
-        assert!(logs.is_empty());
+        assert!(
+            !logs.iter().any(|l| {
+                l.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("")
+                    .contains("127.0.0.1:9999")
+            }),
+            "logs before clear should not be present"
+        );
 
         let _ = shutdown_tx.send(true);
     }

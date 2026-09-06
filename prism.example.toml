@@ -152,6 +152,8 @@ key_file = ""
 # subdomain = "prism"         # services -> <name>.prism.local
 # listen_addr = ":25565"      # local proxy bind address (0.0.0.0 for LAN access)
 # middlewares = ["minecraft"]  # middleware for hostname extraction
+# minecraft_lan = true        # optional: broadcast to Minecraft LAN games list (224.0.2.60:4445)
+# motd_prefix = "[Prism] "    # optional MOTD prefix for LAN broadcast
 
 [logging]
 level = "info"

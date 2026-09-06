@@ -123,6 +123,7 @@ pub async fn write_register_request<W: AsyncWrite + Unpin>(
     let n: u32 = b.len().try_into().unwrap_or(u32::MAX);
     w.write_u32(n).await?;
     w.write_all(&b).await?;
+    w.flush().await?;
     Ok(())
 }
 

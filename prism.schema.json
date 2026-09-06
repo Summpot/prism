@@ -366,6 +366,16 @@
 						}
 					],
 					"description": "Middleware(s) for hostname extraction on the local proxy (e.g. 'minecraft')."
+				},
+				"minecraft_lan": {
+					"type": "boolean",
+					"description": "Enable Minecraft LAN multicast/broadcast discovery reflection (224.0.2.60:4445).",
+					"default": false
+				},
+				"motd_prefix": {
+					"type": "string",
+					"description": "MOTD prefix for LAN broadcast reflection.",
+					"default": "[Prism] "
 				}
 			}
 		},

@@ -470,6 +470,30 @@ pub async fn run(
                 }
             }
 
+            // Optional Minecraft LAN multicast broadcaster for zero-config client discovery.
+            if cfg.tunnel.mdns.minecraft_lan {
+                let broadcaster = tunnel::fake_lan::FakeLanBroadcaster::new();
+                for s in &cfg.tunnel.services {
+                    let name = s.name.trim();
+                    if !name.is_empty() && !s.local_addr.trim().is_empty() && !s.route_only {
+                        broadcaster
+                            .add_service(tunnel::fake_lan::AdvertisedService::new(
+                                name,
+                                port,
+                                &cfg.tunnel.mdns.motd_prefix,
+                            ))
+                            .await;
+                    }
+                }
+                let shutdown = shutdown_rx.clone();
+                tasks.spawn(async move {
+                    if let Err(err) = broadcaster.run(shutdown).await {
+                        tracing::warn!(err = %err, "mdns: minecraft fake lan broadcaster exited with error");
+                    }
+                    Ok(())
+                });
+            }
+
             // Build middleware chain for hostname extraction.
             if !cfg.tunnel.mdns.middlewares.is_empty() {
                 let provider =

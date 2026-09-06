@@ -389,6 +389,10 @@ pub struct ManagedMdnsDocument {
     pub listen_addr: String,
     #[serde(default)]
     pub middlewares: Vec<String>,
+    #[serde(default)]
+    pub minecraft_lan: bool,
+    #[serde(default = "default_motd_prefix")]
+    pub motd_prefix: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -604,6 +608,10 @@ pub struct MdnsConfig {
     pub listen_addr: String,
     /// Middleware names used for hostname extraction on the local proxy.
     pub middlewares: Vec<String>,
+    /// Whether to broadcast Minecraft LAN discovery packets (224.0.2.60:4445).
+    pub minecraft_lan: bool,
+    /// MOTD prefix for Minecraft LAN broadcast reflection.
+    pub motd_prefix: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -882,6 +890,12 @@ struct FileMdns {
     subdomain: Option<String>,
     listen_addr: Option<String>,
     middlewares: Option<StringOrVec>,
+    #[serde(default)]
+    minecraft_lan: bool,
+    #[serde(default)]
+    fake_lan_broadcast: bool,
+    motd_prefix: Option<String>,
+    discovery: Option<FileClientDiscovery>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1420,6 +1434,27 @@ impl Config {
                     .into_iter()
                     .filter_map(|s| normalize_middleware_ref(&s).ok())
                     .collect();
+
+                let (minecraft_lan, motd_prefix) = if let Some(ref d) = m.discovery {
+                    if let Some(ref mc) = d.minecraft_lan {
+                        (
+                            mc.enabled,
+                            mc.motd_prefix.clone().unwrap_or_else(default_motd_prefix),
+                        )
+                    } else {
+                        (
+                            m.minecraft_lan || m.fake_lan_broadcast,
+                            m.motd_prefix.clone().unwrap_or_else(default_motd_prefix),
+                        )
+                    }
+                } else {
+                    (
+                        m.minecraft_lan || m.fake_lan_broadcast,
+                        m.motd_prefix.clone().unwrap_or_else(default_motd_prefix),
+                    )
+                };
+                cfg.tunnel.mdns.minecraft_lan = minecraft_lan;
+                cfg.tunnel.mdns.motd_prefix = motd_prefix;
             }
         } else {
             // Default: match Go defaults.
@@ -1799,6 +1834,14 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 } else {
                     Some(StringOrVec::Many(m.middlewares.clone()))
                 },
+                minecraft_lan: m.minecraft_lan,
+                fake_lan_broadcast: false,
+                motd_prefix: if m.motd_prefix.trim().is_empty() {
+                    None
+                } else {
+                    Some(m.motd_prefix.clone())
+                },
+                discovery: None,
             }),
         }),
         auth: doc.auth.as_ref().map(|a| FileAuthConfig {
@@ -2510,6 +2553,31 @@ enabled = true
         assert_eq!(cfg.tunnel.mdns.subdomain, "");
         assert_eq!(cfg.tunnel.mdns.listen_addr, "");
         assert!(cfg.tunnel.mdns.middlewares.is_empty());
+        assert!(!cfg.tunnel.mdns.minecraft_lan);
+        assert_eq!(cfg.tunnel.mdns.motd_prefix, "[Prism] ");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tunnel_mdns_minecraft_lan() {
+        let dir = temp_dir("mdns_minecraft_lan");
+        let cfg_path = dir.join("prism.toml");
+
+        let toml = r#"
+admin_addr = ":8080"
+
+[tunnel.mdns]
+enabled = true
+minecraft_lan = true
+motd_prefix = "[Custom] "
+"#;
+
+        std::fs::write(&cfg_path, toml).expect("write");
+        let cfg = load_config(&cfg_path).expect("load_config");
+        assert!(cfg.tunnel.mdns.enabled);
+        assert!(cfg.tunnel.mdns.minecraft_lan);
+        assert_eq!(cfg.tunnel.mdns.motd_prefix, "[Custom] ");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2524,6 +2592,7 @@ enabled = true
                     subdomain: "prism".into(),
                     listen_addr: ":25565".into(),
                     middlewares: vec!["minecraft".into()],
+                    ..Default::default()
                 }),
                 ..Default::default()
             }),
@@ -2539,6 +2608,7 @@ enabled = true
                     subdomain: "prism".into(),
                     listen_addr: ":25565".into(),
                     middlewares: vec!["minecraft".into()],
+                    ..Default::default()
                 }),
                 ..Default::default()
             }),

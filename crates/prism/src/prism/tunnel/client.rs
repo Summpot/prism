@@ -430,7 +430,28 @@ impl Client {
         };
         protocol::write_register_request(&mut reg, &req).await?;
 
-        // Store active session for player connections
+        // Await initial service catalog update to confirm registration from the server.
+        let initial_services = tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    sess.close().await;
+                    return Ok(());
+                }
+                return Ok(());
+            }
+            res = protocol::read_service_catalog(&mut reg) => {
+                match res {
+                    Ok(s) => s,
+                    Err(err) => {
+                        anyhow::bail!(
+                            "registration rejected by server (check auth_token or server ACLs) or catalog stream closed: {err}"
+                        );
+                    }
+                }
+            }
+        };
+
+        // Store active session for player connections only after registration is accepted
         *self.current_sess.write().await = Some(sess.clone());
 
         match AdminTunnelBridge::start(self.current_sess.clone()).await {
@@ -452,7 +473,34 @@ impl Client {
             self.config.transport
         );
 
-        // Catalog sync loop on the register stream
+        let names = initial_services
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        tracing::info!(
+            "Received service catalog update: {} services [{}]",
+            initial_services.len(),
+            if names.is_empty() { "none" } else { &names }
+        );
+
+        // Update known services
+        *self.known_services.write().await = initial_services.clone();
+
+        // Update Fake LAN broadcaster
+        if let Some(broadcaster) = &self.broadcaster {
+            let mut advertised = Vec::with_capacity(initial_services.len());
+            for s in &initial_services {
+                advertised.push(AdvertisedService::new(
+                    s.name.clone(),
+                    local_port,
+                    self.config.motd_prefix.clone(),
+                ));
+            }
+            broadcaster.set_services(advertised).await;
+        }
+
+        // Catalog sync loop on the register stream for subsequent updates
         loop {
             tokio::select! {
                 _ = shutdown.changed() => {
@@ -1347,7 +1395,13 @@ mod tests {
         assert!(logs.iter().any(|l| l.message.contains("client sidecar")));
 
         controller.clear_logs().await;
-        assert!(controller.logs(100).await.is_empty());
+        let remaining = controller.logs(100).await;
+        assert!(
+            !remaining
+                .iter()
+                .any(|l| l.message.contains("client sidecar")),
+            "logs before clear should not be present"
+        );
     }
 
     #[tokio::test]

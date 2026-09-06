@@ -196,7 +196,7 @@ async function apiRequest<T>(
 		...init,
 		headers: {
 			"Content-Type": "application/json",
-			Authorization: `Bearer ${connection.token}`,
+			...(connection.token?.trim() ? { Authorization: `Bearer ${connection.token.trim()}` } : {}),
 			...init?.headers,
 		},
 	});

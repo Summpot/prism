@@ -156,14 +156,18 @@ async fn handle_conn(
     };
 
     // Extract service name from the parsed hostname.
-    let service_name = extract_service_name(&host, &config.subdomain, &config.domain);
-    if service_name.is_empty() {
+    let mut service_name = extract_service_name(&host, &config.subdomain, &config.domain);
+    let local_addr = if let Some(addr) = services.get(&service_name) {
+        addr.clone()
+    } else if services.len() == 1 {
+        let (name, addr) = services.iter().next().expect("checked len == 1");
+        service_name = name.clone();
+        addr.clone()
+    } else if service_name.is_empty() {
         anyhow::bail!("mdns: could not extract service name from host '{host}'");
-    }
-
-    let local_addr = services.get(&service_name).cloned().ok_or_else(|| {
-        anyhow::anyhow!("mdns: unknown service '{service_name}' from host '{host}'")
-    })?;
+    } else {
+        anyhow::bail!("mdns: unknown service '{service_name}' from host '{host}'");
+    };
 
     tracing::info!(
         host = %host,
@@ -328,6 +332,63 @@ mod tests {
         let mut resp = [0u8; 13];
         client.read_exact(&mut resp).await.unwrap();
         assert_eq!(&resp, b"pong response");
+
+        backend_done_rx.await.unwrap();
+        let _ = shutdown_tx.send(true);
+        let _ = proxy_task.await;
+    }
+
+    #[tokio::test]
+    async fn local_proxy_fallback_to_single_service_when_host_is_ip_or_unmatched() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend.local_addr().unwrap().to_string();
+
+        let (backend_done_tx, backend_done_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = backend.accept().await.unwrap();
+            let mut buf = [0u8; 4];
+            stream.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+            let _ = backend_done_tx.send(());
+        });
+
+        let proxy_ln = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = proxy_ln.local_addr().unwrap().to_string();
+        drop(proxy_ln);
+
+        let mut map = HashMap::new();
+        map.insert("gto".to_string(), backend_addr);
+
+        // Host is an IP literal, such as when discovered via Minecraft LAN broadcast or direct IP connect
+        let proxy = LocalProxy::new(
+            LocalProxyConfig {
+                listen_addr: proxy_addr.clone(),
+                max_header_bytes: 4096,
+                handshake_timeout: Duration::from_secs(3),
+                domain: "local".into(),
+                subdomain: "".into(),
+            },
+            Arc::new(map),
+            Arc::new(MockChain {
+                host: "192.168.1.100".into(),
+            }),
+        );
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let proxy_task = tokio::spawn(async move {
+            let _ = proxy.run(shutdown_rx).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let mut client = TcpStream::connect(&proxy_addr).await.unwrap();
+        client.write_all(b"ping").await.unwrap();
+        let mut resp = [0u8; 4];
+        client.read_exact(&mut resp).await.unwrap();
+        assert_eq!(&resp, b"pong");
 
         backend_done_rx.await.unwrap();
         let _ = shutdown_tx.send(true);

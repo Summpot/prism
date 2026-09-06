@@ -13,6 +13,46 @@ use tokio::sync::RwLock;
 /// Standard multicast address used by Minecraft LAN server discovery.
 pub const MINECRAFT_LAN_MULTICAST_ADDR: &str = "224.0.2.60:4445";
 
+/// Standard global broadcast address used by Minecraft LAN server discovery.
+pub const MINECRAFT_LAN_BROADCAST_ADDR: &str = "255.255.255.255:4445";
+
+/// Standard loopback address for local Minecraft client discovery.
+pub const MINECRAFT_LAN_LOOPBACK_ADDR: &str = "127.0.0.1:4445";
+
+/// Detect the machine's outbound LAN IPv4 address by connecting a UDP socket to a
+/// well-known address. This does not actually send any traffic.
+pub fn detect_lan_ipv4() -> Option<std::net::Ipv4Addr> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("8.8.8.8:80").ok()?;
+    match sock.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(v4) => Some(v4),
+        std::net::IpAddr::V6(_) => None,
+    }
+}
+
+/// Computes the list of destination addresses to send LAN broadcast packets to.
+pub fn resolve_broadcast_targets(target_addr: &str) -> Vec<String> {
+    if target_addr != MINECRAFT_LAN_MULTICAST_ADDR {
+        return vec![target_addr.to_string()];
+    }
+
+    let mut targets = vec![
+        MINECRAFT_LAN_MULTICAST_ADDR.to_string(),
+        MINECRAFT_LAN_BROADCAST_ADDR.to_string(),
+        MINECRAFT_LAN_LOOPBACK_ADDR.to_string(),
+    ];
+
+    if let Some(ip) = detect_lan_ipv4() {
+        let octets = ip.octets();
+        let subnet_bcast = format!("{}.{}.{}.255:4445", octets[0], octets[1], octets[2]);
+        if !targets.contains(&subnet_bcast) {
+            targets.push(subnet_bcast);
+        }
+    }
+
+    targets
+}
+
 /// Default interval between periodic broadcast packets (1.5 seconds).
 pub const DEFAULT_BROADCAST_INTERVAL: Duration = Duration::from_millis(1500);
 
@@ -129,8 +169,30 @@ impl FakeLanBroadcaster {
         let _ = socket.set_multicast_loop_v4(true);
         let _ = socket.set_multicast_ttl_v4(2);
 
+        let lan_ip = detect_lan_ipv4();
+        // Also create a dedicated LAN-bound socket if an outbound LAN IP is detected.
+        // Binding directly to the LAN IP forces Windows/Linux to route both multicast and broadcast
+        // out of the physical network adapter rather than virtual adapters (Hyper-V / WSL).
+        let lan_socket = if let Some(ip) = lan_ip {
+            match tokio::net::UdpSocket::bind(std::net::SocketAddr::from((ip, 0))).await {
+                Ok(s) => {
+                    let _ = s.set_broadcast(true);
+                    let _ = s.set_multicast_loop_v4(true);
+                    let _ = s.set_multicast_ttl_v4(2);
+                    Some(s)
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let targets = resolve_broadcast_targets(&self.target_addr);
+
         tracing::info!(
             target = %self.target_addr,
+            targets = ?targets,
+            lan_ip = ?lan_ip,
             interval = %humantime::format_duration(self.interval),
             "fake_lan: broadcaster started"
         );
@@ -151,20 +213,29 @@ impl FakeLanBroadcaster {
                     for svc in active {
                         let payload = svc.to_payload();
                         let bytes = payload.as_bytes();
-                        if let Err(err) = socket.send_to(bytes, &self.target_addr).await {
-                            tracing::warn!(
-                                err = %err,
-                                target = %self.target_addr,
-                                service = %svc.name,
-                                "fake_lan: failed to send broadcast packet"
-                            );
-                        } else {
-                            tracing::trace!(
-                                target = %self.target_addr,
-                                service = %svc.name,
-                                payload = %payload,
-                                "fake_lan: broadcast packet sent"
-                            );
+                        for target in &targets {
+                            let sock = if target.starts_with("127.") {
+                                &socket
+                            } else if let Some(ref ls) = lan_socket {
+                                ls
+                            } else {
+                                &socket
+                            };
+                            if let Err(err) = sock.send_to(bytes, target).await {
+                                tracing::trace!(
+                                    err = %err,
+                                    target = %target,
+                                    service = %svc.name,
+                                    "fake_lan: send_to skipped target"
+                                );
+                            } else {
+                                tracing::trace!(
+                                    target = %target,
+                                    service = %svc.name,
+                                    payload = %payload,
+                                    "fake_lan: broadcast packet sent"
+                                );
+                            }
                         }
                     }
                 }
@@ -261,5 +332,16 @@ mod tests {
             .expect("should terminate gracefully")
             .unwrap()
             .unwrap();
+    }
+
+    #[test]
+    fn test_resolve_broadcast_targets() {
+        let custom = resolve_broadcast_targets("192.168.1.50:4445");
+        assert_eq!(custom, vec!["192.168.1.50:4445"]);
+
+        let defaults = resolve_broadcast_targets(MINECRAFT_LAN_MULTICAST_ADDR);
+        assert!(defaults.contains(&MINECRAFT_LAN_MULTICAST_ADDR.to_string()));
+        assert!(defaults.contains(&MINECRAFT_LAN_BROADCAST_ADDR.to_string()));
+        assert!(defaults.contains(&MINECRAFT_LAN_LOOPBACK_ADDR.to_string()));
     }
 }

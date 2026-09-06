@@ -16,6 +16,7 @@ import {
 	Minus,
 	Plus,
 	Power,
+	Radio,
 	RotateCcw,
 	Search,
 	Server,

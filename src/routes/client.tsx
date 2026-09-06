@@ -16,7 +16,6 @@ import {
 	Minus,
 	Plus,
 	Power,
-	Radio,
 	RotateCcw,
 	Search,
 	Server,
@@ -576,9 +575,11 @@ function ClientDashboardPage() {
 					<div className="relative z-10 flex w-72 flex-col border-r border-border bg-card p-5 text-card-foreground shadow-2xl">
 						<div className="flex items-center justify-between border-b border-border pb-4">
 							<div className="flex items-center gap-3">
-								<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shadow-xs ring-1 ring-primary/20">
-									<Radio className="h-5 w-5" />
-								</div>
+								<img
+									src="/logo192.png"
+									alt="Prism"
+									className="h-9 w-9 rounded-lg object-contain shadow-xs ring-1 ring-primary/20"
+								/>
 								<div>
 									<div className="text-sm font-bold tracking-tight text-foreground">
 										Prism Connect
@@ -730,12 +731,12 @@ function ClientDashboardPage() {
 							<Menu className="h-4 w-4" />
 						</Button>
 
-						<div
+						<img
+							src="/logo192.png"
+							alt="Prism"
 							data-tauri-drag-region
-							className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-primary/10 text-primary shadow-xs ring-1 ring-primary/20"
-						>
-							<Radio className="h-3.5 w-3.5" />
-						</div>
+							className="h-7 w-7 flex-none rounded-md object-contain shadow-xs ring-1 ring-primary/20"
+						/>
 
 						<div className="flex items-center gap-1.5 min-w-0" data-tauri-drag-region>
 							<h1

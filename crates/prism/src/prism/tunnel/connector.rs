@@ -15,6 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::prism::middleware::{
     FramePriority, PollResult, SessionState, StreamResult, WasmMiddleware, WasmProtocolSession,
+    frame_uncompressed_packet,
 };
 use crate::prism::tunnel::{
     protocol::{self, ProxyStreamKind, RegisterRequest, RegisteredService},
@@ -261,6 +262,10 @@ pub async fn run_optimized_tcp_pipeline(
     // Inbound: PRPX stream -> OptimizedReader -> local_write
     let decompressor_config = DecompressorConfig { window_log };
     let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?;
+    if let Some(ref traffic) = traffic {
+        opt_reader.add_stats(traffic.service(&meta.name));
+        opt_reader.add_stats(traffic.global());
+    }
     let inbound_task = tokio::spawn(async move {
         let mut buf = vec![0u8; 64 * 1024];
         loop {
@@ -316,12 +321,23 @@ pub async fn run_optimized_tcp_pipeline(
                         while offset < read_buf.len() {
                             let slice = &read_buf[offset..];
                             match sess.poll(slice) {
-                                Ok(PollResult::Stream(StreamResult::Frame { len, priority })) => {
+                                Ok(PollResult::Stream(StreamResult::Frame {
+                                    len,
+                                    priority,
+                                    payload,
+                                })) => {
                                     if len == 0 || len > slice.len() {
                                         // Need more data for a full frame
                                         break;
                                     }
-                                    opt_writer.write_frame(&slice[..len], priority).await?;
+                                    if let Some(ref decompressed) = payload {
+                                        let framed = frame_uncompressed_packet(decompressed);
+                                        opt_writer
+                                            .write_frame_with_metric(len, &framed, priority)
+                                            .await?;
+                                    } else {
+                                        opt_writer.write_frame(&slice[..len], priority).await?;
+                                    }
                                     offset += len;
                                 }
                                 Ok(PollResult::Stream(StreamResult::NeedMoreData)) => {

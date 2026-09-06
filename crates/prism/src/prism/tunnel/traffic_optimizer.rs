@@ -697,15 +697,23 @@ impl<W> OptimizedWriter<W> {
 }
 
 impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
-    /// Writes a frame with the specified priority.
+    /// Writes a frame with an explicit raw metric byte count.
     ///
-    /// If `FramePriority::Urgent` is given, or if the buffer/time threshold is reached,
-    /// the batch is flushed and written out immediately.
-    pub async fn write_frame(&mut self, frame: &[u8], priority: FramePriority) -> io::Result<()> {
+    /// This is used when the incoming frame was decompressed from an upstream Deflate
+    /// stream: `metric_raw_len` is the wire byte count of the incoming Deflate packet
+    /// (preventing zip-bomb / raw uncompressed ratio inflation), while `frame` is the
+    /// decompressed raw payload that [`Batcher`] and [`ZstdStreamCompressor`] will
+    /// aggregate and compress over the PRPX tunnel.
+    pub async fn write_frame_with_metric(
+        &mut self,
+        metric_raw_len: usize,
+        frame: &[u8],
+        priority: FramePriority,
+    ) -> io::Result<()> {
         // Flush any pending write_buf
         self.flush_pending_write_buf().await?;
 
-        self.record_raw(frame.len());
+        self.record_raw(metric_raw_len);
 
         if let Some(batch) = self.batcher.push(frame, priority) {
             match priority {
@@ -717,6 +725,15 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
             self.flush_pending_write_buf().await?;
         }
         Ok(())
+    }
+
+    /// Writes a frame with the specified priority.
+    ///
+    /// If `FramePriority::Urgent` is given, or if the buffer/time threshold is reached,
+    /// the batch is flushed and written out immediately.
+    pub async fn write_frame(&mut self, frame: &[u8], priority: FramePriority) -> io::Result<()> {
+        self.write_frame_with_metric(frame.len(), frame, priority)
+            .await
     }
 
     /// Explicitly flushes any buffered frames through compression and writes them to `inner`.
@@ -902,6 +919,8 @@ pin_project! {
         chunk_len: usize,
         payload_buf: Vec<u8>,
         payload_pos: usize,
+        stats: Vec<SharedTrafficStats>,
+        record_raw_metrics: bool,
     }
 }
 
@@ -918,12 +937,45 @@ impl<R> OptimizedReader<R> {
             chunk_len: 0,
             payload_buf: Vec::new(),
             payload_pos: 0,
+            stats: Vec::new(),
+            record_raw_metrics: true,
         })
     }
 
     /// Creates a new `OptimizedReader` with default configuration.
     pub fn with_defaults(inner: R) -> io::Result<Self> {
         Self::new(inner, DecompressorConfig::default())
+    }
+
+    /// Attaches a shared traffic statistics collector to this reader.
+    pub fn add_stats(&mut self, stats: SharedTrafficStats) {
+        self.stats.push(stats);
+    }
+
+    /// Builder method to attach a shared traffic statistics collector.
+    pub fn with_stats(mut self, stats: SharedTrafficStats) -> Self {
+        self.stats.push(stats);
+        self
+    }
+
+    /// Builder method to attach a shared traffic statistics collector and configure
+    /// whether raw decompressed bytes should be recorded as `raw_bytes` metric.
+    /// When `record_raw` is false, only wire bytes are recorded on the reader, leaving
+    /// raw metrics to be recorded after protocol recompression at egress.
+    pub fn with_stats_and_raw_mode(mut self, stats: SharedTrafficStats, record_raw: bool) -> Self {
+        self.stats.push(stats);
+        self.record_raw_metrics = record_raw;
+        self
+    }
+
+    /// Sets whether this reader records raw decompressed byte counts to attached stats.
+    pub fn set_record_raw_metrics(&mut self, record_raw: bool) {
+        self.record_raw_metrics = record_raw;
+    }
+
+    /// Returns references to attached traffic statistics collectors.
+    pub fn stats(&self) -> &[SharedTrafficStats] {
+        &self.stats
     }
 
     /// Returns a reference to the inner reader.
@@ -1036,6 +1088,14 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
                 .decompress_chunk_into(&this.payload_buf[..len], this.decompressed_buf)
             {
                 return Poll::Ready(Err(e));
+            }
+
+            let decomp_produced = this.decompressed_buf.len();
+            for s in this.stats.iter() {
+                s.add_wire_bytes((len + 4) as u64);
+                if *this.record_raw_metrics {
+                    s.add_raw_bytes(decomp_produced as u64);
+                }
             }
 
             // Reset chunk state for next iteration
@@ -1403,5 +1463,35 @@ mod tests {
         assert_eq!(snap2.threshold_batches, 1);
         assert!(snap2.saved_bytes > 0);
         assert!(snap2.saved_ratio > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_write_frame_with_metric_prevents_zip_bomb_inflation() {
+        let stats = Arc::new(TrafficStats::new());
+        let mut sink = Vec::new();
+        let mut writer = OptimizedWriter::with_defaults(&mut sink)
+            .unwrap()
+            .with_stats(stats.clone());
+
+        // Simulate a 100-byte Deflate packet that decompresses to 10,000 bytes (100x inflation)
+        let incoming_deflate_wire_len = 100;
+        let decompressed_payload = vec![0x33u8; 10_000];
+
+        writer
+            .write_frame_with_metric(
+                incoming_deflate_wire_len,
+                &decompressed_payload,
+                FramePriority::Urgent,
+            )
+            .await
+            .unwrap();
+
+        let snap = stats.snapshot();
+        // The raw_bytes metric MUST record the incoming wire length (100 bytes), NOT 10,000 bytes!
+        assert_eq!(
+            snap.raw_bytes, incoming_deflate_wire_len as u64,
+            "raw_bytes must be anchored to incoming Deflate wire size to prevent zip-bomb inflation"
+        );
+        assert!(snap.wire_bytes > 0);
     }
 }

@@ -78,14 +78,15 @@
   )
 
   ;; ---------------------------------------------------------------------------
-  ;; Memory (4 pages = 256 KiB)
+  ;; Memory (64 pages = 4 MiB)
   ;; ---------------------------------------------------------------------------
   ;; Layout:
   ;;   Page 0 (0..65535): general buffer space / input
-  ;;   Page 1 (65536..131071): route match struct { host_ptr, host_len, rw_ptr, rw_len } at 65536
-  ;;   Page 2 (131072..196607): scratch / rewrite / decompression buffer
-  ;;   Page 3 (196608..262143): injected data (e.g. RSA private key) at 196608, length at 196604
-  (memory (export "memory") 4)
+  ;;   Page 1 (65536..131071): route match struct at 65536, stream frame struct at 65552
+  ;;   Page 2 (131072..196607): scratch / rewrite buffer
+  ;;   Page 3 (196608..262143): injected data (e.g. RSA private key) at 196608
+  ;;   Page 4+ (262144..): decompressed streaming payload buffer
+  (memory (export "memory") 64)
 
   ;; ---------------------------------------------------------------------------
   ;; Internal State Globals
@@ -188,8 +189,7 @@
 
   ;; Check whether packet ID represents an urgent packet (KeepAlive or Ping/Pong)
   (func $is_urgent_packet (param $pid i32) (result i32)
-    ;; Status Ping / Pong / Request / Response: 0x00, 0x01
-    (if (i32.eq (local.get $pid) (i32.const 0x00)) (then (return (i32.const 1))))
+    ;; Status Ping / Pong / Request: 0x01
     (if (i32.eq (local.get $pid) (i32.const 0x01)) (then (return (i32.const 1))))
 
     ;; Serverbound KeepAlive across Minecraft versions:
@@ -369,6 +369,10 @@
     (local $p i32)
     (local $pid i32)
     (local $pid_n i32)
+    (local $data_len i32)
+    (local $data_len_n i32)
+    (local $decomp_len i32)
+    (local $is_urgent i32)
 
     ;; Empty buffer: NEED_MORE_DATA (Action 0)
     (if (i32.le_s (local.get $buf_len) (i32.const 0))
@@ -405,26 +409,69 @@
       (then (return (call $pack_result (i32.const 1) (local.get $total_len))))
     )
 
-    ;; 2. Read packet ID
     (local.set $p (i32.add (local.get $buf_ptr) (local.get $len_n)))
+
+    ;; Check for Minecraft Deflate compression (data_length VarInt at $p)
+    (local.set $tmp (call $read_varint (local.get $p) (i32.add (local.get $buf_ptr) (local.get $total_len))))
+    (local.set $data_len (i32.wrap_i64 (local.get $tmp)))
+    (local.set $data_len_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+
+    ;; If data_length > 0 and data_len_n > 0: attempt Deflate decompression
+    (if (i32.and (i32.gt_s (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+      (then
+        ;; Call $deflate_decompress:
+        ;; in_ptr = $p + $data_len_n
+        ;; in_len = $pkt_len - $data_len_n
+        ;; out_ptr = 262144 (Page 4)
+        ;; out_max_len = 3145728 (3 MiB)
+        (local.set $decomp_len
+          (call $deflate_decompress
+            (i32.add (local.get $p) (local.get $data_len_n))
+            (i32.sub (local.get $pkt_len) (local.get $data_len_n))
+            (i32.const 262144)
+            (i32.const 3145728)
+          )
+        )
+        (if (i32.gt_s (local.get $decomp_len) (i32.const 0))
+          (then
+            ;; Write struct StreamFrame at fixed offset 65552:
+            ;; offset 65552: consumed_len (i32) = $total_len
+            ;; offset 65556: payload_ptr (i32) = 262144
+            ;; offset 65560: payload_len (i32) = $decomp_len
+            (i32.store (i32.const 65552) (local.get $total_len))
+            (i32.store (i32.const 65556) (i32.const 262144))
+            (i32.store (i32.const 65560) (local.get $decomp_len))
+
+            ;; Decompressed game payloads (chunks, lighting, entity data) must always defer
+            ;; to enable full 20ms aggregation batching into continuous Zstd streams.
+            (return (call $pack_result (i32.const 3) (i32.const 65552)))
+          )
+        )
+      )
+    )
+
+    ;; Fallback / uncompressed packet:
+    ;; If data_length was 0, packet ID starts at $p + $data_len_n. Otherwise at $p.
+    (if (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+      (then
+        (local.set $p (i32.add (local.get $p) (local.get $data_len_n)))
+      )
+    )
+
     (local.set $tmp (call $read_varint (local.get $p) (i32.add (local.get $buf_ptr) (local.get $total_len))))
     (local.set $pid (i32.wrap_i64 (local.get $tmp)))
     (local.set $pid_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
 
-    ;; If packet ID cannot be parsed, defer packet
     (if (i32.eq (local.get $pid_n) (i32.const 0))
       (then (return (call $pack_result (i32.const 1) (local.get $total_len))))
     )
 
-    ;; 3. Check for urgent packet (KeepAlive or Ping/Pong)
     (if (call $is_urgent_packet (local.get $pid))
       (then
-        ;; FRAME_URGENT (Action 2), Value = total packet bytes
         (return (call $pack_result (i32.const 2) (local.get $total_len)))
       )
     )
 
-    ;; Normal game packet: FRAME_DEFER (Action 1), Value = total packet bytes
     (call $pack_result (i32.const 1) (local.get $total_len))
   )
 

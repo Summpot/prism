@@ -336,7 +336,11 @@ pub enum FramePriority {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamResult {
     NeedMoreData,
-    Frame { len: usize, priority: FramePriority },
+    Frame {
+        len: usize,
+        priority: FramePriority,
+        payload: Option<Vec<u8>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -502,6 +506,112 @@ pub fn deflate_compress(input: &[u8], level: i32) -> Result<Vec<u8>, i32> {
     Ok(miniz_oxide::deflate::compress_to_vec_zlib(input, lvl))
 }
 
+/// Encodes an unsigned integer as a Minecraft VarInt into `buf`.
+pub fn write_varint(buf: &mut Vec<u8>, mut val: u32) {
+    loop {
+        let mut b = (val & 0x7F) as u8;
+        val >>= 7;
+        if val != 0 {
+            b |= 0x80;
+        }
+        buf.push(b);
+        if val == 0 {
+            break;
+        }
+    }
+}
+
+/// Reads a Minecraft VarInt from the start of `buf`.
+/// Returns `Some((value, bytes_read))` or `None` if incomplete or invalid.
+pub fn read_varint(buf: &[u8]) -> Option<(u32, usize)> {
+    let mut val = 0u32;
+    let mut shift = 0;
+    for (i, &b) in buf.iter().enumerate().take(5) {
+        val |= ((b & 0x7F) as u32) << shift;
+        if (b & 0x80) == 0 {
+            return Some((val, i + 1));
+        }
+        shift += 7;
+    }
+    None
+}
+
+/// Frames an uncompressed packet payload into Minecraft's uncompressed framing:
+/// `[Packet Length: VarInt] [0x00: Data Length = 0] [raw_payload]`.
+///
+/// This produces a 100% valid Minecraft packet that can be parsed by any client or
+/// server operating under a compression threshold.
+pub fn frame_uncompressed_packet(raw_payload: &[u8]) -> Vec<u8> {
+    let packet_len = 1 + raw_payload.len();
+    let mut out = Vec::with_capacity(5 + packet_len);
+    write_varint(&mut out, packet_len as u32);
+    out.push(0x00);
+    out.extend_from_slice(raw_payload);
+    out
+}
+
+/// Re-compresses an uncompressed packet payload into Minecraft compressed framing:
+/// `[Packet Length: VarInt] [Data Length: VarInt] [Payload]`.
+///
+/// If payload length >= threshold, compresses payload with zlib Deflate (level 1 for high speed).
+/// If payload length < threshold, encodes with `Data Length = 0` (uncompressed).
+pub fn deflate_recompress_packet(raw_payload: &[u8], threshold: usize) -> Vec<u8> {
+    if raw_payload.len() >= threshold {
+        if let Ok(compressed) = deflate_compress(raw_payload, 1) {
+            let mut dl_buf = Vec::new();
+            write_varint(&mut dl_buf, raw_payload.len() as u32);
+            let packet_len = dl_buf.len() + compressed.len();
+            let mut out = Vec::with_capacity(5 + packet_len);
+            write_varint(&mut out, packet_len as u32);
+            out.extend_from_slice(&dl_buf);
+            out.extend_from_slice(&compressed);
+            return out;
+        }
+    }
+    frame_uncompressed_packet(raw_payload)
+}
+
+/// Recompresses packets in a stream buffer that have `data_length == 0` and payload size >= threshold.
+/// Writes complete processed packets to `writer`, keeping any incomplete trailing packet in `pending`.
+pub async fn recompress_packet_stream<W: tokio::io::AsyncWrite + Unpin>(
+    pending: &mut Vec<u8>,
+    writer: &mut W,
+    threshold: usize,
+) -> std::io::Result<usize> {
+    let mut written = 0;
+    let mut offset = 0;
+    while offset < pending.len() {
+        let slice = &pending[offset..];
+        let Some((pkt_len, len_n)) = read_varint(slice) else {
+            break;
+        };
+        let total_pkt_len = len_n + pkt_len as usize;
+        if slice.len() < total_pkt_len {
+            break;
+        }
+        let pkt_data = &slice[len_n..total_pkt_len];
+        if let Some((data_len, dl_n)) = read_varint(pkt_data) {
+            if data_len == 0 {
+                let uncompressed_payload = &pkt_data[dl_n..];
+                if uncompressed_payload.len() >= threshold {
+                    let recompressed = deflate_recompress_packet(uncompressed_payload, threshold);
+                    tokio::io::AsyncWriteExt::write_all(writer, &recompressed).await?;
+                    written += recompressed.len();
+                    offset += total_pkt_len;
+                    continue;
+                }
+            }
+        }
+        tokio::io::AsyncWriteExt::write_all(writer, &slice[..total_pkt_len]).await?;
+        written += total_pkt_len;
+        offset += total_pkt_len;
+    }
+    if offset > 0 {
+        pending.drain(..offset);
+    }
+    Ok(written)
+}
+
 pub fn host_crypto_rsa_decrypt(
     mut env: FunctionEnvMut<HostEnv>,
     key_ptr: i32,
@@ -627,13 +737,12 @@ pub fn host_deflate_decompress(
     if in_len == 0 {
         return 0;
     }
-    let (data, store) = env.data_and_store_mut();
+    let (data, mut store) = env.data_and_store_mut();
     let memory = match data.memory.as_ref() {
         Some(m) => m,
         None => return -1,
     };
-    let view = memory.view(&store);
-    let mem_size = view.data_size();
+    let mem_size = memory.view(&store).data_size();
 
     let in_end = (in_ptr as u64).saturating_add(in_len as u64);
     if in_end > mem_size {
@@ -641,7 +750,11 @@ pub fn host_deflate_decompress(
     }
 
     let mut in_bytes = vec![0u8; in_len as usize];
-    if view.read(in_ptr as u64, &mut in_bytes).is_err() {
+    if memory
+        .view(&store)
+        .read(in_ptr as u64, &mut in_bytes)
+        .is_err()
+    {
         return -1;
     }
 
@@ -656,10 +769,21 @@ pub fn host_deflate_decompress(
 
     let out_end = (out_ptr as u64).saturating_add(decompressed.len() as u64);
     if out_end > mem_size {
-        return -3;
+        let delta = out_end - mem_size;
+        let pages = delta.div_ceil(65536);
+        if memory
+            .grow(&mut store, wasmer::Pages(pages as u32))
+            .is_err()
+        {
+            return -3;
+        }
     }
 
-    if view.write(out_ptr as u64, &decompressed).is_err() {
+    if memory
+        .view(&store)
+        .write(out_ptr as u64, &decompressed)
+        .is_err()
+    {
         return -3;
     }
 
@@ -1026,11 +1150,55 @@ impl WasmProtocolSession {
                 1 => Ok(PollResult::Stream(StreamResult::Frame {
                     len: value as usize,
                     priority: FramePriority::Defer,
+                    payload: None,
                 })),
                 2 => Ok(PollResult::Stream(StreamResult::Frame {
                     len: value as usize,
                     priority: FramePriority::Urgent,
+                    payload: None,
                 })),
+                3 | 4 => {
+                    let view = self.memory.view(&self.store);
+                    let ptr = value as u64;
+                    if ptr + 12 > view.data_size() {
+                        return Err(MiddlewareError::Fatal(format!(
+                            "stream frame struct pointer out of bounds: {value}"
+                        )));
+                    }
+                    let mut header = [0u8; 12];
+                    view.read(ptr, &mut header).map_err(|e| {
+                        MiddlewareError::Fatal(format!("read stream frame struct failed: {e}"))
+                    })?;
+
+                    let consumed_len =
+                        u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
+                    let payload_ptr = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64;
+                    let payload_len =
+                        u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
+
+                    if payload_ptr + (payload_len as u64) > view.data_size() {
+                        return Err(MiddlewareError::Fatal(format!(
+                            "stream payload pointer out of bounds: {payload_ptr} + {payload_len}"
+                        )));
+                    }
+
+                    let mut payload = vec![0u8; payload_len];
+                    view.read(payload_ptr, &mut payload).map_err(|e| {
+                        MiddlewareError::Fatal(format!("read stream payload failed: {e}"))
+                    })?;
+
+                    let priority = if action == 4 {
+                        FramePriority::Urgent
+                    } else {
+                        FramePriority::Defer
+                    };
+
+                    Ok(PollResult::Stream(StreamResult::Frame {
+                        len: consumed_len,
+                        priority,
+                        payload: Some(payload),
+                    }))
+                }
                 other => Err(MiddlewareError::Fatal(format!(
                     "invalid streaming action code: {other}"
                 ))),
@@ -1536,6 +1704,7 @@ mod tests {
             PollResult::Stream(StreamResult::Frame {
                 len: prelude.len(),
                 priority: FramePriority::Defer,
+                payload: None,
             })
         );
     }
@@ -1974,7 +2143,7 @@ mod tests {
 
         // Streaming: FrameUrgent
         match session.poll(&[0x01, 0xAA, 0xBB, 0xCC]).unwrap() {
-            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+            PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
                 assert_eq!(len, 16);
                 assert_eq!(priority, FramePriority::Urgent);
             }
@@ -1983,7 +2152,7 @@ mod tests {
 
         // Streaming: FrameDefer
         match session.poll(&[0x02, 0xAA, 0xBB, 0xCC]).unwrap() {
-            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+            PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
                 assert_eq!(len, 32);
                 assert_eq!(priority, FramePriority::Defer);
             }
@@ -2078,7 +2247,7 @@ mod tests {
 
         // Urgent Ping packet -> Action 2 (FRAME_URGENT), Value = total packet bytes
         match session.poll(&ping_pkt).unwrap() {
-            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+            PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
                 assert_eq!(priority, FramePriority::Urgent);
                 assert_eq!(len, ping_pkt.len());
             }
@@ -2095,7 +2264,7 @@ mod tests {
             pkt.extend_from_slice(&kp);
 
             match session.poll(&pkt).unwrap() {
-                PollResult::Stream(StreamResult::Frame { len, priority }) => {
+                PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
                     assert_eq!(
                         priority,
                         FramePriority::Urgent,
@@ -2117,7 +2286,7 @@ mod tests {
         pkt.extend_from_slice(&normal);
 
         match session.poll(&pkt).unwrap() {
-            PollResult::Stream(StreamResult::Frame { len, priority }) => {
+            PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
                 assert_eq!(priority, FramePriority::Defer);
                 assert_eq!(len, pkt.len());
             }
@@ -2233,5 +2402,64 @@ mod tests {
         let res2 = test_intern.call(&mut store, symbol.len() as i32).unwrap();
         assert_eq!((res2 >> 32) as i32, 0);
         assert_eq!((res2 & 0xffff_ffff) as i32, 1);
+    }
+
+    #[tokio::test]
+    async fn test_minecraft_deflate_packet_decompress_and_recompress_roundtrip() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let wat_path = root.join("middlewares").join("minecraft.wat");
+        let wat_bytes = fs::read(&wat_path).expect("read minecraft.wat");
+        let mut session = WasmProtocolSession::from_wat(&wat_bytes).expect("session");
+        session.set_state(SessionState::Streaming);
+
+        // Construct raw Minecraft packet: ID 0x27 + 500 bytes of repetitive data (simulating chunk)
+        let mut raw_packet = Vec::new();
+        push_varint(0x27, &mut raw_packet);
+        for i in 0..500 {
+            raw_packet.push((i % 256) as u8);
+        }
+
+        // Compress with Deflate (threshold = 256)
+        let compressed_packet = deflate_recompress_packet(&raw_packet, 256);
+
+        // Feed to session.poll
+        let poll_res = session.poll(&compressed_packet).expect("poll");
+        match poll_res {
+            PollResult::Stream(StreamResult::Frame {
+                len,
+                priority,
+                payload,
+            }) => {
+                assert_eq!(
+                    len,
+                    compressed_packet.len(),
+                    "consumed_len must equal incoming wire bytes"
+                );
+                assert_eq!(priority, FramePriority::Defer);
+                let decompressed = payload.expect("must return decompressed payload");
+                assert_eq!(
+                    &decompressed, &raw_packet,
+                    "decompressed payload must match original raw packet"
+                );
+            }
+            other => panic!("expected Frame with payload, got {other:?}"),
+        }
+
+        // Test recompress_packet_stream
+        let framed_uncompressed = frame_uncompressed_packet(&raw_packet);
+        let mut pending = framed_uncompressed.clone();
+        let mut out = Vec::new();
+        recompress_packet_stream(&mut pending, &mut out, 256)
+            .await
+            .unwrap();
+        assert!(pending.is_empty());
+        // Verify output packet is compressed with Deflate
+        let (pkt_len, len_n) = read_varint(&out).unwrap();
+        let (data_len, dl_n) = read_varint(&out[len_n..]).unwrap();
+        assert_eq!(data_len as usize, raw_packet.len());
+        let decomp = deflate_decompress(&out[len_n + dl_n..len_n + pkt_len as usize]).unwrap();
+        assert_eq!(&decomp, &raw_packet);
     }
 }

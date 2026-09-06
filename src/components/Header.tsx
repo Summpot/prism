@@ -8,7 +8,6 @@ import {
 	Github,
 	LogOut,
 	Menu,
-	Network,
 	PlugZap,
 	ShieldCheck,
 	Unplug,
@@ -67,9 +66,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 		<div className="flex h-full flex-col">
 			<div className="border-b border-border px-6 py-5">
 				<div className="flex items-center gap-3">
-					<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
-						<Network className="h-5 w-5" />
-					</div>
+					<img
+						src="/logo192.png"
+						alt="Prism"
+						className="h-10 w-10 rounded-xl object-contain shadow-xs ring-1 ring-primary/20"
+					/>
 					<div>
 						<div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
 							Prism
@@ -148,7 +149,7 @@ export default function Header() {
 					>
 						<Menu className="h-5 w-5" />
 					</button>
-					<Network className="h-5 w-5 text-primary" />
+					<img src="/logo192.png" alt="Prism" className="h-6 w-6 rounded-md object-contain" />
 					<span className="text-sm font-semibold text-foreground">Prism</span>
 				</div>
 			</div>

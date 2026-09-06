@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use crate::prism::config::TunnelClientConfig;
 use crate::prism::middleware::{
     FramePriority, HandshakeResult, PollResult, SessionState, StreamResult, WasmProtocolSession,
-    get_default_middleware_wat,
+    frame_uncompressed_packet, get_default_middleware_wat, recompress_packet_stream,
 };
 use crate::prism::net;
 use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
@@ -646,12 +646,15 @@ async fn handle_player_connection(
             buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
         };
 
+        let is_minecraft = wasm_module.is_some();
+
         let (player_rd, mut player_wr) = player_socket.into_split();
         let (prpx_rd, prpx_wr) = tokio::io::split(prpx_stream);
 
-        let mut opt_reader = OptimizedReader::new(prpx_rd, decompressor_config)?;
+        let mut opt_reader = OptimizedReader::new(prpx_rd, decompressor_config)?
+            .with_stats_and_raw_mode(traffic_stats.clone(), !is_minecraft);
         let mut opt_writer = OptimizedWriter::new(prpx_wr, batcher_config, compressor_config)?
-            .with_stats(traffic_stats);
+            .with_stats(traffic_stats.clone());
 
         // Write initial handshake bytes if any
         if !initial_bytes.is_empty() {
@@ -660,10 +663,32 @@ async fn handle_player_connection(
         }
 
         // Inbound: PRPX -> Player (decompress)
-        let inbound = async move {
-            tokio::io::copy(&mut opt_reader, &mut player_wr).await?;
-            player_wr.shutdown().await?;
-            Ok::<(), anyhow::Error>(())
+        let inbound = {
+            let traffic_stats = traffic_stats.clone();
+            async move {
+                if is_minecraft {
+                    let mut pending = Vec::new();
+                    let mut buf = vec![0u8; 64 * 1024];
+                    loop {
+                        let n = opt_reader.read(&mut buf).await?;
+                        if n == 0 {
+                            break;
+                        }
+                        pending.extend_from_slice(&buf[..n]);
+                        let written =
+                            recompress_packet_stream(&mut pending, &mut player_wr, 256).await?;
+                        traffic_stats.add_raw_bytes(written as u64);
+                    }
+                    if !pending.is_empty() {
+                        player_wr.write_all(&pending).await?;
+                        traffic_stats.add_raw_bytes(pending.len() as u64);
+                    }
+                } else {
+                    tokio::io::copy(&mut opt_reader, &mut player_wr).await?;
+                }
+                player_wr.shutdown().await?;
+                Ok::<(), anyhow::Error>(())
+            }
         };
 
         let mut wasm_session = if let Some(module) = &wasm_module {
@@ -702,11 +727,22 @@ async fn handle_player_connection(
                             while offset < read_buf.len() {
                                 let slice = &read_buf[offset..];
                                 match sess.poll(slice) {
-                                    Ok(PollResult::Stream(StreamResult::Frame { len, priority })) => {
+                                    Ok(PollResult::Stream(StreamResult::Frame {
+                                        len,
+                                        priority,
+                                        payload,
+                                    })) => {
                                         if len == 0 || len > slice.len() {
                                             break;
                                         }
-                                        opt_writer.write_frame(&slice[..len], priority).await?;
+                                        if let Some(ref decompressed) = payload {
+                                            let framed = frame_uncompressed_packet(decompressed);
+                                            opt_writer
+                                                .write_frame_with_metric(len, &framed, priority)
+                                                .await?;
+                                        } else {
+                                            opt_writer.write_frame(&slice[..len], priority).await?;
+                                        }
                                         offset += len;
                                     }
                                     Ok(PollResult::Stream(StreamResult::NeedMoreData)) => {

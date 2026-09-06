@@ -100,15 +100,6 @@ pub async fn run(
     let tunnel_connector_enabled =
         cfg.tunnel.connector.is_some() && !cfg.tunnel.services.is_empty();
     let tunnel_client_enabled = cfg.tunnel.client.is_some();
-    let admin_enabled = !cfg.admin_addr.trim().is_empty()
-        && (proxy_enabled
-            || tunnel_server_enabled
-            || tunnel_connector_enabled
-            || tunnel_client_enabled
-            || matches!(
-                cfg.role,
-                config::PrismRole::Management | config::PrismRole::Worker
-            ));
 
     if !proxy_enabled
         && !tunnel_server_enabled
@@ -200,8 +191,9 @@ pub async fn run(
         paths.middleware_dir.clone(),
     )));
 
-    // Admin server.
-    if admin_enabled {
+    // Admin server (either external public/private or loopback ephemeral for internal stream).
+    let mut bound_admin_addr: Option<SocketAddr> = None;
+    if !cfg.admin_addr.trim().is_empty() {
         let admin_addr = net::normalize_bind_addr(&cfg.admin_addr);
         let addr: SocketAddr = admin_addr
             .parse()
@@ -232,8 +224,59 @@ pub async fn run(
             serve_frontend: true,
         };
 
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        bound_admin_addr = Some(local_addr);
         let shutdown = shutdown_rx.clone();
-        tasks.spawn(async move { admin::serve_with_shutdown(addr, admin_state, shutdown).await });
+        tasks.spawn(async move {
+            admin::serve_listener_with_shutdown(listener, admin_state, shutdown).await
+        });
+    } else if tunnel_server_enabled
+        || proxy_enabled
+        || matches!(
+            cfg.role,
+            config::PrismRole::Management | config::PrismRole::Worker
+        )
+    {
+        // No explicit admin_addr configured (e.g. to avoid public web exposure / compliance).
+        // Bind an internal loopback ephemeral listener for in-band tunnel management streams.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let local_addr = listener.local_addr()?;
+        bound_admin_addr = Some(local_addr);
+        tracing::info!(
+            internal_admin = %local_addr,
+            "admin: internal loopback listener started for in-band tunnel streams"
+        );
+
+        let admin_state = admin::AdminState {
+            sessions: sessions.clone(),
+            traffic: traffic.clone(),
+            config_path: resolved.path.clone(),
+            reload_tx: reload_tx.clone(),
+            tunnel: Some(tunnel_manager.clone()),
+            auth: admin::AdminAuth {
+                panel_token: management_plane
+                    .as_ref()
+                    .map(|plane| plane.panel_token().to_string()),
+                worker_token: if let Some(plane) = &management_plane {
+                    Some(plane.worker_token().to_string())
+                } else {
+                    worker_agent
+                        .as_ref()
+                        .map(|agent| agent.auth_token().to_string())
+                },
+            },
+            management: management_plane.clone(),
+            worker: worker_agent.clone(),
+            client: Some(client_controller.clone()),
+            auth_manager: Some(auth_manager.clone()),
+            serve_frontend: true,
+        };
+
+        let shutdown = shutdown_rx.clone();
+        tasks.spawn(async move {
+            admin::serve_listener_with_shutdown(listener, admin_state, shutdown).await
+        });
     }
 
     // Proxy listeners.
@@ -310,6 +353,7 @@ pub async fn run(
                 },
                 manager: tunnel_manager.clone(),
                 auth_manager: Some(auth_manager.clone()),
+                admin_addr: bound_admin_addr,
             })?;
 
             let shutdown = shutdown_rx.clone();

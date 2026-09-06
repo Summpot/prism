@@ -303,7 +303,10 @@ function ClientDashboardPage() {
 		if (!autoConnectPanel) return;
 		if (!status?.running || status.state !== "connected") return;
 
-		const targetUrl = managementUrl.trim() || deriveManagementUrl(serverAddr || status.server_addr);
+		const targetUrl =
+			status?.admin_url?.trim() ||
+			managementUrl.trim() ||
+			deriveManagementUrl(serverAddr || status.server_addr);
 		if (!targetUrl) return;
 
 		if (connection?.baseUrl === targetUrl && connection?.token === authToken.trim()) {
@@ -330,6 +333,7 @@ function ClientDashboardPage() {
 		status?.running,
 		status?.state,
 		status?.server_addr,
+		status?.admin_url,
 		managementUrl,
 		serverAddr,
 		authToken,
@@ -731,13 +735,6 @@ function ClientDashboardPage() {
 						>
 							<Menu className="h-4 w-4" />
 						</Button>
-
-						<img
-							src="/logo192.png"
-							alt="Prism"
-							data-tauri-drag-region
-							className="h-7 w-7 flex-none rounded-md object-contain shadow-xs ring-1 ring-primary/20"
-						/>
 
 						<div className="flex items-center gap-1.5 min-w-0" data-tauri-drag-region>
 							<h1

@@ -8,6 +8,7 @@ const MAGIC_REGISTER: &[u8; 4] = b"PRRG"; // Prism Reverse Register
 const MAGIC_PROXY_TCP: &[u8; 4] = b"PRPX"; // Prism Reverse Proxy (TCP stream)
 const MAGIC_PROXY_UDP: &[u8; 4] = b"PRPU"; // Prism Reverse Proxy (UDP datagram stream)
 pub const MAGIC_SERVICE_CATALOG: &[u8; 4] = b"PRSC"; // Prism Reverse Service Catalog
+pub const ADMIN_SERVICE_NAME: &str = "$admin";
 const PROTOCOL_V1: u8 = 1;
 
 pub const FLAG_RAW: u8 = 0x00;

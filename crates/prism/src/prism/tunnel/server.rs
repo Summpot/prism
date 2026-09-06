@@ -29,6 +29,7 @@ pub struct ServerOptions {
     pub websocket: WebSocketServerOptions,
     pub manager: Arc<Manager>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
+    pub admin_addr: Option<std::net::SocketAddr>,
 }
 
 pub struct Server {
@@ -87,8 +88,9 @@ impl Server {
                     let mgr = self.opts.manager.clone();
                     let token = self.opts.auth_token.clone();
                     let auth_mgr = self.opts.auth_manager.clone();
+                    let admin_addr = self.opts.admin_addr;
                     tokio::spawn(async move {
-                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr).await {
+                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr, admin_addr).await {
                             tracing::warn!(err=%err, "tunnel: session ended with error");
                         }
                     });
@@ -106,6 +108,7 @@ async fn handle_session(
     sess: Arc<dyn crate::prism::tunnel::transport::TransportSession>,
     auth_token: String,
     auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
+    admin_addr: Option<std::net::SocketAddr>,
 ) -> anyhow::Result<()> {
     let remote = sess
         .remote_addr()
@@ -200,8 +203,10 @@ async fn handle_session(
             let mgr = mgr.clone();
             let auth_mgr = auth_mgr.clone();
             let identity = identity.clone();
+            let admin_addr = admin_addr;
             tokio::spawn(async move {
-                if let Err(err) = handle_client_stream(mgr, client_stream, auth_mgr, identity).await
+                if let Err(err) =
+                    handle_client_stream(mgr, client_stream, auth_mgr, identity, admin_addr).await
                 {
                     tracing::debug!(err=%err, "tunnel: client stream relay ended");
                 }
@@ -234,9 +239,46 @@ async fn handle_client_stream(
     mut client_stream: crate::prism::tunnel::transport::BoxedStream,
     auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
     identity: Option<crate::prism::auth::AuthIdentity>,
+    admin_addr: Option<std::net::SocketAddr>,
 ) -> anyhow::Result<()> {
     let (kind, service_name, flags) =
         protocol::read_proxy_stream_header_with_flags(&mut client_stream).await?;
+
+    if service_name == protocol::ADMIN_SERVICE_NAME {
+        let is_admin = if let (Some(_), Some(id)) = (&auth_mgr, &identity) {
+            id.is_admin
+        } else if let Some(id) = &identity {
+            id.is_admin
+        } else {
+            // When auth_mgr is None and token matched, or no auth is enabled on server
+            true
+        };
+
+        if !is_admin {
+            tracing::warn!(
+                user = ?identity.as_ref().map(|i| &i.username),
+                "tunnel: unauthorized client stream blocked from accessing $admin"
+            );
+            return Ok(());
+        }
+
+        if let Some(addr) = admin_addr {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(mut admin_conn) => {
+                    let _ =
+                        tokio::io::copy_bidirectional(&mut client_stream, &mut admin_conn).await;
+                }
+                Err(err) => {
+                    tracing::warn!(addr = %addr, err = %err, "tunnel: failed to connect to local admin service");
+                }
+            }
+        } else {
+            tracing::warn!(
+                "tunnel: internal admin stream requested but admin_addr is not configured"
+            );
+        }
+        return Ok(());
+    }
 
     if let (Some(am), Some(id)) = (&auth_mgr, &identity) {
         if !am.can_access_service(id, &service_name) {
@@ -370,7 +412,7 @@ mod tests {
         let mgr_clone = mgr.clone();
         let sess_clone = sess.clone();
         let handle = tokio::spawn(async move {
-            let _ = handle_session(mgr_clone, sess_clone, "secret".into(), None).await;
+            let _ = handle_session(mgr_clone, sess_clone, "secret".into(), None, None).await;
         });
 
         // Wait briefly for registration
@@ -419,7 +461,7 @@ mod tests {
         let mgr_clone = mgr.clone();
         let sess_clone = sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_clone, sess_clone, "".into(), None).await;
+            let _ = handle_session(mgr_clone, sess_clone, "".into(), None, None).await;
         });
 
         // Initially empty
@@ -450,7 +492,7 @@ mod tests {
         let mgr_c = mgr.clone();
         let conn_sess_clone = conn_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None).await;
+            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None, None).await;
         });
 
         let (c1, c2) = w_handle.await.unwrap();
@@ -493,7 +535,7 @@ mod tests {
         let mgr_c = mgr.clone();
         let conn_sess_clone = conn_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None).await;
+            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None, None).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -517,7 +559,7 @@ mod tests {
         let mgr_cs = mgr.clone();
         let client_sess_clone = client_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_clone, "".into(), None).await;
+            let _ = handle_session(mgr_cs, client_sess_clone, "".into(), None, None).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -629,7 +671,8 @@ mod tests {
         let conn_sess_c = conn_sess.clone();
         let auth_c = auth.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c)).await;
+            let _ =
+                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -660,7 +703,7 @@ mod tests {
         let client_sess_c = client_sess.clone();
         let auth_cs = auth.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs)).await;
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None).await;
         });
 
         // 3. Verify that Alice ONLY sees mc-survival in catalog (secret-database filtered out)
@@ -688,5 +731,170 @@ mod tests {
 
         client_sess.close().await;
         conn_sess.close().await;
+    }
+
+    #[tokio::test]
+    async fn server_admin_stream_relays_to_local_admin() {
+        let mgr = Arc::new(Manager::new());
+
+        // 1. Start a mock local admin listener
+        let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let admin_addr = admin_listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = admin_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let n = stream.read(&mut buf).await.unwrap();
+                assert!(String::from_utf8_lossy(&buf[..n]).contains("GET /health"));
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}")
+                    .await
+                    .unwrap();
+            }
+        });
+
+        // 2. Client connects with admin session
+        let (client_accept_tx, client_accept_rx) = mpsc::channel(16);
+        let client_sess = Arc::new(MockSession::new(client_accept_rx, None));
+        let (mut client_reg_c, client_reg_s) = tokio::io::duplex(4096);
+        client_accept_tx.send(Box::new(client_reg_s)).await.unwrap();
+
+        let client_req = protocol::RegisterRequest {
+            client_type: "client".into(),
+            token: "admin_token".into(),
+            services: vec![],
+        };
+        tokio::spawn(async move {
+            protocol::write_register_request(&mut client_reg_c, &client_req)
+                .await
+                .unwrap();
+        });
+
+        let mgr_cs = mgr.clone();
+        let client_sess_clone = client_sess.clone();
+        tokio::spawn(async move {
+            let _ = handle_session(
+                mgr_cs,
+                client_sess_clone,
+                "admin_token".into(),
+                None,
+                Some(admin_addr),
+            )
+            .await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // 3. Client opens $admin stream
+        let (mut client_stream_c, client_stream_s) = tokio::io::duplex(4096);
+        client_accept_tx
+            .send(Box::new(client_stream_s))
+            .await
+            .unwrap();
+
+        protocol::write_proxy_stream_header(
+            &mut client_stream_c,
+            protocol::ProxyStreamKind::Tcp,
+            protocol::ADMIN_SERVICE_NAME,
+        )
+        .await
+        .unwrap();
+
+        // 4. Send HTTP request and read response
+        client_stream_c
+            .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut resp = vec![0u8; 1024];
+        let n = client_stream_c.read(&mut resp).await.unwrap();
+        let resp_str = String::from_utf8_lossy(&resp[..n]);
+        assert!(resp_str.contains("HTTP/1.1 200 OK"));
+        assert!(resp_str.contains("{\"ok\":true}"));
+
+        client_sess.close().await;
+    }
+
+    #[tokio::test]
+    async fn server_admin_stream_blocked_for_non_admin() {
+        use crate::prism::auth::{AuthConfig, AuthManager, UserRecord, UserRole};
+
+        let auth = Arc::new(AuthManager::new(AuthConfig::default(), None));
+        let user = UserRecord {
+            id: "u_bob".into(),
+            username: "bob".into(),
+            display_name: None,
+            avatar_url: None,
+            role: UserRole::Member, // NOT admin!
+            service_rules: vec!["*".into()],
+            created_at_unix_ms: 100,
+            last_login_unix_ms: 100,
+        };
+        auth.upsert_user(user).await.unwrap();
+        let (bob_token, _) = auth
+            .create_client_token("u_bob", "Bob PC", None)
+            .await
+            .unwrap();
+
+        let mgr = Arc::new(Manager::new());
+
+        let (client_accept_tx, client_accept_rx) = mpsc::channel(16);
+        let client_sess = Arc::new(MockSession::new(client_accept_rx, None));
+        let (mut client_reg_c, client_reg_s) = tokio::io::duplex(4096);
+        client_accept_tx.send(Box::new(client_reg_s)).await.unwrap();
+
+        let client_req = protocol::RegisterRequest {
+            client_type: "client".into(),
+            token: bob_token,
+            services: vec![],
+        };
+        tokio::spawn(async move {
+            protocol::write_register_request(&mut client_reg_c, &client_req)
+                .await
+                .unwrap();
+        });
+
+        let mgr_cs = mgr.clone();
+        let client_sess_clone = client_sess.clone();
+        let auth_clone = auth.clone();
+        // admin_addr is provided, but bob is Member, so should be blocked
+        let dummy_admin_addr = "127.0.0.1:59999".parse().unwrap();
+        tokio::spawn(async move {
+            let _ = handle_session(
+                mgr_cs,
+                client_sess_clone,
+                "".into(),
+                Some(auth_clone),
+                Some(dummy_admin_addr),
+            )
+            .await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let (mut client_stream_c, client_stream_s) = tokio::io::duplex(4096);
+        client_accept_tx
+            .send(Box::new(client_stream_s))
+            .await
+            .unwrap();
+
+        protocol::write_proxy_stream_header(
+            &mut client_stream_c,
+            protocol::ProxyStreamKind::Tcp,
+            protocol::ADMIN_SERVICE_NAME,
+        )
+        .await
+        .unwrap();
+
+        // Bob tries to send request, but stream is closed by server ACL
+        client_stream_c
+            .write_all(b"GET /health HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        let mut resp = [0u8; 128];
+        let n = client_stream_c.read(&mut resp).await.unwrap();
+        assert_eq!(n, 0); // Stream EOF because closed!
+
+        client_sess.close().await;
     }
 }

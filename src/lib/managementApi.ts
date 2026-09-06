@@ -292,6 +292,7 @@ export interface ClientStatusResponse {
 	fake_lan_broadcast: boolean;
 	known_services: ClientRegisteredService[];
 	stats: ClientTrafficStats;
+	admin_url?: string | null;
 }
 
 export interface StartClientPayload {

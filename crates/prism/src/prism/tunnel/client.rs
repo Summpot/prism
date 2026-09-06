@@ -46,6 +46,7 @@ pub struct Client {
     known_services: Arc<RwLock<Vec<RegisteredService>>>,
     broadcaster: Option<Arc<FakeLanBroadcaster>>,
     current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
+    admin_bridge: Arc<RwLock<Option<AdminTunnelBridge>>>,
     dial_timeout: Duration,
     traffic_stats: SharedTrafficStats,
 }
@@ -72,6 +73,7 @@ impl Client {
             known_services: Arc::new(RwLock::new(Vec::new())),
             broadcaster,
             current_sess: Arc::new(RwLock::new(None)),
+            admin_bridge: Arc::new(RwLock::new(None)),
             dial_timeout: Duration::from_secs(5),
             traffic_stats,
         })
@@ -119,6 +121,28 @@ impl Client {
         self.current_sess.read().await.is_some()
     }
 
+    /// Opens an in-band administrative stream over the active tunnel session.
+    pub async fn open_admin_stream(
+        &self,
+    ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+        let guard = self.current_sess.read().await;
+        let sess = match guard.as_ref() {
+            Some(s) => s.clone(),
+            None => anyhow::bail!("tunnel client is not currently connected to server"),
+        };
+
+        let mut stream = sess.open_stream().await?;
+        protocol::write_proxy_stream_header_with_flags(
+            &mut stream,
+            protocol::ProxyStreamKind::Tcp,
+            protocol::ADMIN_SERVICE_NAME,
+            protocol::FLAG_RAW,
+        )
+        .await?;
+
+        Ok(stream)
+    }
+
     /// Returns the active configuration.
     #[allow(dead_code)]
     pub fn config(&self) -> &TunnelClientConfig {
@@ -130,6 +154,11 @@ impl Client {
         let connected = self.is_connected().await;
         let services = self.known_services().await;
         let stats = self.traffic_stats.snapshot();
+        let admin_url = if let Some(b) = self.admin_bridge.read().await.as_ref() {
+            Some(format!("http://{}", b.addr()))
+        } else {
+            None
+        };
         ClientStatusSnapshot {
             running: true,
             state: if connected {
@@ -143,6 +172,7 @@ impl Client {
             fake_lan_broadcast: self.config.fake_lan_broadcast,
             known_services: services,
             stats,
+            admin_url,
         }
     }
 
@@ -317,6 +347,9 @@ impl Client {
 
             // Disconnected: clear active session and clear broadcaster list
             *self.current_sess.write().await = None;
+            if let Some(b) = self.admin_bridge.write().await.take() {
+                b.close();
+            }
             if let Some(broadcaster) = &self.broadcaster {
                 broadcaster.clear().await;
             }
@@ -335,6 +368,9 @@ impl Client {
 
         player_loop_handle.abort();
         *self.current_sess.write().await = None;
+        if let Some(b) = self.admin_bridge.write().await.take() {
+            b.close();
+        }
         if let Some(broadcaster) = &self.broadcaster {
             broadcaster.clear().await;
         }
@@ -392,6 +428,19 @@ impl Client {
 
         // Store active session for player connections
         *self.current_sess.write().await = Some(sess.clone());
+
+        match AdminTunnelBridge::start(self.current_sess.clone()).await {
+            Ok(bridge) => {
+                tracing::info!(
+                    admin_url = %format!("http://{}", bridge.addr()),
+                    "Tunnel admin bridge listening locally"
+                );
+                *self.admin_bridge.write().await = Some(bridge);
+            }
+            Err(err) => {
+                tracing::warn!(err = %err, "Failed to start local admin bridge");
+            }
+        }
 
         tracing::info!(
             "Connected to server {} ({}), registered sidecar client",
@@ -799,6 +848,84 @@ async fn handle_player_connection(
     Ok(())
 }
 
+/// Local loopback TCP bridge that tunnels incoming HTTP connections to the server's admin service.
+pub struct AdminTunnelBridge {
+    listen_addr: std::net::SocketAddr,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+}
+
+impl AdminTunnelBridge {
+    pub async fn start(
+        current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
+    ) -> anyhow::Result<Self> {
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:18080").await {
+            Ok(l) => l,
+            Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0").await?,
+        };
+        let listen_addr = listener.local_addr()?;
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+        let sess_holder = current_sess.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                    res = listener.accept() => {
+                        match res {
+                            Ok((mut local_stream, _)) => {
+                                let sess_guard = sess_holder.read().await;
+                                let sess = match sess_guard.as_ref() {
+                                    Some(s) => s.clone(),
+                                    None => continue,
+                                };
+                                drop(sess_guard);
+
+                                tokio::spawn(async move {
+                                    match sess.open_stream().await {
+                                        Ok(mut admin_stream) => {
+                                            if let Err(err) = protocol::write_proxy_stream_header_with_flags(
+                                                &mut admin_stream,
+                                                protocol::ProxyStreamKind::Tcp,
+                                                protocol::ADMIN_SERVICE_NAME,
+                                                protocol::FLAG_RAW,
+                                            ).await {
+                                                tracing::warn!(err = %err, "admin bridge: failed to write header");
+                                                return;
+                                            }
+                                            let _ = tokio::io::copy_bidirectional(&mut local_stream, &mut admin_stream).await;
+                                        }
+                                        Err(err) => {
+                                            tracing::warn!(err = %err, "admin bridge: failed to open stream to server");
+                                        }
+                                    }
+                                });
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            listen_addr,
+            shutdown_tx,
+        })
+    }
+
+    pub fn addr(&self) -> std::net::SocketAddr {
+        self.listen_addr
+    }
+
+    pub fn close(&self) {
+        let _ = self.shutdown_tx.send(true);
+    }
+}
+
 /// Status snapshot for the terminal client sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClientStatusSnapshot {
@@ -810,6 +937,8 @@ pub struct ClientStatusSnapshot {
     pub fake_lan_broadcast: bool,
     pub known_services: Vec<RegisteredService>,
     pub stats: TrafficStatsSnapshot,
+    #[serde(default)]
+    pub admin_url: Option<String>,
 }
 
 impl Default for ClientStatusSnapshot {
@@ -823,6 +952,7 @@ impl Default for ClientStatusSnapshot {
             fake_lan_broadcast: true,
             known_services: Vec::new(),
             stats: TrafficStatsSnapshot::default(),
+            admin_url: None,
         }
     }
 }
@@ -930,6 +1060,19 @@ impl ClientController {
             target.to_string(),
             message.to_string(),
         );
+    }
+
+    /// Opens an in-band administrative stream to the connected tunnel server.
+    #[allow(dead_code)]
+    pub async fn open_admin_stream(
+        &self,
+    ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+        let guard = self.active.read().await;
+        let client = match guard.as_ref() {
+            Some(inst) => inst.client.clone(),
+            None => anyhow::bail!("client sidecar is not running"),
+        };
+        client.open_admin_stream().await
     }
 }
 
@@ -1045,6 +1188,7 @@ mod tests {
             websocket: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
+            admin_addr: None,
         })
         .unwrap();
 
@@ -1235,6 +1379,7 @@ mod tests {
             websocket: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
+            admin_addr: None,
         })
         .unwrap();
 
@@ -1341,6 +1486,191 @@ mod tests {
         assert_eq!(&received, message);
 
         // Shutdown everything
+        shutdown_tx.send(true).unwrap();
+    }
+
+    struct MockAdminSession {
+        open_tx: tokio::sync::Mutex<
+            tokio::sync::mpsc::Sender<crate::prism::tunnel::transport::BoxedStream>,
+        >,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::prism::tunnel::transport::TransportSession for MockAdminSession {
+        async fn open_stream(
+            &self,
+        ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+            let (client_side, server_side) = tokio::io::duplex(4096);
+            self.open_tx
+                .lock()
+                .await
+                .send(Box::new(server_side))
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(Box::new(client_side))
+        }
+
+        async fn accept_stream(
+            &self,
+        ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+            Err(anyhow::anyhow!("not implemented"))
+        }
+
+        async fn close(&self) {}
+        fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+            None
+        }
+        fn local_addr(&self) -> Option<std::net::SocketAddr> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn test_client_open_admin_stream() {
+        use tokio::sync::mpsc;
+
+        let (server_open_tx, mut server_open_rx) = mpsc::channel(16);
+        let mock_sess = Arc::new(MockAdminSession {
+            open_tx: tokio::sync::Mutex::new(server_open_tx),
+        });
+
+        let client = Client::new(TunnelClientConfig {
+            server_addr: "127.0.0.1:12345".into(),
+            transport: "tcp".into(),
+            auth_token: "".into(),
+            listen_addr: "127.0.0.1:0".into(),
+            middleware: None,
+            fake_lan_broadcast: false,
+            motd_prefix: "".into(),
+            traffic_optimizer: None,
+            websocket: None,
+        })
+        .unwrap();
+
+        // Inject active session
+        *client.current_sess.write().await = Some(mock_sess);
+
+        // Spawn task to read from server side of opened stream
+        let reader = tokio::spawn(async move {
+            let mut st = server_open_rx.recv().await.expect("stream opened");
+            let (kind, svc, flags) = protocol::read_proxy_stream_header_with_flags(&mut st)
+                .await
+                .expect("header read");
+            assert_eq!(kind, protocol::ProxyStreamKind::Tcp);
+            assert_eq!(svc, protocol::ADMIN_SERVICE_NAME);
+            assert_eq!(flags, protocol::FLAG_RAW);
+        });
+
+        let _admin_stream = client
+            .open_admin_stream()
+            .await
+            .expect("open_admin_stream success");
+        reader.await.expect("reader passed");
+    }
+
+    #[tokio::test]
+    async fn test_client_e2e_in_band_admin_bridge() {
+        use crate::prism::tunnel::manager::Manager;
+        use crate::prism::tunnel::server::{QuicServerOptions, Server, ServerOptions};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // 1. Mock local admin server on the server side
+        let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let admin_addr = admin_listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = admin_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    if String::from_utf8_lossy(&buf[..n]).contains("GET /health") {
+                        let _ = stream
+                            .write_all(
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                            )
+                            .await;
+                    }
+                }
+            }
+        });
+
+        // 2. Start tunnel server (with admin_addr = Some(admin_addr))
+        let server_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server_listener.local_addr().unwrap().to_string();
+        drop(server_listener);
+
+        let mgr = Arc::new(Manager::new());
+        let server = Server::new(ServerOptions {
+            listen_addr: server_addr.clone(),
+            transport: "tcp".into(),
+            auth_token: "secret".into(),
+            quic: QuicServerOptions::default(),
+            websocket: Default::default(),
+            manager: mgr.clone(),
+            auth_manager: None,
+            admin_addr: Some(admin_addr),
+        })
+        .unwrap();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let srv_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let _ = server.listen_and_serve(srv_shutdown).await;
+        });
+
+        // 3. Start client connecting to tunnel server
+        let client_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client_listen_addr = client_listener.local_addr().unwrap().to_string();
+        drop(client_listener);
+
+        let client = Arc::new(
+            Client::new(TunnelClientConfig {
+                server_addr: server_addr.clone(),
+                transport: "tcp".into(),
+                auth_token: "secret".into(),
+                listen_addr: client_listen_addr,
+                middleware: None,
+                fake_lan_broadcast: false,
+                motd_prefix: "".into(),
+                traffic_optimizer: None,
+                websocket: None,
+            })
+            .unwrap(),
+        );
+
+        let c_clone = client.clone();
+        let client_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let _ = c_clone.run(client_shutdown).await;
+        });
+
+        // Wait for client to connect and bridge to become available
+        let mut admin_url = None;
+        for _ in 0..60 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let st = client.status().await;
+            if st.state == "connected" && st.admin_url.is_some() {
+                admin_url = st.admin_url;
+                break;
+            }
+        }
+        let admin_url = admin_url.expect("client should be connected with admin_url");
+
+        // 4. Request /health on the client's local admin_url
+        let mut stream = tokio::net::TcpStream::connect(admin_url.strip_prefix("http://").unwrap())
+            .await
+            .expect("should connect to local admin bridge");
+
+        stream
+            .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut buf = vec![0u8; 1024];
+        let n = stream.read(&mut buf).await.unwrap();
+        let resp = String::from_utf8_lossy(&buf[..n]);
+        assert!(resp.contains("HTTP/1.1 200 OK"));
+        assert!(resp.contains("{\"ok\":true}"));
+
         shutdown_tx.send(true).unwrap();
     }
 }

@@ -61,7 +61,7 @@ function RootContent() {
 
 	if (isClientShell) {
 		return (
-			<div className="min-h-screen bg-background text-foreground">
+			<div className="h-screen max-h-screen overflow-hidden bg-background text-foreground">
 				<Outlet />
 			</div>
 		);

@@ -74,6 +74,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     tauri::Builder::default()
         .setup(move |app| {
             let main_window = app.get_webview_window("main").expect("main window exists");
+            position_bottom_right(&main_window);
             let _ = main_window.show();
 
             // Build Tray Menu
@@ -174,4 +175,27 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     let _ = shutdown_tx.send(true);
     Ok(())
+}
+
+fn position_bottom_right(window: &tauri::WebviewWindow) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    if let Some(monitor) = monitor {
+        let screen_size = monitor.size();
+        let screen_pos = monitor.position();
+        let scale_factor = monitor.scale_factor();
+        if let Ok(win_size) = window.outer_size() {
+            // Margin in physical pixels (accounting for Windows taskbar ~48px and right margin ~16px)
+            let margin_x = (16.0 * scale_factor) as i32;
+            let margin_y = (48.0 * scale_factor) as i32;
+            let x = screen_pos.x + screen_size.width as i32 - win_size.width as i32 - margin_x;
+            let y = screen_pos.y + screen_size.height as i32 - win_size.height as i32 - margin_y;
+            let _ =
+                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+        }
+    }
 }

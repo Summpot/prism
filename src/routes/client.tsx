@@ -13,6 +13,7 @@ import {
 	Github,
 	Layers,
 	Menu,
+	Minus,
 	Plus,
 	Power,
 	Radio,
@@ -27,6 +28,8 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { closeWindow, isDesktopApp, minimizeWindow } from "@/lib/desktopWindow";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,18 +74,14 @@ export const Route = createFileRoute("/client")({
 
 function ClientDashboardPage() {
 	const { connection, saveConnection } = usePanelSession();
+	const isDesktop = useMemo(() => isDesktopApp(), []);
 	const effectiveConnection = useMemo(
 		() =>
 			connection ?? {
-				baseUrl:
-					typeof window !== "undefined" &&
-					((window as unknown as { __TAURI__?: unknown }).__TAURI__ ||
-						(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
-						? "http://127.0.0.1:8080"
-						: "",
+				baseUrl: isDesktop ? "http://127.0.0.1:8080" : "",
 				token: "",
 			},
-		[connection],
+		[connection, isDesktop],
 	);
 
 	const [status, setStatus] = useState<ClientStatusResponse | null>(null);
@@ -716,8 +715,11 @@ function ClientDashboardPage() {
 
 			<div className="mx-auto flex h-full max-h-screen w-full max-w-5xl flex-1 min-h-0 flex-col gap-2 p-2 sm:p-3 overflow-hidden">
 				{/* Compact Window Header Bar */}
-				<div className="flex flex-none items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-xs">
-					<div className="flex items-center gap-1.5 min-w-0">
+				<div
+					data-tauri-drag-region
+					className="flex flex-none select-none items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-xs cursor-default"
+				>
+					<div className="flex items-center gap-1.5 min-w-0" data-tauri-drag-region>
 						<Button
 							variant="ghost"
 							size="icon"
@@ -728,12 +730,18 @@ function ClientDashboardPage() {
 							<Menu className="h-4 w-4" />
 						</Button>
 
-						<div className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-primary/10 text-primary shadow-xs ring-1 ring-primary/20">
+						<div
+							data-tauri-drag-region
+							className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-primary/10 text-primary shadow-xs ring-1 ring-primary/20"
+						>
 							<Radio className="h-3.5 w-3.5" />
 						</div>
 
-						<div className="flex items-center gap-1.5 min-w-0">
-							<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
+						<div className="flex items-center gap-1.5 min-w-0" data-tauri-drag-region>
+							<h1
+								data-tauri-drag-region
+								className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground"
+							>
 								Prism Connect
 							</h1>
 							{isConnected ? (
@@ -805,6 +813,31 @@ function ClientDashboardPage() {
 							<span>Control Plane</span>
 							<ExternalLink className="h-2.5 w-2.5 opacity-60" />
 						</Link>
+
+						{isDesktop ? (
+							<div className="flex items-center gap-0.5 ml-0.5 pl-1 border-l border-border/60">
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									onClick={() => void minimizeWindow()}
+									className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
+									title="Minimize"
+									aria-label="Minimize window"
+								>
+									<Minus className="h-3.5 w-3.5" />
+								</Button>
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									onClick={() => void closeWindow()}
+									className="h-7 w-7 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
+									title="Close to tray"
+									aria-label="Close to tray"
+								>
+									<X className="h-3.5 w-3.5" />
+								</Button>
+							</div>
+						) : null}
 					</div>
 				</div>
 

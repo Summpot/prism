@@ -9,6 +9,7 @@ import {
 import { useEffect } from "react";
 
 import Header from "@/components/Header";
+import { isDesktopApp } from "@/lib/desktopWindow";
 import { PanelSessionProvider } from "@/lib/panelSession";
 
 import appCss from "../styles.css?url";
@@ -41,10 +42,7 @@ function RootContent() {
 	const location = useLocation();
 	const navigate = useNavigate();
 
-	const isDesktop =
-		typeof window !== "undefined" &&
-		(Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__) ||
-			Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+	const isDesktop = isDesktopApp();
 
 	useEffect(() => {
 		if (
@@ -61,7 +59,11 @@ function RootContent() {
 
 	if (isClientShell) {
 		return (
-			<div className="h-screen max-h-screen overflow-hidden bg-background text-foreground">
+			<div
+				className={`h-screen max-h-screen overflow-hidden bg-background text-foreground ${
+					isDesktop ? "border border-border/80" : ""
+				}`}
+			>
 				<Outlet />
 			</div>
 		);

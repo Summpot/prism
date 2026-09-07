@@ -40,6 +40,15 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         Some(&workdir),
     ));
 
+    let storage_path = workdir.join("prism.db");
+    let storage = match crate::prism::storage::StorageEngine::open(&storage_path) {
+        Ok(s) => Some(Arc::new(s)),
+        Err(err) => {
+            tracing::warn!(err = %err, "desktop: failed to open persistent storage; continuing without DB");
+            None
+        }
+    };
+
     let admin_state = crate::prism::admin::AdminState {
         sessions: Arc::new(crate::prism::telemetry::SessionRegistry::new()),
         optimizer: Arc::new(crate::prism::telemetry::OptimizerStatsRegistry::new()),
@@ -52,6 +61,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         client: Some(client_controller.clone()),
         auth_manager: Some(auth_manager),
         serve_frontend: false,
+        storage,
     };
 
     // Bind embedded admin/client server (prefer standard 8080, fallback to random free port)

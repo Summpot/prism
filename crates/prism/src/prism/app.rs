@@ -191,6 +191,15 @@ pub async fn run(
         paths.middleware_dir.clone(),
     )));
 
+    let storage_path = paths.workdir.join("prism.db");
+    let storage = match crate::prism::storage::StorageEngine::open(&storage_path) {
+        Ok(s) => Some(Arc::new(s)),
+        Err(err) => {
+            tracing::warn!(err = %err, "failed to open storage engine at {}; continuing without DB", storage_path.display());
+            None
+        }
+    };
+
     // Admin server (either external public/private or loopback ephemeral for internal stream).
     let mut bound_admin_addr: Option<SocketAddr> = None;
     if !cfg.admin_addr.trim().is_empty() {
@@ -222,6 +231,7 @@ pub async fn run(
             client: Some(client_controller.clone()),
             auth_manager: Some(auth_manager.clone()),
             serve_frontend: true,
+            storage: storage.clone(),
         };
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -271,6 +281,7 @@ pub async fn run(
             client: Some(client_controller.clone()),
             auth_manager: Some(auth_manager.clone()),
             serve_frontend: true,
+            storage: storage.clone(),
         };
 
         let shutdown = shutdown_rx.clone();

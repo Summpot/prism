@@ -312,6 +312,25 @@ export interface ClientStatusResponse {
 	known_services: ClientRegisteredService[];
 	stats: ClientOptimizerStats;
 	admin_url?: string | null;
+	active_profile_id?: string | null;
+	cumulative_stats?: ClientOptimizerStats | null;
+}
+
+export interface ClientConfigState {
+	profile_name: string;
+	server_addr: string;
+	transport: string;
+	auth_token: string;
+	listen_addr: string;
+	fake_lan_broadcast: boolean;
+	auto_connect_panel: boolean;
+}
+
+export interface ClientConfigResponse {
+	active_profile_id: string | null;
+	active_config: ClientConfigState;
+	profiles: ClientProfile[];
+	cumulative_stats: ClientOptimizerStats;
 }
 
 export interface StartClientPayload {
@@ -321,6 +340,8 @@ export interface StartClientPayload {
 	listen_addr?: string;
 	fake_lan_broadcast?: boolean;
 	motd_prefix?: string;
+	profile_id?: string;
+	profile_name?: string;
 }
 
 export interface ClientProfile {
@@ -335,6 +356,26 @@ export interface ClientProfile {
 
 export function getClientStatus(connection: PanelConnection) {
 	return apiRequest<ClientStatusResponse>(connection, "/client/status");
+}
+
+export function getClientConfig(connection: PanelConnection) {
+	return apiRequest<ClientConfigResponse>(connection, "/client/config");
+}
+
+export function saveClientConfig(
+	connection: PanelConnection,
+	payload: { active_profile_id?: string | null; active_config?: Partial<ClientConfigState> },
+) {
+	return apiRequest<{ ok: boolean }>(connection, "/client/config", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+}
+
+export function resetClientStats(connection: PanelConnection) {
+	return apiRequest<{ ok: boolean }>(connection, "/client/stats", {
+		method: "DELETE",
+	});
 }
 
 export function startClient(connection: PanelConnection, payload: StartClientPayload) {

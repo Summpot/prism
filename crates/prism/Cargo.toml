@@ -35,6 +35,7 @@ pin-project-lite = "0.2"
 quinn = "0.11"
 rand = "0.10"
 rcgen = "0.14"
+rusqlite = { version = "0.33", features = ["bundled"] }
 regex = "1.13"
 # Explicitly enable ring so the binary always has a usable rustls crypto backend.
 # Quinn may also enable aws-lc-rs; main installs ring as the process default.

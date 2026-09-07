@@ -29,6 +29,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { closeWindow, isDesktopApp, minimizeWindow } from "@/lib/desktopWindow";
+import { formatBytes } from "@/lib/format";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,19 +44,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatBytes } from "@/lib/format";
 import {
 	type ClientLogEntry,
+	type ClientOptimizerStats,
 	type ClientProfile,
 	type ClientStatusResponse,
 	type DeviceCodeResponse,
 	clearClientLogs,
+	getClientConfig,
 	getClientLogs,
 	getClientProfiles,
 	getClientStatus,
 	getHealth,
 	pollDeviceCode,
 	requestDeviceCode,
+	resetClientStats,
+	saveClientConfig,
 	saveClientProfiles,
 	startClient,
 	stopClient,
@@ -94,6 +98,12 @@ function ClientDashboardPage() {
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	]);
 	const prevWireRef = useRef(0);
+
+	// Cumulative lifetime stats state
+	const [cumulativeStats, setCumulativeStats] = useState<ClientOptimizerStats | null>(null);
+	const [statsViewMode, setStatsViewMode] = useState<"session" | "lifetime">("session");
+	const configLoadedRef = useRef(false);
+	const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	// Form / profile config state
 	const [serverAddr, setServerAddr] = useState("127.0.0.1:7000");
@@ -160,8 +170,8 @@ function ClientDashboardPage() {
 		getClientStatus(clientConnection)
 			.then((resp) => {
 				setStatus(resp);
-				if (resp.running && resp.server_addr) {
-					setServerAddr((prev) => prev || resp.server_addr);
+				if (resp.cumulative_stats) {
+					setCumulativeStats(resp.cumulative_stats);
 				}
 			})
 			.catch((err) => {
@@ -169,23 +179,51 @@ function ClientDashboardPage() {
 			});
 	}, [clientConnection]);
 
-	// Fetch profiles
-	const fetchProfiles = useCallback(() => {
-		getClientProfiles(clientConnection)
-			.then((list) => {
-				setProfiles(list);
-				if (list.length > 0 && !selectedProfileId) {
-					const first = list[0];
-					setSelectedProfileId(first.id);
-					setProfileName(first.name);
-					setServerAddr(first.server_addr);
-					setTransport(first.transport);
-					setAuthToken(first.auth_token);
-					setListenAddr(first.listen_addr);
-					setFakeLanBroadcast(first.fake_lan_broadcast);
+	// Fetch full client configuration from persistent redb on mount or after updates
+	const fetchClientConfigData = useCallback(() => {
+		getClientConfig(clientConnection)
+			.then((resp) => {
+				setProfiles(resp.profiles);
+				if (resp.cumulative_stats) {
+					setCumulativeStats(resp.cumulative_stats);
+				}
+
+				if (!configLoadedRef.current) {
+					configLoadedRef.current = true;
+					if (resp.active_config) {
+						setProfileName(resp.active_config.profile_name || "Default Realm");
+						setServerAddr(resp.active_config.server_addr || "127.0.0.1:7000");
+						setTransport(resp.active_config.transport || "quic");
+						setAuthToken(resp.active_config.auth_token || "");
+						setListenAddr(resp.active_config.listen_addr || "127.0.0.1:25565");
+						setFakeLanBroadcast(resp.active_config.fake_lan_broadcast ?? true);
+						setAutoConnectPanel(resp.active_config.auto_connect_panel ?? true);
+					}
+					if (resp.active_profile_id) {
+						setSelectedProfileId(resp.active_profile_id);
+					} else if (resp.profiles.length > 0) {
+						setSelectedProfileId(resp.profiles[0].id);
+					}
 				}
 			})
-			.catch(() => {});
+			.catch(() => {
+				getClientProfiles(clientConnection)
+					.then((list) => {
+						setProfiles(list);
+						if (list.length > 0 && !selectedProfileId && !configLoadedRef.current) {
+							configLoadedRef.current = true;
+							const first = list[0];
+							setSelectedProfileId(first.id);
+							setProfileName(first.name);
+							setServerAddr(first.server_addr);
+							setTransport(first.transport);
+							setAuthToken(first.auth_token);
+							setListenAddr(first.listen_addr);
+							setFakeLanBroadcast(first.fake_lan_broadcast);
+						}
+					})
+					.catch(() => {});
+			});
 	}, [clientConnection, selectedProfileId]);
 
 	// Fetch logs with deduplication to avoid unnecessary re-renders
@@ -214,9 +252,45 @@ function ClientDashboardPage() {
 
 	useEffect(() => {
 		fetchStatus();
-		fetchProfiles();
+		fetchClientConfigData();
 		fetchLogs();
-	}, [fetchStatus, fetchProfiles, fetchLogs]);
+	}, [fetchStatus, fetchClientConfigData, fetchLogs]);
+
+	// Debounced auto-save of active configuration to KV storage
+	useEffect(() => {
+		if (!configLoadedRef.current) return;
+		if (autoSaveTimerRef.current) {
+			clearTimeout(autoSaveTimerRef.current);
+		}
+		autoSaveTimerRef.current = setTimeout(() => {
+			saveClientConfig(clientConnection, {
+				active_profile_id: selectedProfileId || null,
+				active_config: {
+					server_addr: serverAddr,
+					transport,
+					auth_token: authToken,
+					listen_addr: listenAddr,
+					fake_lan_broadcast: fakeLanBroadcast,
+					auto_connect_panel: autoConnectPanel,
+				},
+			}).catch(() => {});
+		}, 500);
+
+		return () => {
+			if (autoSaveTimerRef.current) {
+				clearTimeout(autoSaveTimerRef.current);
+			}
+		};
+	}, [
+		clientConnection,
+		selectedProfileId,
+		serverAddr,
+		transport,
+		authToken,
+		listenAddr,
+		fakeLanBroadcast,
+		autoConnectPanel,
+	]);
 
 	// Poll status frequently
 	usePolling(fetchStatus, 1500, true);
@@ -395,6 +469,17 @@ function ClientDashboardPage() {
 			setAuthToken(p.auth_token);
 			setListenAddr(p.listen_addr);
 			setFakeLanBroadcast(p.fake_lan_broadcast);
+			saveClientConfig(clientConnection, {
+				active_profile_id: id,
+				active_config: {
+					server_addr: p.server_addr,
+					transport: p.transport,
+					auth_token: p.auth_token,
+					listen_addr: p.listen_addr,
+					fake_lan_broadcast: p.fake_lan_broadcast,
+					auto_connect_panel: autoConnectPanel,
+				},
+			}).catch(() => {});
 		}
 	};
 
@@ -425,16 +510,40 @@ function ClientDashboardPage() {
 		setProfiles(updated);
 		setSelectedProfileId(id);
 		await saveClientProfiles(clientConnection, updated).catch(() => {});
+		await saveClientConfig(clientConnection, {
+			active_profile_id: id,
+			active_config: {
+				server_addr: serverAddr,
+				transport,
+				auth_token: authToken,
+				listen_addr: listenAddr,
+				fake_lan_broadcast: fakeLanBroadcast,
+				auto_connect_panel: autoConnectPanel,
+			},
+		}).catch(() => {});
 	};
 
 	// Delete Profile
 	const handleDeleteProfile = async (id: string) => {
 		const updated = profiles.filter((p) => p.id !== id);
 		setProfiles(updated);
+		const nextActiveId = selectedProfileId === id ? updated[0]?.id || "" : selectedProfileId;
 		if (selectedProfileId === id) {
-			setSelectedProfileId(updated[0]?.id || "");
+			setSelectedProfileId(nextActiveId);
+			if (updated[0]) {
+				const first = updated[0];
+				setProfileName(first.name);
+				setServerAddr(first.server_addr);
+				setTransport(first.transport);
+				setAuthToken(first.auth_token);
+				setListenAddr(first.listen_addr);
+				setFakeLanBroadcast(first.fake_lan_broadcast);
+			}
 		}
 		await saveClientProfiles(clientConnection, updated).catch(() => {});
+		await saveClientConfig(clientConnection, {
+			active_profile_id: nextActiveId || null,
+		}).catch(() => {});
 	};
 
 	// Connect / Disconnect Handlers
@@ -448,9 +557,12 @@ function ClientDashboardPage() {
 				auth_token: authToken,
 				listen_addr: listenAddr,
 				fake_lan_broadcast: fakeLanBroadcast,
+				profile_id: selectedProfileId || undefined,
+				profile_name: profileName || undefined,
 			});
 			fetchStatus();
 			fetchLogs();
+			fetchClientConfigData();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -469,6 +581,15 @@ function ClientDashboardPage() {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setActionLoading(false);
+		}
+	};
+
+	const handleResetStats = async () => {
+		try {
+			await resetClientStats(clientConnection);
+			fetchStatus();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
 		}
 	};
 
@@ -719,9 +840,9 @@ function ClientDashboardPage() {
 								</Badge>
 							</div>
 							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">
-								<span className="truncate">{status?.server_addr || serverAddr || "No Server"}</span>
+								<span className="truncate">{serverAddr || status?.server_addr || "No Server"}</span>
 								<span>&rarr;</span>
-								<span className="truncate">{status?.listen_addr || listenAddr}</span>
+								<span className="truncate">{listenAddr || status?.listen_addr}</span>
 							</div>
 						</div>
 					</div>
@@ -751,30 +872,82 @@ function ClientDashboardPage() {
 				{/* Connected Metrics Strip */}
 				{isConnected ? (
 					<div className="mt-2 border-t border-border/60 pt-1.5 space-y-1.5">
+						{/* Mode Switcher */}
+						<div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+							<span className="font-semibold uppercase tracking-wider text-[9px]">
+								{statsViewMode === "session" ? "Current Session" : "Cumulative Lifetime"}
+							</span>
+							<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
+								<button
+									type="button"
+									onClick={() => setStatsViewMode("session")}
+									className={cn(
+										"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
+										statsViewMode === "session"
+											? "bg-primary text-primary-foreground font-semibold"
+											: "text-muted-foreground hover:text-foreground",
+									)}
+								>
+									Session
+								</button>
+								<button
+									type="button"
+									onClick={() => setStatsViewMode("cumulative")}
+									className={cn(
+										"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
+										statsViewMode === "cumulative"
+											? "bg-primary text-primary-foreground font-semibold"
+											: "text-muted-foreground hover:text-foreground",
+									)}
+								>
+									Lifetime
+								</button>
+							</div>
+						</div>
+
 						{/* 4-col compact stats */}
 						<div className="grid grid-cols-4 gap-1 text-center font-mono">
 							<div className="rounded bg-muted/40 px-1 py-0.5">
-								<div className="text-[9px] uppercase text-muted-foreground">Uptime</div>
+								<div className="text-[9px] uppercase text-muted-foreground">
+									{statsViewMode === "session" ? "Uptime" : "Sessions"}
+								</div>
 								<div className="text-[11px] font-bold text-foreground truncate">
-									{formatUptime(uptimeSeconds)}
+									{statsViewMode === "session"
+										? formatUptime(uptimeSeconds)
+										: (cumulativeStats?.sessions_count ?? 0) + 1}
 								</div>
 							</div>
 							<div className="rounded bg-muted/40 px-1 py-0.5">
 								<div className="text-[9px] uppercase text-muted-foreground">Raw</div>
 								<div className="text-[11px] font-bold text-foreground truncate">
-									{formatBytes(rawBytes)}
+									{formatBytes(
+										statsViewMode === "session"
+											? rawBytes
+											: (cumulativeStats?.raw_bytes ?? 0) + rawBytes,
+									)}
 								</div>
 							</div>
 							<div className="rounded bg-muted/40 px-1 py-0.5">
 								<div className="text-[9px] uppercase text-muted-foreground">Wire</div>
 								<div className="text-[11px] font-bold text-foreground truncate">
-									{formatBytes(wireBytes)}
+									{formatBytes(
+										statsViewMode === "session"
+											? wireBytes
+											: (cumulativeStats?.wire_bytes ?? 0) + wireBytes,
+									)}
 								</div>
 							</div>
 							<div className="rounded bg-muted/40 px-1 py-0.5">
 								<div className="text-[9px] uppercase text-emerald-500">Saved</div>
 								<div className="text-[11px] font-bold text-emerald-500 truncate">
-									{savedRatio.toFixed(1)}%
+									{statsViewMode === "session"
+										? `${savedRatio.toFixed(1)}%`
+										: (() => {
+												const r = (cumulativeStats?.raw_bytes ?? 0) + rawBytes;
+												const w = (cumulativeStats?.wire_bytes ?? 0) + wireBytes;
+												const ratio = r > 0 && w <= r ? ((r - w) / r) * 100 : 0;
+												return `${ratio.toFixed(1)}%`;
+											})()}
 								</div>
 							</div>
 						</div>
@@ -860,6 +1033,35 @@ function ClientDashboardPage() {
 								</div>
 							) : null}
 						</div>
+					</div>
+				) : null}
+
+				{!isConnected && cumulativeStats && cumulativeStats.raw_bytes > 0 ? (
+					<div className="mt-2 border-t border-border/60 pt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+						<div className="flex items-center gap-1.5 truncate">
+							<span className="font-semibold uppercase tracking-wider text-[9px] text-primary">
+								Lifetime Persisted
+							</span>
+							<span className="font-mono truncate">
+								{formatBytes(cumulativeStats.raw_bytes)} raw &bull;{" "}
+								{formatBytes(cumulativeStats.wire_bytes)} wire &bull;{" "}
+								<span className="text-emerald-500 font-bold">
+									{((cumulativeStats.saved_ratio || 0) * 100).toFixed(1)}% saved
+								</span>
+								<span className="text-muted-foreground/70 ml-1">
+									({cumulativeStats.sessions_count} sessions)
+								</span>
+							</span>
+						</div>
+						<Button
+							variant="ghost"
+							size="xs"
+							onClick={handleResetStats}
+							className="h-5 px-1.5 text-[9px] text-muted-foreground hover:text-destructive cursor-pointer"
+							title="Reset cumulative statistics"
+						>
+							Reset Stats
+						</Button>
 					</div>
 				) : null}
 			</div>

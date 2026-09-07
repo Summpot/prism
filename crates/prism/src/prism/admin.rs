@@ -38,6 +38,7 @@ pub struct AdminState {
     pub client: Option<Arc<tunnel::client::ClientController>>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
     pub serve_frontend: bool,
+    pub storage: Option<Arc<crate::prism::storage::StorageEngine>>,
 }
 
 #[allow(dead_code)]
@@ -99,6 +100,11 @@ pub(crate) fn build_router(state: AdminState) -> Router {
             "/client/profiles",
             get(client_get_profiles).post(client_save_profiles),
         )
+        .route(
+            "/client/config",
+            get(client_get_config).post(client_save_config),
+        )
+        .route("/client/stats", axum::routing::delete(client_reset_stats))
         .route("/client/logs", get(client_logs).delete(client_clear_logs))
         .route("/middlewares/{name}/data", post(post_middleware_data))
         .route("/auth/providers", get(auth_providers))
@@ -220,6 +226,10 @@ pub struct StartClientRequest {
     pub motd_prefix: String,
     #[serde(default)]
     pub optimizer: Option<crate::prism::config::OptimizerClientConfig>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub profile_name: Option<String>,
 }
 
 fn default_transport() -> String {
@@ -235,7 +245,7 @@ fn default_motd_prefix() -> String {
     "[Prism] ".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientProfile {
     pub id: String,
     pub name: String,
@@ -261,22 +271,43 @@ fn profiles_path() -> PathBuf {
 }
 
 async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let (active_profile_id, cumulative_stats) = if let Some(ref storage) = st.storage {
+        (
+            storage.load_active_profile_id().ok().flatten(),
+            Some(storage.load_cumulative_stats().unwrap_or_default()),
+        )
+    } else {
+        (None, None)
+    };
+
     if let Some(ref client) = st.client {
         let status = client.status().await;
-        (
-            StatusCode::OK,
-            Json(serde_json::to_value(status).unwrap_or_default()),
-        )
-            .into_response()
+        let mut val = serde_json::to_value(status).unwrap_or_default();
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "active_profile_id".into(),
+                serde_json::to_value(active_profile_id).unwrap_or(serde_json::Value::Null),
+            );
+            obj.insert(
+                "cumulative_stats".into(),
+                serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        (StatusCode::OK, Json(val)).into_response()
     } else {
-        (
-            StatusCode::OK,
-            Json(
-                serde_json::to_value(tunnel::client::ClientStatusSnapshot::default())
-                    .unwrap_or_default(),
-            ),
-        )
-            .into_response()
+        let mut val = serde_json::to_value(tunnel::client::ClientStatusSnapshot::default())
+            .unwrap_or_default();
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "active_profile_id".into(),
+                serde_json::to_value(active_profile_id).unwrap_or(serde_json::Value::Null),
+            );
+            obj.insert(
+                "cumulative_stats".into(),
+                serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        (StatusCode::OK, Json(val)).into_response()
     }
 }
 
@@ -291,6 +322,52 @@ async fn client_start(
         )
             .into_response();
     };
+
+    // Automatically persist active config and profile when starting client
+    if let Some(ref storage) = st.storage {
+        let profile_name = payload
+            .profile_name
+            .clone()
+            .unwrap_or_else(|| "Default Realm".to_string());
+        let form_state = crate::prism::storage::ClientConfigState {
+            profile_name: profile_name.clone(),
+            server_addr: payload.server_addr.clone(),
+            transport: payload.transport.clone(),
+            auth_token: payload.auth_token.clone(),
+            listen_addr: payload.listen_addr.clone(),
+            fake_lan_broadcast: payload.fake_lan_broadcast,
+            auto_connect_panel: true,
+        };
+        let _ = storage.save_active_config(&form_state);
+
+        let profile_id = payload
+            .profile_id
+            .clone()
+            .unwrap_or_else(|| format!("profile-{}", crate::prism::telemetry::now_unix_ms()));
+        let _ = storage.save_active_profile_id(&profile_id);
+
+        if let Ok(mut profiles) = storage.load_profiles() {
+            if let Some(p) = profiles.iter_mut().find(|item| item.id == profile_id) {
+                p.name = profile_name;
+                p.server_addr = payload.server_addr.clone();
+                p.transport = payload.transport.clone();
+                p.auth_token = payload.auth_token.clone();
+                p.listen_addr = payload.listen_addr.clone();
+                p.fake_lan_broadcast = payload.fake_lan_broadcast;
+            } else if profiles.is_empty() {
+                profiles.push(ClientProfile {
+                    id: profile_id,
+                    name: profile_name,
+                    server_addr: payload.server_addr.clone(),
+                    transport: payload.transport.clone(),
+                    auth_token: payload.auth_token.clone(),
+                    listen_addr: payload.listen_addr.clone(),
+                    fake_lan_broadcast: payload.fake_lan_broadcast,
+                });
+            }
+            let _ = storage.save_profiles(&profiles);
+        }
+    }
 
     let cfg = crate::prism::config::TunnelClientConfig {
         server_addr: payload.server_addr,
@@ -316,6 +393,10 @@ async fn client_start(
 
 async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     if let Some(ref client) = st.client {
+        if let Some(ref storage) = st.storage {
+            let snap = client.status().await;
+            let _ = storage.record_session_stats(&snap.stats);
+        }
         client.stop().await;
         (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
     } else {
@@ -327,7 +408,12 @@ async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     }
 }
 
-async fn client_get_profiles() -> impl IntoResponse {
+async fn client_get_profiles(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(ref storage) = st.storage {
+        if let Ok(profiles) = storage.load_profiles() {
+            return (StatusCode::OK, Json(profiles));
+        }
+    }
     let path = profiles_path();
     if let Ok(data) = std::fs::read_to_string(&path) {
         if let Ok(profiles) = serde_json::from_str::<Vec<ClientProfile>>(&data) {
@@ -337,7 +423,19 @@ async fn client_get_profiles() -> impl IntoResponse {
     (StatusCode::OK, Json(Vec::<ClientProfile>::new()))
 }
 
-async fn client_save_profiles(Json(profiles): Json<Vec<ClientProfile>>) -> impl IntoResponse {
+async fn client_save_profiles(
+    State(st): State<Arc<AdminState>>,
+    Json(profiles): Json<Vec<ClientProfile>>,
+) -> impl IntoResponse {
+    if let Some(ref storage) = st.storage {
+        if let Err(err) = storage.save_profiles(&profiles) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            );
+        }
+        return (StatusCode::OK, Json(serde_json::json!({ "ok": true })));
+    }
     let path = profiles_path();
     if let Ok(data) = serde_json::to_string_pretty(&profiles) {
         if let Err(err) = std::fs::write(&path, data) {
@@ -346,6 +444,53 @@ async fn client_save_profiles(Json(profiles): Json<Vec<ClientProfile>>) -> impl 
                 Json(serde_json::json!({ "error": err.to_string() })),
             );
         }
+    }
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+async fn client_get_config(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(ref storage) = st.storage {
+        let snapshot = storage.get_client_config_snapshot();
+        return (StatusCode::OK, Json(snapshot));
+    }
+    (
+        StatusCode::OK,
+        Json(crate::prism::storage::ClientConfigResponse {
+            active_profile_id: None,
+            active_config: crate::prism::storage::ClientConfigState::default(),
+            profiles: Vec::new(),
+            cumulative_stats: tunnel::optimizer::OptimizerStatsSnapshot::default(),
+        }),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveConfigRequest {
+    #[serde(default)]
+    pub active_profile_id: Option<String>,
+    #[serde(default)]
+    pub active_config: Option<crate::prism::storage::ClientConfigState>,
+}
+
+async fn client_save_config(
+    State(st): State<Arc<AdminState>>,
+    Json(payload): Json<SaveConfigRequest>,
+) -> impl IntoResponse {
+    if let Some(ref storage) = st.storage {
+        if let Some(ref id) = payload.active_profile_id {
+            let _ = storage.save_active_profile_id(id);
+        }
+        if let Some(ref cfg) = payload.active_config {
+            let _ = storage.save_active_config(cfg);
+        }
+        return (StatusCode::OK, Json(serde_json::json!({ "ok": true })));
+    }
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+async fn client_reset_stats(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    if let Some(ref storage) = st.storage {
+        let _ = storage.reset_cumulative_stats();
     }
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
 }
@@ -1024,6 +1169,7 @@ mod tests {
             client: None,
             auth_manager: None,
             serve_frontend: false,
+            storage: None,
         };
 
         let app = build_router(state);
@@ -1106,6 +1252,7 @@ mod tests {
             client: None,
             auth_manager: None,
             serve_frontend: false,
+            storage: None,
         };
 
         let app = build_router(state);
@@ -1157,6 +1304,7 @@ mod tests {
             client: Some(client_controller),
             auth_manager: None,
             serve_frontend: false,
+            storage: None,
         };
 
         let app = build_router(state);
@@ -1283,6 +1431,7 @@ mod tests {
             client: None,
             auth_manager: None,
             serve_frontend: false,
+            storage: None,
         };
 
         let app = build_router(state);
@@ -1307,5 +1456,119 @@ mod tests {
         assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
         let _ = shutdown_tx.send(true);
+    }
+
+    #[tokio::test]
+    async fn test_client_config_and_stats_persistence_endpoints() {
+        let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let client_controller = Arc::new(tunnel::client::ClientController::new(None));
+
+        let rand_id = rand::random::<u64>();
+        let db_path = std::env::temp_dir().join(format!("prism_admin_test_{}.db", rand_id));
+        let storage = Arc::new(crate::prism::storage::StorageEngine::open(&db_path).unwrap());
+
+        let state = AdminState {
+            sessions: Arc::new(telemetry::SessionRegistry::new()),
+            optimizer: Arc::new(telemetry::OptimizerStatsRegistry::new()),
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth::default(),
+            management: None,
+            worker: None,
+            client: Some(client_controller),
+            auth_manager: None,
+            serve_frontend: false,
+            storage: Some(storage.clone()),
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(wait_shutdown(shutdown_rx))
+                .await
+                .unwrap();
+        });
+
+        let http = reqwest::Client::new();
+
+        // 1. Initial /client/config snapshot
+        let resp = http
+            .get(format!("http://{addr}/client/config"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let cfg_resp: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(cfg_resp["active_profile_id"], serde_json::Value::Null);
+        assert_eq!(cfg_resp["profiles"].as_array().unwrap().len(), 0);
+
+        // 2. Start client with specific remote and profile metadata -> should auto-persist
+        let start_resp = http
+            .post(format!("http://{addr}/client/start"))
+            .json(&serde_json::json!({
+                "server_addr": "relay.mycustomserver.net:7000",
+                "transport": "quic",
+                "auth_token": "token123",
+                "listen_addr": "127.0.0.1:25565",
+                "profile_id": "prof-custom-1",
+                "profile_name": "My Custom Realm"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(start_resp.status(), reqwest::StatusCode::OK);
+
+        // 3. Verify /client/config reflects newly persisted active profile and config
+        let resp2 = http
+            .get(format!("http://{addr}/client/config"))
+            .send()
+            .await
+            .unwrap();
+        let cfg_resp2: serde_json::Value = resp2.json().await.unwrap();
+        assert_eq!(cfg_resp2["active_profile_id"], "prof-custom-1");
+        assert_eq!(
+            cfg_resp2["active_config"]["server_addr"],
+            "relay.mycustomserver.net:7000"
+        );
+        assert_eq!(
+            cfg_resp2["active_config"]["profile_name"],
+            "My Custom Realm"
+        );
+        let profiles = cfg_resp2["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0]["id"], "prof-custom-1");
+
+        // 4. Check status includes active_profile_id and cumulative_stats
+        let status_resp = http
+            .get(format!("http://{addr}/client/status"))
+            .send()
+            .await
+            .unwrap();
+        let status_json: serde_json::Value = status_resp.json().await.unwrap();
+        assert_eq!(status_json["active_profile_id"], "prof-custom-1");
+        assert!(status_json.get("cumulative_stats").is_some());
+
+        // 5. Stop client and test /client/stats reset
+        let stop_resp = http
+            .post(format!("http://{addr}/client/stop"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(stop_resp.status(), reqwest::StatusCode::OK);
+
+        let reset_resp = http
+            .delete(format!("http://{addr}/client/stats"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reset_resp.status(), reqwest::StatusCode::OK);
+
+        let _ = shutdown_tx.send(true);
+        let _ = std::fs::remove_file(db_path);
     }
 }

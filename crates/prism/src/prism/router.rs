@@ -306,8 +306,7 @@ fn resolve_route_for_host(rt: &CompiledRoute, host: &str) -> Option<Resolution> 
 ///
 /// - trim + lowercase
 /// - strip trailing FQDN dots
-/// - strip a trailing `:port` when the port is all digits (Minecraft clients often
-///   put `host:port` into the handshake address string)
+/// - strip a trailing `:port` when the port is all digits
 /// - unwrap `[ipv6]:port` / `[ipv6]` brackets
 pub(crate) fn normalize_routing_host(host: &str) -> String {
     let mut h = host.trim().trim_matches('\0').to_ascii_lowercase();

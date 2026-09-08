@@ -501,7 +501,7 @@ pub async fn run(
                 let shutdown = shutdown_rx.clone();
                 tasks.spawn(async move {
                     if let Err(err) = broadcaster.run(shutdown).await {
-                        tracing::warn!(err = %err, "mdns: minecraft fake lan broadcaster exited with error");
+                        tracing::warn!(err = %err, "mdns: fake lan broadcaster exited with error");
                     }
                     Ok(())
                 });

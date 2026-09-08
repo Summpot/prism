@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use crate::prism::config::TunnelClientConfig;
 use crate::prism::middleware::{
     FramePriority, HandshakeResult, PollResult, SessionState, StreamResult, WasmProtocolSession,
-    frame_uncompressed_packet, get_default_middleware_wat, recompress_packet_stream,
+    get_default_middleware_wat,
 };
 use crate::prism::net;
 use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
@@ -859,14 +859,14 @@ async fn handle_player_connection(
             buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
         };
 
-        let is_minecraft = wasm_module.is_some();
+        let has_wasm = wasm_module.is_some();
 
         let (player_rd, mut player_wr) = player_socket.into_split();
         let (prpx_rd, prpx_wr) = tokio::io::split(prpx_stream);
 
         let mut opt_reader = OptimizedReader::new(prpx_rd, decompressor_config)?
             .with_direction(TrafficDirection::Downlink)
-            .with_stats_and_raw_mode(optimizer_stats.clone(), !is_minecraft);
+            .with_stats_and_raw_mode(optimizer_stats.clone(), !has_wasm);
         let mut opt_writer = OptimizedWriter::new(prpx_wr, batcher_config, compressor_config)?
             .with_direction(TrafficDirection::Uplink)
             .with_stats(optimizer_stats.clone());
@@ -877,11 +877,20 @@ async fn handle_player_connection(
             opt_writer.flush().await?;
         }
 
-        // Inbound: PRPX -> Player (decompress)
+        // Inbound: PRPX -> Player (decompress & generic WASM egress transform)
         let inbound = {
             let optimizer_stats = optimizer_stats.clone();
+            let mut egress_session = if let Some(module) = &wasm_module {
+                let mut s = WasmProtocolSession::new(&wasm_engine, module).ok();
+                if let Some(ref mut sess) = s {
+                    sess.set_state(SessionState::StreamingEgress);
+                }
+                s
+            } else {
+                None
+            };
             async move {
-                if is_minecraft {
+                if let Some(ref mut sess) = egress_session {
                     let mut pending = Vec::new();
                     let mut buf = vec![0u8; 64 * 1024];
                     loop {
@@ -890,8 +899,9 @@ async fn handle_player_connection(
                             break;
                         }
                         pending.extend_from_slice(&buf[..n]);
-                        let written =
-                            recompress_packet_stream(&mut pending, &mut player_wr, 256).await?;
+                        let written = sess
+                            .process_egress_stream(&mut pending, &mut player_wr)
+                            .await?;
                         optimizer_stats
                             .add_direction_raw_bytes(TrafficDirection::Downlink, written as u64);
                     }
@@ -954,10 +964,9 @@ async fn handle_player_connection(
                                         if len == 0 || len > slice.len() {
                                             break;
                                         }
-                                        if let Some(ref decompressed) = payload {
-                                            let framed = frame_uncompressed_packet(decompressed);
+                                        if let Some(ref payload) = payload {
                                             opt_writer
-                                                .write_frame_with_metric(len, &framed, priority)
+                                                .write_frame_with_metric(len, payload, priority)
                                                 .await?;
                                         } else {
                                             opt_writer.write_frame(&slice[..len], priority).await?;

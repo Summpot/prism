@@ -284,8 +284,8 @@
       )
     )
 
-    ;; State 1: Streaming
-    (if (i32.eq (local.get $state) (i32.const 1))
+    ;; State 1: Streaming Ingress & State 2: Streaming Egress
+    (if (i32.or (i32.eq (local.get $state) (i32.const 1)) (i32.eq (local.get $state) (i32.const 2)))
       (then
         (return (call $poll_streaming (local.get $buf_ptr) (local.get $buf_len)))
       )

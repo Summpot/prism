@@ -89,6 +89,15 @@
   (memory (export "memory") 64)
 
   ;; ---------------------------------------------------------------------------
+  ;; Static Data Segments (Page 1: 65600..65800)
+  ;; ---------------------------------------------------------------------------
+  (data (i32.const 65600) "224.0.2.60:4445,255.255.255.255:4445,127.0.0.1:4445")
+  (data (i32.const 65660) "[MOTD]{prefix}{name}[/MOTD][AD]{port}[/AD]")
+  (data (i32.const 65710) "[MOTD]")
+  (data (i32.const 65720) "[/MOTD][AD]")
+  (data (i32.const 65740) "[/AD]")
+
+  ;; ---------------------------------------------------------------------------
   ;; Internal State Globals
   ;; ---------------------------------------------------------------------------
 
@@ -185,6 +194,75 @@
         (br $loop)
       )
     )
+  )
+
+  ;; write_varint(buf_ptr, val) -> nbytes:i32
+  (func $write_varint (param $buf_ptr i32) (param $val i32) (result i32)
+    (local $p i32)
+    (local $b i32)
+    (local $v i32)
+    (local.set $p (local.get $buf_ptr))
+    (local.set $v (local.get $val))
+    (loop $loop
+      (local.set $b (i32.and (local.get $v) (i32.const 0x7f)))
+      (local.set $v (i32.shr_u (local.get $v) (i32.const 7)))
+      (if (i32.ne (local.get $v) (i32.const 0))
+        (then
+          (local.set $b (i32.or (local.get $b) (i32.const 0x80)))
+        )
+      )
+      (i32.store8 (local.get $p) (local.get $b))
+      (local.set $p (i32.add (local.get $p) (i32.const 1)))
+      (br_if $loop (i32.ne (local.get $v) (i32.const 0)))
+    )
+    (i32.sub (local.get $p) (local.get $buf_ptr))
+  )
+
+  ;; write_u32_ascii(ptr, val) -> len (writes decimal ASCII representation of val to ptr)
+  (func $write_u32_ascii (param $ptr i32) (param $val i32) (result i32)
+    (local $temp_ptr i32)
+    (local $v i32)
+    (local $digit i32)
+    (local $len i32)
+    (local $i i32)
+
+    (if (i32.eq (local.get $val) (i32.const 0))
+      (then
+        (i32.store8 (local.get $ptr) (i32.const 48)) ;; '0'
+        (return (i32.const 1))
+      )
+    )
+
+    ;; Write digits backwards into scratch buffer at 131072
+    (local.set $temp_ptr (i32.const 131072))
+    (local.set $v (local.get $val))
+    (local.set $len (i32.const 0))
+
+    (loop $digit_loop
+      (local.set $digit (i32.rem_u (local.get $v) (i32.const 10)))
+      (i32.store8
+        (i32.add (local.get $temp_ptr) (local.get $len))
+        (i32.add (local.get $digit) (i32.const 48))
+      )
+      (local.set $len (i32.add (local.get $len) (i32.const 1)))
+      (local.set $v (i32.div_u (local.get $v) (i32.const 10)))
+      (br_if $digit_loop (i32.gt_u (local.get $v) (i32.const 0)))
+    )
+
+    ;; Reverse digits into $ptr
+    (local.set $i (i32.const 0))
+    (loop $copy_loop
+      (i32.store8
+        (i32.add (local.get $ptr) (local.get $i))
+        (i32.load8_u
+          (i32.sub (i32.sub (i32.add (local.get $temp_ptr) (local.get $len)) (local.get $i)) (i32.const 1))
+        )
+      )
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br_if $copy_loop (i32.lt_u (local.get $i) (local.get $len)))
+    )
+
+    (local.get $len)
   )
 
   ;; Check whether packet ID represents an urgent packet (KeepAlive or Ping/Pong)
@@ -373,6 +451,10 @@
     (local $data_len_n i32)
     (local $decomp_len i32)
     (local $is_urgent i32)
+    (local $tmp_n i32)
+    (local $hdr_len i32)
+    (local $frame_ptr i32)
+    (local $total_payload_len i32)
 
     ;; Empty buffer: NEED_MORE_DATA (Action 0)
     (if (i32.le_s (local.get $buf_len) (i32.const 0))
@@ -422,25 +504,39 @@
         ;; Call $deflate_decompress:
         ;; in_ptr = $p + $data_len_n
         ;; in_len = $pkt_len - $data_len_n
-        ;; out_ptr = 262144 (Page 4)
-        ;; out_max_len = 3145728 (3 MiB)
+        ;; out_ptr = 262150 (Page 4 + 6 bytes headroom for [VarInt Length] + [0x00])
+        ;; out_max_len = 3145722 (3 MiB - 6)
         (local.set $decomp_len
           (call $deflate_decompress
             (i32.add (local.get $p) (local.get $data_len_n))
             (i32.sub (local.get $pkt_len) (local.get $data_len_n))
-            (i32.const 262144)
-            (i32.const 3145728)
+            (i32.const 262150)
+            (i32.const 3145722)
           )
         )
         (if (i32.gt_s (local.get $decomp_len) (i32.const 0))
           (then
+            ;; Uncompressed packet framing: [VarInt(decomp_len + 1)] [0x00] [decompressed_payload]
+            ;; Calculate VarInt length for (decomp_len + 1) in scratch at Page 2 (131072)
+            (local.set $tmp_n (call $write_varint (i32.const 131072) (i32.add (local.get $decomp_len) (i32.const 1))))
+            ;; Total header length = $tmp_n + 1 (for 0x00)
+            (local.set $hdr_len (i32.add (local.get $tmp_n) (i32.const 1)))
+            (local.set $frame_ptr (i32.sub (i32.const 262150) (local.get $hdr_len)))
+            ;; Write VarInt at $frame_ptr
+            (drop (call $write_varint (local.get $frame_ptr) (i32.add (local.get $decomp_len) (i32.const 1))))
+            ;; Write 0x00 at ($frame_ptr + $tmp_n)
+            (i32.store8 (i32.add (local.get $frame_ptr) (local.get $tmp_n)) (i32.const 0))
+
+            ;; Full framed packet length = $hdr_len + $decomp_len
+            (local.set $total_payload_len (i32.add (local.get $hdr_len) (local.get $decomp_len)))
+
             ;; Write struct StreamFrame at fixed offset 65552:
             ;; offset 65552: consumed_len (i32) = $total_len
-            ;; offset 65556: payload_ptr (i32) = 262144
-            ;; offset 65560: payload_len (i32) = $decomp_len
+            ;; offset 65556: payload_ptr (i32) = $frame_ptr
+            ;; offset 65560: payload_len (i32) = $total_payload_len
             (i32.store (i32.const 65552) (local.get $total_len))
-            (i32.store (i32.const 65556) (i32.const 262144))
-            (i32.store (i32.const 65560) (local.get $decomp_len))
+            (i32.store (i32.const 65556) (local.get $frame_ptr))
+            (i32.store (i32.const 65560) (local.get $total_payload_len))
 
             ;; Decompressed game payloads (chunks, lighting, entity data) must always defer
             ;; to enable full 20ms aggregation batching into continuous Zstd streams.
@@ -476,6 +572,123 @@
   )
 
   ;; ---------------------------------------------------------------------------
+  ;; State 2: Streaming Egress Logic (Tunnel -> Local Socket)
+  ;; Recompresses packets when data_length == 0 and uncompressed payload >= 256
+  ;; ---------------------------------------------------------------------------
+
+  (func $poll_egress (param $buf_ptr i32) (param $buf_len i32) (result i64)
+    (local $tmp i64)
+    (local $pkt_len i32)
+    (local $len_n i32)
+    (local $total_len i32)
+    (local $buf_end i32)
+    (local $p i32)
+    (local $data_len i32)
+    (local $data_len_n i32)
+    (local $raw_payload_ptr i32)
+    (local $raw_payload_len i32)
+    (local $comp_len i32)
+    (local $dl_varint_n i32)
+    (local $inner_pkt_len i32)
+    (local $pkt_varint_n i32)
+    (local $hdr_len i32)
+    (local $frame_ptr i32)
+    (local $total_out_len i32)
+
+    ;; Empty buffer: NEED_MORE_DATA (Action 0)
+    (if (i32.le_s (local.get $buf_len) (i32.const 0))
+      (then (return (call $pack_result (i32.const 0) (i32.const 0))))
+    )
+
+    (local.set $buf_end (i32.add (local.get $buf_ptr) (local.get $buf_len)))
+
+    ;; 1. Parse packet length VarInt
+    (local.set $tmp (call $read_varint (local.get $buf_ptr) (local.get $buf_end)))
+    (local.set $pkt_len (i32.wrap_i64 (local.get $tmp)))
+    (local.set $len_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+
+    (if (i32.eq (local.get $len_n) (i32.const 0))
+      (then (return (call $pack_result (i32.const 0) (i32.const 0))))
+    )
+    (if (i32.lt_s (local.get $pkt_len) (i32.const 0))
+      (then (return (call $pack_result (i32.const 0) (i32.const 0))))
+    )
+
+    (local.set $total_len (i32.add (local.get $len_n) (local.get $pkt_len)))
+    (if (i32.lt_u (local.get $buf_len) (local.get $total_len))
+      (then (return (call $pack_result (i32.const 0) (i32.const 0))))
+    )
+
+    (if (i32.eq (local.get $pkt_len) (i32.const 0))
+      (then (return (call $pack_result (i32.const 1) (local.get $total_len))))
+    )
+
+    (local.set $p (i32.add (local.get $buf_ptr) (local.get $len_n)))
+
+    ;; Check data_length VarInt at $p
+    (local.set $tmp (call $read_varint (local.get $p) (i32.add (local.get $buf_ptr) (local.get $total_len))))
+    (local.set $data_len (i32.wrap_i64 (local.get $tmp)))
+    (local.set $data_len_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+
+    ;; Only recompress if data_length == 0 and data_len_n > 0
+    (if (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+      (then
+        (local.set $raw_payload_ptr (i32.add (local.get $p) (local.get $data_len_n)))
+        (local.set $raw_payload_len (i32.sub (local.get $pkt_len) (local.get $data_len_n)))
+
+        ;; Recompress threshold: 256 bytes
+        (if (i32.ge_u (local.get $raw_payload_len) (i32.const 256))
+          (then
+            ;; Compress into Page 4 + 16 (262160), leaving 16 bytes headroom for two VarInts
+            (local.set $comp_len
+              (call $deflate_compress
+                (local.get $raw_payload_ptr)
+                (local.get $raw_payload_len)
+                (i32.const 262160)
+                (i32.const 3145712)
+                (i32.const 1)
+              )
+            )
+            (if (i32.gt_s (local.get $comp_len) (i32.const 0))
+              (then
+                ;; Form [Packet Length: VarInt] [Data Length: VarInt(raw_payload_len)] [compressed data]
+                ;; 1. Write Data Length VarInt in scratch (131072)
+                (local.set $dl_varint_n (call $write_varint (i32.const 131072) (local.get $raw_payload_len)))
+                (local.set $inner_pkt_len (i32.add (local.get $dl_varint_n) (local.get $comp_len)))
+                ;; 2. Write Packet Length VarInt in scratch (131080)
+                (local.set $pkt_varint_n (call $write_varint (i32.const 131080) (local.get $inner_pkt_len)))
+
+                (local.set $hdr_len (i32.add (local.get $pkt_varint_n) (local.get $dl_varint_n)))
+                (local.set $frame_ptr (i32.sub (i32.const 262160) (local.get $hdr_len)))
+
+                ;; Copy Packet Length VarInt
+                (call $memcpy (local.get $frame_ptr) (i32.const 131080) (local.get $pkt_varint_n))
+                ;; Copy Data Length VarInt
+                (call $memcpy (i32.add (local.get $frame_ptr) (local.get $pkt_varint_n)) (i32.const 131072) (local.get $dl_varint_n))
+
+                (local.set $total_out_len (i32.add (local.get $hdr_len) (local.get $comp_len)))
+
+                ;; Write struct StreamFrame at 65552:
+                ;; offset 65552: consumed_len (i32) = $total_len
+                ;; offset 65556: payload_ptr (i32) = $frame_ptr
+                ;; offset 65560: payload_len (i32) = $total_out_len
+                (i32.store (i32.const 65552) (local.get $total_len))
+                (i32.store (i32.const 65556) (local.get $frame_ptr))
+                (i32.store (i32.const 65560) (local.get $total_out_len))
+
+                (return (call $pack_result (i32.const 3) (i32.const 65552)))
+              )
+            )
+          )
+        )
+      )
+    )
+
+    ;; Fallback / below threshold: passthrough frame as-is
+    (call $pack_result (i32.const 1) (local.get $total_len))
+  )
+
+  ;; ---------------------------------------------------------------------------
   ;; Exported Functions
   ;; ---------------------------------------------------------------------------
 
@@ -494,10 +707,17 @@
       )
     )
 
-    ;; State 1: Streaming
+    ;; State 1: Streaming Ingress
     (if (i32.eq (local.get $state) (i32.const 1))
       (then
         (return (call $poll_streaming (local.get $buf_ptr) (local.get $buf_len)))
+      )
+    )
+
+    ;; State 2: Streaming Egress
+    (if (i32.eq (local.get $state) (i32.const 2))
+      (then
+        (return (call $poll_egress (local.get $buf_ptr) (local.get $buf_len)))
       )
     )
 
@@ -533,5 +753,101 @@
     )
 
     (i32.const 0)
+  )
+
+  ;; discovery_targets(out_ptr, out_max_len) -> i32
+  ;; Writes the default discovery target addresses (comma-separated):
+  ;; "224.0.2.60:4445,255.255.255.255:4445,127.0.0.1:4445"
+  ;; Returns written byte count, or -1 if out_max_len is too small.
+  (func (export "discovery_targets")
+    (param $out_ptr i32)
+    (param $out_max_len i32)
+    (result i32)
+    (local $len i32)
+    (local.set $len (i32.const 51))
+    (if (i32.lt_s (local.get $out_max_len) (local.get $len))
+      (then (return (i32.const -1)))
+    )
+    (call $memcpy (local.get $out_ptr) (i32.const 65600) (local.get $len))
+    (local.get $len)
+  )
+
+  ;; discovery_template(out_ptr, out_max_len) -> i32
+  ;; Writes the discovery payload template string:
+  ;; "[MOTD]{prefix}{name}[/MOTD][AD]{port}[/AD]"
+  ;; Returns written byte count, or -1 if out_max_len is too small.
+  (func (export "discovery_template")
+    (param $out_ptr i32)
+    (param $out_max_len i32)
+    (result i32)
+    (local $len i32)
+    (local.set $len (i32.const 42))
+    (if (i32.lt_s (local.get $out_max_len) (local.get $len))
+      (then (return (i32.const -1)))
+    )
+    (call $memcpy (local.get $out_ptr) (i32.const 65660) (local.get $len))
+    (local.get $len)
+  )
+
+  ;; build_discovery_payload(name_ptr, name_len, port, prefix_ptr, prefix_len, out_ptr, out_max_len) -> i32
+  ;; Generates discovery payload: "[MOTD]{prefix}{name}[/MOTD][AD]{port}[/AD]"
+  ;; Returns total byte length written to out_ptr, or -1 on error/buffer too small.
+  (func (export "build_discovery_payload")
+    (param $name_ptr i32) (param $name_len i32)
+    (param $port i32)
+    (param $prefix_ptr i32) (param $prefix_len i32)
+    (param $out_ptr i32) (param $out_max_len i32)
+    (result i32)
+
+    (local $curr i32)
+    (local $port_len i32)
+    (local $needed i32)
+
+    (local.set $needed
+      (i32.add
+        (i32.add (local.get $prefix_len) (local.get $name_len))
+        (i32.const 28)
+      )
+    )
+    (if (i32.lt_s (local.get $out_max_len) (local.get $needed))
+      (then (return (i32.const -1)))
+    )
+
+    (local.set $curr (local.get $out_ptr))
+
+    ;; 1. "[MOTD]" (6 bytes at 65710)
+    (call $memcpy (local.get $curr) (i32.const 65710) (i32.const 6))
+    (local.set $curr (i32.add (local.get $curr) (i32.const 6)))
+
+    ;; 2. prefix
+    (if (i32.gt_u (local.get $prefix_len) (i32.const 0))
+      (then
+        (call $memcpy (local.get $curr) (local.get $prefix_ptr) (local.get $prefix_len))
+        (local.set $curr (i32.add (local.get $curr) (local.get $prefix_len)))
+      )
+    )
+
+    ;; 3. name
+    (if (i32.gt_u (local.get $name_len) (i32.const 0))
+      (then
+        (call $memcpy (local.get $curr) (local.get $name_ptr) (local.get $name_len))
+        (local.set $curr (i32.add (local.get $curr) (local.get $name_len)))
+      )
+    )
+
+    ;; 4. "[/MOTD][AD]" (11 bytes at 65720)
+    (call $memcpy (local.get $curr) (i32.const 65720) (i32.const 11))
+    (local.set $curr (i32.add (local.get $curr) (i32.const 11)))
+
+    ;; 5. port ASCII
+    (local.set $port_len (call $write_u32_ascii (local.get $curr) (local.get $port)))
+    (local.set $curr (i32.add (local.get $curr) (local.get $port_len)))
+
+    ;; 6. "[/AD]" (5 bytes at 65740)
+    (call $memcpy (local.get $curr) (i32.const 65740) (i32.const 5))
+    (local.set $curr (i32.add (local.get $curr) (i32.const 5)))
+
+    ;; Return total written bytes
+    (i32.sub (local.get $curr) (local.get $out_ptr))
   )
 )

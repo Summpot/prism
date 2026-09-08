@@ -313,6 +313,7 @@ pub fn materialize_default_middlewares(dir: &Path) -> anyhow::Result<Vec<PathBuf
 pub enum SessionState {
     Handshake = 0,
     Streaming = 1,
+    StreamingEgress = 2,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,110 +496,110 @@ pub fn deflate_compress(input: &[u8], level: i32) -> Result<Vec<u8>, i32> {
     Ok(miniz_oxide::deflate::compress_to_vec_zlib(input, lvl))
 }
 
-/// Encodes an unsigned integer as a Minecraft VarInt into `buf`.
-pub fn write_varint(buf: &mut Vec<u8>, mut val: u32) {
-    loop {
-        let mut b = (val & 0x7F) as u8;
-        val >>= 7;
-        if val != 0 {
-            b |= 0x80;
-        }
-        buf.push(b);
-        if val == 0 {
-            break;
-        }
-    }
-}
+#[cfg(test)]
+pub mod legacy_minecraft_reference {
+    use super::*;
 
-/// Reads a Minecraft VarInt from the start of `buf`.
-/// Returns `Some((value, bytes_read))` or `None` if incomplete or invalid.
-pub fn read_varint(buf: &[u8]) -> Option<(u32, usize)> {
-    let mut val = 0u32;
-    let mut shift = 0;
-    for (i, &b) in buf.iter().enumerate().take(5) {
-        val |= ((b & 0x7F) as u32) << shift;
-        if (b & 0x80) == 0 {
-            return Some((val, i + 1));
-        }
-        shift += 7;
-    }
-    None
-}
-
-/// Frames an uncompressed packet payload into Minecraft's uncompressed framing:
-/// `[Packet Length: VarInt] [0x00: Data Length = 0] [raw_payload]`.
-///
-/// This produces a 100% valid Minecraft packet that can be parsed by any client or
-/// server operating under a compression threshold.
-pub fn frame_uncompressed_packet(raw_payload: &[u8]) -> Vec<u8> {
-    let packet_len = 1 + raw_payload.len();
-    let mut out = Vec::with_capacity(5 + packet_len);
-    write_varint(&mut out, packet_len as u32);
-    out.push(0x00);
-    out.extend_from_slice(raw_payload);
-    out
-}
-
-/// Re-compresses an uncompressed packet payload into Minecraft compressed framing:
-/// `[Packet Length: VarInt] [Data Length: VarInt] [Payload]`.
-///
-/// If payload length >= threshold, compresses payload with zlib Deflate (level 1 for high speed).
-/// If payload length < threshold, encodes with `Data Length = 0` (uncompressed).
-pub fn deflate_recompress_packet(raw_payload: &[u8], threshold: usize) -> Vec<u8> {
-    if raw_payload.len() >= threshold {
-        if let Ok(compressed) = deflate_compress(raw_payload, 1) {
-            let mut dl_buf = Vec::new();
-            write_varint(&mut dl_buf, raw_payload.len() as u32);
-            let packet_len = dl_buf.len() + compressed.len();
-            let mut out = Vec::with_capacity(5 + packet_len);
-            write_varint(&mut out, packet_len as u32);
-            out.extend_from_slice(&dl_buf);
-            out.extend_from_slice(&compressed);
-            return out;
-        }
-    }
-    frame_uncompressed_packet(raw_payload)
-}
-
-/// Recompresses packets in a stream buffer that have `data_length == 0` and payload size >= threshold.
-/// Writes complete processed packets to `writer`, keeping any incomplete trailing packet in `pending`.
-pub async fn recompress_packet_stream<W: tokio::io::AsyncWrite + Unpin>(
-    pending: &mut Vec<u8>,
-    writer: &mut W,
-    threshold: usize,
-) -> std::io::Result<usize> {
-    let mut written = 0;
-    let mut offset = 0;
-    while offset < pending.len() {
-        let slice = &pending[offset..];
-        let Some((pkt_len, len_n)) = read_varint(slice) else {
-            break;
-        };
-        let total_pkt_len = len_n + pkt_len as usize;
-        if slice.len() < total_pkt_len {
-            break;
-        }
-        let pkt_data = &slice[len_n..total_pkt_len];
-        if let Some((data_len, dl_n)) = read_varint(pkt_data) {
-            if data_len == 0 {
-                let uncompressed_payload = &pkt_data[dl_n..];
-                if uncompressed_payload.len() >= threshold {
-                    let recompressed = deflate_recompress_packet(uncompressed_payload, threshold);
-                    tokio::io::AsyncWriteExt::write_all(writer, &recompressed).await?;
-                    written += recompressed.len();
-                    offset += total_pkt_len;
-                    continue;
-                }
+    /// Encodes an unsigned integer as a Minecraft VarInt into `buf`.
+    pub fn write_varint(buf: &mut Vec<u8>, mut val: u32) {
+        loop {
+            let mut b = (val & 0x7F) as u8;
+            val >>= 7;
+            if val != 0 {
+                b |= 0x80;
+            }
+            buf.push(b);
+            if val == 0 {
+                break;
             }
         }
-        tokio::io::AsyncWriteExt::write_all(writer, &slice[..total_pkt_len]).await?;
-        written += total_pkt_len;
-        offset += total_pkt_len;
     }
-    if offset > 0 {
-        pending.drain(..offset);
+
+    /// Reads a Minecraft VarInt from the start of `buf`.
+    /// Returns `Some((value, bytes_read))` or `None` if incomplete or invalid.
+    pub fn read_varint(buf: &[u8]) -> Option<(u32, usize)> {
+        let mut val = 0u32;
+        let mut shift = 0;
+        for (i, &b) in buf.iter().enumerate().take(5) {
+            val |= ((b & 0x7F) as u32) << shift;
+            if (b & 0x80) == 0 {
+                return Some((val, i + 1));
+            }
+            shift += 7;
+        }
+        None
     }
-    Ok(written)
+
+    /// Frames an uncompressed packet payload into Minecraft's uncompressed framing:
+    /// `[Packet Length: VarInt] [0x00: Data Length = 0] [raw_payload]`.
+    pub fn frame_uncompressed_packet(raw_payload: &[u8]) -> Vec<u8> {
+        let packet_len = 1 + raw_payload.len();
+        let mut out = Vec::with_capacity(5 + packet_len);
+        write_varint(&mut out, packet_len as u32);
+        out.push(0x00);
+        out.extend_from_slice(raw_payload);
+        out
+    }
+
+    /// Re-compresses an uncompressed packet payload into Minecraft compressed framing:
+    /// `[Packet Length: VarInt] [Data Length: VarInt] [Payload]`.
+    pub fn deflate_recompress_packet(raw_payload: &[u8], threshold: usize) -> Vec<u8> {
+        if raw_payload.len() >= threshold {
+            if let Ok(compressed) = deflate_compress(raw_payload, 1) {
+                let mut dl_buf = Vec::new();
+                write_varint(&mut dl_buf, raw_payload.len() as u32);
+                let packet_len = dl_buf.len() + compressed.len();
+                let mut out = Vec::with_capacity(5 + packet_len);
+                write_varint(&mut out, packet_len as u32);
+                out.extend_from_slice(&dl_buf);
+                out.extend_from_slice(&compressed);
+                return out;
+            }
+        }
+        frame_uncompressed_packet(raw_payload)
+    }
+
+    /// Recompresses packets in a stream buffer that have `data_length == 0` and payload size >= threshold.
+    /// Writes complete processed packets to `writer`, keeping any incomplete trailing packet in `pending`.
+    pub async fn recompress_packet_stream<W: tokio::io::AsyncWrite + Unpin>(
+        pending: &mut Vec<u8>,
+        writer: &mut W,
+        threshold: usize,
+    ) -> std::io::Result<usize> {
+        let mut written = 0;
+        let mut offset = 0;
+        while offset < pending.len() {
+            let slice = &pending[offset..];
+            let Some((pkt_len, len_n)) = read_varint(slice) else {
+                break;
+            };
+            let total_pkt_len = len_n + pkt_len as usize;
+            if slice.len() < total_pkt_len {
+                break;
+            }
+            let pkt_data = &slice[len_n..total_pkt_len];
+            if let Some((data_len, dl_n)) = read_varint(pkt_data) {
+                if data_len == 0 {
+                    let uncompressed_payload = &pkt_data[dl_n..];
+                    if uncompressed_payload.len() >= threshold {
+                        let recompressed =
+                            deflate_recompress_packet(uncompressed_payload, threshold);
+                        tokio::io::AsyncWriteExt::write_all(writer, &recompressed).await?;
+                        written += recompressed.len();
+                        offset += total_pkt_len;
+                        continue;
+                    }
+                }
+            }
+            tokio::io::AsyncWriteExt::write_all(writer, &slice[..total_pkt_len]).await?;
+            written += total_pkt_len;
+            offset += total_pkt_len;
+        }
+        if offset > 0 {
+            pending.drain(..offset);
+        }
+        Ok(written)
+    }
 }
 
 pub fn host_crypto_rsa_decrypt(
@@ -1157,7 +1158,7 @@ impl WasmProtocolSession {
                     "invalid handshake action code: {other}"
                 ))),
             },
-            SessionState::Streaming => match action {
+            SessionState::Streaming | SessionState::StreamingEgress => match action {
                 0 => Ok(PollResult::Stream(StreamResult::NeedMoreData)),
                 1 => Ok(PollResult::Stream(StreamResult::Frame {
                     len: value as usize,
@@ -1221,6 +1222,232 @@ impl WasmProtocolSession {
             },
         }
     }
+
+    pub fn poll_ingress(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
+        self.set_state(SessionState::Streaming);
+        self.poll(buf)
+    }
+
+    pub fn poll_egress(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
+        self.set_state(SessionState::StreamingEgress);
+        self.poll(buf)
+    }
+
+    /// Generic egress stream processing: transforms buffer through WASM egress driver
+    /// and writes resulting frames to the writer.
+    pub async fn process_egress_stream<W: tokio::io::AsyncWrite + Unpin>(
+        &mut self,
+        pending: &mut Vec<u8>,
+        writer: &mut W,
+    ) -> std::io::Result<usize> {
+        self.set_state(SessionState::StreamingEgress);
+        let mut written = 0;
+        let mut offset = 0;
+        while offset < pending.len() {
+            let slice = &pending[offset..];
+            match self.poll(slice) {
+                Ok(PollResult::Stream(StreamResult::Frame { len, payload, .. })) => {
+                    if len == 0 || len > slice.len() {
+                        break;
+                    }
+                    if let Some(ref p) = payload {
+                        tokio::io::AsyncWriteExt::write_all(writer, p).await?;
+                        written += p.len();
+                    } else {
+                        tokio::io::AsyncWriteExt::write_all(writer, &slice[..len]).await?;
+                        written += len;
+                    }
+                    offset += len;
+                }
+                Ok(PollResult::Stream(StreamResult::NeedMoreData)) => break,
+                _ => {
+                    tokio::io::AsyncWriteExt::write_all(writer, slice).await?;
+                    written += slice.len();
+                    offset += slice.len();
+                    break;
+                }
+            }
+        }
+        if offset > 0 {
+            pending.drain(..offset);
+        }
+        Ok(written)
+    }
+
+    /// Queries the discovery target addresses defined by the WASM module.
+    /// If the module exports `discovery_targets`, returns the parsed list of target addresses.
+    pub fn discovery_targets(&mut self) -> Result<Option<Vec<String>>, MiddlewareError> {
+        let func = match self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&mut self.store, "discovery_targets")
+        {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+
+        let out_ptr = 65536;
+        let max_len = 1024;
+        let res = func
+            .call(&mut self.store, (out_ptr, max_len))
+            .map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm discovery_targets call failed: {e}"))
+            })?;
+
+        if res <= 0 {
+            return Ok(Some(Vec::new()));
+        }
+
+        let mut buf = vec![0u8; res as usize];
+        self.memory
+            .read(&self.store, out_ptr as usize, &mut buf)
+            .map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm read discovery_targets failed: {e}"))
+            })?;
+
+        let s = String::from_utf8(buf)
+            .map_err(|e| MiddlewareError::Fatal(format!("invalid utf-8 discovery_targets: {e}")))?;
+
+        let targets: Vec<String> = s
+            .split([',', '\n', ';'])
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        Ok(Some(targets))
+    }
+
+    /// Queries the discovery template string defined by the WASM module.
+    /// If the module exports `discovery_template`, returns the template string.
+    pub fn discovery_template(&mut self) -> Result<Option<String>, MiddlewareError> {
+        let func = match self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&mut self.store, "discovery_template")
+        {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+
+        let out_ptr = 65536;
+        let max_len = 1024;
+        let res = func
+            .call(&mut self.store, (out_ptr, max_len))
+            .map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm discovery_template call failed: {e}"))
+            })?;
+
+        if res <= 0 {
+            return Ok(None);
+        }
+
+        let mut buf = vec![0u8; res as usize];
+        self.memory
+            .read(&self.store, out_ptr as usize, &mut buf)
+            .map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm read discovery_template failed: {e}"))
+            })?;
+
+        let s = String::from_utf8(buf).map_err(|e| {
+            MiddlewareError::Fatal(format!("invalid utf-8 discovery_template: {e}"))
+        })?;
+
+        Ok(Some(s))
+    }
+
+    /// Generates discovery payload using the WASM module's `build_discovery_payload` export.
+    pub fn build_discovery_payload(
+        &mut self,
+        name: &str,
+        port: u16,
+        prefix: &str,
+    ) -> Result<Option<Vec<u8>>, MiddlewareError> {
+        let func = match self
+            .instance
+            .get_typed_func::<(i32, i32, i32, i32, i32, i32, i32), i32>(
+                &mut self.store,
+                "build_discovery_payload",
+            ) {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+
+        let name_bytes = name.as_bytes();
+        let prefix_bytes = prefix.as_bytes();
+
+        let name_ptr = 0i32;
+        let name_len = name_bytes.len() as i32;
+        let prefix_ptr = name_len;
+        let prefix_len = prefix_bytes.len() as i32;
+
+        let out_ptr = 4096i32;
+        let out_max_len = 8192i32;
+
+        if !name_bytes.is_empty() {
+            self.memory
+                .write(&mut self.store, name_ptr as usize, name_bytes)
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm write name failed: {e}")))?;
+        }
+        if !prefix_bytes.is_empty() {
+            self.memory
+                .write(&mut self.store, prefix_ptr as usize, prefix_bytes)
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm write prefix failed: {e}")))?;
+        }
+
+        let res = func
+            .call(
+                &mut self.store,
+                (
+                    name_ptr,
+                    name_len,
+                    port as i32,
+                    prefix_ptr,
+                    prefix_len,
+                    out_ptr,
+                    out_max_len,
+                ),
+            )
+            .map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm build_discovery_payload call failed: {e}"))
+            })?;
+
+        if res < 0 {
+            return Err(MiddlewareError::Fatal(
+                "wasm build_discovery_payload returned error".into(),
+            ));
+        }
+
+        let mut out = vec![0u8; res as usize];
+        self.memory
+            .read(&self.store, out_ptr as usize, &mut out)
+            .map_err(|e| {
+                MiddlewareError::Fatal(format!("wasm read discovery payload failed: {e}"))
+            })?;
+
+        Ok(Some(out))
+    }
+}
+
+/// Queries discovery target addresses from the default protocol driver ("minecraft").
+pub fn get_default_discovery_targets() -> Vec<String> {
+    if let Some(wat) = get_default_middleware_wat("minecraft") {
+        if let Ok(mut session) = WasmProtocolSession::from_wat(wat) {
+            if let Ok(Some(targets)) = session.discovery_targets() {
+                return targets;
+            }
+        }
+    }
+    vec![]
+}
+
+/// Builds discovery payload using the default protocol driver ("minecraft").
+pub fn build_default_discovery_payload(name: &str, port: u16, prefix: &str) -> Option<String> {
+    if let Some(wat) = get_default_middleware_wat("minecraft") {
+        if let Ok(mut session) = WasmProtocolSession::from_wat(wat) {
+            if let Ok(Some(bytes)) = session.build_discovery_payload(name, port, prefix) {
+                return String::from_utf8(bytes).ok();
+            }
+        }
+    }
+    None
 }
 
 pub struct WasmMiddleware {
@@ -1368,6 +1595,7 @@ impl Middleware for WasmMiddleware {
 
 #[cfg(test)]
 mod tests {
+    use super::legacy_minecraft_reference::*;
     use super::*;
     use std::fs;
 
@@ -1717,6 +1945,18 @@ mod tests {
         let res_full = session.poll(&prelude).expect("poll stream full");
         assert_eq!(
             res_full,
+            PollResult::Stream(StreamResult::Frame {
+                len: prelude.len(),
+                priority: FramePriority::Defer,
+                payload: None,
+            })
+        );
+
+        // State 2: Streaming Egress - full record framing
+        session.set_state(SessionState::StreamingEgress);
+        let res_egress = session.poll(&prelude).expect("poll egress full");
+        assert_eq!(
+            res_egress,
             PollResult::Stream(StreamResult::Frame {
                 len: prelude.len(),
                 priority: FramePriority::Defer,
@@ -2388,16 +2628,17 @@ mod tests {
                     "consumed_len must equal incoming wire bytes"
                 );
                 assert_eq!(priority, FramePriority::Defer);
-                let decompressed = payload.expect("must return decompressed payload");
+                let framed_packet = payload.expect("must return framed uncompressed payload");
+                let expected_uncompressed = frame_uncompressed_packet(&raw_packet);
                 assert_eq!(
-                    &decompressed, &raw_packet,
-                    "decompressed payload must match original raw packet"
+                    &framed_packet, &expected_uncompressed,
+                    "decompressed payload must be fully framed uncompressed packet"
                 );
             }
             other => panic!("expected Frame with payload, got {other:?}"),
         }
 
-        // Test recompress_packet_stream
+        // Test recompress_packet_stream (legacy reference)
         let framed_uncompressed = frame_uncompressed_packet(&raw_packet);
         let mut pending = framed_uncompressed.clone();
         let mut out = Vec::new();
@@ -2411,5 +2652,59 @@ mod tests {
         assert_eq!(data_len as usize, raw_packet.len());
         let decomp = deflate_decompress(&out[len_n + dl_n..len_n + pkt_len as usize]).unwrap();
         assert_eq!(&decomp, &raw_packet);
+
+        // Test generic WASM egress streaming transformation (WAT State 2: Egress)
+        let mut egress_pending = framed_uncompressed.clone();
+        let mut egress_out = Vec::new();
+        session
+            .process_egress_stream(&mut egress_pending, &mut egress_out)
+            .await
+            .unwrap();
+        assert!(egress_pending.is_empty());
+        assert_eq!(
+            &egress_out, &out,
+            "WASM egress output must match recompressed packet"
+        );
+    }
+
+    #[test]
+    fn test_minecraft_wat_discovery_targets_and_payload() {
+        let wat = get_default_middleware_wat("minecraft").unwrap();
+        let mut session = WasmProtocolSession::from_wat(wat).unwrap();
+
+        // 1. Discovery targets
+        let targets = session.discovery_targets().unwrap().unwrap();
+        assert_eq!(
+            targets,
+            vec![
+                "224.0.2.60:4445".to_string(),
+                "255.255.255.255:4445".to_string(),
+                "127.0.0.1:4445".to_string()
+            ]
+        );
+
+        // 2. Discovery template
+        let template = session.discovery_template().unwrap().unwrap();
+        assert_eq!(template, "[MOTD]{prefix}{name}[/MOTD][AD]{port}[/AD]");
+
+        // 3. Build discovery payload
+        let payload_bytes = session
+            .build_discovery_payload("生存服", 25565, "[Prism] ")
+            .unwrap()
+            .unwrap();
+        let payload_str = String::from_utf8(payload_bytes).unwrap();
+        assert_eq!(payload_str, "[MOTD][Prism] 生存服[/MOTD][AD]25565[/AD]");
+
+        // 4. Default helper functions
+        assert_eq!(
+            get_default_discovery_targets(),
+            vec![
+                "224.0.2.60:4445".to_string(),
+                "255.255.255.255:4445".to_string(),
+                "127.0.0.1:4445".to_string()
+            ]
+        );
+        let default_payload = build_default_discovery_payload("生存服", 25565, "[Prism] ").unwrap();
+        assert_eq!(default_payload, "[MOTD][Prism] 生存服[/MOTD][AD]25565[/AD]");
     }
 }

@@ -15,7 +15,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::prism::middleware::{
     FramePriority, PollResult, SessionState, StreamResult, WasmMiddleware, WasmProtocolSession,
-    frame_uncompressed_packet,
 };
 use crate::prism::tunnel::{
     optimizer::{
@@ -333,10 +332,9 @@ pub async fn run_optimized_tcp_pipeline(
                                         // Need more data for a full frame
                                         break;
                                     }
-                                    if let Some(ref decompressed) = payload {
-                                        let framed = frame_uncompressed_packet(decompressed);
+                                    if let Some(ref payload) = payload {
                                         opt_writer
-                                            .write_frame_with_metric(len, &framed, priority)
+                                            .write_frame_with_metric(len, payload, priority)
                                             .await?;
                                     } else {
                                         opt_writer.write_frame(&slice[..len], priority).await?;

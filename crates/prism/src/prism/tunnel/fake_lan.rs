@@ -1,23 +1,12 @@
-//! Fake LAN multicast broadcaster for Minecraft LAN discovery.
+//! Generic UDP service discovery broadcaster (supporting Minecraft LAN discovery, SSDP, custom UDP broadcasts).
 //!
-//! Specifications:
-//! - Multicast IP: `224.0.2.60`, Port: `4445` (UDP)
-//! - Payload format: `[MOTD]{motd_prefix}{service_name}[/MOTD][AD]{port}[/AD]`
-//!   Example: `[MOTD][Prism] 生存服[/MOTD][AD]25565[/AD]`
+//! Discovery targets and payload framing are decoupled into WASM protocol drivers
+//! (e.g. `middlewares/minecraft.wat`), with fallback dynamic templating.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::RwLock;
-
-/// Standard multicast address used by Minecraft LAN server discovery.
-pub const MINECRAFT_LAN_MULTICAST_ADDR: &str = "224.0.2.60:4445";
-
-/// Standard global broadcast address used by Minecraft LAN server discovery.
-pub const MINECRAFT_LAN_BROADCAST_ADDR: &str = "255.255.255.255:4445";
-
-/// Standard loopback address for local Minecraft client discovery.
-pub const MINECRAFT_LAN_LOOPBACK_ADDR: &str = "127.0.0.1:4445";
 
 /// Detect the machine's outbound LAN IPv4 address by connecting a UDP socket to a
 /// well-known address. This does not actually send any traffic.
@@ -31,23 +20,47 @@ pub fn detect_lan_ipv4() -> Option<std::net::Ipv4Addr> {
 }
 
 /// Computes the list of destination addresses to send LAN broadcast packets to.
+/// Automatically includes subnet broadcast `{subnet}.255:{port}` if any target is a
+/// multicast or broadcast address and a local LAN IPv4 address is detected.
 pub fn resolve_broadcast_targets(target_addr: &str) -> Vec<String> {
-    if target_addr != MINECRAFT_LAN_MULTICAST_ADDR {
-        return vec![target_addr.to_string()];
+    let raw_targets: Vec<&str> = target_addr
+        .split([',', ';'])
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let mut targets = Vec::new();
+    let lan_ip = detect_lan_ipv4();
+
+    for t in raw_targets {
+        if !targets.iter().any(|existing: &String| existing == t) {
+            targets.push(t.to_string());
+        }
+
+        // Extract port and check if target is multicast/broadcast
+        if let Ok(addr) = t.parse::<std::net::SocketAddr>() {
+            let ip = addr.ip();
+            let port = addr.port();
+            let is_multi_or_bcast = match ip {
+                std::net::IpAddr::V4(v4) => v4.is_multicast() || v4.is_broadcast(),
+                std::net::IpAddr::V6(v6) => v6.is_multicast(),
+            };
+
+            if is_multi_or_bcast {
+                if let Some(lip) = lan_ip {
+                    let octets = lip.octets();
+                    let subnet_bcast =
+                        format!("{}.{}.{}.255:{port}", octets[0], octets[1], octets[2]);
+                    if !targets.contains(&subnet_bcast) {
+                        targets.push(subnet_bcast);
+                    }
+                }
+            }
+        }
     }
 
-    let mut targets = vec![
-        MINECRAFT_LAN_MULTICAST_ADDR.to_string(),
-        MINECRAFT_LAN_BROADCAST_ADDR.to_string(),
-        MINECRAFT_LAN_LOOPBACK_ADDR.to_string(),
-    ];
-
-    if let Some(ip) = detect_lan_ipv4() {
-        let octets = ip.octets();
-        let subnet_bcast = format!("{}.{}.{}.255:4445", octets[0], octets[1], octets[2]);
-        if !targets.contains(&subnet_bcast) {
-            targets.push(subnet_bcast);
-        }
+    if targets.is_empty() && !target_addr.is_empty() {
+        targets.push(target_addr.to_string());
     }
 
     targets
@@ -56,43 +69,80 @@ pub fn resolve_broadcast_targets(target_addr: &str) -> Vec<String> {
 /// Default interval between periodic broadcast packets (1.5 seconds).
 pub const DEFAULT_BROADCAST_INTERVAL: Duration = Duration::from_millis(1500);
 
-/// An active advertised service for Fake LAN broadcast.
+/// Render discovery payload string from template with placeholder substitutions.
+pub fn render_payload(template: &str, motd_prefix: &str, service_name: &str, port: u16) -> String {
+    template
+        .replace("{motd_prefix}", motd_prefix)
+        .replace("{prefix}", motd_prefix)
+        .replace("{service_name}", service_name)
+        .replace("{name}", service_name)
+        .replace("{service}", service_name)
+        .replace("{port}", &port.to_string())
+}
+
+/// An active advertised service for UDP service discovery broadcast.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdvertisedService {
     pub name: String,
     pub port: u16,
     pub motd_prefix: String,
+    pub template: Option<String>,
+    payload: String,
 }
 
 impl AdvertisedService {
     pub fn new(name: impl Into<String>, port: u16, motd_prefix: impl Into<String>) -> Self {
+        let name = name.into();
+        let motd_prefix = motd_prefix.into();
+        let payload =
+            crate::prism::middleware::build_default_discovery_payload(&name, port, &motd_prefix)
+                .unwrap_or_else(|| format!("{motd_prefix}{name}:{port}"));
         Self {
-            name: name.into(),
+            name,
             port,
-            motd_prefix: motd_prefix.into(),
+            motd_prefix,
+            template: None,
+            payload,
         }
     }
 
-    /// Formats the service as a standard Minecraft LAN broadcast payload.
-    pub fn to_payload(&self) -> String {
-        format_payload(&self.motd_prefix, &self.name, self.port)
+    pub fn with_template(
+        name: impl Into<String>,
+        port: u16,
+        motd_prefix: impl Into<String>,
+        template: impl Into<String>,
+    ) -> Self {
+        let name = name.into();
+        let motd_prefix = motd_prefix.into();
+        let template = template.into();
+        let payload = render_payload(&template, &motd_prefix, &name, port);
+        Self {
+            name,
+            port,
+            motd_prefix,
+            template: Some(template),
+            payload,
+        }
+    }
+
+    /// Formats the service as a discovery broadcast payload.
+    pub fn to_payload(&self) -> &str {
+        &self.payload
     }
 }
 
-/// Formats a Minecraft LAN broadcast message string:
-/// `[MOTD]{motd_prefix}{service_name}[/MOTD][AD]{port}[/AD]`
+/// Formats a discovery broadcast message string using the default protocol driver.
 pub fn format_payload(motd_prefix: &str, service_name: &str, port: u16) -> String {
-    format!(
-        "[MOTD]{}{}[/MOTD][AD]{}[/AD]",
-        motd_prefix, service_name, port
-    )
+    crate::prism::middleware::build_default_discovery_payload(service_name, port, motd_prefix)
+        .unwrap_or_else(|| format!("{motd_prefix}{service_name}:{port}"))
 }
 
-/// Periodic Minecraft LAN UDP multicast broadcaster.
+/// Periodic UDP multicast/broadcast service advertiser.
 ///
-/// Broadcasts Minecraft LAN discovery packets to `224.0.2.60:4445` so players
-/// see available tunnel services in their in-game multiplayer LAN list without
-/// manually entering server addresses.
+/// Broadcasts service discovery packets (e.g. to `224.0.2.60:4445` for Minecraft LAN, or
+/// custom discovery endpoints) so clients can automatically discover services on local networks.
+#[allow(dead_code)]
+pub type UdpDiscoveryBroadcaster = FakeLanBroadcaster;
 #[derive(Debug, Clone)]
 pub struct FakeLanBroadcaster {
     services: Arc<RwLock<Vec<AdvertisedService>>>,
@@ -107,9 +157,11 @@ impl Default for FakeLanBroadcaster {
 }
 
 impl FakeLanBroadcaster {
-    /// Creates a new broadcaster pointing to `224.0.2.60:4445` with 1.5s interval.
+    /// Creates a new broadcaster using default discovery targets from the protocol driver.
     pub fn new() -> Self {
-        Self::with_target(MINECRAFT_LAN_MULTICAST_ADDR, DEFAULT_BROADCAST_INTERVAL)
+        let targets = crate::prism::middleware::get_default_discovery_targets();
+        let target_addr = targets.join(",");
+        Self::with_target(target_addr, DEFAULT_BROADCAST_INTERVAL)
     }
 
     /// Creates a new broadcaster with custom target address and interval (useful for tests).
@@ -262,6 +314,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_custom_discovery_template() {
+        let svc = AdvertisedService::with_template(
+            "valheim-server",
+            2456,
+            "prefix-",
+            "DISCOVER:{name}:{port}:{prefix}",
+        );
+        assert_eq!(svc.to_payload(), "DISCOVER:valheim-server:2456:prefix-");
+    }
+
     #[tokio::test]
     async fn test_dynamic_service_updates() {
         let broadcaster = FakeLanBroadcaster::new();
@@ -339,9 +402,10 @@ mod tests {
         let custom = resolve_broadcast_targets("192.168.1.50:4445");
         assert_eq!(custom, vec!["192.168.1.50:4445"]);
 
-        let defaults = resolve_broadcast_targets(MINECRAFT_LAN_MULTICAST_ADDR);
-        assert!(defaults.contains(&MINECRAFT_LAN_MULTICAST_ADDR.to_string()));
-        assert!(defaults.contains(&MINECRAFT_LAN_BROADCAST_ADDR.to_string()));
-        assert!(defaults.contains(&MINECRAFT_LAN_LOOPBACK_ADDR.to_string()));
+        let defaults =
+            resolve_broadcast_targets("224.0.2.60:4445,255.255.255.255:4445,127.0.0.1:4445");
+        assert!(defaults.contains(&"224.0.2.60:4445".to_string()));
+        assert!(defaults.contains(&"255.255.255.255:4445".to_string()));
+        assert!(defaults.contains(&"127.0.0.1:4445".to_string()));
     }
 }

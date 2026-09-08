@@ -71,10 +71,26 @@ tunnel:
         cert_file: ""
         key_file: ""
     # - listen_addr: ":7002"
-    #   transport: "websocket" # or "wss"
+    #   transport: "wss"
     #   websocket:
+    #     use_acme: true
     #     cert_file: ""
     #     key_file: ""
+
+# ACME Automated Certificate Management (Cloudflare DNS-01)
+# acme:
+#   enabled: false
+#   domains:
+#     - "tunnel.example.com"
+#     - "*.tunnel.example.com"
+#   email: "admin@example.com"
+#   directory_url: "production" # production | staging | URL
+#   renew_before_days: 30
+#   auto_renew: true
+#   cloudflare:
+#     api_token: "your-cloudflare-api-token"
+#     zone_id: "" # optional (auto-detected if omitted)
+#     propagation_timeout_secs: 120
 
   # Optional: tunnel connector host role (uncomment to expose private services).
   # connector:

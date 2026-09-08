@@ -311,6 +311,36 @@ pub struct ManagedConfigDocument {
     pub tunnel: Option<ManagedTunnelDocument>,
     #[serde(default)]
     pub auth: Option<ManagedAuthDocument>,
+    #[serde(default)]
+    pub acme: Option<ManagedAcmeDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedCloudflareDocument {
+    #[serde(default)]
+    pub api_token: String,
+    #[serde(default)]
+    pub zone_id: String,
+    pub propagation_timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedAcmeDocument {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub domains: Vec<String>,
+    pub email: Option<String>,
+    pub directory_url: Option<String>,
+    pub storage_dir: Option<String>,
+    pub cert_file: Option<String>,
+    pub key_file: Option<String>,
+    pub renew_before_days: Option<u32>,
+    #[serde(default)]
+    pub auto_renew: Option<bool>,
+    pub cloudflare: Option<ManagedCloudflareDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -411,6 +441,7 @@ pub struct ManagedTunnelDocument {
     #[serde(default)]
     pub services: Vec<ManagedTunnelServiceDocument>,
     pub mdns: Option<ManagedMdnsDocument>,
+    pub acme: Option<ManagedAcmeDocument>,
 }
 
 fn default_true() -> bool {
@@ -486,11 +517,12 @@ pub struct ManagedOptimizerClientDocument {
     pub zstd_window_log: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedQuicServerDocument {
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
+    pub use_acme: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -501,12 +533,13 @@ pub struct ManagedQuicClientDocument {
     pub insecure_skip_verify: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedWebSocketServerDocument {
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
     pub url_path: Option<String>,
+    pub use_acme: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -560,6 +593,7 @@ pub struct Config {
     pub timeouts: Timeouts,
     pub tunnel: TunnelConfig,
     pub auth: crate::prism::auth::AuthConfig,
+    pub acme: Option<AcmeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -683,6 +717,16 @@ impl OptimizerClientConfig {
 pub struct QuicServerConfig {
     pub cert_file: String,
     pub key_file: String,
+    pub use_acme: Option<bool>,
+}
+
+impl QuicServerConfig {
+    pub fn should_use_acme(&self, acme_enabled: bool) -> bool {
+        match self.use_acme {
+            Some(v) => v,
+            None => acme_enabled && self.cert_file.trim().is_empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -695,12 +739,70 @@ pub struct QuicClientConfig {
 pub struct WebSocketServerConfig {
     pub cert_file: String,
     pub key_file: String,
+    pub use_acme: Option<bool>,
+}
+
+impl WebSocketServerConfig {
+    pub fn should_use_acme(&self, acme_enabled: bool) -> bool {
+        match self.use_acme {
+            Some(v) => v,
+            None => acme_enabled && self.cert_file.trim().is_empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WebSocketClientConfig {
     pub server_name: String,
     pub insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudflareAcmeConfig {
+    pub api_token: String,
+    pub zone_id: String,
+    pub propagation_timeout_secs: u64,
+}
+
+impl Default for CloudflareAcmeConfig {
+    fn default() -> Self {
+        Self {
+            api_token: String::new(),
+            zone_id: String::new(),
+            propagation_timeout_secs: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcmeConfig {
+    pub enabled: bool,
+    pub domains: Vec<String>,
+    pub email: Option<String>,
+    pub directory_url: String,
+    pub storage_dir: String,
+    pub cert_file: String,
+    pub key_file: String,
+    pub renew_before_days: u32,
+    pub auto_renew: bool,
+    pub cloudflare: CloudflareAcmeConfig,
+}
+
+impl Default for AcmeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            domains: Vec::new(),
+            email: None,
+            directory_url: "production".to_string(),
+            storage_dir: String::new(),
+            cert_file: String::new(),
+            key_file: String::new(),
+            renew_before_days: 30,
+            auto_renew: true,
+            cloudflare: CloudflareAcmeConfig::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -795,6 +897,34 @@ struct FileConfig {
     tunnel: Option<FileTunnel>,
 
     auth: Option<FileAuthConfig>,
+
+    acme: Option<FileAcmeConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileCloudflareConfig {
+    api_token: Option<String>,
+    zone_id: Option<String>,
+    propagation_timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileAcmeConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    domains: Option<StringOrVec>,
+    email: Option<String>,
+    directory_url: Option<String>,
+    storage_dir: Option<String>,
+    cert_file: Option<String>,
+    key_file: Option<String>,
+    renew_before_days: Option<u32>,
+    #[serde(default)]
+    auto_renew: Option<bool>,
+    cloudflare: Option<FileCloudflareConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -880,6 +1010,7 @@ struct FileTunnel {
     client: Option<FileTunnelClient>,
     services: Option<Vec<FileTunnelService>>,
     mdns: Option<FileMdns>,
+    acme: Option<FileAcmeConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -954,6 +1085,7 @@ struct FileOptimizerClient {
 struct FileQuicServer {
     cert_file: Option<String>,
     key_file: Option<String>,
+    use_acme: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -967,6 +1099,7 @@ struct FileQuicClient {
 struct FileWebSocketServer {
     cert_file: Option<String>,
     key_file: Option<String>,
+    use_acme: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1091,6 +1224,7 @@ impl Config {
             },
             tunnel: TunnelConfig::default(),
             auth: crate::prism::auth::AuthConfig::default(),
+            acme: None,
         };
 
         if cfg.max_header_bytes == 0 {
@@ -1255,6 +1389,7 @@ impl Config {
                                 .unwrap_or_default()
                                 .trim()
                                 .to_string(),
+                            use_acme: ep.quic.as_ref().and_then(|q| q.use_acme),
                         },
                         websocket: WebSocketServerConfig {
                             cert_file: ep
@@ -1271,6 +1406,7 @@ impl Config {
                                 .unwrap_or_default()
                                 .trim()
                                 .to_string(),
+                            use_acme: ep.websocket.as_ref().and_then(|w| w.use_acme),
                         },
                     });
                 }
@@ -1496,6 +1632,61 @@ impl Config {
         }
         cfg.auth = auth_cfg;
 
+        // --- ACME ---
+        let raw_acme = fc.acme.take().or_else(|| fc.tunnel.as_mut().and_then(|t| t.acme.take()));
+        if let Some(fa) = raw_acme {
+            let mut domains = fa.domains.map(|s| s.into_vec()).unwrap_or_default();
+            domains.retain(|d| !d.trim().is_empty());
+
+            let email = fa.email
+                .or_else(|| std::env::var("ACME_EMAIL").ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            let mut cf_cfg = CloudflareAcmeConfig::default();
+            if let Some(cf) = fa.cloudflare {
+                cf_cfg.api_token = cf.api_token
+                    .or_else(|| std::env::var("CLOUDFLARE_API_TOKEN").ok())
+                    .or_else(|| std::env::var("CF_API_TOKEN").ok())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                cf_cfg.zone_id = cf.zone_id
+                    .or_else(|| std::env::var("CLOUDFLARE_ZONE_ID").ok())
+                    .or_else(|| std::env::var("CF_ZONE_ID").ok())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if let Some(to) = cf.propagation_timeout_secs {
+                    cf_cfg.propagation_timeout_secs = to.max(5);
+                }
+            } else {
+                cf_cfg.api_token = std::env::var("CLOUDFLARE_API_TOKEN")
+                    .or_else(|_| std::env::var("CF_API_TOKEN"))
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                cf_cfg.zone_id = std::env::var("CLOUDFLARE_ZONE_ID")
+                    .or_else(|_| std::env::var("CF_ZONE_ID"))
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+            }
+
+            cfg.acme = Some(AcmeConfig {
+                enabled: fa.enabled,
+                domains,
+                email,
+                directory_url: fa.directory_url.unwrap_or_else(|| "production".into()).trim().to_string(),
+                storage_dir: fa.storage_dir.unwrap_or_default().trim().to_string(),
+                cert_file: fa.cert_file.unwrap_or_default().trim().to_string(),
+                key_file: fa.key_file.unwrap_or_default().trim().to_string(),
+                renew_before_days: fa.renew_before_days.unwrap_or(30),
+                auto_renew: fa.auto_renew.unwrap_or(true),
+                cloudflare: cf_cfg,
+            });
+        }
+
         cfg.role = PrismRole::parse(&fc.role)?;
 
         if let Some(m) = &fc.managed {
@@ -1704,10 +1895,12 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                         quic: endpoint.quic.as_ref().map(|quic| FileQuicServer {
                             cert_file: quic.cert_file.clone(),
                             key_file: quic.key_file.clone(),
+                            use_acme: quic.use_acme,
                         }),
                         websocket: endpoint.websocket.as_ref().map(|ws| FileWebSocketServer {
                             cert_file: ws.cert_file.clone(),
                             key_file: ws.key_file.clone(),
+                            use_acme: ws.use_acme,
                         }),
                     })
                     .collect(),
@@ -1843,6 +2036,7 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 },
                 discovery: None,
             }),
+            acme: None,
         }),
         auth: doc.auth.as_ref().map(|a| FileAuthConfig {
             mode: if a.mode.trim().is_empty() {
@@ -1861,6 +2055,22 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 allowed_users: Some(StringOrVec::Many(g.allowed_users.clone())),
                 allowed_orgs: Some(StringOrVec::Many(g.allowed_orgs.clone())),
                 default_role: Some(g.default_role.clone()),
+            }),
+        }),
+        acme: doc.acme.as_ref().map(|a| FileAcmeConfig {
+            enabled: a.enabled,
+            domains: Some(StringOrVec::Many(a.domains.clone())),
+            email: a.email.clone(),
+            directory_url: a.directory_url.clone(),
+            storage_dir: a.storage_dir.clone(),
+            cert_file: a.cert_file.clone(),
+            key_file: a.key_file.clone(),
+            renew_before_days: a.renew_before_days,
+            auto_renew: a.auto_renew,
+            cloudflare: a.cloudflare.as_ref().map(|cf| FileCloudflareConfig {
+                api_token: Some(cf.api_token.clone()),
+                zone_id: Some(cf.zone_id.clone()),
+                propagation_timeout_secs: cf.propagation_timeout_secs,
             }),
         }),
     };
@@ -2704,4 +2914,62 @@ default_role = "member"
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn test_acme_config_parsing() {
+        let toml_content = r#"
+[acme]
+enabled = true
+domains = ["tunnel.example.com", "*.tunnel.example.com"]
+email = "admin@example.com"
+directory_url = "staging"
+renew_before_days = 25
+auto_renew = true
+
+[acme.cloudflare]
+api_token = "cf-token-12345"
+zone_id = "zone-id-67890"
+propagation_timeout_secs = 60
+
+[tunnel]
+auth_token = "tunnel-secret"
+
+[[tunnel.endpoints]]
+listen_addr = ":7001"
+transport = "quic"
+
+[tunnel.endpoints.quic]
+use_acme = true
+
+[[tunnel.endpoints]]
+listen_addr = ":7002"
+transport = "wss"
+"#;
+        let mut fc: FileConfig = toml::from_str(toml_content).expect("parse toml with acme");
+        let cfg = Config::from_file_config(&mut fc, Path::new("test.toml")).expect("convert to runtime config");
+
+        let acme = cfg.acme.expect("acme should be configured");
+        assert!(acme.enabled);
+        assert_eq!(acme.domains, vec!["tunnel.example.com", "*.tunnel.example.com"]);
+        assert_eq!(acme.email.as_deref(), Some("admin@example.com"));
+        assert_eq!(acme.directory_url, "staging");
+        assert_eq!(acme.renew_before_days, 25);
+        assert!(acme.auto_renew);
+        assert_eq!(acme.cloudflare.api_token, "cf-token-12345");
+        assert_eq!(acme.cloudflare.zone_id, "zone-id-67890");
+        assert_eq!(acme.cloudflare.propagation_timeout_secs, 60);
+
+        assert_eq!(cfg.tunnel.endpoints.len(), 2);
+        let ep0 = &cfg.tunnel.endpoints[0];
+        assert_eq!(ep0.transport, "quic");
+        assert_eq!(ep0.quic.use_acme, Some(true));
+        assert!(ep0.quic.should_use_acme(true));
+
+        let ep1 = &cfg.tunnel.endpoints[1];
+        assert_eq!(ep1.transport, "wss");
+        assert_eq!(ep1.websocket.use_acme, None);
+        assert!(ep1.websocket.should_use_acme(true));
+        assert!(!ep1.websocket.should_use_acme(false));
+    }
 }
+

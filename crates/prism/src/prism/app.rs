@@ -351,18 +351,56 @@ pub async fn run(
 
     // Tunnel server.
     if tunnel_server_enabled {
+        let mut acme_cert_paths = None;
+        if let Some(ref acme_cfg) = cfg.acme {
+            if acme_cfg.enabled {
+                let acme_mgr = crate::prism::acme::AcmeManager::new(acme_cfg.clone(), &paths.workdir);
+                match acme_mgr.ensure_certificate().await {
+                    Ok(paths) => {
+                        let renewal_mgr = acme_mgr.clone();
+                        let renewal_shutdown = shutdown_rx.clone();
+                        tasks.spawn(async move {
+                            renewal_mgr.run_renewal_loop(renewal_shutdown).await;
+                            Ok(())
+                        });
+                        acme_cert_paths = Some(paths);
+                    }
+                    Err(err) => {
+                        tracing::error!(err = %err, "ACME: failed to ensure certificate");
+                        return Err(err);
+                    }
+                }
+            }
+        }
+
         for ep in &cfg.tunnel.endpoints {
+            let (quic_cert, quic_key) = if ep.quic.should_use_acme(acme_cert_paths.is_some())
+                && let Some(ref ap) = acme_cert_paths
+            {
+                (ap.cert_file.clone(), ap.key_file.clone())
+            } else {
+                (ep.quic.cert_file.clone(), ep.quic.key_file.clone())
+            };
+
+            let (ws_cert, ws_key) = if ep.websocket.should_use_acme(acme_cert_paths.is_some())
+                && let Some(ref ap) = acme_cert_paths
+            {
+                (ap.cert_file.clone(), ap.key_file.clone())
+            } else {
+                (ep.websocket.cert_file.clone(), ep.websocket.key_file.clone())
+            };
+
             let server = tunnel::server::Server::new(tunnel::server::ServerOptions {
                 listen_addr: ep.listen_addr.clone(),
                 transport: ep.transport.clone(),
                 auth_token: cfg.tunnel.auth_token.clone(),
                 quic: tunnel::server::QuicServerOptions {
-                    cert_file: ep.quic.cert_file.clone(),
-                    key_file: ep.quic.key_file.clone(),
+                    cert_file: quic_cert,
+                    key_file: quic_key,
                 },
                 websocket: tunnel::server::WebSocketServerOptions {
-                    cert_file: ep.websocket.cert_file.clone(),
-                    key_file: ep.websocket.key_file.clone(),
+                    cert_file: ws_cert,
+                    key_file: ws_key,
                 },
                 manager: tunnel_manager.clone(),
                 auth_manager: Some(auth_manager.clone()),

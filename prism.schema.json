@@ -76,7 +76,8 @@
 		},
 		"timeouts": { "$ref": "#/$defs/timeouts" },
 		"tunnel": { "$ref": "#/$defs/tunnel" },
-		"auth": { "$ref": "#/$defs/auth" }
+		"auth": { "$ref": "#/$defs/auth" },
+		"acme": { "$ref": "#/$defs/acme" }
 	},
 	"allOf": [
 		{
@@ -407,6 +408,10 @@
 					"type": "string",
 					"description": "Path to TLS private key PEM file for WSS. If empty, Prism may generate a self-signed key.",
 					"default": ""
+				},
+				"use_acme": {
+					"type": "boolean",
+					"description": "Whether this endpoint should use the ACME certificate. Defaults to true when ACME is enabled and cert_file is empty."
 				}
 			}
 		},
@@ -423,6 +428,10 @@
 					"type": "string",
 					"description": "Path to TLS private key PEM file. If empty, Prism may generate a self-signed key.",
 					"default": ""
+				},
+				"use_acme": {
+					"type": "boolean",
+					"description": "Whether this endpoint should use the ACME certificate. Defaults to true when ACME is enabled and cert_file is empty."
 				}
 			}
 		},
@@ -723,6 +732,82 @@
 					"anyOf": [{ "required": ["middlewares"] }, { "required": ["parsers"] }]
 				}
 			]
+		},
+		"cloudflareAcme": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"api_token": {
+					"type": "string",
+					"description": "Cloudflare API token with Zone:DNS:Edit permission. Can also be set via CLOUDFLARE_API_TOKEN environment variable.",
+					"default": ""
+				},
+				"zone_id": {
+					"type": "string",
+					"description": "Optional Cloudflare Zone ID. If omitted, Prism will auto-detect the zone from the configured domains.",
+					"default": ""
+				},
+				"propagation_timeout_secs": {
+					"type": "integer",
+					"minimum": 5,
+					"description": "Timeout in seconds to wait for DNS TXT propagation before notifying the ACME CA (default: 120s).",
+					"default": 120
+				}
+			}
+		},
+		"acme": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable automated ACME certificate management.",
+					"default": false
+				},
+				"domains": {
+					"oneOf": [
+						{ "type": "string" },
+						{
+							"type": "array",
+							"items": { "type": "string" }
+						}
+					],
+					"description": "Domain name(s) to issue certificates for (supports apex, subdomains, and wildcards)."
+				},
+				"email": {
+					"type": "string",
+					"description": "Contact email address for ACME registration and expiry notifications."
+				},
+				"directory_url": {
+					"type": "string",
+					"description": "ACME directory URL or preset ('production', 'staging', 'zerossl', or custom URL).",
+					"default": "production"
+				},
+				"storage_dir": {
+					"type": "string",
+					"description": "Directory to store issued certificates, private keys, and account credentials. Defaults to <workdir>/acme."
+				},
+				"cert_file": {
+					"type": "string",
+					"description": "Explicit path to save the certificate PEM file. Defaults to <storage_dir>/cert.pem."
+				},
+				"key_file": {
+					"type": "string",
+					"description": "Explicit path to save the private key PEM file. Defaults to <storage_dir>/key.pem."
+				},
+				"renew_before_days": {
+					"type": "integer",
+					"minimum": 1,
+					"description": "Number of days before certificate expiration to attempt automatic renewal (default: 30).",
+					"default": 30
+				},
+				"auto_renew": {
+					"type": "boolean",
+					"description": "Enable periodic background certificate auto-renewal task.",
+					"default": true
+				},
+				"cloudflare": { "$ref": "#/$defs/cloudflareAcme" }
+			}
 		}
 	}
 }

@@ -86,10 +86,43 @@ key_file = ""
 # Example WebSocket tunnel endpoint (ws or wss):
 # [[tunnel.endpoints]]
 # listen_addr = ":7002"
-# transport = "websocket" # or "wss"
+# transport = "wss"
 # [tunnel.endpoints.websocket]
+# # If use_acme is true (or omitted when [acme] is enabled and cert_file is empty),
+# # Prism will automatically use the ACME-provisioned certificate.
+# use_acme = true
 # cert_file = ""
 # key_file = ""
+
+# ============================================================================
+# ACME Automated Certificate Management (Cloudflare DNS-01)
+# ============================================================================
+# Automatically acquires and renews trusted TLS certificates via RFC 8555 (Let's Encrypt)
+# using Cloudflare DNS-01 challenge. This enables trusted TLS certificates for
+# QUIC and WSS tunnel endpoints, including wildcard and apex domains, without needing
+# to expose HTTP port 80.
+#
+# [acme]
+# enabled = false
+# domains = ["tunnel.example.com"]
+# email = "admin@example.com"
+# # Directory URL preset: "production" (default), "staging", or full ACME directory URL
+# directory_url = "production"
+# # Directory to store certificates, keys, and account credentials (defaults to <workdir>/acme)
+# storage_dir = ""
+# # Number of days before certificate expiration to attempt renewal (default: 30)
+# renew_before_days = 30
+# # Enable background certificate auto-renewal task (default: true)
+# auto_renew = true
+#
+# [acme.cloudflare]
+# # Cloudflare API token with Zone:DNS:Edit permissions.
+# # Can also be passed via the CLOUDFLARE_API_TOKEN environment variable.
+# api_token = "your-cloudflare-api-token"
+# # Optional: Cloudflare Zone ID. Auto-detected from domain if omitted.
+# zone_id = ""
+# # DNS propagation check timeout in seconds (default: 120)
+# propagation_timeout_secs = 120
 
 # Optional: tunnel connector host role (uncomment to expose private services).
 #

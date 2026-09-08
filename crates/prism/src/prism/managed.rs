@@ -752,7 +752,6 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
-            serve_frontend: false,
             storage: None,
         };
 

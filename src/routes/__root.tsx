@@ -12,13 +12,14 @@ import { useEffect, useMemo } from "react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { setupDeepLinkListener } from "@/lib/deepLink";
-import { exchangeGitHubCode } from "@/lib/managementApi";
+import { exchangeGitHubCode, getClientStatus } from "@/lib/managementApi";
 import {
 	closeWindow,
 	isDesktopApp,
 	minimizeWindow,
 	toggleMaximizeWindow,
 } from "@/lib/desktopWindow";
+import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { PanelSessionProvider, usePanelSession } from "@/lib/panelSession";
 
 import appCss from "../styles.css?url";
@@ -126,7 +127,7 @@ function RootContent() {
 	useEffect(() => {
 		return setupDeepLinkListener((payload) => {
 			if (payload.kind === "auth") {
-				const currentBaseUrl = connection?.baseUrl || "http://127.0.0.1:8080";
+				const currentBaseUrl = connection?.baseUrl || "";
 				saveConnection({
 					baseUrl: currentBaseUrl,
 					token: payload.token,
@@ -136,46 +137,89 @@ function RootContent() {
 					void navigate({ to: "/" });
 				}
 			} else if (payload.kind === "auth-code") {
-				const pendingUrl =
-					typeof window !== "undefined"
-						? window.sessionStorage.getItem("prism_pending_auth_url")
-						: null;
-				const currentBaseUrl = pendingUrl || connection?.baseUrl || "http://127.0.0.1:8080";
-				exchangeGitHubCode({ baseUrl: currentBaseUrl, token: "" }, payload.code)
-					.then((res) => {
-						if (typeof window !== "undefined") {
-							window.sessionStorage.removeItem("prism_pending_auth_url");
+				window.dispatchEvent(
+					new CustomEvent("prism:deep-link-exchange-start", {
+						detail: { code: payload.code },
+					}),
+				);
+				const doExchange = async () => {
+					const candidates: string[] = [];
+					if (typeof window !== "undefined") {
+						const fromLocal = window.localStorage.getItem("prism_pending_auth_url");
+						const fromSession = window.sessionStorage.getItem("prism_pending_auth_url");
+						if (fromLocal && !candidates.includes(fromLocal)) candidates.push(fromLocal);
+						if (fromSession && !candidates.includes(fromSession)) candidates.push(fromSession);
+					}
+
+					// Also check if local tunnel client is running with an active in-band admin bridge
+					try {
+						const clientSt = await getClientStatus();
+						if (clientSt?.admin_url && !candidates.includes(clientSt.admin_url)) {
+							candidates.push(clientSt.admin_url);
 						}
-						saveConnection({
-							baseUrl: currentBaseUrl,
-							token: res.token,
-						});
-						window.dispatchEvent(
-							new CustomEvent("prism:deep-link-auth", {
-								detail: {
-									token: res.token,
-									userId: res.user.id,
-									username: res.user.username,
-									role: res.user.role,
-								},
-							}),
-						);
-						if (location.pathname === "/login") {
-							void navigate({ to: "/" });
+					} catch {
+						// ignore
+					}
+
+					if (connection?.baseUrl && !candidates.includes(connection.baseUrl)) {
+						candidates.push(connection.baseUrl);
+					}
+
+					// Fallback to default in-band tunnel admin bridge port
+					if (!candidates.includes("http://127.0.0.1:18080")) {
+						candidates.push("http://127.0.0.1:18080");
+					}
+
+					let lastErr: unknown = null;
+					for (const targetUrl of candidates) {
+						try {
+							const norm = normalizeBaseUrl(targetUrl);
+							const res = await exchangeGitHubCode({ baseUrl: norm, token: "" }, payload.code);
+							if (typeof window !== "undefined") {
+								window.localStorage.removeItem("prism_pending_auth_url");
+								window.sessionStorage.removeItem("prism_pending_auth_url");
+							}
+							saveConnection({
+								baseUrl: norm,
+								token: res.token,
+							});
+							window.dispatchEvent(
+								new CustomEvent("prism:deep-link-auth", {
+									detail: {
+										token: res.token,
+										userId: res.user.id,
+										username: res.user.username,
+										role: res.user.role,
+									},
+								}),
+							);
+							if (location.pathname === "/login") {
+								void navigate({ to: "/" });
+							}
+							return;
+						} catch (err) {
+							lastErr = err;
 						}
-					})
-					.catch((err) => {
-						console.error("Failed to exchange GitHub OAuth code via deep link:", err);
-					});
+					}
+					console.error("Failed to exchange GitHub OAuth code via deep link:", lastErr);
+					window.dispatchEvent(
+						new CustomEvent("prism:deep-link-exchange-error", {
+							detail: {
+								error:
+									lastErr instanceof Error
+										? lastErr.message
+										: "GitHub 授权码兑换凭证失败，验证码可能已失效，请重新发起登录",
+							},
+						}),
+					);
+				};
+				void doExchange();
 			} else if (payload.kind === "profile") {
 				window.dispatchEvent(
 					new CustomEvent("prism:deep-link-profile", {
 						detail: payload.profile,
 					}),
 				);
-				if (location.pathname !== "/client") {
-					void navigate({ to: "/client" });
-				}
 			}
 		});
 	}, [connection?.baseUrl, location.pathname, navigate, saveConnection]);
@@ -183,17 +227,10 @@ function RootContent() {
 	useEffect(() => {
 		if (typeof window !== "undefined") {
 			if (location.pathname === "/_shell.html") {
-				void navigate({ to: "/client" });
-			} else if (
-				isDesktop &&
-				location.pathname === "/" &&
-				!window.sessionStorage.getItem("prism_visited")
-			) {
-				window.sessionStorage.setItem("prism_visited", "true");
-				void navigate({ to: "/client" });
+				void navigate({ to: "/", replace: true });
 			}
 		}
-	}, [isDesktop, location.pathname, navigate]);
+	}, [location.pathname, navigate]);
 
 	return (
 		<div

@@ -20,7 +20,7 @@
 				"minHeight": 600,
 				"resizable": true,
 				"fullscreen": false,
-				"url": "_shell.html",
+				"url": "index.html",
 				"visible": false,
 				"decorations": false,
 				"shadow": true

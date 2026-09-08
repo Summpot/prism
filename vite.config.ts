@@ -17,7 +17,6 @@ const config = defineConfig(({ command }) => ({
 		port: 3000,
 		strictPort: true,
 		proxy: {
-			"/client": "http://127.0.0.1:8080",
 			"/stats": "http://127.0.0.1:8080",
 			"/auth": "http://127.0.0.1:8080",
 			"/health": "http://127.0.0.1:8080",

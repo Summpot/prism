@@ -87,3 +87,17 @@ export async function openExternalUrl(url: string): Promise<void> {
 	}
 }
 
+/**
+ * Generic invoke wrapper for Tauri commands.
+ * Throws an error if invoked outside of a Tauri desktop context.
+ */
+export async function invokeTauri<T = unknown>(
+	cmd: string,
+	args?: Record<string, unknown>,
+): Promise<T> {
+	const invoke = getTauriInvoke();
+	if (!invoke) {
+		throw new Error(`Tauri invoke is not available: cannot execute command '${cmd}'`);
+	}
+	return (await invoke(cmd, args)) as T;
+}

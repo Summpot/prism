@@ -64,9 +64,7 @@ describe("prismLink", () => {
 	});
 
 	it("resolves various remote connection string formats", () => {
-		const fromPrism = resolveRemoteConnection(
-			"prism://play.example.com:7000?transport=kcp",
-		);
+		const fromPrism = resolveRemoteConnection("prism://play.example.com:7000?transport=kcp");
 		expect(fromPrism.managementUrl).toBe("http://play.example.com:8080");
 		expect(fromPrism.serverAddr).toBe("play.example.com:7000");
 		expect(fromPrism.transport).toBe("kcp");

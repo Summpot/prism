@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Github } from "@/components/icons/Github";
 
-import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
+import { openExternalUrl } from "@/lib/desktopWindow";
 import { formatBytes } from "@/lib/format";
 
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +45,9 @@ import {
 	type ClientProfile,
 	type ClientStatusResponse,
 	type CumulativeStats,
+	type UserRecord,
 	clearClientLogs,
+	exchangeGitHubCode,
 	getAuthProviders,
 	getClientConfig,
 	getClientLogs,
@@ -59,8 +61,9 @@ import {
 	startClient,
 	stopClient,
 } from "@/lib/managementApi";
-import { type PanelConnection, deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
+import { deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
+import { parseDeepLink } from "@/lib/deepLink";
 import {
 	SUPPORTED_LINK_PROTOCOLS,
 	encodePrismLink,
@@ -113,15 +116,6 @@ function ClientDashboardPage() {
 	const location = useLocation();
 	const navigate = useNavigate();
 	const { connection, authSession, isAdmin, saveConnection, clearConnection } = usePanelSession();
-	const isDesktop = useMemo(() => isDesktopApp(), []);
-
-	const clientConnection = useMemo<PanelConnection>(
-		() => ({
-			baseUrl: isDesktop ? "http://127.0.0.1:8080" : "",
-			token: "",
-		}),
-		[isDesktop],
-	);
 
 	const [status, setStatus] = useState<ClientStatusResponse | null>(null);
 	const [profiles, setProfiles] = useState<ClientProfile[]>([]);
@@ -222,6 +216,9 @@ function ClientDashboardPage() {
 	const [authServerUrl, setAuthServerUrl] = useState("http://127.0.0.1:8080");
 	const [authError, setAuthError] = useState<string | null>(null);
 	const [oauthLoading, setOauthLoading] = useState(false);
+	const [oauthWaitingCallback, setOauthWaitingCallback] = useState(false);
+	const [oauthExchanging, setOauthExchanging] = useState(false);
+	const [manualCallbackInput, setManualCallbackInput] = useState("");
 
 	// Import modal state
 	const [importModalOpen, setImportModalOpen] = useState(false);
@@ -230,7 +227,7 @@ function ClientDashboardPage() {
 
 	// Fetch status
 	const fetchStatus = useCallback(() => {
-		getClientStatus(clientConnection)
+		getClientStatus()
 			.then((resp) => {
 				setStatus(resp);
 				if (resp.cumulative_stats) {
@@ -240,11 +237,11 @@ function ClientDashboardPage() {
 			.catch((err) => {
 				console.debug("Failed to fetch client status:", err);
 			});
-	}, [clientConnection]);
+	}, []);
 
 	// Fetch full client configuration from persistent redb on mount or after updates
 	const fetchClientConfigData = useCallback(() => {
-		getClientConfig(clientConnection)
+		getClientConfig()
 			.then((resp) => {
 				setProfiles(resp.profiles);
 				if (resp.cumulative_stats) {
@@ -272,7 +269,7 @@ function ClientDashboardPage() {
 				}
 			})
 			.catch(() => {
-				getClientProfiles(clientConnection)
+				getClientProfiles()
 					.then((list) => {
 						setProfiles(list);
 						if (list.length > 0 && !selectedProfileId && !configLoadedRef.current) {
@@ -289,11 +286,11 @@ function ClientDashboardPage() {
 					})
 					.catch(() => {});
 			});
-	}, [clientConnection, selectedProfileId]);
+	}, [selectedProfileId]);
 
 	// Fetch logs with deduplication to avoid unnecessary re-renders
 	const fetchLogs = useCallback(() => {
-		getClientLogs(clientConnection, 300)
+		getClientLogs(300)
 			.then((entries) => {
 				setLogs((prev) => {
 					if (prev.length === entries.length) {
@@ -313,7 +310,7 @@ function ClientDashboardPage() {
 				});
 			})
 			.catch(() => {});
-	}, [clientConnection]);
+	}, []);
 
 	useEffect(() => {
 		fetchStatus();
@@ -328,7 +325,7 @@ function ClientDashboardPage() {
 			clearTimeout(autoSaveTimerRef.current);
 		}
 		autoSaveTimerRef.current = setTimeout(() => {
-			saveClientConfig(clientConnection, {
+			saveClientConfig({
 				active_profile_id: selectedProfileId || null,
 				active_config: {
 					server_addr: serverAddr,
@@ -347,7 +344,6 @@ function ClientDashboardPage() {
 			}
 		};
 	}, [
-		clientConnection,
 		selectedProfileId,
 		serverAddr,
 		transport,
@@ -487,14 +483,17 @@ function ClientDashboardPage() {
 				setServerAddr(nextServer);
 			}
 			if (typeof window !== "undefined") {
+				window.localStorage.setItem("prism_pending_auth_url", norm);
 				window.sessionStorage.setItem("prism_pending_auth_url", norm);
 			}
 			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
 			if (res.url) {
+				setOauthWaitingCallback(true);
 				await openExternalUrl(res.url);
 			}
 		} catch (err) {
 			setAuthError(err instanceof Error ? err.message : String(err));
+			setOauthWaitingCallback(false);
 		} finally {
 			setOauthLoading(false);
 		}
@@ -530,10 +529,24 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Handle paste event (auto detect protocol when pasting link)
+	// Handle paste event (auto detect protocol or auth callback when pasting link)
 	const handleAddressPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
 		const text = e.clipboardData.getData("text");
 		if (!text) return;
+		const trimmedText = text.trim();
+		if (
+			trimmedText.toLowerCase().startsWith("prism://") &&
+			(trimmedText.includes("code=") || trimmedText.includes("token="))
+		) {
+			const deep = parseDeepLink(trimmedText);
+			if (deep.kind === "auth-code" || deep.kind === "auth") {
+				e.preventDefault();
+				setRemoteLinkInput(trimmedText);
+				void handleConnectFromLink(trimmedText);
+				return;
+			}
+		}
+
 		const { protocol, address } = extractProtocolAndAddress(text);
 		if (protocol) {
 			e.preventDefault();
@@ -561,7 +574,25 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Connect from remote link: query providers and open select login method dialog
+	// Re-detect providers from a given or current URL
+	const handleRedetectProviders = async (overrideUrl?: string) => {
+		const target = (overrideUrl ?? authServerUrl).trim() || status?.admin_url;
+		if (!target) return;
+		setCheckingProviders(true);
+		setProvidersError(null);
+		try {
+			const norm = normalizeBaseUrl(target);
+			const providers = await getAuthProviders(norm);
+			setProvidersResult(providers);
+			setAuthServerUrl(norm);
+		} catch (err) {
+			setProvidersError(err instanceof Error ? err.message : "探测失败，无法连接到远端服务");
+		} finally {
+			setCheckingProviders(false);
+		}
+	};
+
+	// Connect from remote link: initiate tunnel client connection, query providers via in-band bridge or direct URL
 	const handleConnectFromLink = async (customLink?: string) => {
 		let raw = (customLink ?? remoteLinkInput).trim();
 		if (!raw && serverAddr) {
@@ -574,44 +605,268 @@ function ClientDashboardPage() {
 			return;
 		}
 
-		const resolved = resolveRemoteConnection(raw);
-		setServerAddr(resolved.serverAddr);
-		if (resolved.transport) {
-			setTransport(resolved.transport);
-			const matched = SUPPORTED_LINK_PROTOCOLS.find((p) => p.transport === resolved.transport);
-			if (matched) setLinkProtocol(matched.value);
+		// Handle direct OAuth code or Token callback links pasted by user
+		const deep = parseDeepLink(raw);
+		if (deep.kind === "auth-code") {
+			setActionLoading(true);
+			setOauthExchanging(true);
+			setOauthWaitingCallback(false);
+			setLoginModalOpen(true);
+			setAuthError(null);
+			setProvidersError(null);
+			try {
+				const candidateUrls: string[] = [];
+				if (typeof window !== "undefined") {
+					const fromLocal = window.localStorage.getItem("prism_pending_auth_url");
+					const fromSession = window.sessionStorage.getItem("prism_pending_auth_url");
+					if (fromLocal && !candidateUrls.includes(fromLocal)) candidateUrls.push(fromLocal);
+					if (fromSession && !candidateUrls.includes(fromSession)) candidateUrls.push(fromSession);
+				}
+				if (status?.admin_url && !candidateUrls.includes(status.admin_url)) {
+					candidateUrls.push(status.admin_url);
+				}
+				if (authServerUrl && !candidateUrls.includes(authServerUrl)) {
+					candidateUrls.push(authServerUrl);
+				}
+				if (serverAddr) {
+					const derived = deriveManagementUrl(serverAddr);
+					if (derived && !candidateUrls.includes(derived)) {
+						candidateUrls.push(derived);
+					}
+				}
+				if (!candidateUrls.includes("http://127.0.0.1:18080")) {
+					candidateUrls.push("http://127.0.0.1:18080");
+				}
+
+				let res: { token: string; user: UserRecord; token_id: string } | null = null;
+				let activeUrl = candidateUrls[0];
+				let lastErr: unknown = null;
+				for (const u of candidateUrls) {
+					try {
+						res = await exchangeGitHubCode({ baseUrl: normalizeBaseUrl(u), token: "" }, deep.code);
+						activeUrl = u;
+						break;
+					} catch (err) {
+						lastErr = err;
+					}
+				}
+
+				if (!res) {
+					throw new Error(
+						lastErr instanceof Error
+							? lastErr.message
+							: "GitHub 授权码兑换凭证失败，验证码可能已失效，请重新发起登录",
+					);
+				}
+
+				setAuthToken(res.token);
+				if (res.user?.role?.toLowerCase() === "admin") {
+					setLoginAdminUnlocked(true);
+				}
+				saveClientConfig({
+					active_profile_id: selectedProfileId || null,
+					active_config: {
+						server_addr: serverAddr,
+						transport,
+						auth_token: res.token,
+						listen_addr: listenAddr,
+						fake_lan_broadcast: fakeLanBroadcast,
+						auto_connect_panel: autoConnectPanel,
+					},
+				}).catch(() => {});
+				if (autoConnectPanel && activeUrl) {
+					saveConnection({ baseUrl: normalizeBaseUrl(activeUrl), token: res.token });
+				}
+				setLoginModalOpen(false);
+				setOauthWaitingCallback(false);
+				setOauthExchanging(false);
+				setAuthError(null);
+				void startClient({
+					server_addr: serverAddr,
+					transport,
+					auth_token: res.token,
+					listen_addr: listenAddr,
+					fake_lan_broadcast: fakeLanBroadcast,
+					profile_id: selectedProfileId || undefined,
+					profile_name: profileName || undefined,
+				}).then(() => {
+					fetchStatus();
+					fetchLogs();
+				});
+				setRemoteLinkInput("");
+				setManualCallbackInput("");
+			} catch (err) {
+				setAuthError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setActionLoading(false);
+				setCheckingProviders(false);
+				setOauthExchanging(false);
+			}
+			return;
+		} else if (deep.kind === "auth") {
+			setAuthToken(deep.token);
+			if (deep.role?.toLowerCase() === "admin") {
+				setLoginAdminUnlocked(true);
+			}
+			saveClientConfig({
+				active_profile_id: selectedProfileId || null,
+				active_config: {
+					server_addr: serverAddr,
+					transport,
+					auth_token: deep.token,
+					listen_addr: listenAddr,
+					fake_lan_broadcast: fakeLanBroadcast,
+					auto_connect_panel: autoConnectPanel,
+				},
+			}).catch(() => {});
+			setLoginModalOpen(false);
+			void startClient({
+				server_addr: serverAddr,
+				transport,
+				auth_token: deep.token,
+				listen_addr: listenAddr,
+				fake_lan_broadcast: fakeLanBroadcast,
+				profile_id: selectedProfileId || undefined,
+				profile_name: profileName || undefined,
+			}).then(() => {
+				fetchStatus();
+				fetchLogs();
+			});
+			setRemoteLinkInput("");
+			return;
 		}
+
+		const resolved = resolveRemoteConnection(raw);
+		const targetServerAddr = resolved.serverAddr;
+		const targetTransport = resolved.transport || "quic";
+		setServerAddr(targetServerAddr);
+		setTransport(targetTransport);
+		const matched = SUPPORTED_LINK_PROTOCOLS.find((p) => p.transport === targetTransport);
+		if (matched) setLinkProtocol(matched.value);
 		if (resolved.name) setProfileName(resolved.name);
 		if (resolved.listenAddr) setListenAddr(resolved.listenAddr);
 
-		const targetAuthUrl = resolved.managementUrl;
-		setAuthServerUrl(targetAuthUrl);
 		setAuthError(null);
 		setProvidersError(null);
 		setLoginModalOpen(true);
 		setCheckingProviders(true);
+		setActionLoading(true);
 
 		try {
-			const norm = normalizeBaseUrl(targetAuthUrl);
-			const providers = await getAuthProviders(norm);
-			setProvidersResult(providers);
+			// 1. Initiate client tunnel connection to target server (unauthenticated/pre-login allowed)
+			await startClient({
+				server_addr: targetServerAddr,
+				transport: targetTransport,
+				auth_token: authToken || "",
+				listen_addr: resolved.listenAddr || listenAddr,
+				fake_lan_broadcast: fakeLanBroadcast,
+				profile_id: selectedProfileId || undefined,
+				profile_name: resolved.name || profileName || undefined,
+			}).catch((err) => {
+				console.warn("Tunnel client start attempt:", err);
+			});
+
+			// 2. Poll for connected status and in-band admin bridge URL (up to 3 seconds)
+			let bridgeAdminUrl = status?.admin_url || null;
+			let latestStatus: ClientStatusResponse | null = null;
+			for (let i = 0; i < 15; i++) {
+				const st = await getClientStatus().catch(() => null);
+				if (st) {
+					latestStatus = st;
+					if (st.admin_url) {
+						bridgeAdminUrl = st.admin_url;
+						setStatus(st);
+						break;
+					}
+					if (st.state === "connected" && st.admin_url) {
+						bridgeAdminUrl = st.admin_url;
+						setStatus(st);
+						break;
+					}
+				}
+				await new Promise((resolve) => setTimeout(resolve, 200));
+			}
+
+			if (latestStatus) {
+				setStatus(latestStatus);
+			}
+			fetchLogs();
+
+			// 3. Determine target URL to probe: prefer in-band tunnel admin bridge, fallback to resolved.managementUrl
+			const candidateUrls: string[] = [];
+			if (bridgeAdminUrl) {
+				candidateUrls.push(normalizeBaseUrl(bridgeAdminUrl));
+			}
+			if (resolved.managementUrl) {
+				const normManagement = normalizeBaseUrl(resolved.managementUrl);
+				if (!candidateUrls.includes(normManagement)) {
+					candidateUrls.push(normManagement);
+				}
+			}
+
+			let providers: AuthProvidersResponse | null = null;
+			let successfulUrl = candidateUrls[0] || resolved.managementUrl;
+
+			for (const url of candidateUrls) {
+				try {
+					const res = await getAuthProviders(url);
+					if (res.providers && res.providers.length > 0) {
+						providers = res;
+						successfulUrl = url;
+						break;
+					}
+					if (res.github_enabled) {
+						providers = res;
+						successfulUrl = url;
+						break;
+					}
+				} catch {
+					// try next candidate
+				}
+			}
+
+			if (!providers && candidateUrls.length > 0) {
+				try {
+					providers = await getAuthProviders(candidateUrls[0]);
+					successfulUrl = candidateUrls[0];
+				} catch (err) {
+					setProvidersError(
+						err instanceof Error ? err.message : "无法获取远端登录方式，请检查网络或服务端配置",
+					);
+				}
+			}
+
+			setAuthServerUrl(successfulUrl);
+			if (providers) {
+				setProvidersResult(providers);
+			}
 		} catch (err) {
 			setProvidersError(
-				err instanceof Error ? err.message : "无法获取远端登录方式，请检查网络或服务端配置",
+				err instanceof Error ? err.message : "连接远端或获取登录方式失败，请检查网络",
 			);
-			setProvidersResult({
-				github_enabled: false,
-				github_client_id: null,
-				mode: "token",
-				providers: [],
-			});
 		} finally {
 			setCheckingProviders(false);
+			setActionLoading(false);
 		}
 	};
 
 	// Listen for Deep Link OAuth and Profile events
 	useEffect(() => {
+		const handleExchangeStart = () => {
+			setOauthWaitingCallback(false);
+			setOauthExchanging(true);
+			setAuthError(null);
+			setLoginModalOpen(true);
+		};
+
+		const handleExchangeError = (event: Event) => {
+			const customEvent = event as CustomEvent<{ error?: string }>;
+			setOauthWaitingCallback(false);
+			setOauthExchanging(false);
+			setOauthLoading(false);
+			setAuthError(customEvent.detail?.error || "授权验证失败，请重试");
+		};
+
 		const handleDeepLinkAuth = (event: Event) => {
 			const customEvent = event as CustomEvent<{
 				token: string;
@@ -620,12 +875,15 @@ function ClientDashboardPage() {
 				role?: string;
 			}>;
 			const { token, role } = customEvent.detail;
+			setOauthWaitingCallback(false);
+			setOauthExchanging(false);
+			setOauthLoading(false);
 			if (token) {
 				setAuthToken(token);
 				if (role?.toLowerCase() === "admin") {
 					setLoginAdminUnlocked(true);
 				}
-				saveClientConfig(clientConnection, {
+				saveClientConfig({
 					active_profile_id: selectedProfileId || null,
 					active_config: {
 						server_addr: serverAddr,
@@ -640,6 +898,21 @@ function ClientDashboardPage() {
 					saveConnection({ baseUrl: normalizeBaseUrl(authServerUrl), token });
 				}
 				setLoginModalOpen(false);
+				setAuthError(null);
+				void startClient({
+					server_addr: serverAddr,
+					transport,
+					auth_token: token,
+					listen_addr: listenAddr,
+					fake_lan_broadcast: fakeLanBroadcast,
+					profile_id: selectedProfileId || undefined,
+					profile_name: profileName || undefined,
+				}).then(() => {
+					fetchStatus();
+					fetchLogs();
+				});
+				setRemoteLinkInput("");
+				setManualCallbackInput("");
 			}
 		};
 
@@ -659,17 +932,23 @@ function ClientDashboardPage() {
 			}
 		};
 
+		window.addEventListener("prism:deep-link-exchange-start", handleExchangeStart);
+		window.addEventListener("prism:deep-link-exchange-error", handleExchangeError);
 		window.addEventListener("prism:deep-link-auth", handleDeepLinkAuth);
 		window.addEventListener("prism:deep-link-profile", handleDeepLinkProfile);
 		return () => {
+			window.removeEventListener("prism:deep-link-exchange-start", handleExchangeStart);
+			window.removeEventListener("prism:deep-link-exchange-error", handleExchangeError);
 			window.removeEventListener("prism:deep-link-auth", handleDeepLinkAuth);
 			window.removeEventListener("prism:deep-link-profile", handleDeepLinkProfile);
 		};
 	}, [
+		authServerUrl,
 		autoConnectPanel,
-		clientConnection,
 		fakeLanBroadcast,
 		listenAddr,
+		profileName,
+		saveConnection,
 		selectedProfileId,
 		serverAddr,
 		transport,
@@ -686,7 +965,7 @@ function ClientDashboardPage() {
 			setAuthToken(p.auth_token);
 			setListenAddr(p.listen_addr);
 			setFakeLanBroadcast(p.fake_lan_broadcast);
-			saveClientConfig(clientConnection, {
+			saveClientConfig({
 				active_profile_id: id,
 				active_config: {
 					server_addr: p.server_addr,
@@ -726,8 +1005,8 @@ function ClientDashboardPage() {
 
 		setProfiles(updated);
 		setSelectedProfileId(id);
-		await saveClientProfiles(clientConnection, updated).catch(() => {});
-		await saveClientConfig(clientConnection, {
+		await saveClientProfiles(updated).catch(() => {});
+		await saveClientConfig({
 			active_profile_id: id,
 			active_config: {
 				server_addr: serverAddr,
@@ -757,8 +1036,8 @@ function ClientDashboardPage() {
 				setFakeLanBroadcast(first.fake_lan_broadcast);
 			}
 		}
-		await saveClientProfiles(clientConnection, updated).catch(() => {});
-		await saveClientConfig(clientConnection, {
+		await saveClientProfiles(updated).catch(() => {});
+		await saveClientConfig({
 			active_profile_id: nextActiveId || null,
 		}).catch(() => {});
 	};
@@ -768,7 +1047,7 @@ function ClientDashboardPage() {
 		setActionLoading(true);
 		setError(null);
 		try {
-			await startClient(clientConnection, {
+			await startClient({
 				server_addr: serverAddr,
 				transport,
 				auth_token: authToken,
@@ -791,7 +1070,7 @@ function ClientDashboardPage() {
 		setActionLoading(true);
 		setError(null);
 		try {
-			await stopClient(clientConnection);
+			await stopClient();
 			fetchStatus();
 			fetchLogs();
 		} catch (err) {
@@ -803,7 +1082,7 @@ function ClientDashboardPage() {
 
 	const handleResetStats = async () => {
 		try {
-			await resetClientStats(clientConnection);
+			await resetClientStats();
 			fetchStatus();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -822,7 +1101,7 @@ function ClientDashboardPage() {
 	// Clear Logs Handler
 	const handleClearLogs = async () => {
 		try {
-			await clearClientLogs(clientConnection);
+			await clearClientLogs();
 			setLogs([]);
 		} catch (err) {
 			console.error("Failed to clear logs:", err);
@@ -1871,7 +2150,9 @@ function ClientDashboardPage() {
 											onChange={(e) => {
 												const val = e.target.value;
 												setTransport(val);
-												const matched = SUPPORTED_LINK_PROTOCOLS.find((item) => item.transport === val);
+												const matched = SUPPORTED_LINK_PROTOCOLS.find(
+													(item) => item.transport === val,
+												);
 												if (matched) setLinkProtocol(matched.value);
 											}}
 											className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
@@ -1997,7 +2278,8 @@ function ClientDashboardPage() {
 								<div className="min-w-0">
 									<CardTitle className="text-sm sm:text-base font-bold">选择登录方式</CardTitle>
 									<CardDescription className="text-xs truncate">
-										远端节点：<code className="text-foreground font-mono">{serverAddr || "未指定"}</code>
+										远端节点：
+										<code className="text-foreground font-mono">{serverAddr || "未指定"}</code>
 									</CardDescription>
 								</div>
 							</div>
@@ -2008,6 +2290,9 @@ function ClientDashboardPage() {
 									setLoginModalOpen(false);
 									setAuthError(null);
 									setProvidersError(null);
+									setOauthWaitingCallback(false);
+									setOauthExchanging(false);
+									setManualCallbackInput("");
 								}}
 							>
 								<X className="h-4 w-4" />
@@ -2019,6 +2304,77 @@ function ClientDashboardPage() {
 									<RotateCcw className="h-7 w-7 animate-spin text-primary" />
 									<p className="text-xs">正在探测远端支持的登录方式...</p>
 								</div>
+							) : oauthExchanging ? (
+								<div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-3">
+									<RotateCcw className="h-8 w-8 animate-spin text-primary" />
+									<div className="space-y-1">
+										<p className="text-sm font-semibold text-foreground">
+											正在兑换 GitHub 授权凭证...
+										</p>
+										<p className="text-xs text-muted-foreground">
+											已接收到授权回调，正在与远端节点验证并申请访问令牌
+										</p>
+									</div>
+								</div>
+							) : oauthWaitingCallback ? (
+								<div className="space-y-4 py-2">
+									<div className="rounded-xl border border-primary/30 bg-primary/10 p-5 flex flex-col items-center text-center gap-3">
+										<div className="relative flex items-center justify-center">
+											<RotateCcw className="h-9 w-9 animate-spin text-primary" />
+											<Github className="absolute h-4 w-4 text-primary" />
+										</div>
+										<div className="space-y-1">
+											<p className="text-sm font-bold text-foreground">等待 GitHub 授权完成</p>
+											<p className="text-xs text-muted-foreground leading-relaxed max-w-sm">
+												已在默认浏览器中打开 GitHub
+												授权页面。完成授权后，系统将自动唤起客户端完成登录并自动关闭此对话框。
+											</p>
+										</div>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => startGitHubAuthWithUrl(authServerUrl, serverAddr)}
+											disabled={oauthLoading}
+											className="text-xs h-7.5 gap-1.5 mt-1"
+										>
+											<RotateCcw className="h-3.5 w-3.5" />
+											重新打开授权页面
+										</Button>
+									</div>
+
+									{authError ? (
+										<div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
+											{authError}
+										</div>
+									) : null}
+
+									{/* 手动输入回调链接作为保底 (Manual fallback) */}
+									<div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+										<div className="text-[11px] font-medium text-muted-foreground">
+											若系统未能自动唤起客户端，请复制浏览器地址栏中的完整回调链接并粘贴至此：
+										</div>
+										<div className="flex gap-2">
+											<Input
+												value={manualCallbackInput}
+												onChange={(e) => setManualCallbackInput(e.target.value)}
+												placeholder="prism://auth/callback?code=... 或直接粘贴回调链接"
+												className="h-8 text-xs font-mono"
+											/>
+											<Button
+												size="sm"
+												onClick={() => {
+													if (manualCallbackInput.trim()) {
+														void handleConnectFromLink(manualCallbackInput.trim());
+													}
+												}}
+												disabled={!manualCallbackInput.trim() || actionLoading || oauthExchanging}
+												className="h-8 text-xs shrink-0"
+											>
+												完成登录
+											</Button>
+										</div>
+									</div>
+								</div>
 							) : (
 								<>
 									<div className="space-y-1">
@@ -2028,7 +2384,7 @@ function ClientDashboardPage() {
 											</label>
 											<button
 												type="button"
-												onClick={() => void handleConnectFromLink()}
+												onClick={() => void handleRedetectProviders()}
 												className="text-primary hover:underline text-[11px] cursor-pointer flex items-center gap-1"
 											>
 												<RotateCcw className="h-3 w-3" />
@@ -2068,7 +2424,9 @@ function ClientDashboardPage() {
 														已确认管理员身份，侧边栏管理控制台已解锁。
 													</p>
 												) : (
-													<p className="text-muted-foreground mt-0.5">访问凭证已保存至客户端配置。</p>
+													<p className="text-muted-foreground mt-0.5">
+														访问凭证已保存至客户端配置。
+													</p>
 												)}
 											</div>
 										</div>
@@ -2097,12 +2455,16 @@ function ClientDashboardPage() {
 																	</div>
 																</div>
 															</div>
-															<Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">
+															<Badge
+																variant="outline"
+																className="text-[10px] text-emerald-500 border-emerald-500/30"
+															>
 																推荐
 															</Badge>
 														</div>
 														<p className="text-[11px] text-muted-foreground leading-relaxed">
-															在浏览器中打开 GitHub 授权页面，授权完成后由 Deep Link 自动唤起客户端完成登录。
+															在浏览器中打开 GitHub 授权页面，授权完成后由 Deep Link
+															自动唤起客户端完成登录。
 														</p>
 														<Button
 															size="sm"
@@ -2111,16 +2473,20 @@ function ClientDashboardPage() {
 															className="w-full h-8 text-xs font-semibold gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
 														>
 															<Github className="h-3.5 w-3.5" />
-															<span>{oauthLoading ? "正在获取授权链接..." : "前往 GitHub 授权登录"}</span>
+															<span>
+																{oauthLoading ? "正在获取授权链接..." : "前往 GitHub 授权登录"}
+															</span>
 														</Button>
 													</div>
 												)}
 												{/* If remote returns no login methods */}
 												{providersResult &&
 													!providersResult.github_enabled &&
-													(!providersResult.providers || !providersResult.providers.includes("github")) && (
+													(!providersResult.providers ||
+														!providersResult.providers.includes("github")) && (
 														<div className="rounded-lg border border-muted bg-muted/20 p-4 text-center text-xs text-muted-foreground">
-															远端节点未开启授权登录（如 GitHub OAuth），请联系服务端管理员开启配置。
+															远端节点未开启授权登录（如 GitHub
+															OAuth），请联系服务端管理员开启配置。
 														</div>
 													)}
 											</div>
@@ -2137,6 +2503,9 @@ function ClientDashboardPage() {
 									setLoginModalOpen(false);
 									setAuthError(null);
 									setProvidersError(null);
+									setOauthWaitingCallback(false);
+									setOauthExchanging(false);
+									setManualCallbackInput("");
 								}}
 							>
 								关闭

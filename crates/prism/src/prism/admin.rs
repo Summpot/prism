@@ -3,21 +3,16 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use axum::{
     Json, Router,
     extract::{Path as AxumPath, Query, State},
-    http::{HeaderMap, StatusCode, Uri, header},
+    http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
     routing::{get, post, put},
 };
-use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tower_http::cors::CorsLayer;
 
 use crate::prism::telemetry;
 use crate::prism::{managed, tunnel};
-
-#[derive(Embed)]
-#[folder = "../../dist/client/"]
-struct FrontendAssets;
 
 #[derive(Clone, Debug, Default)]
 pub struct AdminAuth {
@@ -37,7 +32,6 @@ pub struct AdminState {
     pub worker: Option<Arc<managed::WorkerAgent>>,
     pub client: Option<Arc<tunnel::client::ClientController>>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
-    pub serve_frontend: bool,
     pub storage: Option<Arc<crate::prism::storage::StorageEngine>>,
 }
 
@@ -73,10 +67,32 @@ pub async fn serve_with_shutdown(
     serve_listener_with_shutdown(listener, state, shutdown).await
 }
 
+#[derive(Debug, Serialize)]
+struct RootInfoResponse {
+    service: &'static str,
+    version: &'static str,
+    status: &'static str,
+    frontend: &'static str,
+    message: &'static str,
+}
+
+async fn root_info() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(RootInfoResponse {
+            service: "prism-admin-api",
+            version: env!("CARGO_PKG_VERSION"),
+            status: "running",
+            frontend: "desktop-only",
+            message: "Prism web frontend is deprecated. Please use the official Prism desktop application.",
+        }),
+    )
+}
+
 pub(crate) fn build_router(state: AdminState) -> Router {
-    let serve_frontend_enabled = state.serve_frontend;
     let shared = Arc::new(state);
-    let mut router = Router::new()
+    Router::new()
+        .route("/", get(root_info))
         .route("/health", get(health))
         .route("/conns", get(conns))
         .route("/tunnel/services", get(tunnel_services))
@@ -120,13 +136,9 @@ pub(crate) fn build_router(state: AdminState) -> Router {
             axum::routing::delete(auth_revoke_token),
         )
         .route("/managed/users", get(managed_users))
-        .route("/managed/users/{user_id}", put(put_managed_user));
-
-    if serve_frontend_enabled {
-        router = router.fallback(serve_frontend);
-    }
-
-    router.with_state(shared).layer(CorsLayer::permissive())
+        .route("/managed/users/{user_id}", put(put_managed_user))
+        .with_state(shared)
+        .layer(CorsLayer::permissive())
 }
 
 async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
@@ -138,36 +150,6 @@ async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
             break;
         }
     }
-}
-
-pub(crate) async fn serve_frontend(uri: Uri) -> impl IntoResponse {
-    let path = uri.path().trim_start_matches('/');
-
-    // Try the exact path first.
-    if !path.is_empty() {
-        if let Some(file) = FrontendAssets::get(path) {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            return (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, mime.as_ref().to_string())],
-                file.data.into_owned(),
-            )
-                .into_response();
-        }
-    }
-
-    // SPA fallback: serve _shell.html for any unmatched route.
-    if let Some(file) = FrontendAssets::get("_shell.html") {
-        return (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8".to_string())],
-            file.data.into_owned(),
-        )
-            .into_response();
-    }
-
-    // No frontend assets embedded.
-    (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
 #[derive(Debug, Serialize)]
@@ -207,7 +189,7 @@ async fn stats_optimizer(State(st): State<Arc<AdminState>>) -> impl IntoResponse
     )
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartClientRequest {
     pub server_addr: String,
     #[serde(default = "default_transport")]
@@ -268,8 +250,15 @@ fn profiles_path() -> PathBuf {
     }
 }
 
-async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let (active_profile_id, cumulative_stats) = if let Some(ref storage) = st.storage {
+// ---------------------------------------------------------------------------
+// Shared Client Controller & Storage Logic (Used by HTTP API & Tauri Commands)
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn do_client_status(
+    client: Option<&crate::prism::tunnel::client::ClientController>,
+    storage: Option<&crate::prism::storage::StorageEngine>,
+) -> serde_json::Value {
+    let (active_profile_id, cumulative_stats) = if let Some(storage) = storage {
         (
             storage.load_active_profile_id().ok().flatten(),
             Some(storage.load_cumulative_stats().unwrap_or_default()),
@@ -278,50 +267,32 @@ async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
         (None, None)
     };
 
-    if let Some(ref client) = st.client {
-        let status = client.status().await;
-        let mut val = serde_json::to_value(status).unwrap_or_default();
-        if let Some(obj) = val.as_object_mut() {
-            obj.insert(
-                "active_profile_id".into(),
-                serde_json::to_value(active_profile_id).unwrap_or(serde_json::Value::Null),
-            );
-            obj.insert(
-                "cumulative_stats".into(),
-                serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        (StatusCode::OK, Json(val))
+    let mut val = if let Some(client) = client {
+        serde_json::to_value(client.status().await).unwrap_or_default()
     } else {
-        let mut val = serde_json::to_value(tunnel::client::ClientStatusSnapshot::default())
-            .unwrap_or_default();
-        if let Some(obj) = val.as_object_mut() {
-            obj.insert(
-                "active_profile_id".into(),
-                serde_json::to_value(active_profile_id).unwrap_or(serde_json::Value::Null),
-            );
-            obj.insert(
-                "cumulative_stats".into(),
-                serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        (StatusCode::OK, Json(val))
-    }
-}
-
-async fn client_start(
-    State(st): State<Arc<AdminState>>,
-    Json(payload): Json<StartClientRequest>,
-) -> impl IntoResponse {
-    let Some(ref client) = st.client else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "client controller not enabled" })),
-        );
+        serde_json::to_value(tunnel::client::ClientStatusSnapshot::default()).unwrap_or_default()
     };
 
+    if let Some(obj) = val.as_object_mut() {
+        obj.insert(
+            "active_profile_id".into(),
+            serde_json::to_value(active_profile_id).unwrap_or(serde_json::Value::Null),
+        );
+        obj.insert(
+            "cumulative_stats".into(),
+            serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    val
+}
+
+pub(crate) async fn do_client_start(
+    client: &crate::prism::tunnel::client::ClientController,
+    storage: Option<&crate::prism::storage::StorageEngine>,
+    payload: StartClientRequest,
+) -> Result<(), String> {
     // Automatically persist active config and profile when starting client
-    if let Some(ref storage) = st.storage {
+    if let Some(storage) = storage {
         let profile_name = payload
             .profile_name
             .clone()
@@ -378,88 +349,66 @@ async fn client_start(
         websocket: None,
     };
 
-    match client.start(cfg).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        ),
-    }
+    client.start(cfg).await.map_err(|err| err.to_string())
 }
 
-async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    if let Some(ref client) = st.client {
-        if let Some(ref storage) = st.storage {
-            let snap = client.status().await;
-            let _ = storage.record_session_stats(&snap.stats);
-        }
-        client.stop().await;
-        (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
-    } else {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "client controller not enabled" })),
-        )
+pub(crate) async fn do_client_stop(
+    client: &crate::prism::tunnel::client::ClientController,
+    storage: Option<&crate::prism::storage::StorageEngine>,
+) -> Result<(), String> {
+    if let Some(storage) = storage {
+        let snap = client.status().await;
+        let _ = storage.record_session_stats(&snap.stats);
     }
+    client.stop().await;
+    Ok(())
 }
 
-async fn client_get_profiles(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    if let Some(ref storage) = st.storage {
+pub(crate) fn do_client_get_profiles(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+) -> Vec<ClientProfile> {
+    if let Some(storage) = storage {
         if let Ok(profiles) = storage.load_profiles() {
-            return (StatusCode::OK, Json(profiles));
+            return profiles;
         }
     }
     let path = profiles_path();
     if let Ok(data) = std::fs::read_to_string(&path) {
         if let Ok(profiles) = serde_json::from_str::<Vec<ClientProfile>>(&data) {
-            return (StatusCode::OK, Json(profiles));
+            return profiles;
         }
     }
-    (StatusCode::OK, Json(Vec::<ClientProfile>::new()))
+    Vec::new()
 }
 
-async fn client_save_profiles(
-    State(st): State<Arc<AdminState>>,
-    Json(profiles): Json<Vec<ClientProfile>>,
-) -> impl IntoResponse {
-    if let Some(ref storage) = st.storage {
-        if let Err(err) = storage.save_profiles(&profiles) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            );
-        }
-        return (StatusCode::OK, Json(serde_json::json!({ "ok": true })));
+pub(crate) fn do_client_save_profiles(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+    profiles: &[ClientProfile],
+) -> Result<(), String> {
+    if let Some(storage) = storage {
+        return storage.save_profiles(profiles).map_err(|e| e.to_string());
     }
     let path = profiles_path();
-    if let Ok(data) = serde_json::to_string_pretty(&profiles) {
-        if let Err(err) = std::fs::write(&path, data) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            );
-        }
-    }
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    let data = serde_json::to_string_pretty(profiles).map_err(|e| e.to_string())?;
+    std::fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
-async fn client_get_config(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    if let Some(ref storage) = st.storage {
-        let snapshot = storage.get_client_config_snapshot();
-        return (StatusCode::OK, Json(snapshot));
+pub(crate) fn do_client_get_config(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+) -> crate::prism::storage::ClientConfigResponse {
+    if let Some(storage) = storage {
+        return storage.get_client_config_snapshot();
     }
-    (
-        StatusCode::OK,
-        Json(crate::prism::storage::ClientConfigResponse {
-            active_profile_id: None,
-            active_config: crate::prism::storage::ClientConfigState::default(),
-            profiles: Vec::new(),
-            cumulative_stats: tunnel::optimizer::OptimizerStatsSnapshot::default(),
-        }),
-    )
+    crate::prism::storage::ClientConfigResponse {
+        active_profile_id: None,
+        active_config: crate::prism::storage::ClientConfigState::default(),
+        profiles: Vec::new(),
+        cumulative_stats: tunnel::optimizer::OptimizerStatsSnapshot::default(),
+    }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveConfigRequest {
     #[serde(default)]
     pub active_profile_id: Option<String>,
@@ -467,27 +416,28 @@ pub struct SaveConfigRequest {
     pub active_config: Option<crate::prism::storage::ClientConfigState>,
 }
 
-async fn client_save_config(
-    State(st): State<Arc<AdminState>>,
-    Json(payload): Json<SaveConfigRequest>,
-) -> impl IntoResponse {
-    if let Some(ref storage) = st.storage {
+pub(crate) fn do_client_save_config(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+    payload: SaveConfigRequest,
+) -> Result<(), String> {
+    if let Some(storage) = storage {
         if let Some(ref id) = payload.active_profile_id {
             let _ = storage.save_active_profile_id(id);
         }
         if let Some(ref cfg) = payload.active_config {
             let _ = storage.save_active_config(cfg);
         }
-        return (StatusCode::OK, Json(serde_json::json!({ "ok": true })));
     }
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    Ok(())
 }
 
-async fn client_reset_stats(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    if let Some(ref storage) = st.storage {
+pub(crate) fn do_client_reset_stats(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+) -> Result<(), String> {
+    if let Some(storage) = storage {
         let _ = storage.reset_cumulative_stats();
     }
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -495,26 +445,113 @@ pub struct ClientLogsQuery {
     pub limit: Option<usize>,
 }
 
+pub(crate) async fn do_client_logs(
+    client: Option<&crate::prism::tunnel::client::ClientController>,
+    limit: usize,
+) -> Vec<tunnel::client::ClientLogEntry> {
+    if let Some(client) = client {
+        client.logs(limit).await
+    } else {
+        Vec::new()
+    }
+}
+
+pub(crate) async fn do_client_clear_logs(
+    client: Option<&crate::prism::tunnel::client::ClientController>,
+) {
+    if let Some(client) = client {
+        client.clear_logs().await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP Axum Route Handlers
+// ---------------------------------------------------------------------------
+
+async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let val = do_client_status(st.client.as_deref(), st.storage.as_deref()).await;
+    (StatusCode::OK, Json(val))
+}
+
+async fn client_start(
+    State(st): State<Arc<AdminState>>,
+    Json(payload): Json<StartClientRequest>,
+) -> impl IntoResponse {
+    let Some(ref client) = st.client else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "client controller not enabled" })),
+        );
+    };
+
+    match do_client_start(client, st.storage.as_deref(), payload).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err })),
+        ),
+    }
+}
+
+async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let Some(ref client) = st.client else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "client controller not enabled" })),
+        );
+    };
+    let _ = do_client_stop(client, st.storage.as_deref()).await;
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+async fn client_get_profiles(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let profiles = do_client_get_profiles(st.storage.as_deref());
+    (StatusCode::OK, Json(profiles))
+}
+
+async fn client_save_profiles(
+    State(st): State<Arc<AdminState>>,
+    Json(profiles): Json<Vec<ClientProfile>>,
+) -> impl IntoResponse {
+    match do_client_save_profiles(st.storage.as_deref(), &profiles) {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err })),
+        ),
+    }
+}
+
+async fn client_get_config(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let cfg = do_client_get_config(st.storage.as_deref());
+    (StatusCode::OK, Json(cfg))
+}
+
+async fn client_save_config(
+    State(st): State<Arc<AdminState>>,
+    Json(payload): Json<SaveConfigRequest>,
+) -> impl IntoResponse {
+    let _ = do_client_save_config(st.storage.as_deref(), payload);
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+async fn client_reset_stats(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+    let _ = do_client_reset_stats(st.storage.as_deref());
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
 async fn client_logs(
     State(st): State<Arc<AdminState>>,
     Query(query): Query<ClientLogsQuery>,
 ) -> impl IntoResponse {
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
-    if let Some(ref client) = st.client {
-        let logs = client.logs(limit).await;
-        (StatusCode::OK, Json(logs)).into_response()
-    } else {
-        (
-            StatusCode::OK,
-            Json(Vec::<tunnel::client::ClientLogEntry>::new()),
-        )
-            .into_response()
-    }
+    let logs = do_client_logs(st.client.as_deref(), limit).await;
+    (StatusCode::OK, Json(logs)).into_response()
 }
 
 async fn client_clear_logs(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     if let Some(ref client) = st.client {
-        client.clear_logs().await;
+        do_client_clear_logs(Some(client)).await;
         (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
     } else {
         (
@@ -1156,7 +1193,6 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
-            serve_frontend: false,
             storage: None,
         };
 
@@ -1239,7 +1275,6 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
-            serve_frontend: false,
             storage: None,
         };
 
@@ -1291,7 +1326,6 @@ mod tests {
             worker: None,
             client: Some(client_controller),
             auth_manager: None,
-            serve_frontend: false,
             storage: None,
         };
 
@@ -1403,7 +1437,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_serve_frontend_flag() {
+    async fn test_root_info_and_frontend_deprecation() {
         let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -1418,7 +1452,6 @@ mod tests {
             worker: None,
             client: None,
             auth_manager: None,
-            serve_frontend: false,
             storage: None,
         };
 
@@ -1434,13 +1467,24 @@ mod tests {
         });
 
         let client = reqwest::Client::new();
+
+        // Root returns JSON info indicating frontend is desktop-only
+        let root_resp = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(root_resp.status(), reqwest::StatusCode::OK);
+        let root_json: serde_json::Value = root_resp.json().await.unwrap();
+        assert_eq!(root_json["service"], "prism-admin-api");
+        assert_eq!(root_json["frontend"], "desktop-only");
+
+        // Non-API route returns 404 without HTML fallback
         let resp = client
             .get(format!("http://{addr}/client"))
             .send()
             .await
             .unwrap();
-
-        // When serve_frontend is false, non-API route returns 404
         assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
         let _ = shutdown_tx.send(true);
@@ -1467,7 +1511,6 @@ mod tests {
             worker: None,
             client: Some(client_controller),
             auth_manager: None,
-            serve_frontend: false,
             storage: Some(storage.clone()),
         };
 

@@ -1,3 +1,4 @@
+import { invokeTauri } from "@/lib/desktopWindow";
 import type { PanelConnection } from "@/lib/panelConnection";
 
 export interface ManagedProxyListenerDocument {
@@ -379,52 +380,44 @@ export interface ClientProfile {
 	fake_lan_broadcast: boolean;
 }
 
-export function getClientStatus(connection: PanelConnection) {
-	return apiRequest<ClientStatusResponse>(connection, "/client/status");
+export function getClientStatus(): Promise<ClientStatusResponse> {
+	return invokeTauri<ClientStatusResponse>("client_status");
 }
 
-export function getClientConfig(connection: PanelConnection) {
-	return apiRequest<ClientConfigResponse>(connection, "/client/config");
+export function getClientConfig(): Promise<ClientConfigResponse> {
+	return invokeTauri<ClientConfigResponse>("client_get_config");
 }
 
-export function saveClientConfig(
-	connection: PanelConnection,
-	payload: { active_profile_id?: string | null; active_config?: Partial<ClientConfigState> },
-) {
-	return apiRequest<{ ok: boolean }>(connection, "/client/config", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
+export async function saveClientConfig(payload: {
+	active_profile_id?: string | null;
+	active_config?: Partial<ClientConfigState>;
+}): Promise<{ ok: boolean }> {
+	await invokeTauri("client_save_config", { payload });
+	return { ok: true };
 }
 
-export function resetClientStats(connection: PanelConnection) {
-	return apiRequest<{ ok: boolean }>(connection, "/client/stats", {
-		method: "DELETE",
-	});
+export async function resetClientStats(): Promise<{ ok: boolean }> {
+	await invokeTauri("client_reset_stats");
+	return { ok: true };
 }
 
-export function startClient(connection: PanelConnection, payload: StartClientPayload) {
-	return apiRequest<{ ok: boolean }>(connection, "/client/start", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
+export async function startClient(payload: StartClientPayload): Promise<{ ok: boolean }> {
+	await invokeTauri("client_start", { payload });
+	return { ok: true };
 }
 
-export function stopClient(connection: PanelConnection) {
-	return apiRequest<{ ok: boolean }>(connection, "/client/stop", {
-		method: "POST",
-	});
+export async function stopClient(): Promise<{ ok: boolean }> {
+	await invokeTauri("client_stop");
+	return { ok: true };
 }
 
-export function getClientProfiles(connection: PanelConnection) {
-	return apiRequest<ClientProfile[]>(connection, "/client/profiles");
+export function getClientProfiles(): Promise<ClientProfile[]> {
+	return invokeTauri<ClientProfile[]>("client_get_profiles");
 }
 
-export function saveClientProfiles(connection: PanelConnection, profiles: ClientProfile[]) {
-	return apiRequest<{ ok: boolean }>(connection, "/client/profiles", {
-		method: "POST",
-		body: JSON.stringify(profiles),
-	});
+export async function saveClientProfiles(profiles: ClientProfile[]): Promise<{ ok: boolean }> {
+	await invokeTauri("client_save_profiles", { profiles });
+	return { ok: true };
 }
 
 export interface ClientLogEntry {
@@ -434,14 +427,13 @@ export interface ClientLogEntry {
 	message: string;
 }
 
-export function getClientLogs(connection: PanelConnection, limit = 200) {
-	return apiRequest<ClientLogEntry[]>(connection, `/client/logs?limit=${limit}`);
+export function getClientLogs(limit = 200): Promise<ClientLogEntry[]> {
+	return invokeTauri<ClientLogEntry[]>("client_logs", { limit });
 }
 
-export function clearClientLogs(connection: PanelConnection) {
-	return apiRequest<{ ok: boolean }>(connection, "/client/logs", {
-		method: "DELETE",
-	});
+export async function clearClientLogs(): Promise<{ ok: boolean }> {
+	await invokeTauri("client_clear_logs");
+	return { ok: true };
 }
 
 export interface AuthProvidersResponse {

@@ -37,7 +37,10 @@ export const SUPPORTED_LINK_PROTOCOLS = [
  * Extracts transport protocol prefix (if present) and address portion from a connection string.
  * For prism:// configuration links, extracts the underlying transport protocol and server address.
  */
-export function extractProtocolAndAddress(raw: string): { protocol: string | null; address: string } {
+export function extractProtocolAndAddress(raw: string): {
+	protocol: string | null;
+	address: string;
+} {
 	const trimmed = raw.trim();
 	if (!trimmed) {
 		return { protocol: null, address: "" };
@@ -107,11 +110,7 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 			}
 
 			const defaultTransport =
-				scheme === "prism"
-					? "quic"
-					: scheme === "ws" || scheme === "wss"
-						? "websocket"
-						: scheme;
+				scheme === "prism" ? "quic" : scheme === "ws" || scheme === "wss" ? "websocket" : scheme;
 			const name = fakeUrl.searchParams.get("name") || "";
 			const transport = fakeUrl.searchParams.get("transport") || defaultTransport;
 			const auth_token = fakeUrl.searchParams.get("token") || "";

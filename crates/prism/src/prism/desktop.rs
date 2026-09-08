@@ -8,6 +8,12 @@ use tauri::WindowEvent;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
+#[derive(Clone)]
+pub struct DesktopClientState {
+    pub client: Arc<crate::prism::tunnel::client::ClientController>,
+    pub storage: Option<Arc<crate::prism::storage::StorageEngine>>,
+}
+
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     crate::prism::logging::init_desktop_or_test_subscriber();
     tracing::info!("prism: starting desktop GUI mode");
@@ -60,17 +66,13 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         worker: None,
         client: Some(client_controller.clone()),
         auth_manager: Some(auth_manager),
-        serve_frontend: false,
-        storage,
+        storage: storage.clone(),
     };
 
-    // Bind embedded loopback admin/client server on 127.0.0.1:8080
-    let listener = match tokio::net::TcpListener::bind("127.0.0.1:8080").await {
-        Ok(l) => l,
-        Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0").await?,
-    };
+    // Bind embedded loopback admin API on ephemeral port for internal tasks
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let local_addr = listener.local_addr()?;
-    tracing::info!(%local_addr, "prism desktop: embedded admin/client API listening on loopback");
+    tracing::info!(%local_addr, "prism desktop: internal loopback admin API started");
 
     let admin_state_clone = admin_state.clone();
     tokio::spawn(async move {
@@ -83,6 +85,12 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     });
 
     let client_ctrl_for_tray = client_controller.clone();
+    let storage_for_tray = storage.clone();
+
+    let desktop_client_state = DesktopClientState {
+        client: client_controller.clone(),
+        storage: storage.clone(),
+    };
 
     #[tauri::command]
     fn open_external_url(url: String) -> Result<(), String> {
@@ -110,8 +118,87 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         Ok(())
     }
 
+    #[tauri::command]
+    async fn client_status(
+        state: tauri::State<'_, DesktopClientState>,
+    ) -> Result<serde_json::Value, String> {
+        Ok(crate::prism::admin::do_client_status(
+            Some(&state.client),
+            state.storage.as_deref(),
+        )
+        .await)
+    }
+
+    #[tauri::command]
+    async fn client_start(
+        state: tauri::State<'_, DesktopClientState>,
+        payload: crate::prism::admin::StartClientRequest,
+    ) -> Result<(), String> {
+        crate::prism::admin::do_client_start(&state.client, state.storage.as_deref(), payload).await
+    }
+
+    #[tauri::command]
+    async fn client_stop(state: tauri::State<'_, DesktopClientState>) -> Result<(), String> {
+        crate::prism::admin::do_client_stop(&state.client, state.storage.as_deref()).await
+    }
+
+    #[tauri::command]
+    fn client_get_profiles(
+        state: tauri::State<'_, DesktopClientState>,
+    ) -> Result<Vec<crate::prism::admin::ClientProfile>, String> {
+        Ok(crate::prism::admin::do_client_get_profiles(
+            state.storage.as_deref(),
+        ))
+    }
+
+    #[tauri::command]
+    fn client_save_profiles(
+        state: tauri::State<'_, DesktopClientState>,
+        profiles: Vec<crate::prism::admin::ClientProfile>,
+    ) -> Result<(), String> {
+        crate::prism::admin::do_client_save_profiles(state.storage.as_deref(), &profiles)
+    }
+
+    #[tauri::command]
+    fn client_get_config(
+        state: tauri::State<'_, DesktopClientState>,
+    ) -> Result<crate::prism::storage::ClientConfigResponse, String> {
+        Ok(crate::prism::admin::do_client_get_config(
+            state.storage.as_deref(),
+        ))
+    }
+
+    #[tauri::command]
+    fn client_save_config(
+        state: tauri::State<'_, DesktopClientState>,
+        payload: crate::prism::admin::SaveConfigRequest,
+    ) -> Result<(), String> {
+        crate::prism::admin::do_client_save_config(state.storage.as_deref(), payload)
+    }
+
+    #[tauri::command]
+    fn client_reset_stats(state: tauri::State<'_, DesktopClientState>) -> Result<(), String> {
+        crate::prism::admin::do_client_reset_stats(state.storage.as_deref())
+    }
+
+    #[tauri::command]
+    async fn client_logs(
+        state: tauri::State<'_, DesktopClientState>,
+        limit: Option<usize>,
+    ) -> Result<Vec<crate::prism::tunnel::client::ClientLogEntry>, String> {
+        let limit = limit.unwrap_or(200).clamp(1, 1000);
+        Ok(crate::prism::admin::do_client_logs(Some(&state.client), limit).await)
+    }
+
+    #[tauri::command]
+    async fn client_clear_logs(state: tauri::State<'_, DesktopClientState>) -> Result<(), String> {
+        crate::prism::admin::do_client_clear_logs(Some(&state.client)).await;
+        Ok(())
+    }
+
     // 2. Run Tauri desktop application
     tauri::Builder::default()
+        .manage(desktop_client_state)
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -120,7 +207,19 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![open_external_url])
+        .invoke_handler(tauri::generate_handler![
+            open_external_url,
+            client_status,
+            client_start,
+            client_stop,
+            client_get_profiles,
+            client_save_profiles,
+            client_get_config,
+            client_save_config,
+            client_reset_stats,
+            client_logs,
+            client_clear_logs,
+        ])
         .setup(move |app| {
             #[cfg(desktop)]
             {
@@ -164,6 +263,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             });
 
             let ctrl_clone = client_ctrl_for_tray.clone();
+            let storage_for_tray_clone = storage_for_tray.clone();
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .menu(&menu)
@@ -184,8 +284,9 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                     }
                     "disconnect" => {
                         let ctrl = ctrl_clone.clone();
+                        let storage_clone = storage_for_tray_clone.clone();
                         tokio::spawn(async move {
-                            ctrl.stop().await;
+                            let _ = crate::prism::admin::do_client_stop(&ctrl, storage_clone.as_deref()).await;
                         });
                     }
                     "quit" => {

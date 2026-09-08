@@ -6,7 +6,12 @@ import { Github } from "@/components/icons/Github";
 
 import { fieldClassName, PrimaryButton } from "@/components/ui";
 import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
-import { getAuthProviders, getGitHubLoginUrl, getHealth, getManagementStatus } from "@/lib/managementApi";
+import {
+	getAuthProviders,
+	getGitHubLoginUrl,
+	getHealth,
+	getManagementStatus,
+} from "@/lib/managementApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 
@@ -95,6 +100,7 @@ function LoginPage() {
 			setError(null);
 			const norm = normalizeBaseUrl(baseUrl);
 			if (typeof window !== "undefined") {
+				window.localStorage.setItem("prism_pending_auth_url", norm);
 				window.sessionStorage.setItem("prism_pending_auth_url", norm);
 			}
 			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
@@ -162,7 +168,9 @@ function LoginPage() {
 								className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15 cursor-pointer disabled:opacity-50"
 							>
 								<Github className="h-4 w-4" />
-								<span>{oauthLoading ? "Requesting authorization URL..." : "Sign in with GitHub"}</span>
+								<span>
+									{oauthLoading ? "Requesting authorization URL..." : "Sign in with GitHub"}
+								</span>
 							</button>
 							{isDesktopApp() ? (
 								<p className="text-xs text-slate-400 text-center">

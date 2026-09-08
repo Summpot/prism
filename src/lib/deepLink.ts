@@ -120,6 +120,8 @@ export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 
 export type DeepLinkHandler = (payload: DeepLinkPayload) => void;
 
+const consumedDeepLinks = new Set<string>();
+
 /**
  * Sets up listeners for Tauri deep link events in desktop mode.
  */
@@ -131,6 +133,23 @@ export function setupDeepLinkListener(onPayload: DeepLinkHandler): () => void {
 	let unlisten: (() => void) | null = null;
 	let cancelled = false;
 
+	const handleUrl = (url: string) => {
+		const trimmed = url.trim();
+		if (!trimmed) return;
+		const storageKey = `prism_deep_link_${trimmed}`;
+		if (typeof window !== "undefined" && window.sessionStorage.getItem(storageKey)) {
+			return;
+		}
+		if (consumedDeepLinks.has(trimmed)) {
+			return;
+		}
+		consumedDeepLinks.add(trimmed);
+		if (typeof window !== "undefined") {
+			window.sessionStorage.setItem(storageKey, "1");
+		}
+		onPayload(parseDeepLink(trimmed));
+	};
+
 	import("@tauri-apps/plugin-deep-link")
 		.then(({ onOpenUrl, getCurrent }) => {
 			if (cancelled) return;
@@ -141,7 +160,7 @@ export function setupDeepLinkListener(onPayload: DeepLinkHandler): () => void {
 					if (cancelled || !urls || urls.length === 0) return;
 					for (const url of urls) {
 						if (url) {
-							onPayload(parseDeepLink(url));
+							handleUrl(url);
 						}
 					}
 				})
@@ -154,7 +173,7 @@ export function setupDeepLinkListener(onPayload: DeepLinkHandler): () => void {
 				if (cancelled) return;
 				for (const url of urls) {
 					if (url) {
-						onPayload(parseDeepLink(url));
+						handleUrl(url);
 					}
 				}
 			})

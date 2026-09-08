@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { closeWindow, isDesktopApp, minimizeWindow, openExternalUrl, toggleMaximizeWindow } from "./desktopWindow";
+import {
+	closeWindow,
+	invokeTauri,
+	isDesktopApp,
+	minimizeWindow,
+	openExternalUrl,
+	toggleMaximizeWindow,
+} from "./desktopWindow";
 
 describe("desktopWindow", () => {
 	beforeEach(() => {
@@ -83,5 +90,20 @@ describe("desktopWindow", () => {
 		const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 		await openExternalUrl("https://github.com/login/oauth/authorize");
 		expect(openSpy).toHaveBeenCalledWith("https://github.com/login/oauth/authorize", "_blank");
+	});
+
+	it("calls invokeTauri successfully in desktop environment", async () => {
+		const invokeMock = vi.fn().mockResolvedValue({ ok: true });
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		const res = await invokeTauri<{ ok: boolean }>("client_status");
+		expect(invokeMock).toHaveBeenCalledWith("client_status", undefined);
+		expect(res).toEqual({ ok: true });
+	});
+
+	it("throws error when invokeTauri is called in non-desktop environment", async () => {
+		await expect(invokeTauri("client_status")).rejects.toThrow("Tauri invoke is not available");
 	});
 });

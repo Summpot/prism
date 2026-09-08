@@ -150,7 +150,112 @@ export interface ClientContextValue {
 	handleImportLink: () => void;
 }
 
-const ClientContext = createContext<ClientContextValue | null>(null);
+export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
+	status: null,
+	cumulativeStats: null,
+	statsViewMode: "session",
+	setStatsViewMode: () => {},
+	throughputSamples: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+	uptimeSeconds: 0,
+	formatUptime: () => "00:00:00",
+	isRunning: false,
+	isConnected: false,
+	isConnecting: false,
+	rawBytes: 0,
+	wireBytes: 0,
+	savedRatio: 0,
+	actionLoading: false,
+	error: null,
+	setError: () => {},
+	copied: null,
+	copyText: () => {},
+	handleConnect: async () => {},
+	handleDisconnect: async () => {},
+	handleToggleTunnel: () => {},
+	handleResetStats: async () => {},
+	handleShareLink: () => {},
+	profiles: [],
+	selectedProfileId: "",
+	profileName: "Default Realm",
+	setProfileName: () => {},
+	serverAddr: "127.0.0.1:7000",
+	setServerAddr: () => {},
+	transport: "quic",
+	setTransport: () => {},
+	authToken: "",
+	setAuthToken: () => {},
+	listenAddr: "127.0.0.1:25565",
+	setListenAddr: () => {},
+	fakeLanBroadcast: true,
+	setFakeLanBroadcast: () => {},
+	autoConnectPanel: true,
+	setAutoConnectPanel: () => {},
+	managementUrl: "http://127.0.0.1:8080",
+	handleSelectProfile: () => {},
+	handleSaveProfile: async () => {},
+	handleDeleteProfile: async () => {},
+	remoteLinkInput: "",
+	setRemoteLinkInput: () => {},
+	linkProtocol: "quic://",
+	setLinkProtocol: () => {},
+	handleSelectProtocol: () => {},
+	handleAddressChange: () => {},
+	handleAddressPaste: () => {},
+	handleAddressCopy: () => {},
+	handleConnectFromLink: async () => {},
+	logs: [],
+	filteredLogs: [],
+	logFilterLevel: "ALL",
+	setLogFilterLevel: () => {},
+	logSearchQuery: "",
+	setLogSearchQuery: () => {},
+	autoScrollLogs: true,
+	setAutoScrollLogs: () => {},
+	isAtBottom: true,
+	logsContainerRef: { current: null },
+	handleLogsScroll: () => {},
+	scrollToBottom: () => {},
+	handleClearLogs: async () => {},
+	handleCopyAllLogs: () => {},
+	loginModalOpen: false,
+	setLoginModalOpen: () => {},
+	checkingProviders: false,
+	providersResult: null,
+	providersError: null,
+	setProvidersError: () => {},
+	authServerUrl: "http://127.0.0.1:8080",
+	setAuthServerUrl: () => {},
+	authError: null,
+	setAuthError: () => {},
+	oauthLoading: false,
+	oauthWaitingCallback: false,
+	setOauthWaitingCallback: () => {},
+	oauthExchanging: false,
+	manualCallbackInput: "",
+	setManualCallbackInput: () => {},
+	startGitHubAuthWithUrl: async () => {},
+	handleRedetectProviders: async () => {},
+	loginAdminUnlocked: false,
+	importModalOpen: false,
+	setImportModalOpen: () => {},
+	importUrl: "",
+	setImportUrl: () => {},
+	importError: null,
+	setImportError: () => {},
+	handleImportLink: () => {},
+};
+
+const ClientContext =
+	((typeof globalThis !== "undefined" &&
+		(globalThis as unknown as { __PRISM_CLIENT_CONTEXT__?: React.Context<ClientContextValue> })
+			.__PRISM_CLIENT_CONTEXT__) as React.Context<ClientContextValue> | undefined) ||
+	createContext<ClientContextValue>(DEFAULT_CLIENT_CONTEXT);
+
+if (typeof globalThis !== "undefined") {
+	(
+		globalThis as unknown as { __PRISM_CLIENT_CONTEXT__?: React.Context<ClientContextValue> }
+	).__PRISM_CLIENT_CONTEXT__ = ClientContext;
+}
 
 export function ClientProvider({ children }: { children: React.ReactNode }) {
 	const { connection, saveConnection } = usePanelSession();
@@ -1353,8 +1458,5 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 export function useClient() {
 	const val = useContext(ClientContext);
-	if (!val) {
-		throw new Error("useClient must be used within a ClientProvider");
-	}
-	return val;
+	return val || DEFAULT_CLIENT_CONTEXT;
 }

@@ -6,10 +6,17 @@ import {
 	useLocation,
 	useNavigate,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { Minus, Square, X } from "lucide-react";
+import { useEffect, useMemo } from "react";
 
 import Header from "@/components/Header";
-import { isDesktopApp } from "@/lib/desktopWindow";
+import { Button } from "@/components/ui/button";
+import {
+	closeWindow,
+	isDesktopApp,
+	minimizeWindow,
+	toggleMaximizeWindow,
+} from "@/lib/desktopWindow";
 import { PanelSessionProvider } from "@/lib/panelSession";
 
 import appCss from "../styles.css?url";
@@ -25,7 +32,7 @@ export const Route = createRootRoute({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "Prism Connect",
+				title: "Prism",
 			},
 		],
 		links: [
@@ -46,43 +53,110 @@ export const Route = createRootRoute({
 	component: RootDocument,
 });
 
+function DesktopTitleBar() {
+	return (
+		<div
+			data-tauri-drag-region
+			className="h-8 flex-none select-none border-b border-border/80 bg-card/80 px-2.5 flex items-center justify-between cursor-default z-50 backdrop-blur"
+		>
+			<div className="flex items-center gap-2" data-tauri-drag-region>
+				<img
+					src="/logo192.png"
+					alt="Prism"
+					className="h-4 w-4 rounded object-contain"
+					data-tauri-drag-region
+				/>
+				<span
+					className="text-xs font-semibold text-foreground tracking-tight"
+					data-tauri-drag-region
+				>
+					Prism
+				</span>
+			</div>
+
+			<div className="flex-1 h-full" data-tauri-drag-region />
+
+			{/* Window Controls */}
+			<div className="flex items-center gap-0.5 -mr-1">
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					onClick={() => void minimizeWindow()}
+					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded"
+					title="最小化"
+					aria-label="Minimize window"
+				>
+					<Minus className="h-3 w-3" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					onClick={() => void toggleMaximizeWindow()}
+					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded"
+					title="最大化 / 还原"
+					aria-label="Maximize window"
+				>
+					<Square className="h-2.5 w-2.5" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					onClick={() => void closeWindow()}
+					className="h-6 w-7 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors rounded"
+					title="最小化到托盘"
+					aria-label="Close window to tray"
+				>
+					<X className="h-3 w-3" />
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 function RootContent() {
 	const location = useLocation();
 	const navigate = useNavigate();
 
-	const isDesktop = isDesktopApp();
+	const isDesktop = useMemo(() => isDesktopApp(), []);
+	const isClientPage = location.pathname === "/client";
 
 	useEffect(() => {
-		if (
-			typeof window !== "undefined" &&
-			(isDesktop || window.location.pathname.includes("_shell.html"))
-		) {
-			if (location.pathname === "/" || location.pathname === "/_shell.html") {
+		if (typeof window !== "undefined") {
+			if (location.pathname === "/_shell.html") {
+				void navigate({ to: "/client" });
+			} else if (
+				isDesktop &&
+				location.pathname === "/" &&
+				!window.sessionStorage.getItem("prism_visited")
+			) {
+				window.sessionStorage.setItem("prism_visited", "true");
 				void navigate({ to: "/client" });
 			}
 		}
 	}, [isDesktop, location.pathname, navigate]);
 
-	const isClientShell = location.pathname === "/client" || location.pathname === "/_shell.html";
-
-	if (isClientShell) {
-		return (
-			<div
-				className={`h-screen max-h-screen overflow-hidden bg-background text-foreground ${
-					isDesktop ? "border border-border/80" : ""
-				}`}
-			>
-				<Outlet />
-			</div>
-		);
-	}
-
 	return (
-		<div className="min-h-screen bg-background text-foreground">
-			<div className="mx-auto flex min-h-screen max-w-[1800px]">
+		<div
+			className={`h-screen max-h-screen overflow-hidden flex flex-col bg-background text-foreground ${
+				isDesktop ? "border border-border/80" : ""
+			}`}
+		>
+			{/* Custom frameless titlebar in desktop app */}
+			{isDesktop ? <DesktopTitleBar /> : null}
+
+			{/* Sidebar + Main Viewport */}
+			<div className="flex-1 min-h-0 flex overflow-hidden">
 				<Header />
-				<main className="flex-1 min-w-0 px-4 pt-16 pb-8 md:px-8 xl:px-10 xl:pt-8 xl:pb-8">
-					<Outlet />
+				<main className="flex-1 min-w-0 h-full overflow-hidden bg-background md:pt-0 pt-12 flex flex-col">
+					{isClientPage ? (
+						<Outlet />
+					) : (
+						<div className="flex-1 min-h-0 overflow-y-auto bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
+							<div className="mx-auto max-w-7xl">
+								<Outlet />
+							</div>
+						</div>
+					)}
 				</main>
 			</div>
 		</div>

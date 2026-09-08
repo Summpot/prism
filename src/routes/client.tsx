@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
 	Activity,
 	ArrowDown,
@@ -10,17 +10,14 @@ import {
 	Eye,
 	EyeOff,
 	Gamepad2,
-	Layers,
-	Minus,
 	Plus,
 	Power,
 	Radio,
 	RotateCcw,
 	Search,
-	Server,
 	Settings2,
 	Share2,
-	Square,
+	ShieldCheck,
 	Terminal,
 	Trash2,
 	WifiOff,
@@ -30,12 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Github } from "@/components/icons/Github";
 
-import {
-	closeWindow,
-	isDesktopApp,
-	minimizeWindow,
-	toggleMaximizeWindow,
-} from "@/lib/desktopWindow";
+import { isDesktopApp } from "@/lib/desktopWindow";
 import { formatBytes } from "@/lib/format";
 
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +42,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	type ClientLogEntry,
 	type ClientProfile,
@@ -73,7 +64,7 @@ import {
 } from "@/lib/managementApi";
 import { type PanelConnection, deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
-import { encodePrismLink, parsePrismLink } from "@/lib/prismLink";
+import { encodePrismLink, parsePrismLink, resolveRemoteConnection } from "@/lib/prismLink";
 import { usePolling } from "@/lib/usePolling";
 import { cn } from "@/lib/utils";
 
@@ -116,7 +107,9 @@ function getLoopbackTargetForService(idx: number, port: string): string {
 }
 
 function ClientDashboardPage() {
-	const { connection, saveConnection } = usePanelSession();
+	const location = useLocation();
+	const navigate = useNavigate();
+	const { connection, authSession, isAdmin, refreshSession, saveConnection } = usePanelSession();
 	const isDesktop = useMemo(() => isDesktopApp(), []);
 
 	const clientConnection = useMemo<PanelConnection>(
@@ -133,7 +126,31 @@ function ClientDashboardPage() {
 	const [actionLoading, setActionLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [copied, setCopied] = useState<string | null>(null);
-	const [activeTab, setActiveTab] = useState<string>("overview");
+
+	// Synchronize tab with URL search parameter ?tab=...
+	const searchTab = useMemo(() => {
+		return new URLSearchParams(location.search).get("tab");
+	}, [location.search]);
+
+	const currentTab = useMemo(() => {
+		if (searchTab === "logs") return "logs";
+		if (searchTab === "settings" || searchTab === "profiles") return "settings";
+		return "overview";
+	}, [searchTab]);
+
+	const handleNavigateTab = useCallback(
+		(tab: "overview" | "logs" | "settings") => {
+			void navigate({
+				to: "/client",
+				search: tab === "overview" ? undefined : { tab },
+			});
+		},
+		[navigate],
+	);
+
+	// Remote link input for one-click device flow
+	const [remoteLinkInput, setRemoteLinkInput] = useState("");
+	const [loginAdminUnlocked, setLoginAdminUnlocked] = useState(false);
 
 	// Throughput sparkline history
 	const [throughputSamples, setThroughputSamples] = useState<number[]>([
@@ -234,7 +251,9 @@ function ClientDashboardPage() {
 					configLoadedRef.current = true;
 					if (resp.active_config) {
 						setProfileName(resp.active_config.profile_name || "Default Realm");
-						setServerAddr(resp.active_config.server_addr || "127.0.0.1:7000");
+						const sAddr = resp.active_config.server_addr || "127.0.0.1:7000";
+						setServerAddr(sAddr);
+						setRemoteLinkInput((prev) => prev || sAddr);
 						setTransport(resp.active_config.transport || "quic");
 						setAuthToken(resp.active_config.auth_token || "");
 						setListenAddr(resp.active_config.listen_addr || "127.0.0.1:25565");
@@ -338,7 +357,7 @@ function ClientDashboardPage() {
 	usePolling(fetchStatus, 1500, true);
 
 	// Poll logs frequently while on logs tab or when running
-	usePolling(fetchLogs, 1500, activeTab === "logs" || status?.running === true);
+	usePolling(fetchLogs, 1500, currentTab === "logs" || status?.running === true);
 
 	// Scroll management for logs container
 	const handleLogsScroll = useCallback(() => {
@@ -366,21 +385,21 @@ function ClientDashboardPage() {
 
 	// Auto-scroll logs only when user is already at the bottom and auto-scroll is enabled
 	useEffect(() => {
-		if (activeTab !== "logs") return;
+		if (currentTab !== "logs") return;
 		if (autoScrollLogs && isAtBottomRef.current) {
 			scrollToBottom(false);
 		}
-	}, [filteredLogs, autoScrollLogs, activeTab, scrollToBottom]);
+	}, [filteredLogs, autoScrollLogs, currentTab, scrollToBottom]);
 
 	// When user opens/switches to logs tab, scroll to bottom if auto-scroll is enabled
 	useEffect(() => {
-		if (activeTab === "logs" && autoScrollLogs && isAtBottomRef.current) {
+		if (currentTab === "logs" && autoScrollLogs && isAtBottomRef.current) {
 			const frame = requestAnimationFrame(() => {
 				scrollToBottom(false);
 			});
 			return () => cancelAnimationFrame(frame);
 		}
-	}, [activeTab, autoScrollLogs, scrollToBottom]);
+	}, [currentTab, autoScrollLogs, scrollToBottom]);
 
 	// Connection duration timer
 	useEffect(() => {
@@ -453,12 +472,13 @@ function ClientDashboardPage() {
 		saveConnection,
 	]);
 
-	// Start Device Authorization Flow
-	const startDeviceAuth = async () => {
+	// Start Device Authorization Flow with target management URL
+	const startDeviceAuthWithUrl = async (targetAuthUrl: string, targetServerAddr?: string) => {
 		setDeviceLoading(true);
 		setAuthError(null);
+		setLoginAdminUnlocked(false);
 		try {
-			const norm = normalizeBaseUrl(authServerUrl);
+			const norm = normalizeBaseUrl(targetAuthUrl);
 			const resp = await requestDeviceCode({ baseUrl: norm, token: "" });
 			setDeviceCode(resp);
 			setDevicePolling(true);
@@ -479,15 +499,34 @@ function ClientDashboardPage() {
 						if (autoConnectPanel) {
 							saveConnection({ baseUrl: norm, token: pollRes.token });
 						}
+						const s = await refreshSession();
+						if (s?.is_admin || s?.role === "admin" || pollRes.user?.role === "admin") {
+							setLoginAdminUnlocked(true);
+						}
+
+						// Save updated configuration
+						const nextServer = targetServerAddr || serverAddr;
+						saveClientConfig(clientConnection, {
+							active_profile_id: selectedProfileId || null,
+							active_config: {
+								server_addr: nextServer,
+								transport,
+								auth_token: pollRes.token,
+								listen_addr: listenAddr,
+								fake_lan_broadcast: fakeLanBroadcast,
+								auto_connect_panel: autoConnectPanel,
+							},
+						}).catch(() => {});
+
 						setTimeout(() => {
 							setGithubAuthOpen(false);
 							setDeviceSuccess(false);
 							setDeviceCode(null);
-						}, 2000);
+						}, 2500);
 					} else if (pollRes.status === "expired" || pollRes.status === "denied") {
 						clearInterval(timer);
 						setDevicePolling(false);
-						setAuthError(`GitHub device authorization failed: ${pollRes.status}`);
+						setAuthError(`GitHub 设备码授权失败: ${pollRes.status}`);
 					}
 				} catch {
 					// continue polling
@@ -498,6 +537,31 @@ function ClientDashboardPage() {
 		} finally {
 			setDeviceLoading(false);
 		}
+	};
+
+	const startDeviceAuth = async () => {
+		await startDeviceAuthWithUrl(authServerUrl, serverAddr);
+	};
+
+	// Start Device Authorization directly from the user's remote link
+	const handleStartDeviceAuthFromLink = async (customLink?: string) => {
+		const raw = (customLink ?? remoteLinkInput).trim() || serverAddr;
+		if (!raw) {
+			setAuthError("请输入远端链接或服务器地址");
+			setGithubAuthOpen(true);
+			return;
+		}
+
+		const resolved = resolveRemoteConnection(raw);
+		setServerAddr(resolved.serverAddr);
+		if (resolved.transport) setTransport(resolved.transport);
+		if (resolved.name) setProfileName(resolved.name);
+		if (resolved.listenAddr) setListenAddr(resolved.listenAddr);
+		if (resolved.authToken) setAuthToken(resolved.authToken);
+
+		setAuthServerUrl(resolved.managementUrl);
+		setGithubAuthOpen(true);
+		await startDeviceAuthWithUrl(resolved.managementUrl, resolved.serverAddr);
 	};
 
 	// Select Profile
@@ -725,439 +789,474 @@ function ClientDashboardPage() {
 	};
 
 	return (
-		<div className="mx-auto flex h-full max-h-screen w-full max-w-5xl flex-1 min-h-0 flex-col gap-2 p-2 sm:p-3 overflow-hidden">
-			{/* Compact Window Header Bar */}
-			<div
-				data-tauri-drag-region
-				className="flex flex-none select-none items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-xs cursor-default"
-			>
-				<div className="flex items-center gap-1.5 min-w-0" data-tauri-drag-region>
-					<h1
-						data-tauri-drag-region
-						className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground"
-					>
-						Prism Connect
-					</h1>
-					{isConnected ? (
-						<span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.2 text-[9px] font-semibold text-emerald-500 ring-1 ring-emerald-500/30">
-							<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-							ONLINE
-						</span>
-					) : isConnecting ? (
-						<span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.2 text-[9px] font-semibold text-amber-500 ring-1 ring-amber-500/30">
-							<span className="h-1.5 w-1.5 animate-ping rounded-full bg-amber-500" />
-							CONNECTING
-						</span>
-					) : (
-						<span className="flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.2 text-[9px] font-medium text-muted-foreground">
-							<span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-							OFFLINE
-						</span>
-					)}
-				</div>
-
-				{/* Header Actions */}
-				<div className="flex items-center gap-1 flex-none">
-					{profiles.length > 0 ? (
-						<select
-							aria-label="Select Profile"
-							value={selectedProfileId}
-							onChange={(e) => handleSelectProfile(e.target.value)}
-							className="h-7 max-w-[110px] sm:max-w-[160px] truncate rounded-md border border-input bg-background px-1.5 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
-						>
-							{profiles.map((p) => (
-								<option key={p.id} value={p.id}>
-									{p.name}
-								</option>
-							))}
-						</select>
-					) : null}
-
-					<Button
-						variant="outline"
-						size="icon-xs"
-						onClick={() => setImportModalOpen(true)}
-						className="h-7 w-7 text-xs"
-						title="Import profile"
-					>
-						<Download className="h-3.5 w-3.5 text-primary" />
-					</Button>
-
-					<Button
-						variant="outline"
-						size="icon-xs"
-						onClick={handleShareLink}
-						className="h-7 w-7 text-xs"
-						title="Share profile link"
-					>
-						{copied === "share" ? (
-							<Check className="h-3.5 w-3.5 text-emerald-500" />
-						) : (
-							<Share2 className="h-3.5 w-3.5 text-primary" />
-						)}
-					</Button>
-
-					<Link
-						to="/"
-						className="hidden md:inline-flex items-center gap-1 rounded-md border border-border/80 px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
-						title="Open Server Control Plane"
-					>
-						<Activity className="h-3 w-3 text-primary" />
-						<span>Control Plane</span>
-						<ExternalLink className="h-2.5 w-2.5 opacity-60" />
-					</Link>
-
-					{isDesktop ? (
-						<div className="flex items-center gap-0.5 ml-0.5 pl-1 border-l border-border/60">
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								onClick={() => void minimizeWindow()}
-								className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
-								title="Minimize"
-								aria-label="Minimize window"
-							>
-								<Minus className="h-3.5 w-3.5" />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								onClick={() => void toggleMaximizeWindow()}
-								className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
-								title="Maximize"
-								aria-label="Maximize window"
-							>
-								<Square className="h-3 w-3" />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								onClick={() => void closeWindow()}
-								className="h-7 w-7 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
-								title="Close to tray"
-								aria-label="Close to tray"
-							>
-								<X className="h-3.5 w-3.5" />
-							</Button>
-						</div>
-					) : null}
-				</div>
-			</div>
-
-			{error ? (
-				<div className="flex flex-none items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs text-destructive">
-					<span className="truncate">{error}</span>
-					<Button
-						variant="outline"
-						size="xs"
-						onClick={fetchStatus}
-						className="h-5 text-[10px] px-1.5 flex-none"
-					>
-						Retry
-					</Button>
-				</div>
-			) : null}
-
-			{/* High-Density Connection Control Card */}
-			<div className="flex-none rounded-lg border border-border bg-card p-2.5 shadow-xs">
-				{/* Top row: Profile info + Start/Stop button */}
-				<div className="flex items-center justify-between gap-2">
-					<div className="flex items-center gap-2 min-w-0 flex-1">
-						<div
-							className={cn(
-								"flex h-7 w-7 flex-none items-center justify-center rounded-md text-white transition-colors",
-								isConnected
-									? "bg-emerald-600"
-									: isConnecting
-										? "bg-amber-600 animate-pulse"
-										: "bg-muted text-muted-foreground",
-							)}
-						>
-							{isConnecting ? (
-								<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Radio className="h-3.5 w-3.5" />
-							)}
-						</div>
-						<div className="min-w-0 flex-1">
-							<div className="flex items-center gap-1.5">
-								<span className="font-bold text-xs text-foreground truncate">
-									{profileName || "Default Profile"}
+		<div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden bg-background text-foreground">
+			{/* 1. Overview Page: 连接与服务 (Connection & Services) */}
+			{currentTab === "overview" ? (
+				<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
+					{/* Page Header Bar */}
+					<div className="flex flex-none select-none items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
+						<div className="flex items-center gap-2 min-w-0">
+							<Gamepad2 className="h-4 w-4 text-primary flex-none" />
+							<div className="min-w-0">
+								<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
+									连接与服务
+								</h1>
+								<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
+									远端节点连接、隧道运行状态与服务发现
+								</p>
+							</div>
+							{isConnected ? (
+								<span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-500 ring-1 ring-emerald-500/30">
+									<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+									ONLINE
 								</span>
-								<Badge
-									variant="secondary"
-									className="font-mono text-[9px] uppercase px-1 py-0 h-4 flex-none"
+							) : isConnecting ? (
+								<span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-500 ring-1 ring-amber-500/30">
+									<span className="h-1.5 w-1.5 animate-ping rounded-full bg-amber-500" />
+									CONNECTING
+								</span>
+							) : (
+								<span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+									<span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+									OFFLINE
+								</span>
+							)}
+						</div>
+
+						{/* Quick Controls */}
+						<div className="flex items-center gap-1.5 flex-none">
+							{profiles.length > 0 ? (
+								<select
+									aria-label="Select Profile"
+									value={selectedProfileId}
+									onChange={(e) => handleSelectProfile(e.target.value)}
+									className="h-7 max-w-[120px] sm:max-w-[170px] truncate rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
 								>
-									{status?.transport || transport}
-								</Badge>
-							</div>
-							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">
-								<span className="truncate">{serverAddr || status?.server_addr || "No Server"}</span>
-								<span>&rarr;</span>
-								<span className="truncate">{listenAddr || status?.listen_addr}</span>
-							</div>
+									{profiles.map((p) => (
+										<option key={p.id} value={p.id}>
+											{p.name}
+										</option>
+									))}
+								</select>
+							) : null}
+
+							<Button
+								size="sm"
+								variant={isRunning ? "destructive" : "default"}
+								disabled={actionLoading}
+								onClick={handleToggleTunnel}
+								className={cn(
+									"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs",
+									isRunning
+										? "bg-emerald-600 hover:bg-emerald-700 text-white"
+										: "bg-primary text-primary-foreground hover:bg-primary/90",
+								)}
+							>
+								{actionLoading ? (
+									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<Power className="h-3.5 w-3.5" />
+								)}
+								<span>{isRunning ? "已连接" : "连接"}</span>
+							</Button>
+
+							<Button
+								variant="outline"
+								size="icon-xs"
+								onClick={() => handleNavigateTab("settings")}
+								title="前往隧道配置"
+								className="h-7 w-7 text-xs flex-none cursor-pointer"
+							>
+								<Settings2 className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+							</Button>
 						</div>
 					</div>
 
-					{/* Action Button */}
-					<Button
-						size="sm"
-						variant={isRunning ? "destructive" : "default"}
-						disabled={actionLoading}
-						onClick={handleToggleTunnel}
-						className={cn(
-							"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none transition-all shadow-xs",
-							isRunning
-								? "bg-emerald-600 hover:bg-emerald-700 text-white"
-								: "bg-primary text-primary-foreground hover:bg-primary/90",
-						)}
-					>
-						{actionLoading ? (
-							<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-						) : (
-							<Power className="h-3.5 w-3.5" />
-						)}
-						<span>{isRunning ? "Connected" : "Connect"}</span>
-					</Button>
-				</div>
-
-				{/* Connected Metrics Strip */}
-				{isConnected ? (
-					<div className="mt-2 border-t border-border/60 pt-1.5 space-y-1.5">
-						{/* Mode Switcher */}
-						<div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
-							<span className="font-semibold uppercase tracking-wider text-[9px]">
-								{statsViewMode === "session" ? "Current Session" : "Cumulative Lifetime"}
-							</span>
-							<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
-								<button
-									type="button"
-									onClick={() => setStatsViewMode("session")}
-									className={cn(
-										"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
-										statsViewMode === "session"
-											? "bg-primary text-primary-foreground font-semibold"
-											: "text-muted-foreground hover:text-foreground",
-									)}
-								>
-									Session
-								</button>
-								<button
-									type="button"
-									onClick={() => setStatsViewMode("lifetime")}
-									className={cn(
-										"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
-										statsViewMode === "lifetime"
-											? "bg-primary text-primary-foreground font-semibold"
-											: "text-muted-foreground hover:text-foreground",
-									)}
-								>
-									Lifetime
-								</button>
-							</div>
-						</div>
-
-						{/* 4-col compact stats */}
-						<div className="grid grid-cols-4 gap-1 text-center font-mono">
-							<div className="rounded bg-muted/40 px-1 py-0.5">
-								<div className="text-[9px] uppercase text-muted-foreground">
-									{statsViewMode === "session" ? "Uptime" : "Sessions"}
-								</div>
-								<div className="text-[11px] font-bold text-foreground truncate">
-									{statsViewMode === "session"
-										? formatUptime(uptimeSeconds)
-										: (cumulativeStats?.sessions_count ?? 0) + 1}
-								</div>
-							</div>
-							<div className="rounded bg-muted/40 px-1 py-0.5">
-								<div className="text-[9px] uppercase text-muted-foreground">Raw</div>
-								<div className="text-[11px] font-bold text-foreground truncate">
-									{formatBytes(
-										statsViewMode === "session"
-											? rawBytes
-											: (cumulativeStats?.raw_bytes ?? 0) + rawBytes,
-									)}
-								</div>
-							</div>
-							<div className="rounded bg-muted/40 px-1 py-0.5">
-								<div className="text-[9px] uppercase text-muted-foreground">Wire</div>
-								<div className="text-[11px] font-bold text-foreground truncate">
-									{formatBytes(
-										statsViewMode === "session"
-											? wireBytes
-											: (cumulativeStats?.wire_bytes ?? 0) + wireBytes,
-									)}
-								</div>
-							</div>
-							<div className="rounded bg-muted/40 px-1 py-0.5">
-								<div className="text-[9px] uppercase text-emerald-500">Saved</div>
-								<div className="text-[11px] font-bold text-emerald-500 truncate">
-									{statsViewMode === "session"
-										? `${savedRatio.toFixed(1)}%`
-										: (() => {
-												const r = (cumulativeStats?.raw_bytes ?? 0) + rawBytes;
-												const w = (cumulativeStats?.wire_bytes ?? 0) + wireBytes;
-												const ratio = r > 0 && w <= r ? ((r - w) / r) * 100 : 0;
-												return `${ratio.toFixed(1)}%`;
-											})()}
-								</div>
-							</div>
-						</div>
-
-						{/* Optimizer Directional & Latency Breakdown */}
-						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
-							<div className="rounded bg-muted/25 px-1.5 py-1 border border-border/40 flex items-center justify-between">
-								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
-									<span className="text-primary font-bold">↑</span> Up
-								</span>
-								<span className="font-semibold text-foreground truncate ml-1">
-									{formatBytes(status?.stats.uplink?.wire_bytes ?? 0)}
-									<span className="text-muted-foreground font-normal text-[9px] ml-1">
-										({((status?.stats.uplink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
-									</span>
-								</span>
-							</div>
-							<div className="rounded bg-muted/25 px-1.5 py-1 border border-border/40 flex items-center justify-between">
-								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
-									<span className="text-primary font-bold">↓</span> Down
-								</span>
-								<span className="font-semibold text-foreground truncate ml-1">
-									{formatBytes(status?.stats.downlink?.wire_bytes ?? 0)}
-									<span className="text-muted-foreground font-normal text-[9px] ml-1">
-										({((status?.stats.downlink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
-									</span>
-								</span>
-							</div>
-							<div
-								className="rounded bg-muted/25 px-1.5 py-1 border border-border/40 flex items-center justify-between"
-								title={`Est. transfer saved: -${(status?.stats.est_transfer_time_saved_ms ?? 0).toFixed(1)}ms, CPU processing: +${(status?.stats.est_processing_time_ms ?? 0).toFixed(1)}ms`}
+					{error ? (
+						<div className="flex flex-none items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+							<span className="truncate">{error}</span>
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={fetchStatus}
+								className="h-5 text-[10px] px-1.5 flex-none"
 							>
-								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									Latency
-								</span>
-								<span
-									className={cn(
-										"font-semibold text-[10px]",
-										(status?.stats.net_latency_saved_ms ?? 0) > 0
-											? "text-emerald-500"
-											: (status?.stats.net_latency_saved_ms ?? 0) < 0
-												? "text-amber-500"
-												: "text-muted-foreground",
-									)}
-								>
-									{(status?.stats.net_latency_saved_ms ?? 0) > 0
-										? `-${(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
-										: (status?.stats.net_latency_saved_ms ?? 0) < 0
-											? `+${Math.abs(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
-											: "0.0ms"}
-								</span>
+								Retry
+							</Button>
+						</div>
+					) : null}
+
+					{/* 极简连接远端卡片 (Connect to Remote Hero) */}
+					<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-1.5">
+								<Radio className="h-4 w-4 text-primary" />
+								<span className="text-xs font-bold text-foreground">连接远端节点</span>
 							</div>
+							{authSession?.authenticated ? (
+								<div className="flex items-center gap-1.5">
+									<span className="flex items-center gap-1 text-[11px] text-muted-foreground font-mono">
+										<span className="h-2 w-2 rounded-full bg-emerald-500" />
+										{authSession.display_name || authSession.username}
+									</span>
+									{isAdmin ? (
+										<Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] px-1.5 py-0 h-4">
+											管理员
+										</Badge>
+									) : null}
+								</div>
+							) : (
+								<span className="text-[11px] text-muted-foreground">
+									输入远端链接即可开始 GitHub Device Flow
+								</span>
+							)}
 						</div>
 
-						{/* Throughput and LAN bar */}
-						<div className="flex items-center justify-between gap-2 px-0.5 text-[10px] text-muted-foreground">
-							<div className="flex items-center gap-1.5 flex-1 min-w-0">
-								<Activity className="h-3 w-3 text-emerald-500 flex-none" />
-								<span className="font-mono text-emerald-500 font-semibold flex-none text-[10px]">
-									{formatBytes(throughputSamples[throughputSamples.length - 1] || 0)}/s
-								</span>
-								<div className="w-20 h-4 flex-none overflow-hidden">
-									<ThroughputSparkline samples={throughputSamples} />
-								</div>
-							</div>
-
-							{fakeLanBroadcast ? (
-								<div className="flex items-center gap-1 flex-none bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-medium">
-									<Gamepad2 className="h-3 w-3" />
-									<span>LAN Active</span>
+						<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+							<div className="relative flex-1 min-w-0">
+								<Input
+									value={remoteLinkInput}
+									onChange={(e) => setRemoteLinkInput(e.target.value)}
+									placeholder="输入远端链接，如 prism://play.example.com:7000 或 relay.example.com:7000 或 http://..."
+									className="h-8 text-xs font-mono pr-7"
+								/>
+								{remoteLinkInput ? (
 									<button
 										type="button"
-										onClick={() => copyText(status?.listen_addr || listenAddr, "lan-btn")}
-										className="ml-0.5 hover:opacity-80"
-										title="Copy LAN address"
+										onClick={() => setRemoteLinkInput("")}
+										className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+										title="清空"
 									>
-										{copied === "lan-btn" ? (
-											<Check className="h-2.5 w-2.5 text-emerald-500" />
-										) : (
-											<Copy className="h-2.5 w-2.5" />
-										)}
+										<X className="h-3 w-3" />
 									</button>
+								) : null}
+							</div>
+
+							<Button
+								onClick={() => void handleStartDeviceAuthFromLink()}
+								disabled={deviceLoading || devicePolling}
+								className="h-8 px-3.5 text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs flex-none cursor-pointer"
+							>
+								<Github className="h-3.5 w-3.5" />
+								<span>{deviceLoading ? "请求中…" : "开始 GitHub 设备码登录"}</span>
+							</Button>
+						</div>
+
+						{/* 轮询中的设备码展示 */}
+						{devicePolling && deviceCode ? (
+							<div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-500 space-y-1.5">
+								<div className="flex items-center justify-between">
+									<span className="font-semibold">正在等待 GitHub 授权确认...</span>
+									<span className="font-mono text-[10px]">有效时间: {deviceCode.expires_in}s</span>
 								</div>
-							) : null}
-						</div>
-					</div>
-				) : null}
-
-				{!isConnected && cumulativeStats && cumulativeStats.raw_bytes > 0 ? (
-					<div className="mt-2 border-t border-border/60 pt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-						<div className="flex items-center gap-1.5 truncate">
-							<span className="font-semibold uppercase tracking-wider text-[9px] text-primary">
-								Lifetime Persisted
-							</span>
-							<span className="font-mono truncate">
-								{formatBytes(cumulativeStats.raw_bytes)} raw &bull;{" "}
-								{formatBytes(cumulativeStats.wire_bytes)} wire &bull;{" "}
-								<span className="text-emerald-500 font-bold">
-									{((cumulativeStats.saved_ratio || 0) * 100).toFixed(1)}% saved
-								</span>
-								<span className="text-muted-foreground/70 ml-1">
-									({cumulativeStats.sessions_count} sessions)
-								</span>
-							</span>
-						</div>
-						<Button
-							variant="ghost"
-							size="xs"
-							onClick={handleResetStats}
-							className="h-5 px-1.5 text-[9px] text-muted-foreground hover:text-destructive cursor-pointer"
-							title="Reset cumulative statistics"
-						>
-							Reset Stats
-						</Button>
-					</div>
-				) : null}
-			</div>
-
-			{/* High-Density Tabs Section: Overview, Logs, Profiles, Settings */}
-			<Tabs
-				value={activeTab}
-				onValueChange={setActiveTab}
-				className="flex-1 min-h-0 flex flex-col overflow-hidden"
-			>
-				<TabsList className="grid w-full grid-cols-4 h-7 p-0.5 bg-muted/60 rounded-md flex-none">
-					<TabsTrigger value="overview" className="h-6 gap-1 px-1 text-[11px]">
-						<Layers className="h-3 w-3 flex-none" />
-						<span>Overview</span>
-					</TabsTrigger>
-					<TabsTrigger value="logs" className="h-6 gap-1 px-1 text-[11px]">
-						<Terminal className="h-3 w-3 flex-none" />
-						<span>Logs</span>
-						{logs.length > 0 ? (
-							<span className="rounded-full bg-background px-1 py-0 text-[9px] font-bold">
-								{logs.length}
-							</span>
+								<div className="flex items-center gap-2">
+									<span className="text-[11px] text-muted-foreground">用户验证码:</span>
+									<code className="rounded bg-background px-2 py-0.5 font-mono text-sm font-bold text-foreground ring-1 ring-border">
+										{deviceCode.user_code}
+									</code>
+									<Button
+										variant="outline"
+										size="xs"
+										onClick={() => copyText(deviceCode.user_code, "code-copy")}
+										className="h-6 text-[10px] px-1.5"
+									>
+										{copied === "code-copy" ? "已复制" : "复制"}
+									</Button>
+									<Button
+										size="xs"
+										onClick={() => window.open(deviceCode.verification_uri, "_blank")}
+										className="h-6 text-[10px] px-2 gap-1 ml-auto"
+									>
+										<span>前往验证</span>
+										<ExternalLink className="h-2.5 w-2.5" />
+									</Button>
+								</div>
+							</div>
 						) : null}
-					</TabsTrigger>
-					<TabsTrigger value="profiles" className="h-6 gap-1 px-1 text-[11px]">
-						<Server className="h-3 w-3 flex-none" />
-						<span>Profiles</span>
-					</TabsTrigger>
-					<TabsTrigger value="settings" className="h-6 gap-1 px-1 text-[11px]">
-						<Settings2 className="h-3 w-3 flex-none" />
-						<span>Settings</span>
-					</TabsTrigger>
-				</TabsList>
 
-				{/* 1. Overview Tab: Discovered Services */}
-				<TabsContent
-					value="overview"
-					className="flex-1 min-h-0 flex flex-col overflow-hidden mt-1.5 p-0"
-				>
-					<div className="flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border border-border bg-card p-2">
-						<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
-							<span className="text-xs font-semibold text-foreground">
-								Discovered Remote Services
-							</span>
+						{/* 管理员权限反馈提示 */}
+						{isAdmin || loginAdminUnlocked ? (
+							<div className="flex items-center justify-between gap-2 rounded bg-primary/10 border border-primary/20 px-2.5 py-1.5 text-xs text-primary">
+								<div className="flex items-center gap-1.5 truncate">
+									<ShieldCheck className="h-4 w-4 flex-none text-primary" />
+									<span className="truncate">
+										您具有管理员权限，侧边栏已为您解锁管理控制台（概览、节点、连接、隧道服务等）。
+									</span>
+								</div>
+								<Link
+									to="/"
+									className="text-[11px] font-bold underline hover:opacity-80 flex-none ml-1"
+								>
+									进入控制台 &rarr;
+								</Link>
+							</div>
+						) : null}
+					</div>
+
+					{/* 隧道连接与实时状态卡片 (Active Tunnel Status) */}
+					<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
+						<div className="flex items-center justify-between gap-2">
+							<div className="flex items-center gap-2 min-w-0 flex-1">
+								<div
+									className={cn(
+										"flex h-8 w-8 flex-none items-center justify-center rounded-md text-white transition-colors",
+										isConnected
+											? "bg-emerald-600"
+											: isConnecting
+												? "bg-amber-600 animate-pulse"
+												: "bg-muted text-muted-foreground",
+									)}
+								>
+									{isConnecting ? (
+										<RotateCcw className="h-4 w-4 animate-spin" />
+									) : (
+										<Radio className="h-4 w-4" />
+									)}
+								</div>
+								<div className="min-w-0 flex-1">
+									<div className="flex items-center gap-1.5">
+										<span className="font-bold text-xs sm:text-sm text-foreground truncate">
+											{profileName || "Default Profile"}
+										</span>
+										<Badge
+											variant="secondary"
+											className="font-mono text-[9px] uppercase px-1 py-0 h-4 flex-none"
+										>
+											{status?.transport || transport}
+										</Badge>
+									</div>
+									<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">
+										<span className="truncate">
+											{serverAddr || status?.server_addr || "No Server"}
+										</span>
+										<span>&rarr;</span>
+										<span className="truncate">{listenAddr || status?.listen_addr}</span>
+									</div>
+								</div>
+							</div>
+
+							<Button
+								size="sm"
+								variant={isRunning ? "destructive" : "default"}
+								disabled={actionLoading}
+								onClick={handleToggleTunnel}
+								className={cn(
+									"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs",
+									isRunning
+										? "bg-emerald-600 hover:bg-emerald-700 text-white"
+										: "bg-primary text-primary-foreground hover:bg-primary/90",
+								)}
+							>
+								{actionLoading ? (
+									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<Power className="h-3.5 w-3.5" />
+								)}
+								<span>{isRunning ? "Connected" : "Connect"}</span>
+							</Button>
+						</div>
+
+						{/* Connected Metrics Strip */}
+						{isConnected ? (
+							<div className="border-t border-border/60 pt-2 space-y-2">
+								{/* Mode Switcher */}
+								<div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+									<span className="font-semibold uppercase tracking-wider text-[9px]">
+										{statsViewMode === "session" ? "Current Session" : "Cumulative Lifetime"}
+									</span>
+									<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
+										<button
+											type="button"
+											onClick={() => setStatsViewMode("session")}
+											className={cn(
+												"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
+												statsViewMode === "session"
+													? "bg-primary text-primary-foreground font-semibold"
+													: "text-muted-foreground hover:text-foreground",
+											)}
+										>
+											Session
+										</button>
+										<button
+											type="button"
+											onClick={() => setStatsViewMode("lifetime")}
+											className={cn(
+												"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
+												statsViewMode === "lifetime"
+													? "bg-primary text-primary-foreground font-semibold"
+													: "text-muted-foreground hover:text-foreground",
+											)}
+										>
+											Lifetime
+										</button>
+									</div>
+								</div>
+
+								{/* 4-col compact stats */}
+								<div className="grid grid-cols-4 gap-1.5 text-center font-mono">
+									<div className="rounded bg-muted/40 px-1.5 py-1">
+										<div className="text-[9px] uppercase text-muted-foreground">
+											{statsViewMode === "session" ? "Uptime" : "Sessions"}
+										</div>
+										<div className="text-xs font-bold text-foreground truncate">
+											{statsViewMode === "session"
+												? formatUptime(uptimeSeconds)
+												: (cumulativeStats?.sessions_count ?? 0) + 1}
+										</div>
+									</div>
+									<div className="rounded bg-muted/40 px-1.5 py-1">
+										<div className="text-[9px] uppercase text-muted-foreground">Raw</div>
+										<div className="text-xs font-bold text-foreground truncate">
+											{formatBytes(
+												statsViewMode === "session"
+													? rawBytes
+													: (cumulativeStats?.raw_bytes ?? 0) + rawBytes,
+											)}
+										</div>
+									</div>
+									<div className="rounded bg-muted/40 px-1.5 py-1">
+										<div className="text-[9px] uppercase text-muted-foreground">Wire</div>
+										<div className="text-xs font-bold text-foreground truncate">
+											{formatBytes(
+												statsViewMode === "session"
+													? wireBytes
+													: (cumulativeStats?.wire_bytes ?? 0) + wireBytes,
+											)}
+										</div>
+									</div>
+									<div className="rounded bg-muted/40 px-1.5 py-1">
+										<div className="text-[9px] uppercase text-emerald-500">Saved</div>
+										<div className="text-xs font-bold text-emerald-500 truncate">
+											{statsViewMode === "session"
+												? `${savedRatio.toFixed(1)}%`
+												: (() => {
+														const r = (cumulativeStats?.raw_bytes ?? 0) + rawBytes;
+														const w = (cumulativeStats?.wire_bytes ?? 0) + wireBytes;
+														const ratio = r > 0 && w <= r ? ((r - w) / r) * 100 : 0;
+														return `${ratio.toFixed(1)}%`;
+													})()}
+										</div>
+									</div>
+								</div>
+
+								{/* Optimizer Directional & Latency Breakdown */}
+								<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+									<div className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between">
+										<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
+											<span className="text-primary font-bold">↑</span> Up
+										</span>
+										<span className="font-semibold text-foreground truncate ml-1">
+											{formatBytes(status?.stats.uplink?.wire_bytes ?? 0)}
+											<span className="text-muted-foreground font-normal text-[9px] ml-1">
+												({((status?.stats.uplink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
+											</span>
+										</span>
+									</div>
+									<div className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between">
+										<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
+											<span className="text-primary font-bold">↓</span> Down
+										</span>
+										<span className="font-semibold text-foreground truncate ml-1">
+											{formatBytes(status?.stats.downlink?.wire_bytes ?? 0)}
+											<span className="text-muted-foreground font-normal text-[9px] ml-1">
+												({((status?.stats.downlink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
+											</span>
+										</span>
+									</div>
+									<div
+										className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
+										title={`Est. transfer saved: -${(status?.stats.est_transfer_time_saved_ms ?? 0).toFixed(1)}ms, CPU processing: +${(status?.stats.est_processing_time_ms ?? 0).toFixed(1)}ms`}
+									>
+										<span className="text-[9px] font-sans font-medium text-muted-foreground">
+											Latency
+										</span>
+										<span
+											className={cn(
+												"font-semibold text-[10px]",
+												(status?.stats.net_latency_saved_ms ?? 0) > 0
+													? "text-emerald-500"
+													: (status?.stats.net_latency_saved_ms ?? 0) < 0
+														? "text-amber-500"
+														: "text-muted-foreground",
+											)}
+										>
+											{(status?.stats.net_latency_saved_ms ?? 0) > 0
+												? `-${(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
+												: (status?.stats.net_latency_saved_ms ?? 0) < 0
+													? `+${Math.abs(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
+													: "0.0ms"}
+										</span>
+									</div>
+								</div>
+
+								{/* Throughput and LAN bar */}
+								<div className="flex items-center justify-between gap-2 px-0.5 text-[10px] text-muted-foreground">
+									<div className="flex items-center gap-1.5 flex-1 min-w-0">
+										<Activity className="h-3 w-3 text-emerald-500 flex-none" />
+										<span className="font-mono text-emerald-500 font-semibold flex-none text-[10px]">
+											{formatBytes(throughputSamples[throughputSamples.length - 1] || 0)}/s
+										</span>
+										<div className="w-24 h-4 flex-none overflow-hidden">
+											<ThroughputSparkline samples={throughputSamples} />
+										</div>
+									</div>
+
+									{fakeLanBroadcast ? (
+										<div className="flex items-center gap-1 flex-none bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-medium">
+											<Gamepad2 className="h-3 w-3" />
+											<span>LAN Active</span>
+											<button
+												type="button"
+												onClick={() => copyText(status?.listen_addr || listenAddr, "lan-btn")}
+												className="ml-0.5 hover:opacity-80 cursor-pointer"
+												title="Copy LAN address"
+											>
+												{copied === "lan-btn" ? (
+													<Check className="h-2.5 w-2.5 text-emerald-500" />
+												) : (
+													<Copy className="h-2.5 w-2.5" />
+												)}
+											</button>
+										</div>
+									) : null}
+								</div>
+							</div>
+						) : null}
+
+						{!isConnected && cumulativeStats && cumulativeStats.raw_bytes > 0 ? (
+							<div className="border-t border-border/60 pt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+								<div className="flex items-center gap-1.5 truncate">
+									<span className="font-semibold uppercase tracking-wider text-[9px] text-primary">
+										Lifetime Persisted
+									</span>
+									<span className="font-mono truncate">
+										{formatBytes(cumulativeStats.raw_bytes)} raw &bull;{" "}
+										{formatBytes(cumulativeStats.wire_bytes)} wire &bull;{" "}
+										<span className="text-emerald-500 font-bold">
+											{((cumulativeStats.saved_ratio || 0) * 100).toFixed(1)}% saved
+										</span>
+										<span className="text-muted-foreground/70 ml-1">
+											({cumulativeStats.sessions_count} sessions)
+										</span>
+									</span>
+								</div>
+								<Button
+									variant="ghost"
+									size="xs"
+									onClick={handleResetStats}
+									className="h-5 px-1.5 text-[9px] text-muted-foreground hover:text-destructive cursor-pointer"
+									title="Reset cumulative statistics"
+								>
+									Reset Stats
+								</Button>
+							</div>
+						) : null}
+					</div>
+
+					{/* 已发现远端服务卡片 (Discovered Remote Services) */}
+					<div className="flex-1 min-h-0 flex flex-col rounded-lg border border-border bg-card p-3 shadow-xs">
+						<div className="flex items-center justify-between pb-2 border-b border-border/50 flex-none">
+							<span className="text-xs font-semibold text-foreground">已发现远端服务</span>
 							<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
 								{status?.known_services.length || 0} active
 							</Badge>
@@ -1171,10 +1270,10 @@ function ClientDashboardPage() {
 									const copyTarget = getLoopbackTargetForService(idx, port);
 
 									return (
-										<div key={svc.name} className="flex items-center justify-between gap-2 py-1.5">
+										<div key={svc.name} className="flex items-center justify-between gap-2 py-2">
 											<div className="flex items-center gap-2 min-w-0 flex-1">
-												<div className="flex h-6 w-6 flex-none items-center justify-center rounded bg-primary/10 text-primary">
-													<Radio className="h-3 w-3" />
+												<div className="flex h-7 w-7 flex-none items-center justify-center rounded bg-primary/10 text-primary">
+													<Radio className="h-3.5 w-3.5" />
 												</div>
 												<div className="min-w-0 flex-1">
 													<div className="flex items-center gap-1.5">
@@ -1203,7 +1302,7 @@ function ClientDashboardPage() {
 												variant="outline"
 												size="xs"
 												onClick={() => copyText(copyTarget, svc.name)}
-												className="gap-1 text-[10px] h-6 px-2 flex-none"
+												className="gap-1 text-[10px] h-6 px-2 flex-none cursor-pointer"
 											>
 												{copied === svc.name ? (
 													<Check className="h-3 w-3 text-emerald-500" />
@@ -1216,27 +1315,42 @@ function ClientDashboardPage() {
 									);
 								})
 							) : (
-								<div className="flex h-full flex-col items-center justify-center py-6 text-center text-muted-foreground">
-									<WifiOff className="mb-1.5 h-6 w-6 text-muted-foreground/50" />
+								<div className="flex h-full flex-col items-center justify-center py-8 text-center text-muted-foreground">
+									<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
 									<p className="text-xs">
 										{isConnected
-											? "Waiting for Connector to publish game services..."
-											: "Connect to a Prism server to view services."}
+											? "等待 Connector 发布远端服务..."
+											: "连接到 Prism 服务器以查看发布的服务。"}
 									</p>
 								</div>
 							)}
 						</div>
 					</div>
-				</TabsContent>
+				</div>
+			) : null}
 
-				{/* 2. Client Logs Tab: Real-Time Terminal View */}
-				<TabsContent
-					value="logs"
-					className="flex-1 min-h-0 flex flex-col overflow-hidden mt-1.5 p-0"
-				>
-					<div className="flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border border-border bg-card p-2">
-						{/* Toolbar */}
-						<div className="flex items-center justify-between gap-1 flex-none pb-1.5 flex-wrap">
+			{/* 2. Logs Page: 运行日志 (Full-Page Terminal Log Console) */}
+			{currentTab === "logs" ? (
+				<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-hidden">
+					{/* Header Bar */}
+					<div className="flex flex-none select-none items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
+						<div className="flex items-center gap-2 min-w-0">
+							<Terminal className="h-4 w-4 text-primary flex-none" />
+							<div className="min-w-0">
+								<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
+									运行日志
+								</h1>
+								<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
+									客户端与隧道连接的实时事件与传输记录
+								</p>
+							</div>
+							<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-mono">
+								{filteredLogs.length} / {logs.length}
+							</Badge>
+						</div>
+
+						{/* Action Toolbar */}
+						<div className="flex items-center gap-1.5 flex-wrap">
 							{/* Level Filters */}
 							<div className="flex items-center rounded border border-input p-0.5 text-[10px]">
 								{(["ALL", "INFO", "WARN", "ERROR"] as const).map((lvl) => (
@@ -1245,7 +1359,7 @@ function ClientDashboardPage() {
 										type="button"
 										onClick={() => setLogFilterLevel(lvl)}
 										className={cn(
-											"rounded px-1.5 py-0.5 font-semibold transition",
+											"rounded px-2 py-0.5 font-semibold transition cursor-pointer",
 											logFilterLevel === lvl
 												? "bg-primary text-primary-foreground"
 												: "text-muted-foreground hover:text-foreground",
@@ -1256,141 +1370,153 @@ function ClientDashboardPage() {
 								))}
 							</div>
 
-							{/* Search */}
-							<div className="relative flex-1 min-w-[90px] max-w-[130px]">
+							{/* Search Filter */}
+							<div className="relative w-28 sm:w-36">
 								<Search className="pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
 								<Input
-									placeholder="Filter..."
+									placeholder="Filter logs..."
 									value={logSearchQuery}
 									onChange={(e) => setLogSearchQuery(e.target.value)}
-									className="h-6 pl-6 pr-1 text-[10px] font-mono"
+									className="h-7 pl-6 pr-2 text-xs font-mono"
 								/>
 							</div>
 
-							<div className="flex items-center gap-1">
-								<Button
-									variant={autoScrollLogs && isAtBottom ? "secondary" : "outline"}
-									size="xs"
-									onClick={() => {
-										if (autoScrollLogs && isAtBottom) {
-											setAutoScrollLogs(false);
-										} else {
-											setAutoScrollLogs(true);
-											scrollToBottom(true);
-										}
-									}}
-									className="h-6 text-[10px] px-1.5"
-								>
-									Scroll: {autoScrollLogs ? (isAtBottom ? "ON" : "PAUSED") : "OFF"}
-								</Button>
-
-								<Button
-									variant="outline"
-									size="xs"
-									onClick={handleClearLogs}
-									className="h-6 text-[10px] px-1.5 text-destructive hover:bg-destructive/10"
-								>
-									Clear
-								</Button>
-
-								<Button
-									variant="outline"
-									size="xs"
-									onClick={handleCopyAllLogs}
-									className="h-6 text-[10px] px-1.5 gap-1"
-								>
-									{copied === "all-logs" ? (
-										<Check className="h-2.5 w-2.5 text-emerald-500" />
-									) : (
-										<Copy className="h-2.5 w-2.5" />
-									)}
-									<span>{copied === "all-logs" ? "Copied" : "Copy"}</span>
-								</Button>
-							</div>
-						</div>
-
-						{/* Terminal Window */}
-						<div className="relative flex-1 min-h-0 flex flex-col">
-							<div
-								ref={logsContainerRef}
-								onScroll={handleLogsScroll}
-								className="flex-1 min-h-0 overflow-y-auto rounded border border-border bg-slate-950 p-2 font-mono text-[10px] leading-snug text-slate-200 selection:bg-primary/30 scrollbar-thin"
-							>
-								{filteredLogs.length > 0 ? (
-									<div className="flex flex-col gap-0.5">
-										{filteredLogs.map((entry, idx) => {
-											const lvl = entry.level.toUpperCase();
-											const badgeColor =
-												lvl === "ERROR"
-													? "text-red-400 bg-red-950/60 border-red-800/40"
-													: lvl === "WARN"
-														? "text-amber-400 bg-amber-950/60 border-amber-800/40"
-														: lvl === "DEBUG"
-															? "text-slate-400 bg-slate-900 border-slate-800"
-															: "text-emerald-400 bg-emerald-950/60 border-emerald-800/40";
-
-											return (
-												<div
-													key={idx}
-													className="flex items-start gap-1 leading-snug hover:bg-white/5 px-0.5 py-0.2 rounded"
-												>
-													<span className="shrink-0 text-slate-500 selection:text-slate-300 text-[9.5px]">
-														[
-														{entry.timestamp.length > 8
-															? entry.timestamp.includes("T")
-																? (entry.timestamp.split("T")[1]?.slice(0, 8) ?? entry.timestamp)
-																: entry.timestamp
-															: entry.timestamp}
-														]
-													</span>
-													<span
-														className={cn(
-															"shrink-0 rounded px-1 py-0 text-[8.5px] font-bold border",
-															badgeColor,
-														)}
-													>
-														{entry.level}
-													</span>
-													<span className="shrink-0 text-slate-400">{entry.target}:</span>
-													<span className="break-all text-slate-100">{entry.message}</span>
-												</div>
-											);
-										})}
-									</div>
-								) : (
-									<div className="flex h-full flex-col items-center justify-center text-slate-500 py-4">
-										<Terminal className="mb-1 h-5 w-5 opacity-40" />
-										<p className="text-xs">No client logs recorded yet.</p>
-									</div>
-								)}
-							</div>
-
-							{/* Floating Jump to Bottom Button when user is scrolled up */}
-							{!isAtBottom && filteredLogs.length > 0 ? (
-								<button
-									type="button"
-									onClick={() => {
+							<Button
+								variant={autoScrollLogs && isAtBottom ? "secondary" : "outline"}
+								size="xs"
+								onClick={() => {
+									if (autoScrollLogs && isAtBottom) {
+										setAutoScrollLogs(false);
+									} else {
 										setAutoScrollLogs(true);
 										scrollToBottom(true);
-									}}
-									className="absolute bottom-2 right-2.5 z-10 flex items-center gap-1 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground px-2 py-0.5 text-[10px] font-medium shadow-md transition-all duration-150 backdrop-blur"
-								>
-									<ArrowDown className="h-3 w-3" />
-									<span>Latest</span>
-								</button>
-							) : null}
+									}
+								}}
+								className="h-7 text-xs px-2 cursor-pointer"
+							>
+								Scroll: {autoScrollLogs ? (isAtBottom ? "ON" : "PAUSED") : "OFF"}
+							</Button>
+
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={handleClearLogs}
+								className="h-7 text-xs px-2 text-destructive hover:bg-destructive/10 cursor-pointer"
+							>
+								清空
+							</Button>
+
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={handleCopyAllLogs}
+								className="h-7 text-xs px-2 gap-1 cursor-pointer"
+							>
+								{copied === "all-logs" ? (
+									<Check className="h-3 w-3 text-emerald-500" />
+								) : (
+									<Copy className="h-3 w-3" />
+								)}
+								<span>{copied === "all-logs" ? "已复制" : "复制全部"}</span>
+							</Button>
 						</div>
 					</div>
-				</TabsContent>
 
-				{/* 3. Profiles Tab: Manage & Import/Export */}
-				<TabsContent
-					value="profiles"
-					className="flex-1 min-h-0 flex flex-col overflow-hidden mt-1.5 p-0"
-				>
-					<div className="flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border border-border bg-card p-2">
-						<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
-							<span className="text-xs font-semibold text-foreground">Saved Tunnel Profiles</span>
+					{/* Terminal Window Viewport */}
+					<div className="relative flex-1 min-h-0 flex flex-col rounded-xl border border-border bg-slate-950 overflow-hidden shadow-inner">
+						<div
+							ref={logsContainerRef}
+							onScroll={handleLogsScroll}
+							className="flex-1 min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-slate-200 selection:bg-primary/30 scrollbar-thin"
+						>
+							{filteredLogs.length > 0 ? (
+								<div className="flex flex-col gap-1">
+									{filteredLogs.map((entry, idx) => {
+										const lvl = entry.level.toUpperCase();
+										const badgeColor =
+											lvl === "ERROR"
+												? "text-red-400 bg-red-950/60 border-red-800/40"
+												: lvl === "WARN"
+													? "text-amber-400 bg-amber-950/60 border-amber-800/40"
+													: lvl === "DEBUG"
+														? "text-slate-400 bg-slate-900 border-slate-800"
+														: "text-emerald-400 bg-emerald-950/60 border-emerald-800/40";
+
+										return (
+											<div
+												key={idx}
+												className="flex items-start gap-1.5 leading-relaxed hover:bg-white/5 px-1 py-0.5 rounded transition-colors"
+											>
+												<span className="shrink-0 text-slate-500 selection:text-slate-300 text-[10px]">
+													[
+													{entry.timestamp.length > 8
+														? entry.timestamp.includes("T")
+															? (entry.timestamp.split("T")[1]?.slice(0, 8) ?? entry.timestamp)
+															: entry.timestamp
+														: entry.timestamp}
+													]
+												</span>
+												<span
+													className={cn(
+														"shrink-0 rounded px-1.5 py-0.2 text-[9px] font-bold border",
+														badgeColor,
+													)}
+												>
+													{entry.level}
+												</span>
+												<span className="shrink-0 text-slate-400 font-semibold">
+													{entry.target}:
+												</span>
+												<span className="break-all text-slate-100">{entry.message}</span>
+											</div>
+										);
+									})}
+								</div>
+							) : (
+								<div className="flex h-full flex-col items-center justify-center text-slate-500 py-8">
+									<Terminal className="mb-2 h-8 w-8 opacity-40" />
+									<p className="text-xs">暂无客户端运行日志记录</p>
+								</div>
+							)}
+						</div>
+
+						{/* Floating Jump to Bottom Button */}
+						{!isAtBottom && filteredLogs.length > 0 ? (
+							<button
+								type="button"
+								onClick={() => {
+									setAutoScrollLogs(true);
+									scrollToBottom(true);
+								}}
+								className="absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1 text-xs font-medium shadow-lg transition-all duration-150 backdrop-blur cursor-pointer"
+							>
+								<ArrowDown className="h-3 w-3" />
+								<span>跳转到最新</span>
+							</button>
+						) : null}
+					</div>
+				</div>
+			) : null}
+
+			{/* 3. Settings Page: 隧道配置与配置集 (Profiles & Settings Manager) */}
+			{currentTab === "settings" ? (
+				<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-hidden">
+					{/* Header Bar */}
+					<div className="flex flex-none select-none items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
+						<div className="flex items-center gap-2 min-w-0">
+							<Settings2 className="h-4 w-4 text-primary flex-none" />
+							<div className="min-w-0">
+								<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
+									隧道配置与配置集
+								</h1>
+								<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
+									管理连接配置集 (Profiles) 与底层网络传输协议参数
+								</p>
+							</div>
+						</div>
+
+						{/* Top Actions */}
+						<div className="flex items-center gap-1.5 flex-none">
 							<Button
 								variant="outline"
 								size="xs"
@@ -1404,232 +1530,273 @@ function ClientDashboardPage() {
 									setFakeLanBroadcast(true);
 									setSelectedProfileId(id);
 								}}
-								className="h-6 gap-1 text-[11px] px-2"
+								className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
 							>
-								<Plus className="h-3 w-3" />
-								<span>Add New</span>
+								<Plus className="h-3.5 w-3.5" />
+								<span>新建配置集</span>
+							</Button>
+
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={() => setImportModalOpen(true)}
+								className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
+							>
+								<Download className="h-3.5 w-3.5 text-primary" />
+								<span>导入链接</span>
+							</Button>
+
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={handleShareLink}
+								className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
+							>
+								{copied === "share" ? (
+									<Check className="h-3.5 w-3.5 text-emerald-500" />
+								) : (
+									<Share2 className="h-3.5 w-3.5 text-primary" />
+								)}
+								<span>{copied === "share" ? "已复制" : "分享配置"}</span>
 							</Button>
 						</div>
+					</div>
 
-						<div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/40 pt-1">
-							{profiles.length > 0 ? (
-								profiles.map((p) => {
-									const isSelected = p.id === selectedProfileId;
-									return (
-										<div key={p.id} className="flex items-center justify-between py-1.5 gap-2">
-											<div className="flex items-center gap-1.5 min-w-0 flex-1">
-												<Button
-													variant={isSelected ? "default" : "outline"}
-													size="xs"
-													onClick={() => handleSelectProfile(p.id)}
-													className="text-[10px] h-6 px-1.5 flex-none"
-												>
-													{isSelected ? "Active" : "Select"}
-												</Button>
+					{/* 2-Column Master-Detail Layout */}
+					<div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 min-h-0 overflow-hidden">
+						{/* Left Column: Saved Profiles List */}
+						<div className="md:col-span-5 flex flex-col min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs space-y-2">
+							<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
+								<span className="text-xs font-semibold text-foreground">已保存配置集</span>
+								<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+									{profiles.length} 个配置
+								</Badge>
+							</div>
+
+							<div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/40 pr-1 space-y-1">
+								{profiles.length > 0 ? (
+									profiles.map((p) => {
+										const isSelected = p.id === selectedProfileId;
+										return (
+											<div
+												key={p.id}
+												onClick={() => handleSelectProfile(p.id)}
+												className={cn(
+													"flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors gap-2",
+													isSelected
+														? "bg-primary/10 border border-primary/30"
+														: "hover:bg-accent/50",
+												)}
+											>
 												<div className="min-w-0 flex-1">
-													<div className="font-semibold text-foreground truncate text-xs">
-														{p.name}
+													<div className="flex items-center gap-1.5">
+														<span className="font-semibold text-foreground truncate text-xs">
+															{p.name}
+														</span>
+														{isSelected ? (
+															<Badge className="bg-primary text-primary-foreground text-[9px] px-1 py-0 h-3.5">
+																当前
+															</Badge>
+														) : null}
 													</div>
 													<div className="font-mono text-[10px] text-muted-foreground truncate">
-														{p.server_addr} ({p.transport.toUpperCase()}) &bull; Local:{" "}
+														{p.server_addr} ({p.transport.toUpperCase()}) &bull; 本地:{" "}
 														{p.listen_addr}
 													</div>
 												</div>
-											</div>
 
-											<div className="flex items-center gap-1 flex-none">
-												<Button
-													variant="outline"
-													size="icon-xs"
-													onClick={() => {
-														handleSelectProfile(p.id);
-														setActiveTab("settings");
-													}}
-													className="h-6 w-6 p-0"
-													title="Edit profile settings"
-												>
-													<Settings2 className="h-3 w-3" />
-												</Button>
-												<Button
-													variant="outline"
-													size="icon-xs"
-													onClick={() => handleDeleteProfile(p.id)}
-													className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10"
-													title="Delete profile"
-												>
-													<Trash2 className="h-3 w-3" />
-												</Button>
+												<div className="flex items-center gap-1 flex-none">
+													<Button
+														variant="ghost"
+														size="icon-xs"
+														onClick={(e) => {
+															e.stopPropagation();
+															handleDeleteProfile(p.id);
+														}}
+														className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 cursor-pointer"
+														title="删除配置集"
+													>
+														<Trash2 className="h-3 w-3" />
+													</Button>
+												</div>
+											</div>
+										);
+									})
+								) : (
+									<div className="py-8 text-center text-xs text-muted-foreground">
+										暂无已保存配置集，点击上方“新建配置集”或“导入链接”创建。
+									</div>
+								)}
+							</div>
+						</div>
+
+						{/* Right Column: Configuration Form */}
+						<div className="md:col-span-7 flex flex-col min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs overflow-y-auto space-y-3">
+							<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
+								<span className="text-xs font-semibold text-foreground truncate">
+									编辑配置: {profileName || "未命名配置"}
+								</span>
+								<span className="text-[10px] text-muted-foreground">
+									ID: {selectedProfileId || "新建"}
+								</span>
+							</div>
+
+							<div className="space-y-2.5 flex-1">
+								<div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+									<div className="space-y-1">
+										<label className="text-[10px] uppercase font-bold text-muted-foreground">
+											配置集名称
+										</label>
+										<Input
+											value={profileName}
+											onChange={(e) => setProfileName(e.target.value)}
+											placeholder="例如: 我的游戏服务器"
+											className="h-8 text-xs"
+										/>
+									</div>
+
+									<div className="space-y-1">
+										<label className="text-[10px] uppercase font-bold text-muted-foreground">
+											远端中继服务器地址
+										</label>
+										<Input
+											value={serverAddr}
+											onChange={(e) => setServerAddr(e.target.value)}
+											placeholder="relay.example.com:7000"
+											className="h-8 text-xs font-mono"
+										/>
+									</div>
+								</div>
+
+								<div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+									<div className="space-y-1">
+										<label className="text-[10px] uppercase font-bold text-muted-foreground">
+											传输协议 (Transport)
+										</label>
+										<select
+											aria-label="Transport Protocol"
+											value={transport}
+											onChange={(e) => setTransport(e.target.value)}
+											className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
+										>
+											<option value="quic">QUIC (极速抗丢包，推荐)</option>
+											<option value="kcp">KCP (低延迟 UDP)</option>
+											<option value="tcp">TCP (标准流传输)</option>
+											<option value="websocket">WebSocket (穿透受限网络)</option>
+										</select>
+									</div>
+
+									<div className="space-y-1">
+										<label className="text-[10px] uppercase font-bold text-muted-foreground">
+											本地监听端口 / Ingress
+										</label>
+										<Input
+											value={listenAddr}
+											onChange={(e) => setListenAddr(e.target.value)}
+											placeholder="127.0.0.1:25565"
+											className="h-8 text-xs font-mono"
+										/>
+									</div>
+								</div>
+
+								{/* Auth Token with GitHub Quick Login */}
+								<div className="space-y-1">
+									<div className="flex items-center justify-between">
+										<label className="text-[10px] uppercase font-bold text-muted-foreground">
+											身份认证密钥 (Token)
+										</label>
+										<Button
+											type="button"
+											variant="outline"
+											size="xs"
+											onClick={() => {
+												setAuthServerUrl(managementUrl || "http://127.0.0.1:8080");
+												setGithubAuthOpen(true);
+											}}
+											className="h-5 text-[10px] px-1.5 gap-1 text-primary cursor-pointer"
+										>
+											<Github className="h-2.5 w-2.5" />
+											<span>GitHub 1-Click Login</span>
+										</Button>
+									</div>
+									<div className="relative">
+										<Input
+											type={showToken ? "text" : "password"}
+											value={authToken}
+											onChange={(e) => setAuthToken(e.target.value)}
+											placeholder="可选：服务器访问密钥或 Token"
+											className="h-8 text-xs pr-7 font-mono"
+										/>
+										<button
+											type="button"
+											onClick={() => setShowToken(!showToken)}
+											className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+										>
+											{showToken ? (
+												<EyeOff className="h-3.5 w-3.5" />
+											) : (
+												<Eye className="h-3.5 w-3.5" />
+											)}
+										</button>
+									</div>
+								</div>
+
+								{/* Toggles */}
+								<div className="space-y-2 pt-1">
+									<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">
+										<div>
+											<div className="font-medium text-xs text-foreground">
+												Minecraft 局域网广播 (LAN Discovery)
+											</div>
+											<div className="text-[10px] text-muted-foreground">
+												在局域网内自动广播游戏服务，便于客户端发现
 											</div>
 										</div>
-									);
-								})
-							) : (
-								<div className="py-6 text-center text-xs text-muted-foreground">
-									No saved profiles yet. Click "Add New" or import a link.
+										<Switch checked={fakeLanBroadcast} onCheckedChange={setFakeLanBroadcast} />
+									</div>
+
+									<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">
+										<div>
+											<div className="font-medium text-xs text-foreground">
+												控制面板自动连接 (Auto-Connect Panel)
+											</div>
+											<div className="text-[10px] text-muted-foreground">
+												自动同步管理面板与鉴权状态 ({managementUrl})
+											</div>
+										</div>
+										<Switch checked={autoConnectPanel} onCheckedChange={setAutoConnectPanel} />
+									</div>
 								</div>
-							)}
-						</div>
-					</div>
-				</TabsContent>
-
-				{/* 4. Settings Tab: Connection Configuration & GitHub Auth */}
-				<TabsContent value="settings" className="flex-1 min-h-0 overflow-y-auto mt-1.5 p-0">
-					<div className="rounded-lg border border-border bg-card p-2.5 space-y-2">
-						<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-							<div className="space-y-0.5">
-								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									Profile Name
-								</label>
-								<Input
-									value={profileName}
-									onChange={(e) => setProfileName(e.target.value)}
-									placeholder="e.g. My Realm"
-									className="h-7 text-xs"
-								/>
 							</div>
 
-							<div className="space-y-0.5">
-								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									Relay Server Address
-								</label>
-								<Input
-									value={serverAddr}
-									onChange={(e) => setServerAddr(e.target.value)}
-									placeholder="relay.example.com:7000"
-									className="h-7 text-xs font-mono"
-								/>
-							</div>
-						</div>
+							{/* Footer Controls */}
+							<div className="flex items-center justify-between pt-2 border-t border-border/50 flex-none">
+								{selectedProfileId ? (
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => handleDeleteProfile(selectedProfileId)}
+										className="h-7 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
+									>
+										删除此配置
+									</Button>
+								) : (
+									<div />
+								)}
 
-						<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-							<div className="space-y-0.5">
-								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									Transport Protocol
-								</label>
-								<select
-									aria-label="Transport Protocol"
-									value={transport}
-									onChange={(e) => setTransport(e.target.value)}
-									className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
-								>
-									<option value="quic">QUIC (Fast & Resilient)</option>
-									<option value="kcp">KCP (Low Latency UDP)</option>
-									<option value="tcp">TCP (Standard)</option>
-									<option value="websocket">WebSocket (WS / WSS)</option>
-								</select>
-							</div>
-
-							<div className="space-y-0.5">
-								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									Local Port / Ingress
-								</label>
-								<Input
-									value={listenAddr}
-									onChange={(e) => setListenAddr(e.target.value)}
-									placeholder="127.0.0.1:25565"
-									className="h-7 text-xs font-mono"
-								/>
-							</div>
-						</div>
-
-						{/* Auth Token with GitHub Quick Login */}
-						<div className="space-y-0.5">
-							<div className="flex items-center justify-between">
-								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									Authentication Token
-								</label>
 								<Button
-									type="button"
-									variant="outline"
-									size="xs"
-									onClick={() => {
-										setAuthServerUrl(managementUrl || "http://127.0.0.1:8080");
-										setGithubAuthOpen(true);
-									}}
-									className="h-5 text-[10px] px-1.5 gap-1 text-primary"
+									size="sm"
+									onClick={handleSaveProfile}
+									className="h-7 text-xs gap-1 px-3.5 cursor-pointer"
 								>
-									<Github className="h-2.5 w-2.5" />
-									<span>GitHub 1-Click Login</span>
+									<Check className="h-3.5 w-3.5" />
+									<span>保存配置集</span>
 								</Button>
 							</div>
-							<div className="relative">
-								<Input
-									type={showToken ? "text" : "password"}
-									value={authToken}
-									onChange={(e) => setAuthToken(e.target.value)}
-									placeholder="Optional server auth token"
-									className="h-7 text-xs pr-7 font-mono"
-								/>
-								<button
-									type="button"
-									onClick={() => setShowToken(!showToken)}
-									className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-								>
-									{showToken ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-								</button>
-							</div>
-						</div>
-
-						{/* Toggles */}
-						<div className="space-y-1.5 pt-1">
-							<div className="flex items-center justify-between rounded border border-border/60 p-1.5 text-xs">
-								<div>
-									<div className="font-medium text-[11px] text-foreground">
-										Minecraft LAN Discovery
-									</div>
-									<div className="text-[9.5px] text-muted-foreground">
-										Broadcasts for LAN Games list
-									</div>
-								</div>
-								<Switch
-									checked={fakeLanBroadcast}
-									onCheckedChange={setFakeLanBroadcast}
-									className="scale-75 origin-right"
-								/>
-							</div>
-
-							<div className="flex items-center justify-between rounded border border-border/60 p-1.5 text-xs">
-								<div>
-									<div className="font-medium text-[11px] text-foreground">Auto-Connect Panel</div>
-									<div className="text-[9.5px] text-muted-foreground">
-										Sync control panel ({managementUrl})
-									</div>
-								</div>
-								<Switch
-									checked={autoConnectPanel}
-									onCheckedChange={setAutoConnectPanel}
-									className="scale-75 origin-right"
-								/>
-							</div>
-						</div>
-
-						{/* Footer */}
-						<div className="flex items-center justify-between pt-1 border-t border-border/50">
-							{selectedProfileId ? (
-								<Button
-									variant="outline"
-									size="xs"
-									onClick={() => handleDeleteProfile(selectedProfileId)}
-									className="h-6 text-[10px] text-destructive hover:bg-destructive/10"
-								>
-									Delete
-								</Button>
-							) : (
-								<div />
-							)}
-
-							<Button
-								size="xs"
-								onClick={handleSaveProfile}
-								className="h-6 text-[10px] gap-1 px-2.5"
-							>
-								<Check className="h-3 w-3" />
-								<span>Save Profile</span>
-							</Button>
 						</div>
 					</div>
-				</TabsContent>
-			</Tabs>
+				</div>
+			) : null}
 
 			{/* Import Modal */}
 			{importModalOpen ? (
@@ -1713,8 +1880,14 @@ function ClientDashboardPage() {
 								<div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-500">
 									<CheckCircle2 className="h-5 w-5 flex-none" />
 									<div className="text-xs">
-										<p className="font-semibold">GitHub Authorization Succeeded!</p>
-										<p>Token automatically applied to profile settings.</p>
+										<p className="font-semibold">GitHub 授权成功！</p>
+										{isAdmin || loginAdminUnlocked ? (
+											<p className="text-emerald-400 font-medium mt-0.5">
+												已确认管理员身份，侧边栏管理控制台已为您解锁。
+											</p>
+										) : (
+											<p>访问凭证已自动保存至客户端配置。</p>
+										)}
 									</div>
 								</div>
 							) : deviceCode ? (

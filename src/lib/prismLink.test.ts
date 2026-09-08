@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { encodePrismLink, parsePrismLink } from "./prismLink";
+import { encodePrismLink, parsePrismLink, resolveRemoteConnection } from "./prismLink";
 
 describe("prismLink", () => {
 	it("encodes and decodes standard prism:// links", () => {
@@ -48,5 +48,27 @@ describe("prismLink", () => {
 	it("returns null for invalid inputs", () => {
 		expect(parsePrismLink("")).toBeNull();
 		expect(parsePrismLink("not a link")).toBeNull();
+	});
+
+	it("resolves various remote connection string formats", () => {
+		const fromPrism = resolveRemoteConnection(
+			"prism://play.example.com:7000?token=mytoken&transport=kcp",
+		);
+		expect(fromPrism.managementUrl).toBe("http://play.example.com:8080");
+		expect(fromPrism.serverAddr).toBe("play.example.com:7000");
+		expect(fromPrism.transport).toBe("kcp");
+		expect(fromPrism.authToken).toBe("mytoken");
+
+		const fromHttp = resolveRemoteConnection("http://192.168.1.50:8080");
+		expect(fromHttp.managementUrl).toBe("http://192.168.1.50:8080");
+		expect(fromHttp.serverAddr).toBe("192.168.1.50:7000");
+
+		const fromHost = resolveRemoteConnection("relay.mydomain.org:7000");
+		expect(fromHost.managementUrl).toBe("http://relay.mydomain.org:8080");
+		expect(fromHost.serverAddr).toBe("relay.mydomain.org:7000");
+
+		const fromBare = resolveRemoteConnection("relay.mydomain.org");
+		expect(fromBare.managementUrl).toBe("http://relay.mydomain.org:8080");
+		expect(fromBare.serverAddr).toBe("relay.mydomain.org:7000");
 	});
 });

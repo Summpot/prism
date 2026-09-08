@@ -16,7 +16,7 @@ describe("prismLink", () => {
 		const link = encodePrismLink(profile);
 		expect(link).toContain("prism://play.example.com:7000");
 		expect(link).toContain("name=Survival+Realm");
-		expect(link).toContain("token=super-secret-token");
+		expect(link).not.toContain("token=");
 		expect(link).toContain("transport=kcp");
 		expect(link).toContain("fake_lan=0");
 
@@ -25,9 +25,17 @@ describe("prismLink", () => {
 		expect(parsed?.name).toBe("Survival Realm");
 		expect(parsed?.server_addr).toBe("play.example.com:7000");
 		expect(parsed?.transport).toBe("kcp");
-		expect(parsed?.auth_token).toBe("super-secret-token");
+		expect(parsed?.auth_token).toBe("");
 		expect(parsed?.listen_addr).toBe("127.0.0.1:25566");
 		expect(parsed?.fake_lan_broadcast).toBe(false);
+	});
+
+	it("still decodes legacy prism:// links with token", () => {
+		const legacyLink = "prism://play.example.com:7000?name=Legacy&token=old-token&transport=tcp";
+		const parsed = parsePrismLink(legacyLink);
+		expect(parsed).not.toBeNull();
+		expect(parsed?.name).toBe("Legacy");
+		expect(parsed?.auth_token).toBe("old-token");
 	});
 
 	it("handles minimal server address strings", () => {

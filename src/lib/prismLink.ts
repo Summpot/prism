@@ -1,4 +1,5 @@
 import type { ClientProfile } from "./managementApi";
+export type { ClientProfile };
 
 /**
  * Encodes a server profile into a shareable `prism://` link.
@@ -12,9 +13,6 @@ export function encodePrismLink(profile: Partial<ClientProfile>): string {
 	}
 	if (profile.transport && profile.transport !== "quic") {
 		params.set("transport", profile.transport);
-	}
-	if (profile.auth_token) {
-		params.set("token", profile.auth_token);
 	}
 	if (profile.listen_addr && profile.listen_addr !== "127.0.0.1:25565") {
 		params.set("listen", profile.listen_addr);

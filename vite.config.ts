@@ -4,7 +4,6 @@ import { devtools } from "@tanstack/devtools-vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import viteTsConfigPaths from "vite-tsconfig-paths";
 
 const isVitest = !!process.env.VITEST;
 
@@ -34,6 +33,7 @@ const config = defineConfig(({ command }) => ({
 		alias: {
 			"@": fileURLToPath(new URL("./src", import.meta.url)),
 		},
+		tsconfigPaths: true,
 	},
 	plugins: [
 		...(isVitest || command !== "serve"
@@ -45,9 +45,6 @@ const config = defineConfig(({ command }) => ({
 						},
 					}),
 				]),
-		viteTsConfigPaths({
-			projects: ["./tsconfig.json"],
-		}),
 		tailwindcss(),
 		...(isVitest
 			? []

@@ -6,8 +6,6 @@ import {
 	CheckCircle2,
 	Copy,
 	Download,
-	Eye,
-	EyeOff,
 	Gamepad2,
 	Plus,
 	Power,
@@ -16,7 +14,6 @@ import {
 	Search,
 	Settings2,
 	Share2,
-	ShieldCheck,
 	Terminal,
 	Trash2,
 	WifiOff,
@@ -168,7 +165,6 @@ function ClientDashboardPage() {
 	const [listenAddr, setListenAddr] = useState("127.0.0.1:25565");
 	const [fakeLanBroadcast, setFakeLanBroadcast] = useState(true);
 	const [profileName, setProfileName] = useState("Default Realm");
-	const [showToken, setShowToken] = useState(false);
 
 	// Auto-connect management panel state
 	const [autoConnectPanel, setAutoConnectPanel] = useState(true);
@@ -848,25 +844,38 @@ function ClientDashboardPage() {
 								</select>
 							) : null}
 
-							<Button
-								size="sm"
-								variant={isRunning ? "destructive" : "default"}
-								disabled={actionLoading}
-								onClick={handleToggleTunnel}
-								className={cn(
-									"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs",
-									isRunning
-										? "bg-emerald-600 hover:bg-emerald-700 text-white"
-										: "bg-primary text-primary-foreground hover:bg-primary/90",
-								)}
-							>
-								{actionLoading ? (
-									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-								) : (
-									<Power className="h-3.5 w-3.5" />
-								)}
-								<span>{isRunning ? "已连接" : "连接"}</span>
-							</Button>
+							{authSession?.authenticated ? (
+								<Button
+									size="sm"
+									variant={isRunning ? "destructive" : "default"}
+									disabled={actionLoading}
+									onClick={handleToggleTunnel}
+									className={cn(
+										"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs",
+										isRunning
+											? "bg-emerald-600 hover:bg-emerald-700 text-white"
+											: "bg-primary text-primary-foreground hover:bg-primary/90",
+									)}
+								>
+									{actionLoading ? (
+										<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+									) : (
+										<Power className="h-3.5 w-3.5" />
+									)}
+									<span>{isRunning ? "已连接" : "启动连接"}</span>
+								</Button>
+							) : (
+								<Button
+									size="sm"
+									variant="default"
+									disabled={actionLoading || oauthLoading}
+									onClick={() => void handleStartGitHubAuthFromLink()}
+									className="h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs bg-primary text-primary-foreground hover:bg-primary/90"
+								>
+									<Github className="h-3.5 w-3.5" />
+									<span>登录</span>
+								</Button>
+							)}
 
 							<Button
 								variant="outline"
@@ -895,78 +904,106 @@ function ClientDashboardPage() {
 					) : null}
 
 					{/* 极简连接远端卡片 (Connect to Remote Hero) */}
-					<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-1.5">
-								<Radio className="h-4 w-4 text-primary" />
-								<span className="text-xs font-bold text-foreground">连接远端节点</span>
+					{authSession?.authenticated ? (
+						<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs flex items-center justify-between gap-3">
+							<div className="flex items-center gap-2.5 min-w-0">
+								{authSession.avatar_url ? (
+									<img
+										src={authSession.avatar_url}
+										alt={authSession.username || "User"}
+										className="h-8 w-8 rounded-full object-cover ring-1 ring-border flex-none"
+									/>
+								) : (
+									<div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary flex-none">
+										<Github className="h-4 w-4" />
+									</div>
+								)}
+								<div className="min-w-0">
+									<div className="flex items-center gap-1.5">
+										<span className="text-xs font-bold text-foreground truncate">
+											{authSession.display_name || authSession.username || "已登录"}
+										</span>
+										{isAdmin ? (
+											<Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] px-1.5 py-0 h-4">
+												管理员
+											</Badge>
+										) : (
+											<Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
+												成员
+											</Badge>
+										)}
+									</div>
+									<p className="text-[10px] font-mono text-muted-foreground truncate">
+										远端节点: {serverAddr || "默认节点"}
+									</p>
+								</div>
 							</div>
-							{authSession?.authenticated ? (
+
+							<div className="flex items-center gap-2 flex-none">
+								{isAdmin || loginAdminUnlocked ? (
+									<Link to="/" className="text-[11px] font-bold text-primary hover:underline">
+										进入控制台 &rarr;
+									</Link>
+								) : null}
+								<Button
+									variant="outline"
+									size="xs"
+									onClick={() => {
+										clearConnection();
+										setAuthToken("");
+										if (status?.running) {
+											void handleDisconnect();
+										}
+									}}
+									className="h-7 text-xs px-2.5 text-muted-foreground hover:text-destructive cursor-pointer"
+								>
+									<span>退出登录</span>
+								</Button>
+							</div>
+						</div>
+					) : (
+						<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
+							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-1.5">
-									<span className="flex items-center gap-1 text-[11px] text-muted-foreground font-mono">
-										<span className="h-2 w-2 rounded-full bg-emerald-500" />
-										{authSession.display_name || authSession.username}
-									</span>
-									{isAdmin ? (
-										<Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] px-1.5 py-0 h-4">
-											管理员
-										</Badge>
+									<Radio className="h-4 w-4 text-primary" />
+									<span className="text-xs font-bold text-foreground">连接远端节点与登录</span>
+								</div>
+								<span className="text-[11px] text-muted-foreground">
+									服务端默认允许所有人连接；登录前仅限进行登录操作
+								</span>
+							</div>
+
+							<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+								<div className="relative flex-1 min-w-0">
+									<Input
+										value={remoteLinkInput}
+										onChange={(e) => setRemoteLinkInput(e.target.value)}
+										placeholder="输入远端链接或服务器地址，如 play.example.com:7000 或 relay.example.com"
+										className="h-8 text-xs font-mono pr-7"
+									/>
+									{remoteLinkInput ? (
+										<button
+											type="button"
+											onClick={() => setRemoteLinkInput("")}
+											className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+											title="清空"
+										>
+											<X className="h-3 w-3" />
+										</button>
 									) : null}
 								</div>
-							) : (
-								<span className="text-[11px] text-muted-foreground">
-									输入远端链接即可开始 GitHub Device Flow
-								</span>
-							)}
-						</div>
 
-						<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-							<div className="relative flex-1 min-w-0">
-								<Input
-									value={remoteLinkInput}
-									onChange={(e) => setRemoteLinkInput(e.target.value)}
-									placeholder="输入远端链接，如 prism://play.example.com:7000 或 relay.example.com:7000 或 http://..."
-									className="h-8 text-xs font-mono pr-7"
-								/>
-								{remoteLinkInput ? (
-									<button
-										type="button"
-										onClick={() => setRemoteLinkInput("")}
-										className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-										title="清空"
-									>
-										<X className="h-3 w-3" />
-									</button>
-								) : null}
-							</div>
-
-							<Button
-								onClick={() => void handleStartGitHubAuthFromLink()}
-								className="h-8 px-3.5 text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs flex-none cursor-pointer"
-							>
-								<Github className="h-3.5 w-3.5" />
-								<span>通过 GitHub 登录</span>
-							</Button>
-						</div>
-
-						{/* 管理员权限反馈提示 */}
-						{isAdmin || loginAdminUnlocked ? (
-							<div className="flex items-center justify-between gap-2 rounded bg-primary/10 border border-primary/20 px-2.5 py-1.5 text-xs text-primary">
-								<div className="flex items-center gap-1.5 truncate">
-									<ShieldCheck className="h-4 w-4 flex-none text-primary" />
-									<span className="truncate">
-										您具有管理员权限，侧边栏已为您解锁管理控制台（概览、节点、连接、隧道服务等）。
-									</span>
-								</div>
-								<Link
-									to="/"
-									className="text-[11px] font-bold underline hover:opacity-80 flex-none ml-1"
+								<Button
+									onClick={() => void handleStartGitHubAuthFromLink()}
+									disabled={oauthLoading}
+									className="h-8 px-3.5 text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs flex-none cursor-pointer"
 								>
-									进入控制台 &rarr;
-								</Link>
+									<Github className="h-3.5 w-3.5" />
+									<span>{oauthLoading ? "正在获取授权..." : "通过 GitHub 登录"}</span>
+								</Button>
 							</div>
-						) : null}
-					</div>
+						</div>
+					)}
 
 					{/* 隧道连接与实时状态卡片 (Active Tunnel Status) */}
 					<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
@@ -1010,25 +1047,41 @@ function ClientDashboardPage() {
 								</div>
 							</div>
 
-							<Button
-								size="sm"
-								variant={isRunning ? "destructive" : "default"}
-								disabled={actionLoading}
-								onClick={handleToggleTunnel}
-								className={cn(
-									"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs",
-									isRunning
-										? "bg-emerald-600 hover:bg-emerald-700 text-white"
-										: "bg-primary text-primary-foreground hover:bg-primary/90",
-								)}
-							>
-								{actionLoading ? (
-									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-								) : (
-									<Power className="h-3.5 w-3.5" />
-								)}
-								<span>{isRunning ? "Connected" : "Connect"}</span>
-							</Button>
+							{isRunning ? (
+								<Button
+									size="sm"
+									variant="outline"
+									disabled={actionLoading}
+									onClick={handleDisconnect}
+									className="h-7 px-2.5 text-xs font-semibold gap-1 rounded-md flex-none shadow-xs text-destructive hover:bg-destructive/10 cursor-pointer"
+								>
+									{actionLoading ? (
+										<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+									) : (
+										<Power className="h-3.5 w-3.5" />
+									)}
+									<span>断开隧道</span>
+								</Button>
+							) : authSession?.authenticated ? (
+								<Button
+									size="sm"
+									variant="default"
+									disabled={actionLoading}
+									onClick={handleConnect}
+									className="h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+								>
+									{actionLoading ? (
+										<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+									) : (
+										<Power className="h-3.5 w-3.5" />
+									)}
+									<span>启动连接</span>
+								</Button>
+							) : (
+								<span className="text-[11px] font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+									等待登录
+								</span>
+							)}
 						</div>
 
 						{/* Connected Metrics Strip */}
@@ -1238,7 +1291,16 @@ function ClientDashboardPage() {
 						</div>
 
 						<div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/40 pt-1">
-							{status?.known_services && status.known_services.length > 0 ? (
+							{!authSession?.authenticated ? (
+								<div className="flex h-full flex-col items-center justify-center py-8 text-center text-muted-foreground">
+									<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
+									<p className="text-xs font-medium text-foreground">未登录 GitHub 账号</p>
+									<p className="text-[11px] text-muted-foreground max-w-sm mt-1">
+										服务端默认允许所有人连接，但登录前仅限进行登录操作。请先在上方完成 GitHub
+										登录以获取服务访问权限。
+									</p>
+								</div>
+							) : status?.known_services && status.known_services.length > 0 ? (
 								status.known_services.map((svc, idx) => {
 									const rawListen = status?.listen_addr || listenAddr || "127.0.0.1:25565";
 									const port = parsePort(rawListen);
@@ -1674,48 +1736,6 @@ function ClientDashboardPage() {
 									</div>
 								</div>
 
-								{/* Auth Token with GitHub Quick Login */}
-								<div className="space-y-1">
-									<div className="flex items-center justify-between">
-										<label className="text-[10px] uppercase font-bold text-muted-foreground">
-											身份认证密钥 (Token)
-										</label>
-										<Button
-											type="button"
-											variant="outline"
-											size="xs"
-											onClick={() => {
-												setAuthServerUrl(managementUrl || "http://127.0.0.1:8080");
-												setGithubAuthOpen(true);
-											}}
-											className="h-5 text-[10px] px-1.5 gap-1 text-primary cursor-pointer"
-										>
-											<Github className="h-2.5 w-2.5" />
-											<span>GitHub 1-Click Login</span>
-										</Button>
-									</div>
-									<div className="relative">
-										<Input
-											type={showToken ? "text" : "password"}
-											value={authToken}
-											onChange={(e) => setAuthToken(e.target.value)}
-											placeholder="可选：服务器访问密钥或 Token"
-											className="h-8 text-xs pr-7 font-mono"
-										/>
-										<button
-											type="button"
-											onClick={() => setShowToken(!showToken)}
-											className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-										>
-											{showToken ? (
-												<EyeOff className="h-3.5 w-3.5" />
-											) : (
-												<Eye className="h-3.5 w-3.5" />
-											)}
-										</button>
-									</div>
-								</div>
-
 								{/* Toggles */}
 								<div className="space-y-2 pt-1">
 									<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">
@@ -1866,8 +1886,9 @@ function ClientDashboardPage() {
 							) : (
 								<div className="space-y-4">
 									<p className="text-xs text-muted-foreground leading-relaxed">
-										客户端将通过内部协议从服务器获取授权地址，并在系统默认浏览器中打开 GitHub 授权页面。
-										授权完成后，浏览器通过 Deep Link 自动唤起客户端完成登录，不依赖浏览器直接访问服务端。
+										客户端将通过内部协议从服务器获取授权地址，并在系统默认浏览器中打开 GitHub
+										授权页面。 授权完成后，浏览器通过 Deep Link
+										自动唤起客户端完成登录，不依赖浏览器直接访问服务端。
 									</p>
 									<Button
 										onClick={() => startGitHubAuthWithUrl(authServerUrl, serverAddr)}

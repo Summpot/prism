@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { closeWindow, isDesktopApp, minimizeWindow, toggleMaximizeWindow } from "./desktopWindow";
+import { closeWindow, isDesktopApp, minimizeWindow, openExternalUrl, toggleMaximizeWindow } from "./desktopWindow";
 
 describe("desktopWindow", () => {
 	beforeEach(() => {
@@ -65,5 +65,23 @@ describe("desktopWindow", () => {
 		await expect(minimizeWindow()).resolves.toBeUndefined();
 		await expect(toggleMaximizeWindow()).resolves.toBeUndefined();
 		await expect(closeWindow()).resolves.toBeUndefined();
+	});
+
+	it("calls open_external_url via Tauri invoke in desktop environment", async () => {
+		const invokeMock = vi.fn().mockResolvedValue(undefined);
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		await openExternalUrl("https://github.com/login/oauth/authorize");
+		expect(invokeMock).toHaveBeenCalledWith("open_external_url", {
+			url: "https://github.com/login/oauth/authorize",
+		});
+	});
+
+	it("falls back to window.open in non-desktop environment", async () => {
+		const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+		await openExternalUrl("https://github.com/login/oauth/authorize");
+		expect(openSpy).toHaveBeenCalledWith("https://github.com/login/oauth/authorize", "_blank");
 	});
 });

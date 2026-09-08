@@ -874,7 +874,13 @@ async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse 
     )
 }
 
+#[derive(Debug, Serialize)]
+pub struct GitHubLoginResponse {
+    pub url: String,
+}
+
 async fn auth_github_login(
+    headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let am = st
@@ -892,7 +898,18 @@ async fn auth_github_login(
     if let Some(ref r) = gh.redirect_uri {
         url.push_str(&format!("&redirect_uri={r}"));
     }
-    Ok(axum::response::Redirect::temporary(&url))
+
+    let is_html = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|h| h.to_str().ok())
+        .map(|v| v.contains("text/html"))
+        .unwrap_or(false);
+
+    if is_html {
+        Ok(axum::response::Redirect::temporary(&url).into_response())
+    } else {
+        Ok((StatusCode::OK, Json(GitHubLoginResponse { url })).into_response())
+    }
 }
 
 #[derive(Debug, Deserialize)]

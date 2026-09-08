@@ -509,6 +509,14 @@ export function getAuthProviders(baseUrl: string): Promise<AuthProvidersResponse
 		.catch(() => ({ github_enabled: false, github_client_id: null, mode: "token" }));
 }
 
+export interface GitHubLoginUrlResponse {
+	url: string;
+}
+
+export function getGitHubLoginUrl(connection: PanelConnection) {
+	return apiRequest<GitHubLoginUrlResponse>(connection, "/auth/github/login");
+}
+
 export function exchangeGitHubCode(connection: PanelConnection, code: string) {
 	return apiRequest<{ token: string; user: UserRecord; token_id: string }>(
 		connection,

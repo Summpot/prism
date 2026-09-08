@@ -533,14 +533,6 @@ impl AuthManager {
             .await
     }
 
-    /// Alias for exchange_code.
-    pub async fn exchange_web_code(
-        &self,
-        code: &str,
-    ) -> anyhow::Result<(UserRecord, String, TokenRecord)> {
-        self.exchange_code(code).await
-    }
-
     async fn fetch_github_profile(
         &self,
         access_token: &str,

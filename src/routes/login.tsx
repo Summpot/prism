@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 import { Github } from "@/components/icons/Github";
 
 import { fieldClassName, PrimaryButton } from "@/components/ui";
-import { isDesktopApp } from "@/lib/desktopWindow";
-import { getAuthProviders, getHealth, getManagementStatus } from "@/lib/managementApi";
+import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
+import { getAuthProviders, getGitHubLoginUrl, getHealth, getManagementStatus } from "@/lib/managementApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 
@@ -18,6 +18,7 @@ function LoginPage() {
 	const [baseUrl, setBaseUrl] = useState(connection?.baseUrl ?? "http://127.0.0.1:8080");
 	const [token, setToken] = useState(connection?.token ?? "");
 	const [submitting, setSubmitting] = useState(false);
+	const [oauthLoading, setOauthLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [githubEnabled, setGithubEnabled] = useState(false);
 
@@ -33,9 +34,9 @@ function LoginPage() {
 					baseUrl: normalizeBaseUrl(baseUrl),
 					token: urlToken,
 				};
-				window.history.replaceState(null, "", window.location.pathname);
 				saveConnection(nextConnection);
-				navigate({ to: "/" });
+				window.history.replaceState(null, "", window.location.pathname);
+				void navigate({ to: "/" });
 			}
 		}
 	}, [baseUrl, navigate, saveConnection]);
@@ -88,13 +89,22 @@ function LoginPage() {
 		}
 	};
 
-	const loginWithGitHub = () => {
-		const norm = normalizeBaseUrl(baseUrl);
-		const authUrl = `${norm}/auth/github/login`;
-		if (isDesktopApp()) {
-			window.open(authUrl, "_blank");
-		} else {
-			window.location.href = authUrl;
+	const loginWithGitHub = async () => {
+		try {
+			setOauthLoading(true);
+			setError(null);
+			const norm = normalizeBaseUrl(baseUrl);
+			if (typeof window !== "undefined") {
+				window.sessionStorage.setItem("prism_pending_auth_url", norm);
+			}
+			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
+			if (res.url) {
+				await openExternalUrl(res.url);
+			}
+		} catch (nextError) {
+			setError(nextError instanceof Error ? nextError.message : String(nextError));
+		} finally {
+			setOauthLoading(false);
 		}
 	};
 
@@ -148,10 +158,11 @@ function LoginPage() {
 							<button
 								type="button"
 								onClick={loginWithGitHub}
-								className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15 cursor-pointer"
+								disabled={oauthLoading}
+								className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15 cursor-pointer disabled:opacity-50"
 							>
 								<Github className="h-4 w-4" />
-								<span>Sign in with GitHub</span>
+								<span>{oauthLoading ? "Requesting authorization URL..." : "Sign in with GitHub"}</span>
 							</button>
 							{isDesktopApp() ? (
 								<p className="text-xs text-slate-400 text-center">

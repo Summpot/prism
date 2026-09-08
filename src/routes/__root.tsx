@@ -136,9 +136,16 @@ function RootContent() {
 					void navigate({ to: "/" });
 				}
 			} else if (payload.kind === "auth-code") {
-				const currentBaseUrl = connection?.baseUrl || "http://127.0.0.1:8080";
+				const pendingUrl =
+					typeof window !== "undefined"
+						? window.sessionStorage.getItem("prism_pending_auth_url")
+						: null;
+				const currentBaseUrl = pendingUrl || connection?.baseUrl || "http://127.0.0.1:8080";
 				exchangeGitHubCode({ baseUrl: currentBaseUrl, token: "" }, payload.code)
 					.then((res) => {
+						if (typeof window !== "undefined") {
+							window.sessionStorage.removeItem("prism_pending_auth_url");
+						}
 						saveConnection({
 							baseUrl: currentBaseUrl,
 							token: res.token,

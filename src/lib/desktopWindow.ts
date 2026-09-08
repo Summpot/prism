@@ -68,3 +68,22 @@ export async function closeWindow(): Promise<void> {
 		console.warn("Failed to close window:", err);
 	}
 }
+
+/**
+ * Open external URL in default system browser directly.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+	const invoke = getTauriInvoke();
+	if (invoke) {
+		try {
+			await invoke("open_external_url", { url });
+			return;
+		} catch (err) {
+			console.debug("Failed to invoke open_external_url, falling back to window.open:", err);
+		}
+	}
+	if (typeof window !== "undefined") {
+		window.open(url, "_blank");
+	}
+}
+

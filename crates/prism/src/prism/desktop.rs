@@ -84,6 +84,32 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     let client_ctrl_for_tray = client_controller.clone();
 
+    #[tauri::command]
+    fn open_external_url(url: String) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("rundll32")
+                .args(["url.dll,FileProtocolHandler", &url])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg(&url)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(&url)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     // 2. Run Tauri desktop application
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -94,6 +120,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
+        .invoke_handler(tauri::generate_handler![open_external_url])
         .setup(move |app| {
             #[cfg(desktop)]
             {

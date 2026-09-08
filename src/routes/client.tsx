@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Github } from "@/components/icons/Github";
 
-import { isDesktopApp } from "@/lib/desktopWindow";
+import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
 import { formatBytes } from "@/lib/format";
 
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,7 @@ import {
 	getClientLogs,
 	getClientProfiles,
 	getClientStatus,
+	getGitHubLoginUrl,
 	getHealth,
 	resetClientStats,
 	saveClientConfig,
@@ -210,6 +211,7 @@ function ClientDashboardPage() {
 	const [githubAuthOpen, setGithubAuthOpen] = useState(false);
 	const [authServerUrl, setAuthServerUrl] = useState("http://127.0.0.1:8080");
 	const [authError, setAuthError] = useState<string | null>(null);
+	const [oauthLoading, setOauthLoading] = useState(false);
 
 	// Import modal state
 	const [importModalOpen, setImportModalOpen] = useState(false);
@@ -465,15 +467,27 @@ function ClientDashboardPage() {
 	]);
 
 	// Start GitHub OAuth with target management URL via browser + deep link
-	const startGitHubAuthWithUrl = (targetAuthUrl: string, targetServerAddr?: string) => {
+	const startGitHubAuthWithUrl = async (targetAuthUrl: string, targetServerAddr?: string) => {
 		setAuthError(null);
-		const norm = normalizeBaseUrl(targetAuthUrl);
-		const nextServer = targetServerAddr || serverAddr;
-		if (targetServerAddr) {
-			setServerAddr(nextServer);
+		setOauthLoading(true);
+		try {
+			const norm = normalizeBaseUrl(targetAuthUrl);
+			const nextServer = targetServerAddr || serverAddr;
+			if (targetServerAddr) {
+				setServerAddr(nextServer);
+			}
+			if (typeof window !== "undefined") {
+				window.sessionStorage.setItem("prism_pending_auth_url", norm);
+			}
+			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
+			if (res.url) {
+				await openExternalUrl(res.url);
+			}
+		} catch (err) {
+			setAuthError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setOauthLoading(false);
 		}
-		const authUrl = `${norm}/auth/github/login`;
-		window.open(authUrl, "_blank");
 	};
 
 	// Start GitHub OAuth directly from the user's remote link
@@ -1800,15 +1814,13 @@ function ClientDashboardPage() {
 						<CardHeader className="flex flex-row items-center justify-between pb-3">
 							<div className="flex items-center gap-2">
 								<Github className="h-5 w-5" />
-								<CardTitle>GitHub Device Authorization</CardTitle>
+								<CardTitle>GitHub 授权登录</CardTitle>
 							</div>
 							<Button
 								variant="ghost"
 								size="icon-xs"
 								onClick={() => {
 									setGithubAuthOpen(false);
-									setDeviceCode(null);
-									setDevicePolling(false);
 									setAuthError(null);
 								}}
 							>
@@ -1817,7 +1829,7 @@ function ClientDashboardPage() {
 						</CardHeader>
 						<CardContent className="space-y-4">
 							<p className="text-sm text-muted-foreground">
-								Authenticate via GitHub to fetch a client access token from the relay server.
+								通过 GitHub 授权登录，直接向服务端获取当前客户端访问凭证。
 							</p>
 
 							<div className="space-y-1.5">
@@ -1827,7 +1839,7 @@ function ClientDashboardPage() {
 								<Input
 									value={authServerUrl}
 									onChange={(e) => setAuthServerUrl(e.target.value)}
-									disabled={devicePolling}
+									disabled={oauthLoading}
 								/>
 							</div>
 
@@ -1854,15 +1866,16 @@ function ClientDashboardPage() {
 							) : (
 								<div className="space-y-4">
 									<p className="text-xs text-muted-foreground leading-relaxed">
-										点击下方按钮将在系统默认浏览器中打开 GitHub 授权页面。授权完成后，浏览器将通过
-										Deep Link 自动唤起客户端完成登录，并将访问凭证保存到当前配置。
+										客户端将通过内部协议从服务器获取授权地址，并在系统默认浏览器中打开 GitHub 授权页面。
+										授权完成后，浏览器通过 Deep Link 自动唤起客户端完成登录，不依赖浏览器直接访问服务端。
 									</p>
 									<Button
 										onClick={() => startGitHubAuthWithUrl(authServerUrl, serverAddr)}
-										className="w-full gap-2 cursor-pointer"
+										disabled={oauthLoading}
+										className="w-full gap-2 cursor-pointer disabled:opacity-50"
 									>
 										<Github className="h-4 w-4" />
-										<span>前往 GitHub 授权登录</span>
+										<span>{oauthLoading ? "正在获取授权链接..." : "前往 GitHub 授权登录"}</span>
 									</Button>
 								</div>
 							)}

@@ -285,7 +285,12 @@ Operational notes:
 
 Prism supports token-based authentication and GitHub OAuth for the management control panel and desktop client.
 
-GitHub OAuth directly uses custom URL protocol Deep Links (`prism://auth/callback`). In desktop mode, login requests open the system browser to authorize on GitHub; upon approval, GitHub directly invokes the custom `prism://` protocol to return the authorization code to the desktop client, which automatically exchanges it with Prism for a session token. No intermediate server-side HTTP callback page is needed.
+GitHub OAuth uses custom URL protocol Deep Links (`prism://auth/callback`) directly, with zero assumption of browser access to internal server endpoints:
+
+1. The client requests the GitHub authorization URL from the Prism management node over its internal API connection (`GET /auth/github/login`).
+2. The client launches the default system browser directly to `https://github.com/login/oauth/authorize?...`. The browser never needs direct network access to the Prism server.
+3. Upon user authorization, GitHub redirects the browser to `prism://auth/callback?code=...`.
+4. The operating system deep-link handler brings Prism into focus, and Prism exchanges the authorization code with the server (`POST /auth/github/exchange`) for a session token.
 
 ### GitHub OAuth App Setup
 
@@ -317,7 +322,7 @@ default_role = "member" # "admin" | "member"
 Endpoints:
 
 - `GET /auth/providers` → inspects active authentication providers
-- `GET /auth/github/login` → redirects browser to GitHub OAuth authorization URL
+- `GET /auth/github/login` → returns the GitHub OAuth authorization URL (`{ "url": "..." }`) or redirects for browsers
 - `POST /auth/github/exchange` → exchanges OAuth authorization code returned by deep link (`prism://auth/callback?code=...`) for a Prism session token
 - `GET /auth/session` → inspects the authenticated session
 - `GET /auth/tokens` / `POST /auth/tokens` → token management

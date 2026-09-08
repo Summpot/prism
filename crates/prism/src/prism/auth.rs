@@ -211,36 +211,6 @@ pub struct GitHubOrg {
     pub login: String,
 }
 
-/// Device code response from GitHub.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceCodeResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-
-/// Device poll result from GitHub.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "status")]
-pub enum DevicePollResult {
-    #[serde(rename = "pending")]
-    Pending,
-    #[serde(rename = "slow_down")]
-    SlowDown { interval: u64 },
-    #[serde(rename = "expired")]
-    Expired,
-    #[serde(rename = "success")]
-    Success {
-        user: UserRecord,
-        token: String,
-        token_id: String,
-    },
-    #[serde(rename = "denied")]
-    Denied { message: String },
-}
-
 /// Central authentication and user management plane.
 pub struct AuthManager {
     config: AuthConfig,
@@ -517,100 +487,8 @@ impl AuthManager {
         self.save_state().await
     }
 
-    /// Initiates GitHub Device Authorization Flow.
-    pub async fn request_device_code(&self) -> anyhow::Result<DeviceCodeResponse> {
-        let Some(gh) = self.github_config() else {
-            anyhow::bail!("GitHub OAuth is not configured or enabled");
-        };
-
-        let res = self
-            .http_client
-            .post("https://github.com/login/device/code")
-            .header("Accept", "application/json")
-            .header("User-Agent", "prism-proxy")
-            .json(&serde_json::json!({
-                "client_id": &gh.client_id,
-                "scope": "read:user"
-            }))
-            .send()
-            .await?;
-
-        if !res.status().is_success() {
-            let body = res.text().await.unwrap_or_default();
-            anyhow::bail!("GitHub device code request failed: {body}");
-        }
-
-        let resp: DeviceCodeResponse = res.json().await?;
-        Ok(resp)
-    }
-
-    /// Polls GitHub Device Flow for authorization status.
-    pub async fn poll_device_code(&self, device_code: &str) -> anyhow::Result<DevicePollResult> {
-        let Some(gh) = self.github_config() else {
-            anyhow::bail!("GitHub OAuth is not configured or enabled");
-        };
-
-        #[derive(Deserialize)]
-        struct PollResponse {
-            access_token: Option<String>,
-            error: Option<String>,
-            interval: Option<u64>,
-        }
-
-        let res = self
-            .http_client
-            .post("https://github.com/login/oauth/access_token")
-            .header("Accept", "application/json")
-            .header("User-Agent", "prism-proxy")
-            .json(&serde_json::json!({
-                "client_id": &gh.client_id,
-                "device_code": device_code,
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-            }))
-            .send()
-            .await?;
-
-        let parsed: PollResponse = res.json().await?;
-
-        if let Some(err) = parsed.error {
-            match err.as_str() {
-                "authorization_pending" => return Ok(DevicePollResult::Pending),
-                "slow_down" => {
-                    return Ok(DevicePollResult::SlowDown {
-                        interval: parsed.interval.unwrap_or(5),
-                    });
-                }
-                "expired_token" => return Ok(DevicePollResult::Expired),
-                "access_denied" => {
-                    return Ok(DevicePollResult::Denied {
-                        message: "Access was denied by user".to_string(),
-                    });
-                }
-                other => {
-                    anyhow::bail!("GitHub error: {other}");
-                }
-            }
-        }
-
-        let Some(token) = parsed.access_token else {
-            return Ok(DevicePollResult::Pending);
-        };
-
-        // Fetch user profile from GitHub
-        let (gh_user, orgs) = self.fetch_github_profile(&token).await?;
-        let (user, raw_token, token_record) = self
-            .on_oauth_success(gh_user, &orgs, "GitHub Device Login")
-            .await?;
-
-        Ok(DevicePollResult::Success {
-            user,
-            token: raw_token,
-            token_id: token_record.id,
-        })
-    }
-
-    /// Exchanges Web OAuth Code for token and user profile.
-    pub async fn exchange_web_code(
+    /// Exchanges OAuth Code for token and user profile.
+    pub async fn exchange_code(
         &self,
         code: &str,
     ) -> anyhow::Result<(UserRecord, String, TokenRecord)> {
@@ -651,8 +529,16 @@ impl AuthManager {
         };
 
         let (gh_user, orgs) = self.fetch_github_profile(&token).await?;
-        self.on_oauth_success(gh_user, &orgs, "GitHub Web Login")
+        self.on_oauth_success(gh_user, &orgs, "GitHub Deep Link Login")
             .await
+    }
+
+    /// Alias for exchange_code.
+    pub async fn exchange_web_code(
+        &self,
+        code: &str,
+    ) -> anyhow::Result<(UserRecord, String, TokenRecord)> {
+        self.exchange_code(code).await
     }
 
     async fn fetch_github_profile(

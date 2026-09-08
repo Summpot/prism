@@ -11,13 +11,15 @@ import { useEffect, useMemo } from "react";
 
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
+import { setupDeepLinkListener } from "@/lib/deepLink";
+import { exchangeGitHubCode } from "@/lib/managementApi";
 import {
 	closeWindow,
 	isDesktopApp,
 	minimizeWindow,
 	toggleMaximizeWindow,
 } from "@/lib/desktopWindow";
-import { PanelSessionProvider } from "@/lib/panelSession";
+import { PanelSessionProvider, usePanelSession } from "@/lib/panelSession";
 
 import appCss from "../styles.css?url";
 
@@ -116,9 +118,60 @@ function DesktopTitleBar() {
 function RootContent() {
 	const location = useLocation();
 	const navigate = useNavigate();
+	const { connection, saveConnection } = usePanelSession();
 
 	const isDesktop = useMemo(() => isDesktopApp(), []);
 	const isClientPage = location.pathname === "/client";
+
+	useEffect(() => {
+		return setupDeepLinkListener((payload) => {
+			if (payload.kind === "auth") {
+				const currentBaseUrl = connection?.baseUrl || "http://127.0.0.1:8080";
+				saveConnection({
+					baseUrl: currentBaseUrl,
+					token: payload.token,
+				});
+				window.dispatchEvent(new CustomEvent("prism:deep-link-auth", { detail: payload }));
+				if (location.pathname === "/login") {
+					void navigate({ to: "/" });
+				}
+			} else if (payload.kind === "auth-code") {
+				const currentBaseUrl = connection?.baseUrl || "http://127.0.0.1:8080";
+				exchangeGitHubCode({ baseUrl: currentBaseUrl, token: "" }, payload.code)
+					.then((res) => {
+						saveConnection({
+							baseUrl: currentBaseUrl,
+							token: res.token,
+						});
+						window.dispatchEvent(
+							new CustomEvent("prism:deep-link-auth", {
+								detail: {
+									token: res.token,
+									userId: res.user.id,
+									username: res.user.username,
+									role: res.user.role,
+								},
+							}),
+						);
+						if (location.pathname === "/login") {
+							void navigate({ to: "/" });
+						}
+					})
+					.catch((err) => {
+						console.error("Failed to exchange GitHub OAuth code via deep link:", err);
+					});
+			} else if (payload.kind === "profile") {
+				window.dispatchEvent(
+					new CustomEvent("prism:deep-link-profile", {
+						detail: payload.profile,
+					}),
+				);
+				if (location.pathname !== "/client") {
+					void navigate({ to: "/client" });
+				}
+			}
+		});
+	}, [connection?.baseUrl, location.pathname, navigate, saveConnection]);
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {

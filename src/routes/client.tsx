@@ -6,7 +6,6 @@ import {
 	CheckCircle2,
 	Copy,
 	Download,
-	ExternalLink,
 	Eye,
 	EyeOff,
 	Gamepad2,
@@ -47,15 +46,12 @@ import {
 	type ClientProfile,
 	type ClientStatusResponse,
 	type CumulativeStats,
-	type DeviceCodeResponse,
 	clearClientLogs,
 	getClientConfig,
 	getClientLogs,
 	getClientProfiles,
 	getClientStatus,
 	getHealth,
-	pollDeviceCode,
-	requestDeviceCode,
 	resetClientStats,
 	saveClientConfig,
 	saveClientProfiles,
@@ -109,7 +105,7 @@ function getLoopbackTargetForService(idx: number, port: string): string {
 function ClientDashboardPage() {
 	const location = useLocation();
 	const navigate = useNavigate();
-	const { connection, authSession, isAdmin, refreshSession, saveConnection } = usePanelSession();
+	const { connection, authSession, isAdmin, saveConnection } = usePanelSession();
 	const isDesktop = useMemo(() => isDesktopApp(), []);
 
 	const clientConnection = useMemo<PanelConnection>(
@@ -213,10 +209,6 @@ function ClientDashboardPage() {
 	// GitHub auth modal state
 	const [githubAuthOpen, setGithubAuthOpen] = useState(false);
 	const [authServerUrl, setAuthServerUrl] = useState("http://127.0.0.1:8080");
-	const [deviceCode, setDeviceCode] = useState<DeviceCodeResponse | null>(null);
-	const [deviceLoading, setDeviceLoading] = useState(false);
-	const [devicePolling, setDevicePolling] = useState(false);
-	const [deviceSuccess, setDeviceSuccess] = useState(false);
 	const [authError, setAuthError] = useState<string | null>(null);
 
 	// Import modal state
@@ -472,79 +464,20 @@ function ClientDashboardPage() {
 		saveConnection,
 	]);
 
-	// Start Device Authorization Flow with target management URL
-	const startDeviceAuthWithUrl = async (targetAuthUrl: string, targetServerAddr?: string) => {
-		setDeviceLoading(true);
+	// Start GitHub OAuth with target management URL via browser + deep link
+	const startGitHubAuthWithUrl = (targetAuthUrl: string, targetServerAddr?: string) => {
 		setAuthError(null);
-		setLoginAdminUnlocked(false);
-		try {
-			const norm = normalizeBaseUrl(targetAuthUrl);
-			const resp = await requestDeviceCode({ baseUrl: norm, token: "" });
-			setDeviceCode(resp);
-			setDevicePolling(true);
-
-			if (typeof window !== "undefined") {
-				window.open(resp.verification_uri, "_blank");
-			}
-
-			const intervalMs = Math.max(resp.interval, 5) * 1000;
-			const timer = setInterval(async () => {
-				try {
-					const pollRes = await pollDeviceCode({ baseUrl: norm, token: "" }, resp.device_code);
-					if (pollRes.status === "complete" && pollRes.token) {
-						clearInterval(timer);
-						setDevicePolling(false);
-						setDeviceSuccess(true);
-						setAuthToken(pollRes.token);
-						if (autoConnectPanel) {
-							saveConnection({ baseUrl: norm, token: pollRes.token });
-						}
-						const s = await refreshSession();
-						if (s?.is_admin || s?.role === "admin" || pollRes.user?.role === "admin") {
-							setLoginAdminUnlocked(true);
-						}
-
-						// Save updated configuration
-						const nextServer = targetServerAddr || serverAddr;
-						saveClientConfig(clientConnection, {
-							active_profile_id: selectedProfileId || null,
-							active_config: {
-								server_addr: nextServer,
-								transport,
-								auth_token: pollRes.token,
-								listen_addr: listenAddr,
-								fake_lan_broadcast: fakeLanBroadcast,
-								auto_connect_panel: autoConnectPanel,
-							},
-						}).catch(() => {});
-
-						setTimeout(() => {
-							setGithubAuthOpen(false);
-							setDeviceSuccess(false);
-							setDeviceCode(null);
-						}, 2500);
-					} else if (pollRes.status === "expired" || pollRes.status === "denied") {
-						clearInterval(timer);
-						setDevicePolling(false);
-						setAuthError(`GitHub 设备码授权失败: ${pollRes.status}`);
-					}
-				} catch {
-					// continue polling
-				}
-			}, intervalMs);
-		} catch (err) {
-			setAuthError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setDeviceLoading(false);
+		const norm = normalizeBaseUrl(targetAuthUrl);
+		const nextServer = targetServerAddr || serverAddr;
+		if (targetServerAddr) {
+			setServerAddr(nextServer);
 		}
+		const authUrl = `${norm}/auth/github/login`;
+		window.open(authUrl, "_blank");
 	};
 
-	const startDeviceAuth = async () => {
-		await startDeviceAuthWithUrl(authServerUrl, serverAddr);
-	};
-
-	// Start Device Authorization directly from the user's remote link
-	const handleStartDeviceAuthFromLink = async (customLink?: string) => {
+	// Start GitHub OAuth directly from the user's remote link
+	const handleStartGitHubAuthFromLink = (customLink?: string) => {
 		const raw = (customLink ?? remoteLinkInput).trim() || serverAddr;
 		if (!raw) {
 			setAuthError("请输入远端链接或服务器地址");
@@ -560,9 +493,70 @@ function ClientDashboardPage() {
 		if (resolved.authToken) setAuthToken(resolved.authToken);
 
 		setAuthServerUrl(resolved.managementUrl);
-		setGithubAuthOpen(true);
-		await startDeviceAuthWithUrl(resolved.managementUrl, resolved.serverAddr);
+		startGitHubAuthWithUrl(resolved.managementUrl, resolved.serverAddr);
 	};
+
+	// Listen for Deep Link OAuth and Profile events
+	useEffect(() => {
+		const handleDeepLinkAuth = (event: Event) => {
+			const customEvent = event as CustomEvent<{
+				token: string;
+				userId?: string;
+				username?: string;
+				role?: string;
+			}>;
+			const { token, role } = customEvent.detail;
+			if (token) {
+				setAuthToken(token);
+				if (role?.toLowerCase() === "admin") {
+					setLoginAdminUnlocked(true);
+				}
+				saveClientConfig(clientConnection, {
+					active_profile_id: selectedProfileId || null,
+					active_config: {
+						server_addr: serverAddr,
+						transport,
+						auth_token: token,
+						listen_addr: listenAddr,
+						fake_lan_broadcast: fakeLanBroadcast,
+						auto_connect_panel: autoConnectPanel,
+					},
+				}).catch(() => {});
+				setGithubAuthOpen(false);
+			}
+		};
+
+		const handleDeepLinkProfile = (event: Event) => {
+			const customEvent = event as CustomEvent<Partial<ClientProfile>>;
+			const p = customEvent.detail;
+			if (p?.server_addr) {
+				setServerAddr(p.server_addr);
+				setRemoteLinkInput(p.server_addr);
+				if (p.transport) setTransport(p.transport);
+				if (p.name) setProfileName(p.name);
+				if (p.listen_addr) setListenAddr(p.listen_addr);
+				if (p.auth_token) setAuthToken(p.auth_token);
+				if (typeof p.fake_lan_broadcast === "boolean") {
+					setFakeLanBroadcast(p.fake_lan_broadcast);
+				}
+			}
+		};
+
+		window.addEventListener("prism:deep-link-auth", handleDeepLinkAuth);
+		window.addEventListener("prism:deep-link-profile", handleDeepLinkProfile);
+		return () => {
+			window.removeEventListener("prism:deep-link-auth", handleDeepLinkAuth);
+			window.removeEventListener("prism:deep-link-profile", handleDeepLinkProfile);
+		};
+	}, [
+		autoConnectPanel,
+		clientConnection,
+		fakeLanBroadcast,
+		listenAddr,
+		selectedProfileId,
+		serverAddr,
+		transport,
+	]);
 
 	// Select Profile
 	const handleSelectProfile = (id: string) => {
@@ -933,46 +927,13 @@ function ClientDashboardPage() {
 							</div>
 
 							<Button
-								onClick={() => void handleStartDeviceAuthFromLink()}
-								disabled={deviceLoading || devicePolling}
+								onClick={() => void handleStartGitHubAuthFromLink()}
 								className="h-8 px-3.5 text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs flex-none cursor-pointer"
 							>
 								<Github className="h-3.5 w-3.5" />
-								<span>{deviceLoading ? "请求中…" : "开始 GitHub 设备码登录"}</span>
+								<span>通过 GitHub 登录</span>
 							</Button>
 						</div>
-
-						{/* 轮询中的设备码展示 */}
-						{devicePolling && deviceCode ? (
-							<div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-500 space-y-1.5">
-								<div className="flex items-center justify-between">
-									<span className="font-semibold">正在等待 GitHub 授权确认...</span>
-									<span className="font-mono text-[10px]">有效时间: {deviceCode.expires_in}s</span>
-								</div>
-								<div className="flex items-center gap-2">
-									<span className="text-[11px] text-muted-foreground">用户验证码:</span>
-									<code className="rounded bg-background px-2 py-0.5 font-mono text-sm font-bold text-foreground ring-1 ring-border">
-										{deviceCode.user_code}
-									</code>
-									<Button
-										variant="outline"
-										size="xs"
-										onClick={() => copyText(deviceCode.user_code, "code-copy")}
-										className="h-6 text-[10px] px-1.5"
-									>
-										{copied === "code-copy" ? "已复制" : "复制"}
-									</Button>
-									<Button
-										size="xs"
-										onClick={() => window.open(deviceCode.verification_uri, "_blank")}
-										className="h-6 text-[10px] px-2 gap-1 ml-auto"
-									>
-										<span>前往验证</span>
-										<ExternalLink className="h-2.5 w-2.5" />
-									</Button>
-								</div>
-							</div>
-						) : null}
 
 						{/* 管理员权限反馈提示 */}
 						{isAdmin || loginAdminUnlocked ? (
@@ -1876,67 +1837,34 @@ function ClientDashboardPage() {
 								</div>
 							) : null}
 
-							{deviceSuccess ? (
+							{authToken ? (
 								<div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-500">
 									<CheckCircle2 className="h-5 w-5 flex-none" />
 									<div className="text-xs">
-										<p className="font-semibold">GitHub 授权成功！</p>
+										<p className="font-semibold">GitHub 授权已完成！</p>
 										{isAdmin || loginAdminUnlocked ? (
 											<p className="text-emerald-400 font-medium mt-0.5">
 												已确认管理员身份，侧边栏管理控制台已为您解锁。
 											</p>
 										) : (
-											<p>访问凭证已自动保存至客户端配置。</p>
+											<p>访问凭证已保存至客户端配置。</p>
 										)}
 									</div>
 								</div>
-							) : deviceCode ? (
-								<div className="space-y-3 rounded-lg border border-border bg-muted/40 p-3 sm:p-4">
-									<div className="text-xs text-muted-foreground">
-										Enter this 8-digit device code on the GitHub verification page:
-									</div>
-									<div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 sm:px-4 sm:py-2.5">
-										<span className="font-mono text-lg sm:text-xl font-bold tracking-wider text-primary">
-											{deviceCode.user_code}
-										</span>
-										<Button
-											variant="outline"
-											size="xs"
-											onClick={() => copyText(deviceCode.user_code, "user-code")}
-											className="gap-1 text-xs"
-										>
-											{copied === "user-code" ? (
-												<Check className="h-3 w-3 text-emerald-500" />
-											) : (
-												<Copy className="h-3 w-3" />
-											)}
-											<span>{copied === "user-code" ? "Copied" : "Copy"}</span>
-										</Button>
-									</div>
-
-									<div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
-										<a
-											href={deviceCode.verification_uri}
-											target="_blank"
-											rel="noreferrer"
-											className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-										>
-											<span>Open GitHub Verification</span>
-											<ExternalLink className="h-3 w-3" />
-										</a>
-										{devicePolling ? (
-											<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-												<span className="h-2 w-2 animate-ping rounded-full bg-primary" />
-												Waiting for authorization...
-											</span>
-										) : null}
-									</div>
-								</div>
 							) : (
-								<Button onClick={startDeviceAuth} disabled={deviceLoading} className="w-full gap-2">
-									<Github className="h-4 w-4" />
-									<span>{deviceLoading ? "Requesting code..." : "Request Device Code Login"}</span>
-								</Button>
+								<div className="space-y-4">
+									<p className="text-xs text-muted-foreground leading-relaxed">
+										点击下方按钮将在系统默认浏览器中打开 GitHub 授权页面。授权完成后，浏览器将通过
+										Deep Link 自动唤起客户端完成登录，并将访问凭证保存到当前配置。
+									</p>
+									<Button
+										onClick={() => startGitHubAuthWithUrl(authServerUrl, serverAddr)}
+										className="w-full gap-2 cursor-pointer"
+									>
+										<Github className="h-4 w-4" />
+										<span>前往 GitHub 授权登录</span>
+									</Button>
+								</div>
 							)}
 						</CardContent>
 						<CardFooter className="flex justify-end border-t border-border pt-4">
@@ -1944,12 +1872,10 @@ function ClientDashboardPage() {
 								variant="outline"
 								onClick={() => {
 									setGithubAuthOpen(false);
-									setDeviceCode(null);
-									setDevicePolling(false);
 									setAuthError(null);
 								}}
 							>
-								Close
+								关闭
 							</Button>
 						</CardFooter>
 					</Card>

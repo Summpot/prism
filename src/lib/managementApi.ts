@@ -450,20 +450,6 @@ export interface AuthProvidersResponse {
 	mode: string;
 }
 
-export interface DeviceCodeResponse {
-	device_code: string;
-	user_code: string;
-	verification_uri: string;
-	expires_in: number;
-	interval: number;
-}
-
-export interface DevicePollResult {
-	status: "pending" | "slow_down" | "expired" | "denied" | "complete";
-	token?: string;
-	user?: UserRecord;
-}
-
 export interface AuthSessionResponse {
 	authenticated: boolean;
 	user_id?: string | null;
@@ -523,17 +509,15 @@ export function getAuthProviders(baseUrl: string): Promise<AuthProvidersResponse
 		.catch(() => ({ github_enabled: false, github_client_id: null, mode: "token" }));
 }
 
-export function requestDeviceCode(connection: PanelConnection) {
-	return apiRequest<DeviceCodeResponse>(connection, "/auth/device/code", {
-		method: "POST",
-	});
-}
-
-export function pollDeviceCode(connection: PanelConnection, deviceCode: string) {
-	return apiRequest<DevicePollResult>(connection, "/auth/device/poll", {
-		method: "POST",
-		body: JSON.stringify({ device_code: deviceCode }),
-	});
+export function exchangeGitHubCode(connection: PanelConnection, code: string) {
+	return apiRequest<{ token: string; user: UserRecord; token_id: string }>(
+		connection,
+		"/auth/github/exchange",
+		{
+			method: "POST",
+			body: JSON.stringify({ code }),
+		},
+	);
 }
 
 export function getAuthSession(connection: PanelConnection) {

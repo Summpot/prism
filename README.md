@@ -281,6 +281,47 @@ Operational notes:
 - The admin router still uses **permissive CORS**; authentication protects
   writes, but deployments should still scope exposure carefully
 
+## Authentication and access control
+
+Prism supports token-based authentication and GitHub OAuth for the management control panel and desktop client.
+
+GitHub OAuth directly uses custom URL protocol Deep Links (`prism://auth/callback`). In desktop mode, login requests open the system browser to authorize on GitHub; upon approval, GitHub directly invokes the custom `prism://` protocol to return the authorization code to the desktop client, which automatically exchanges it with Prism for a session token. No intermediate server-side HTTP callback page is needed.
+
+### GitHub OAuth App Setup
+
+In GitHub (Settings → Developer settings → OAuth Apps):
+
+1. **Application name**: `Prism` (or your preferred name)
+2. **Homepage URL**: Your project URL or server address
+3. **Authorization callback URL**: `prism://auth/callback`
+
+### Server Configuration
+
+Example configuration in `prism.toml`:
+
+```toml
+[auth]
+mode = "hybrid" # "token" | "oauth" | "hybrid"
+
+[auth.github]
+enabled = true
+client_id = "your-github-oauth-client-id"
+client_secret = "your-github-oauth-client-secret"
+# redirect_uri = "prism://auth/callback" # optional; GitHub uses the OAuth App's configured callback if omitted
+allowed_users = ["your-github-username"]
+allowed_orgs = []
+admin_users = ["your-github-username"]
+default_role = "member" # "admin" | "member"
+```
+
+Endpoints:
+
+- `GET /auth/providers` → inspects active authentication providers
+- `GET /auth/github/login` → redirects browser to GitHub OAuth authorization URL
+- `POST /auth/github/exchange` → exchanges OAuth authorization code returned by deep link (`prism://auth/callback?code=...`) for a Prism session token
+- `GET /auth/session` → inspects the authenticated session
+- `GET /auth/tokens` / `POST /auth/tokens` → token management
+
 ## Managed control plane
 
 The management role persists a JSON control-plane state file under the Prism workdir and tracks:

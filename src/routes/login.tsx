@@ -1,18 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Check, Copy, ExternalLink, Key, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Github } from "@/components/icons/Github";
 
 import { fieldClassName, PrimaryButton } from "@/components/ui";
-import {
-	type DeviceCodeResponse,
-	getAuthProviders,
-	getHealth,
-	getManagementStatus,
-	pollDeviceCode,
-	requestDeviceCode,
-} from "@/lib/managementApi";
+import { isDesktopApp } from "@/lib/desktopWindow";
+import { getAuthProviders, getHealth, getManagementStatus } from "@/lib/managementApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 
@@ -26,12 +20,6 @@ function LoginPage() {
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [githubEnabled, setGithubEnabled] = useState(false);
-
-	// Device code flow state
-	const [deviceCode, setDeviceCode] = useState<DeviceCodeResponse | null>(null);
-	const [deviceLoading, setDeviceLoading] = useState(false);
-	const [devicePolling, setDevicePolling] = useState(false);
-	const [deviceCopied, setDeviceCopied] = useState(false);
 
 	// Handle OAuth redirect hash fragments: /login#token=prism_adm_...
 	useEffect(() => {
@@ -102,55 +90,11 @@ function LoginPage() {
 
 	const loginWithGitHub = () => {
 		const norm = normalizeBaseUrl(baseUrl);
-		window.location.href = `${norm}/auth/github/login`;
-	};
-
-	const startDeviceAuth = async () => {
-		setDeviceLoading(true);
-		setError(null);
-		try {
-			const norm = normalizeBaseUrl(baseUrl);
-			const resp = await requestDeviceCode({ baseUrl: norm, token: "" });
-			setDeviceCode(resp);
-			setDevicePolling(true);
-
-			// Automatically open verification URI
-			if (typeof window !== "undefined") {
-				window.open(resp.verification_uri, "_blank");
-			}
-
-			const intervalMs = Math.max(resp.interval, 5) * 1000;
-			const timer = setInterval(async () => {
-				try {
-					const pollRes = await pollDeviceCode({ baseUrl: norm, token: "" }, resp.device_code);
-					if (pollRes.status === "complete" && pollRes.token) {
-						clearInterval(timer);
-						setDevicePolling(false);
-						setToken(pollRes.token);
-						const nextConn = { baseUrl: norm, token: pollRes.token };
-						saveConnection(nextConn);
-						navigate({ to: "/" });
-					} else if (pollRes.status === "expired" || pollRes.status === "denied") {
-						clearInterval(timer);
-						setDevicePolling(false);
-						setError(`Device authorization ${pollRes.status}.`);
-					}
-				} catch {
-					// continue polling
-				}
-			}, intervalMs);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setDeviceLoading(false);
-		}
-	};
-
-	const copyDeviceCode = () => {
-		if (deviceCode) {
-			navigator.clipboard.writeText(deviceCode.user_code);
-			setDeviceCopied(true);
-			setTimeout(() => setDeviceCopied(false), 2000);
+		const authUrl = `${norm}/auth/github/login`;
+		if (isDesktopApp()) {
+			window.open(authUrl, "_blank");
+		} else {
+			window.location.href = authUrl;
 		}
 	};
 
@@ -200,69 +144,21 @@ function LoginPage() {
 								<span className="text-xs text-slate-500">Detected via /auth/providers</span>
 							)}
 						</div>
-
-						<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+						<div className="pt-1 space-y-2">
 							<button
 								type="button"
 								onClick={loginWithGitHub}
-								className="flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15"
+								className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15 cursor-pointer"
 							>
 								<Github className="h-4 w-4" />
 								<span>Sign in with GitHub</span>
 							</button>
-
-							<button
-								type="button"
-								onClick={startDeviceAuth}
-								disabled={deviceLoading || devicePolling}
-								className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-50"
-							>
-								<Key className="h-4 w-4" />
-								<span>{deviceLoading ? "Requesting code…" : "Device Code Login"}</span>
-							</button>
+							{isDesktopApp() ? (
+								<p className="text-xs text-slate-400 text-center">
+									将在浏览器中打开 GitHub 授权页面，授权后自动通过 Deep Link 唤起桌面端登录。
+								</p>
+							) : null}
 						</div>
-
-						{deviceCode ? (
-							<div className="mt-3 rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-4 space-y-3">
-								<div className="flex items-center justify-between">
-									<div>
-										<div className="text-xs text-cyan-200/70">Your Device Code</div>
-										<div className="text-2xl font-bold tracking-widest text-cyan-300 font-mono">
-											{deviceCode.user_code}
-										</div>
-									</div>
-									<button
-										type="button"
-										onClick={copyDeviceCode}
-										className="flex items-center gap-1.5 rounded-lg border border-cyan-400/40 bg-cyan-400/20 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-400/30 transition"
-									>
-										{deviceCopied ? (
-											<Check className="h-3.5 w-3.5 text-emerald-300" />
-										) : (
-											<Copy className="h-3.5 w-3.5" />
-										)}
-										<span>{deviceCopied ? "Copied" : "Copy Code"}</span>
-									</button>
-								</div>
-								<div className="flex items-center gap-2">
-									<a
-										href={deviceCode.verification_uri}
-										target="_blank"
-										rel="noreferrer"
-										className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-500 py-2 text-xs font-semibold text-white transition hover:bg-cyan-400"
-									>
-										<span>Open GitHub Device Verification</span>
-										<ExternalLink className="h-3.5 w-3.5" />
-									</a>
-								</div>
-								{devicePolling ? (
-									<div className="flex items-center justify-center gap-2 text-xs text-slate-400">
-										<span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-										<span>Waiting for GitHub verification…</span>
-									</div>
-								) : null}
-							</div>
-						) : null}
 					</div>
 
 					<div className="relative my-6">

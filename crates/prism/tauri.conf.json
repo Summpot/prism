@@ -34,5 +34,12 @@
 		"active": true,
 		"targets": "all",
 		"icon": ["icons/icon.ico", "icons/icon.png"]
+	},
+	"plugins": {
+		"deep-link": {
+			"desktop": {
+				"schemes": ["prism"]
+			}
+		}
 	}
 }

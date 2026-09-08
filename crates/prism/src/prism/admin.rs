@@ -108,10 +108,8 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/client/logs", get(client_logs).delete(client_clear_logs))
         .route("/middlewares/{name}/data", post(post_middleware_data))
         .route("/auth/providers", get(auth_providers))
-        .route("/auth/device/code", post(auth_device_code))
-        .route("/auth/device/poll", post(auth_device_poll))
         .route("/auth/github/login", get(auth_github_login))
-        .route("/auth/github/callback", get(auth_github_callback))
+        .route("/auth/github/exchange", post(auth_github_exchange))
         .route("/auth/session", get(auth_session))
         .route(
             "/auth/tokens",
@@ -858,7 +856,7 @@ pub struct AuthProvidersResponse {
 async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     let (github_enabled, github_client_id, mode) = if let Some(ref am) = st.auth_manager {
         if let Some(gh) = am.github_config() {
-            (true, Some(gh.client_id.clone()), "hybrid".to_string())
+            (true, Some(gh.client_id.clone()), "deeplink".to_string())
         } else {
             (false, None, "token".to_string())
         }
@@ -874,40 +872,6 @@ async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse 
             mode,
         }),
     )
-}
-
-async fn auth_device_code(
-    State(st): State<Arc<AdminState>>,
-) -> Result<impl IntoResponse, ApiError> {
-    let am = st
-        .auth_manager
-        .as_ref()
-        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
-    let resp = am
-        .request_device_code()
-        .await
-        .map_err(ApiError::bad_request)?;
-    Ok((StatusCode::OK, Json(resp)))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DevicePollRequest {
-    pub device_code: String,
-}
-
-async fn auth_device_poll(
-    State(st): State<Arc<AdminState>>,
-    Json(payload): Json<DevicePollRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    let am = st
-        .auth_manager
-        .as_ref()
-        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
-    let result = am
-        .poll_device_code(&payload.device_code)
-        .await
-        .map_err(ApiError::bad_request)?;
-    Ok((StatusCode::OK, Json(result)))
 }
 
 async fn auth_github_login(
@@ -932,39 +896,39 @@ async fn auth_github_login(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GitHubCallbackQuery {
-    pub code: Option<String>,
-    pub error: Option<String>,
+pub struct GitHubExchangeRequest {
+    pub code: String,
 }
 
-async fn auth_github_callback(
+#[derive(Debug, Serialize)]
+pub struct GitHubExchangeResponse {
+    pub token: String,
+    pub user: crate::prism::auth::UserRecord,
+    pub token_id: String,
+}
+
+async fn auth_github_exchange(
     State(st): State<Arc<AdminState>>,
-    axum::extract::Query(query): axum::extract::Query<GitHubCallbackQuery>,
+    Json(payload): Json<GitHubExchangeRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let am = st
         .auth_manager
         .as_ref()
         .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
 
-    if let Some(err) = query.error {
-        return Err(ApiError::unauthorized(&format!(
-            "GitHub login error: {err}"
-        )));
-    }
-    let code = query
-        .code
-        .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("missing code parameter")))?;
-
-    let (user, raw_token, _) = am
-        .exchange_web_code(&code)
+    let (user, raw_token, token_record) = am
+        .exchange_code(&payload.code)
         .await
         .map_err(ApiError::bad_request)?;
 
-    let redirect_url = format!(
-        "/login#token={}&user_id={}&username={}&role={:?}",
-        raw_token, user.id, user.username, user.role
-    );
-    Ok(axum::response::Redirect::temporary(&redirect_url))
+    Ok((
+        StatusCode::OK,
+        Json(GitHubExchangeResponse {
+            token: raw_token,
+            user,
+            token_id: token_record.id,
+        }),
+    ))
 }
 
 #[derive(Debug, Serialize)]

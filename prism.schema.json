@@ -651,7 +651,7 @@
 			"properties": {
 				"github": {
 					"type": "object",
-					"description": "GitHub OAuth configuration for web control panel and client device flow.",
+					"description": "GitHub OAuth configuration for web control panel and desktop deep link login.",
 					"additionalProperties": false,
 					"properties": {
 						"enabled": { "type": "boolean", "default": false },

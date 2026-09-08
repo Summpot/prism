@@ -86,7 +86,23 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     // 2. Run Tauri desktop application
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .setup(move |app| {
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(err) = app.deep_link().register_all() {
+                    tracing::warn!(err = %err, "failed to register deep link schemes");
+                }
+            }
+
             let main_window = app.get_webview_window("main").expect("main window exists");
             let _ = main_window.center();
             let _ = main_window.show();

@@ -16,9 +16,9 @@ WORKDIR /app
 RUN corepack enable \
     && corepack prepare pnpm@10.28.0 --activate
 
-COPY package.json pnpm-lock.yaml ./
-# package.json declares pnpm.onlyBuiltDependencies so esbuild's postinstall
-# is allowed under pnpm 10's strict dependency build policy.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml* .npmrc* ./
+# package.json and pnpm-workspace.yaml declare build and dependency policies
+# (e.g. allowBuilds, minimumReleaseAge) needed under pnpm 10.
 RUN --mount=type=cache,target=/root/.pnpm-store \
     pnpm install --frozen-lockfile
 

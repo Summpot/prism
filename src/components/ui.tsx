@@ -46,11 +46,23 @@ export function StateCard({ label }: { label: string }) {
 	);
 }
 
-export function EmptyState({ icon, label }: { icon?: ReactNode; label: string }) {
+export function EmptyState({
+	icon,
+	label,
+	title,
+	description,
+}: {
+	icon?: ReactNode;
+	label?: string;
+	title?: string;
+	description?: string;
+}) {
 	return (
 		<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">
 			{icon ? <div className="mb-3 text-muted-foreground/60">{icon}</div> : null}
-			{label}
+			{title ? <div className="font-semibold text-foreground">{title}</div> : null}
+			{label ? <div>{label}</div> : null}
+			{description ? <div className="mt-1 text-xs">{description}</div> : null}
 		</div>
 	);
 }
@@ -122,28 +134,43 @@ export function InfoValue({ label, value }: { label: string; value: string | num
 
 export function Badge({
 	tone = "neutral",
+	variant: variantProp,
 	children,
 }: {
 	tone?: "neutral" | "ok" | "warn" | "danger" | "info" | "cyan";
+	variant?: string;
 	children: ReactNode;
 }) {
+	const resolvedTone =
+		tone !== "neutral"
+			? tone
+			: variantProp === "success" || variantProp === "ok"
+				? "ok"
+				: variantProp === "destructive" || variantProp === "danger"
+					? "danger"
+					: variantProp === "warning" || variantProp === "warn"
+						? "warn"
+						: variantProp === "info"
+							? "info"
+							: "neutral";
+
 	const variant =
-		tone === "ok"
+		resolvedTone === "ok"
 			? "secondary"
-			: tone === "warn"
+			: resolvedTone === "warn"
 				? "outline"
-				: tone === "danger"
+				: resolvedTone === "danger"
 					? "destructive"
 					: "secondary";
 
 	const customClass =
-		tone === "ok"
+		resolvedTone === "ok"
 			? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-			: tone === "warn"
+			: resolvedTone === "warn"
 				? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20"
-				: tone === "danger"
+				: resolvedTone === "danger"
 					? "bg-destructive/15 text-destructive border-destructive/20"
-					: tone === "cyan" || tone === "info"
+					: resolvedTone === "cyan" || resolvedTone === "info"
 						? "bg-primary/15 text-primary border-primary/20"
 						: "bg-muted text-muted-foreground border-border";
 

@@ -64,18 +64,22 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         storage,
     };
 
-    // Bind embedded admin/client server (prefer standard 8080, fallback to random free port)
+    // Bind embedded loopback admin/client server on 127.0.0.1:8080
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:8080").await {
         Ok(l) => l,
         Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0").await?,
     };
     let local_addr = listener.local_addr()?;
-    tracing::info!(%local_addr, "prism desktop: embedded admin/client API listening");
+    tracing::info!(%local_addr, "prism desktop: embedded admin/client API listening on loopback");
 
+    let admin_state_clone = admin_state.clone();
     tokio::spawn(async move {
-        let _ =
-            crate::prism::admin::serve_listener_with_shutdown(listener, admin_state, shutdown_rx)
-                .await;
+        let _ = crate::prism::admin::serve_listener_with_shutdown(
+            listener,
+            admin_state_clone,
+            shutdown_rx,
+        )
+        .await;
     });
 
     let client_ctrl_for_tray = client_controller.clone();
@@ -84,7 +88,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     tauri::Builder::default()
         .setup(move |app| {
             let main_window = app.get_webview_window("main").expect("main window exists");
-            position_bottom_right(&main_window);
+            let _ = main_window.center();
             let _ = main_window.show();
 
             // Build Tray Menu
@@ -185,27 +189,4 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     let _ = shutdown_tx.send(true);
     Ok(())
-}
-
-fn position_bottom_right(window: &tauri::WebviewWindow) {
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten());
-
-    if let Some(monitor) = monitor {
-        let screen_size = monitor.size();
-        let screen_pos = monitor.position();
-        let scale_factor = monitor.scale_factor();
-        if let Ok(win_size) = window.outer_size() {
-            // Margin in physical pixels (accounting for Windows taskbar ~48px and right margin ~16px)
-            let margin_x = (16.0 * scale_factor) as i32;
-            let margin_y = (48.0 * scale_factor) as i32;
-            let x = screen_pos.x + screen_size.width as i32 - win_size.width as i32 - margin_x;
-            let y = screen_pos.y + screen_size.height as i32 - win_size.height as i32 - margin_y;
-            let _ =
-                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-        }
-    }
 }

@@ -44,6 +44,19 @@ export async function minimizeWindow(): Promise<void> {
 }
 
 /**
+ * Toggle maximize / restore desktop application window.
+ */
+export async function toggleMaximizeWindow(): Promise<void> {
+	const invoke = getTauriInvoke();
+	if (!invoke) return;
+	try {
+		await invoke("plugin:window|toggle_maximize");
+	} catch (err) {
+		console.warn("Failed to toggle maximize window:", err);
+	}
+}
+
+/**
  * Close desktop application window (hides to system tray).
  */
 export async function closeWindow(): Promise<void> {

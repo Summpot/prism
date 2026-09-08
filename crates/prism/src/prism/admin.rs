@@ -16,7 +16,7 @@ use crate::prism::telemetry;
 use crate::prism::{managed, tunnel};
 
 #[derive(Embed)]
-#[folder = "frontend-dist/"]
+#[folder = "../../dist/client/"]
 struct FrontendAssets;
 
 #[derive(Clone, Debug, Default)]
@@ -142,7 +142,7 @@ async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
     }
 }
 
-async fn serve_frontend(uri: Uri) -> impl IntoResponse {
+pub(crate) async fn serve_frontend(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
     // Try the exact path first.
@@ -293,7 +293,7 @@ async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
                 serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
             );
         }
-        (StatusCode::OK, Json(val)).into_response()
+        (StatusCode::OK, Json(val))
     } else {
         let mut val = serde_json::to_value(tunnel::client::ClientStatusSnapshot::default())
             .unwrap_or_default();
@@ -307,7 +307,7 @@ async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
                 serde_json::to_value(cumulative_stats).unwrap_or(serde_json::Value::Null),
             );
         }
-        (StatusCode::OK, Json(val)).into_response()
+        (StatusCode::OK, Json(val))
     }
 }
 
@@ -319,8 +319,7 @@ async fn client_start(
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "client controller not enabled" })),
-        )
-            .into_response();
+        );
     };
 
     // Automatically persist active config and profile when starting client
@@ -382,12 +381,11 @@ async fn client_start(
     };
 
     match client.start(cfg).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        ),
     }
 }
 
@@ -398,13 +396,12 @@ async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
             let _ = storage.record_session_stats(&snap.stats);
         }
         client.stop().await;
-        (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
     } else {
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "client controller not enabled" })),
         )
-            .into_response()
     }
 }
 
@@ -1163,6 +1160,7 @@ mod tests {
             auth: AdminAuth {
                 panel_token: Some("secret123".to_string()),
                 worker_token: None,
+                ..Default::default()
             },
             management: None,
             worker: None,

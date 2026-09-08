@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { closeWindow, isDesktopApp, minimizeWindow } from "./desktopWindow";
+import { closeWindow, isDesktopApp, minimizeWindow, toggleMaximizeWindow } from "./desktopWindow";
 
 describe("desktopWindow", () => {
 	beforeEach(() => {
@@ -41,6 +41,16 @@ describe("desktopWindow", () => {
 		expect(invokeMock).toHaveBeenCalledWith("plugin:window|minimize");
 	});
 
+	it("calls plugin:window|toggle_maximize when toggling maximize in desktop app", async () => {
+		const invokeMock = vi.fn().mockResolvedValue(undefined);
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		await toggleMaximizeWindow();
+		expect(invokeMock).toHaveBeenCalledWith("plugin:window|toggle_maximize");
+	});
+
 	it("calls plugin:window|close when closing window in desktop app", async () => {
 		const invokeMock = vi.fn().mockResolvedValue(undefined);
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
@@ -51,8 +61,9 @@ describe("desktopWindow", () => {
 		expect(invokeMock).toHaveBeenCalledWith("plugin:window|close");
 	});
 
-	it("does nothing in browser environment when minimize or close is invoked", async () => {
+	it("does nothing in browser environment when minimize, maximize, or close is invoked", async () => {
 		await expect(minimizeWindow()).resolves.toBeUndefined();
+		await expect(toggleMaximizeWindow()).resolves.toBeUndefined();
 		await expect(closeWindow()).resolves.toBeUndefined();
 	});
 });

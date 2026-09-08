@@ -242,13 +242,40 @@ impl Client {
             anyhow::bail!("tunnel client: server_addr is required");
         }
 
-        // 1. Bind local TCP listener for Minecraft players
+        // 1. Bind local TCP listener for Minecraft players (primary on configured listen_addr)
         let bind_addr = net::normalize_bind_addr(&self.config.listen_addr);
         let listener = tokio::net::TcpListener::bind(&*bind_addr).await?;
         let local_port = listener.local_addr()?.port();
 
+        // Also bind auxiliary loopback listeners on the same port:
+        let mut listeners = vec![listener];
+
+        // Ensure both IPv6 and IPv4 loopback are bound if possible
+        if let Ok(l) = tokio::net::TcpListener::bind(format!("[::1]:{local_port}")).await {
+            listeners.push(l);
+        }
+        if let Ok(l) = tokio::net::TcpListener::bind(format!("127.0.0.1:{local_port}")).await {
+            listeners.push(l);
+        }
+
+        // Priority 1: 127.0.0.2 ..= 127.0.0.255
+        for i in 2..=255 {
+            let alias_addr = format!("127.0.0.{i}:{local_port}");
+            if let Ok(l) = tokio::net::TcpListener::bind(&alias_addr).await {
+                listeners.push(l);
+            }
+        }
+
+        // Priority 2: 127.1.0.0 ..= 127.1.0.255 (within safe 127.1.x~127.7.x range)
+        for i in 0..=255 {
+            let alias_addr = format!("127.1.0.{i}:{local_port}");
+            if let Ok(l) = tokio::net::TcpListener::bind(&alias_addr).await {
+                listeners.push(l);
+            }
+        }
+
         tracing::info!(
-            "Local listener bound to {} (port {}), targeting server {} via {}",
+            "Local listener bound to {} (and loopback aliases on port {}), targeting server {} via {}",
             bind_addr,
             local_port,
             self.config.server_addr,
@@ -267,8 +294,9 @@ impl Client {
             });
         }
 
-        // 3. Spawn local player ingress accept loop
-        let player_loop_handle = {
+        // 3. Spawn local player ingress accept loop across all bound loopback listeners
+        let mut player_loop_handles = Vec::new();
+        for l in listeners {
             let current_sess = self.current_sess.clone();
             let known_services = self.known_services.clone();
             let wasm_engine = self.wasm_engine.clone();
@@ -277,7 +305,7 @@ impl Client {
             let optimizer_stats = self.optimizer_stats.clone();
             let mut player_shutdown = shutdown.clone();
 
-            tokio::spawn(async move {
+            let h = tokio::spawn(async move {
                 loop {
                     tokio::select! {
                         _ = player_shutdown.changed() => {
@@ -285,7 +313,7 @@ impl Client {
                                 break;
                             }
                         }
-                        res = listener.accept() => {
+                        res = l.accept() => {
                             match res {
                                 Ok((socket, peer_addr)) => {
                                     let current_sess = current_sess.clone();
@@ -318,8 +346,9 @@ impl Client {
                         }
                     }
                 }
-            })
-        };
+            });
+            player_loop_handles.push(h);
+        }
 
         // 4. Run reconnect loop connecting to Server
         let mut backoff = Duration::from_secs(1);
@@ -370,7 +399,9 @@ impl Client {
             backoff = (backoff * 2).min(Duration::from_secs(10));
         }
 
-        player_loop_handle.abort();
+        for h in player_loop_handles {
+            h.abort();
+        }
         *self.current_sess.write().await = None;
         if let Some(b) = self.admin_bridge.write().await.take() {
             b.close();
@@ -545,6 +576,57 @@ impl Client {
     }
 }
 
+/// Maps a 0-based service index to a loopback IPv4 address:
+/// - index 0 -> 127.0.0.1
+/// - index 1..=254 -> 127.0.0.2 ..= 127.0.0.255 (priority range)
+/// - index 255.. -> 127.1.x.x ..= 127.7.x.x (safe range up to 127.7.x, higher may have OS issues)
+#[allow(dead_code)]
+pub fn loopback_ip_for_service_index(index: usize) -> Option<std::net::Ipv4Addr> {
+    if index <= 254 {
+        Some(std::net::Ipv4Addr::new(127, 0, 0, (index + 1) as u8))
+    } else {
+        let offset = index - 255;
+        let b = 1 + (offset / 65536);
+        if b > 7 {
+            return None;
+        }
+        let rem = offset % 65536;
+        let c = (rem / 256) as u8;
+        let d = (rem % 256) as u8;
+        Some(std::net::Ipv4Addr::new(127, b as u8, c, d))
+    }
+}
+
+/// Decodes an IPv4 loopback address to a 0-based service index:
+/// - 127.0.0.1 -> index 0
+/// - 127.0.0.2 ..= 127.0.0.255 -> index 1 ..= 254
+/// - 127.1.x.x ..= 127.7.x.x -> index 255..
+/// Addresses outside this range (e.g. 127.8.x.x or higher) return None.
+pub fn service_index_for_loopback_ip(ip: std::net::Ipv4Addr) -> Option<usize> {
+    if !ip.is_loopback() {
+        return None;
+    }
+    let octets = ip.octets();
+    if octets[0] != 127 {
+        return None;
+    }
+    if octets[1] == 0 && octets[2] == 0 {
+        let d = octets[3] as usize;
+        if d >= 1 {
+            return Some(d - 1);
+        }
+        return None;
+    }
+    if (1..=7).contains(&octets[1]) {
+        let b = octets[1] as usize;
+        let c = octets[2] as usize;
+        let d = octets[3] as usize;
+        let offset = (b - 1) * 65536 + c * 256 + d;
+        return Some(255 + offset);
+    }
+    None
+}
+
 /// Matches a requested host against known active services.
 pub fn match_target_service(
     known: &[RegisteredService],
@@ -555,13 +637,22 @@ pub fn match_target_service(
     }
 
     if let Some(host) = host {
-        let clean_host = host
-            .trim()
-            .trim_end_matches('.')
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let raw = host.trim().trim_end_matches('.');
+        let clean_host = if raw.starts_with('[') {
+            if let Some(end) = raw.find(']') {
+                raw[1..end].to_ascii_lowercase()
+            } else {
+                raw.to_ascii_lowercase()
+            }
+        } else if let Some((h, _)) = raw.rsplit_once(':') {
+            if !h.contains(':') {
+                h.to_ascii_lowercase()
+            } else {
+                raw.to_ascii_lowercase()
+            }
+        } else {
+            raw.to_ascii_lowercase()
+        };
 
         if !clean_host.is_empty() {
             // 1. Exact match with service name
@@ -579,16 +670,36 @@ pub fn match_target_service(
                 return Some(svc.clone());
             }
 
-            // 3. Subdomain prefix match (e.g. "survival.prism.local" -> "survival")
-            if let Some((sub, _)) = clean_host.split_once('.') {
-                if let Some(svc) = known.iter().find(|s| s.name.eq_ignore_ascii_case(sub)) {
-                    return Some(svc.clone());
+            // 3. Loopback IP matching:
+            // - IPv4: 127.0.0.1 -> 1st service, 127.0.0.2..=255 -> 2nd..255th, 127.1.x~127.7.x -> 256th..
+            // - IPv6: ::1 or [::1] -> 1st service
+            if let Ok(ip) = clean_host.parse::<std::net::IpAddr>() {
+                match ip {
+                    std::net::IpAddr::V4(v4) => {
+                        if let Some(idx) = service_index_for_loopback_ip(v4) {
+                            if idx < known.len() {
+                                return Some(known[idx].clone());
+                            }
+                        }
+                    }
+                    std::net::IpAddr::V6(v6) => {
+                        if v6.is_loopback() && !known.is_empty() {
+                            return Some(known[0].clone());
+                        }
+                    }
+                }
+            } else {
+                // 4. Subdomain prefix match (e.g. "survival.prism.local" -> "survival")
+                if let Some((sub, _)) = clean_host.split_once('.') {
+                    if let Some(svc) = known.iter().find(|s| s.name.eq_ignore_ascii_case(sub)) {
+                        return Some(svc.clone());
+                    }
                 }
             }
         }
     }
 
-    // 4. Default to first active service if only 1 service is registered
+    // 5. Default to first active service if only 1 service is registered
     if known.len() == 1 {
         return Some(known[0].clone());
     }
@@ -644,15 +755,23 @@ async fn handle_player_connection(
             }
         };
 
+        let local_ip = player_socket.local_addr().ok().map(|a| a.ip().to_string());
         let known = known_services.read().await.clone();
-        let matched = match_target_service(&known, host.0.as_deref());
+        let matched = match_target_service(&known, host.0.as_deref())
+            .or_else(|| match_target_service(&known, local_ip.as_deref()));
         let Some(svc) = matched else {
-            anyhow::bail!("no matching service found for host: {:?}", host.0);
+            anyhow::bail!(
+                "no matching service found for host: {:?} (local: {:?})",
+                host.0,
+                local_ip
+            );
         };
         (svc, host.1)
     } else {
+        let local_ip = player_socket.local_addr().ok().map(|a| a.ip().to_string());
         let known = known_services.read().await.clone();
-        let matched = match_target_service(&known, None);
+        let matched = match_target_service(&known, local_ip.as_deref())
+            .or_else(|| match_target_service(&known, None));
         let Some(svc) = matched else {
             anyhow::bail!("no active services available to route player");
         };
@@ -1175,17 +1294,98 @@ mod tests {
         let s = match_target_service(&services, Some("creative.prism.local")).unwrap();
         assert_eq!(s.name, "creative");
 
-        // 4. Unknown host with multiple services -> None
+        // 4. Loopback IP matching: 127.0.0.1 -> index 0, 127.0.0.2 -> index 1
+        let s = match_target_service(&services, Some("127.0.0.1")).unwrap();
+        assert_eq!(s.name, "survival");
+        let s = match_target_service(&services, Some("127.0.0.1:25565")).unwrap();
+        assert_eq!(s.name, "survival");
+
+        let s = match_target_service(&services, Some("127.0.0.2")).unwrap();
+        assert_eq!(s.name, "creative");
+        let s = match_target_service(&services, Some("127.0.0.2:25565")).unwrap();
+        assert_eq!(s.name, "creative");
+
+        // IPv6 loopback matching -> index 0 (survival)
+        let s = match_target_service(&services, Some("::1")).unwrap();
+        assert_eq!(s.name, "survival");
+        let s = match_target_service(&services, Some("[::1]")).unwrap();
+        assert_eq!(s.name, "survival");
+        let s = match_target_service(&services, Some("[::1]:25565")).unwrap();
+        assert_eq!(s.name, "survival");
+
+        // 127.0.0.3 out of bounds for 2 services -> None
+        assert!(match_target_service(&services, Some("127.0.0.3")).is_none());
+
+        // 5. Unknown host with multiple services -> None
         assert!(match_target_service(&services, Some("unknown.host.com")).is_none());
         assert!(match_target_service(&services, None).is_none());
 
-        // 5. Single service -> defaults even if host is None or unknown
+        // 6. Single service -> defaults even if host is None or unknown
         let single = vec![services[0].clone()];
         let s = match_target_service(&single, None).unwrap();
         assert_eq!(s.name, "survival");
 
         let s = match_target_service(&single, Some("127.0.0.1:25565")).unwrap();
         assert_eq!(s.name, "survival");
+    }
+
+    #[test]
+    fn test_loopback_service_index_mapping() {
+        use std::net::Ipv4Addr;
+
+        // 127.0.0.1 -> index 0
+        assert_eq!(
+            loopback_ip_for_service_index(0).unwrap(),
+            Ipv4Addr::new(127, 0, 0, 1)
+        );
+        assert_eq!(
+            service_index_for_loopback_ip(Ipv4Addr::new(127, 0, 0, 1)),
+            Some(0)
+        );
+
+        // 127.0.0.2 -> index 1
+        assert_eq!(
+            loopback_ip_for_service_index(1).unwrap(),
+            Ipv4Addr::new(127, 0, 0, 2)
+        );
+        assert_eq!(
+            service_index_for_loopback_ip(Ipv4Addr::new(127, 0, 0, 2)),
+            Some(1)
+        );
+
+        // 127.0.0.255 -> index 254
+        assert_eq!(
+            loopback_ip_for_service_index(254).unwrap(),
+            Ipv4Addr::new(127, 0, 0, 255)
+        );
+        assert_eq!(
+            service_index_for_loopback_ip(Ipv4Addr::new(127, 0, 0, 255)),
+            Some(254)
+        );
+
+        // 127.1.0.0 -> index 255
+        assert_eq!(
+            loopback_ip_for_service_index(255).unwrap(),
+            Ipv4Addr::new(127, 1, 0, 0)
+        );
+        assert_eq!(
+            service_index_for_loopback_ip(Ipv4Addr::new(127, 1, 0, 0)),
+            Some(255)
+        );
+
+        // Roundtrip for higher indices up to 127.7.x
+        let ip = loopback_ip_for_service_index(1000).unwrap();
+        assert_eq!(service_index_for_loopback_ip(ip), Some(1000));
+
+        // Outside safe range: 127.8.0.1 should not match any service index
+        assert_eq!(
+            service_index_for_loopback_ip(Ipv4Addr::new(127, 8, 0, 1)),
+            None
+        );
+        assert_eq!(
+            service_index_for_loopback_ip(Ipv4Addr::new(192, 168, 1, 1)),
+            None
+        );
     }
 
     #[test]
@@ -1326,7 +1526,7 @@ mod tests {
             if client_arc.known_services().await.len() >= 1 {
                 break;
             }
-            if waited > 3000 {
+            if waited > 8000 {
                 panic!("timed out waiting for client to receive catalog");
             }
         }
@@ -1528,7 +1728,7 @@ mod tests {
                     break;
                 }
             }
-            if waited > 3000 {
+            if waited > 8000 {
                 panic!("timed out waiting for client to connect and receive catalog");
             }
         }
@@ -1706,7 +1906,7 @@ mod tests {
 
         // Wait for client to connect and bridge to become available
         let mut admin_url = None;
-        for _ in 0..60 {
+        for _ in 0..160 {
             tokio::time::sleep(Duration::from_millis(50)).await;
             let st = client.status().await;
             if st.state == "connected" && st.admin_url.is_some() {

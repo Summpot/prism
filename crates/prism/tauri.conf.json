@@ -14,10 +14,10 @@
 		"windows": [
 			{
 				"title": "Prism",
-				"width": 380,
-				"height": 620,
-				"minWidth": 320,
-				"minHeight": 480,
+				"width": 1024,
+				"height": 720,
+				"minWidth": 800,
+				"minHeight": 600,
 				"resizable": true,
 				"fullscreen": false,
 				"url": "_shell.html",

@@ -192,11 +192,25 @@ async function apiRequest<T>(
 	path: string,
 	init?: RequestInit,
 ): Promise<T> {
+	const kind = connection.kind ?? "bearer";
+	const authHeaders: Record<string, string> = {};
+
+	if (kind === "desktop-token") {
+		if (connection.token?.trim()) {
+			authHeaders["X-Prism-Desktop-Token"] = connection.token.trim();
+		}
+	} else if (kind === "console-cookie") {
+		// Browser sends prism_console_session cookie automatically; credentials: "include"
+	} else if (connection.token?.trim()) {
+		authHeaders["Authorization"] = `Bearer ${connection.token.trim()}`;
+	}
+
 	const response = await fetch(`${connection.baseUrl}${path}`, {
 		...init,
+		credentials: kind === "console-cookie" ? "include" : (init?.credentials ?? "same-origin"),
 		headers: {
 			"Content-Type": "application/json",
-			...(connection.token?.trim() ? { Authorization: `Bearer ${connection.token.trim()}` } : {}),
+			...authHeaders,
 			...init?.headers,
 		},
 	});
@@ -290,7 +304,18 @@ export function getConfigPath(connection: PanelConnection) {
 	return apiRequest<ConfigPathResponse>(connection, "/config");
 }
 
-export type ClientOptimizerStats = OptimizerStatsSnapshot;
+export interface CumulativeStats {
+	raw_bytes: number;
+	wire_bytes: number;
+	saved_bytes: number;
+	saved_ratio: number;
+	sessions_count: number;
+	last_session_at?: string | null;
+}
+
+export type ClientOptimizerStats = OptimizerStatsSnapshot & {
+	sessions_count?: number;
+};
 
 export interface ClientRegisteredService {
 	name: string;
@@ -313,7 +338,7 @@ export interface ClientStatusResponse {
 	stats: ClientOptimizerStats;
 	admin_url?: string | null;
 	active_profile_id?: string | null;
-	cumulative_stats?: ClientOptimizerStats | null;
+	cumulative_stats?: CumulativeStats | null;
 }
 
 export interface ClientConfigState {
@@ -330,7 +355,7 @@ export interface ClientConfigResponse {
 	active_profile_id: string | null;
 	active_config: ClientConfigState;
 	profiles: ClientProfile[];
-	cumulative_stats: ClientOptimizerStats;
+	cumulative_stats: CumulativeStats;
 }
 
 export interface StartClientPayload {

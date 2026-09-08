@@ -74,4 +74,3 @@ base64 = "0.23"
 sha2 = "0.10"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 tokio-rustls = "0.26"
-

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { usePanelSession } from "@/lib/panelSession";
 
 const navItems = [
@@ -116,12 +116,18 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 						) : (
 							<div className="mt-3 space-y-2">
 								<p className="text-xs text-muted-foreground">No node attached.</p>
-								<Button variant="outline" size="sm" asChild className="w-full">
-									<Link to="/login" onClick={onNavigate}>
-										<Github className="h-3.5 w-3.5" />
-										Sign In
-									</Link>
-								</Button>
+								<Link
+									to="/login"
+									onClick={onNavigate}
+									className={buttonVariants({
+										variant: "outline",
+										size: "sm",
+										className: "w-full",
+									})}
+								>
+									<Github className="h-3.5 w-3.5" />
+									Sign In
+								</Link>
 							</div>
 						)}
 					</div>

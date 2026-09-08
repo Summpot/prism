@@ -225,6 +225,7 @@ pub async fn run(
                         .as_ref()
                         .map(|agent| agent.auth_token().to_string())
                 },
+                ..Default::default()
             },
             management: management_plane.clone(),
             worker: worker_agent.clone(),
@@ -275,6 +276,7 @@ pub async fn run(
                         .as_ref()
                         .map(|agent| agent.auth_token().to_string())
                 },
+                ..Default::default()
             },
             management: management_plane.clone(),
             worker: worker_agent.clone(),

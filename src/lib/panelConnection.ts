@@ -1,6 +1,7 @@
 export interface PanelConnection {
 	baseUrl: string;
 	token: string;
+	kind?: "bearer" | "desktop-token" | "console-cookie";
 }
 
 export interface StorageLike {
@@ -40,13 +41,15 @@ export function deriveManagementUrl(serverAddr: string): string {
 
 export function normalizePanelConnection(value: PanelConnection): PanelConnection {
 	return {
-		baseUrl: normalizeBaseUrl(value.baseUrl),
-		token: value.token.trim(),
+		baseUrl: normalizeBaseUrl(value.baseUrl || ""),
+		token: (value.token || "").trim(),
+		...(value.kind ? { kind: value.kind } : {}),
 	};
 }
 
 export function isValidPanelConnection(value: PanelConnection | null): value is PanelConnection {
-	return Boolean(value?.baseUrl && value.token);
+	if (!value) return false;
+	return Boolean(value.baseUrl && (value.token || value.kind === "console-cookie"));
 }
 
 export function loadPanelConnection(storage: StorageLike): PanelConnection | null {
@@ -60,6 +63,7 @@ export function loadPanelConnection(storage: StorageLike): PanelConnection | nul
 		const normalized = normalizePanelConnection({
 			baseUrl: parsed.baseUrl ?? "",
 			token: parsed.token ?? "",
+			kind: parsed.kind,
 		});
 
 		if (!isValidPanelConnection(normalized)) {

@@ -49,8 +49,8 @@ RUN --mount=type=cache,target=/home/rust/.cargo/registry \
 # Copy the rest and build.
 COPY . ./
 
-# Copy frontend SPA output (dist/client/) into the rust-embed folder before cargo build.
-COPY --from=frontend /app/dist/client/ crates/prism/frontend-dist/
+# Copy frontend SPA output (dist/client/) into dist/client/ for rust-embed.
+COPY --from=frontend /app/dist/client/ dist/client/
 
 ARG MUSL_TARGET
 # Docker containers run as headless servers and do not need desktop GUI (Tauri/GTK).

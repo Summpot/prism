@@ -21,6 +21,7 @@ import {
 	Server,
 	Settings2,
 	Share2,
+	Square,
 	Terminal,
 	Trash2,
 	WifiOff,
@@ -28,7 +29,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { closeWindow, isDesktopApp, minimizeWindow } from "@/lib/desktopWindow";
+import {
+	closeWindow,
+	isDesktopApp,
+	minimizeWindow,
+	toggleMaximizeWindow,
+} from "@/lib/desktopWindow";
 import { formatBytes } from "@/lib/format";
 
 import { Badge } from "@/components/ui/badge";
@@ -46,9 +52,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	type ClientLogEntry,
-	type ClientOptimizerStats,
 	type ClientProfile,
 	type ClientStatusResponse,
+	type CumulativeStats,
 	type DeviceCodeResponse,
 	clearClientLogs,
 	getClientConfig,
@@ -64,7 +70,7 @@ import {
 	startClient,
 	stopClient,
 } from "@/lib/managementApi";
-import { deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
+import { type PanelConnection, deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 import { encodePrismLink, parsePrismLink } from "@/lib/prismLink";
 import { usePolling } from "@/lib/usePolling";
@@ -74,9 +80,44 @@ export const Route = createFileRoute("/client")({
 	component: ClientDashboardPage,
 });
 
+function parsePort(listenAddr: string): string {
+	const trimmed = listenAddr.trim();
+	if (!trimmed) return "25565";
+	if (trimmed.startsWith("[")) {
+		const end = trimmed.indexOf("]");
+		if (end !== -1) {
+			const rest = trimmed.slice(end + 1);
+			return rest.startsWith(":") ? rest.slice(1) || "25565" : "25565";
+		}
+	}
+	const lastColon = trimmed.lastIndexOf(":");
+	if (lastColon !== -1 && trimmed.indexOf(":") === lastColon) {
+		return trimmed.slice(lastColon + 1) || "25565";
+	}
+	return "25565";
+}
+
+function getLoopbackTargetForService(idx: number, port: string): string {
+	let ip = "127.0.0.1";
+	if (idx <= 254) {
+		ip = `127.0.0.${idx + 1}`;
+	} else {
+		const offset = idx - 255;
+		const b = 1 + Math.floor(offset / 65536);
+		if (b <= 7) {
+			const rem = offset % 65536;
+			const c = Math.floor(rem / 256);
+			const d = rem % 256;
+			ip = `127.${b}.${c}.${d}`;
+		}
+	}
+	return port === "25565" ? ip : `${ip}:${port}`;
+}
+
 function ClientDashboardPage() {
 	const { connection, saveConnection } = usePanelSession();
 	const isDesktop = useMemo(() => isDesktopApp(), []);
+
 	const clientConnection = useMemo<PanelConnection>(
 		() => ({
 			baseUrl: isDesktop ? "http://127.0.0.1:8080" : "",
@@ -100,7 +141,7 @@ function ClientDashboardPage() {
 	const prevWireRef = useRef(0);
 
 	// Cumulative lifetime stats state
-	const [cumulativeStats, setCumulativeStats] = useState<ClientOptimizerStats | null>(null);
+	const [cumulativeStats, setCumulativeStats] = useState<CumulativeStats | null>(null);
 	const [statsViewMode, setStatsViewMode] = useState<"session" | "lifetime">("session");
 	const configLoadedRef = useRef(false);
 	const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -780,6 +821,16 @@ function ClientDashboardPage() {
 							<Button
 								variant="ghost"
 								size="icon-xs"
+								onClick={() => void toggleMaximizeWindow()}
+								className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
+								title="Maximize"
+								aria-label="Maximize window"
+							>
+								<Square className="h-3 w-3" />
+							</Button>
+							<Button
+								variant="ghost"
+								size="icon-xs"
 								onClick={() => void closeWindow()}
 								className="h-7 w-7 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors"
 								title="Close to tray"
@@ -892,10 +943,10 @@ function ClientDashboardPage() {
 								</button>
 								<button
 									type="button"
-									onClick={() => setStatsViewMode("cumulative")}
+									onClick={() => setStatsViewMode("lifetime")}
 									className={cn(
 										"rounded px-1.5 py-0.2 font-medium transition cursor-pointer",
-										statsViewMode === "cumulative"
+										statsViewMode === "lifetime"
 											? "bg-primary text-primary-foreground font-semibold"
 											: "text-muted-foreground hover:text-foreground",
 									)}
@@ -1113,45 +1164,56 @@ function ClientDashboardPage() {
 
 						<div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/40 pt-1">
 							{status?.known_services && status.known_services.length > 0 ? (
-								status.known_services.map((svc) => (
-									<div key={svc.name} className="flex items-center justify-between gap-2 py-1.5">
-										<div className="flex items-center gap-2 min-w-0 flex-1">
-											<div className="flex h-6 w-6 flex-none items-center justify-center rounded bg-primary/10 text-primary">
-												<Radio className="h-3 w-3" />
-											</div>
-											<div className="min-w-0 flex-1">
-												<div className="flex items-center gap-1.5">
-													<span className="font-semibold text-foreground truncate text-xs">
-														{svc.name}
-													</span>
-													<Badge
-														variant="secondary"
-														className="font-mono text-[9px] uppercase px-1 py-0 h-3.5 flex-none"
-													>
-														{svc.proto}
-													</Badge>
-												</div>
-												<div className="font-mono text-[10px] text-muted-foreground truncate">
-													{svc.masquerade_host || "Direct Tunnel"}
-												</div>
-											</div>
-										</div>
+								status.known_services.map((svc, idx) => {
+									const rawListen = status?.listen_addr || listenAddr || "127.0.0.1:25565";
+									const port = parsePort(rawListen);
+									const copyTarget = getLoopbackTargetForService(idx, port);
 
-										<Button
-											variant="outline"
-											size="xs"
-											onClick={() => copyText(status?.listen_addr || listenAddr, svc.name)}
-											className="gap-1 text-[10px] h-6 px-2 flex-none"
-										>
-											{copied === svc.name ? (
-												<Check className="h-3 w-3 text-emerald-500" />
-											) : (
-												<Copy className="h-3 w-3" />
-											)}
-											<span>{copied === svc.name ? "Copied" : "Copy"}</span>
-										</Button>
-									</div>
-								))
+									return (
+										<div key={svc.name} className="flex items-center justify-between gap-2 py-1.5">
+											<div className="flex items-center gap-2 min-w-0 flex-1">
+												<div className="flex h-6 w-6 flex-none items-center justify-center rounded bg-primary/10 text-primary">
+													<Radio className="h-3 w-3" />
+												</div>
+												<div className="min-w-0 flex-1">
+													<div className="flex items-center gap-1.5">
+														<span className="font-semibold text-foreground truncate text-xs">
+															{svc.name}
+														</span>
+														<Badge
+															variant="secondary"
+															className="font-mono text-[9px] uppercase px-1 py-0 h-3.5 flex-none"
+														>
+															{svc.proto}
+														</Badge>
+													</div>
+													<div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground truncate">
+														<span className="text-primary font-medium">{copyTarget}</span>
+														{svc.masquerade_host ? (
+															<span className="text-muted-foreground/70">
+																({svc.masquerade_host})
+															</span>
+														) : null}
+													</div>
+												</div>
+											</div>
+
+											<Button
+												variant="outline"
+												size="xs"
+												onClick={() => copyText(copyTarget, svc.name)}
+												className="gap-1 text-[10px] h-6 px-2 flex-none"
+											>
+												{copied === svc.name ? (
+													<Check className="h-3 w-3 text-emerald-500" />
+												) : (
+													<Copy className="h-3 w-3" />
+												)}
+												<span>{copied === svc.name ? "Copied" : "Copy"}</span>
+											</Button>
+										</div>
+									);
+								})
 							) : (
 								<div className="flex h-full flex-col items-center justify-center py-6 text-center text-muted-foreground">
 									<WifiOff className="mb-1.5 h-6 w-6 text-muted-foreground/50" />

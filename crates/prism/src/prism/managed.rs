@@ -746,6 +746,7 @@ mod tests {
             auth: admin::AdminAuth {
                 panel_token: Some(plane.panel_token().to_string()),
                 worker_token: Some(plane.worker_token().to_string()),
+                ..Default::default()
             },
             management: Some(plane),
             worker: None,

@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Check, Copy, ExternalLink, Github, Key, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Copy, ExternalLink, Key, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
+
+import { Github } from "@/components/icons/Github";
 
 import { fieldClassName, PrimaryButton } from "@/components/ui";
 import {

@@ -6,8 +6,7 @@ use std::{
 };
 
 use aes::Aes128;
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockEncrypt, KeyInit};
+use aes::cipher::{Array, BlockCipherEncrypt, KeyInit};
 use anyhow::Context;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
@@ -471,9 +470,10 @@ pub fn crypto_aes_cfb8(
     data: &mut [u8],
     is_encrypt: bool,
 ) -> Result<(), i32> {
-    let cipher = Aes128::new(GenericArray::from_slice(key));
+    let key_array = Array::from(*key);
+    let cipher = Aes128::new(&key_array);
     for b in data.iter_mut() {
-        let mut block = GenericArray::clone_from_slice(iv);
+        let mut block = Array::from(*iv);
         cipher.encrypt_block(&mut block);
         let keystream = block[0];
         let in_b = *b;

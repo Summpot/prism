@@ -5,7 +5,6 @@ import {
 	Cable,
 	Gamepad2,
 	Gauge,
-	Github,
 	LogOut,
 	Menu,
 	PlugZap,
@@ -15,6 +14,8 @@ import {
 	X,
 } from "lucide-react";
 import { useState } from "react";
+
+import { Github } from "@/components/icons/Github";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { usePanelSession } from "@/lib/panelSession";

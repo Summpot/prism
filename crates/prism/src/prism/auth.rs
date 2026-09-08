@@ -108,7 +108,7 @@ pub fn match_service_rule(pattern: &str, target: &str) -> bool {
 pub fn hash_token(raw: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(raw.trim().as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 /// Generates a secure random token with prefix (e.g. `prism_cl_`).

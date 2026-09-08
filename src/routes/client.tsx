@@ -10,7 +10,6 @@ import {
 	Eye,
 	EyeOff,
 	Gamepad2,
-	Github,
 	Layers,
 	Minus,
 	Plus,
@@ -28,6 +27,8 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { Github } from "@/components/icons/Github";
 
 import {
 	closeWindow,

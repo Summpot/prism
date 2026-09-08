@@ -448,6 +448,7 @@ export interface AuthProvidersResponse {
 	github_enabled: boolean;
 	github_client_id?: string | null;
 	mode: string;
+	providers?: string[];
 }
 
 export interface AuthSessionResponse {
@@ -497,16 +498,33 @@ export function getAuthProviders(baseUrl: string): Promise<AuthProvidersResponse
 	return fetch(`${baseUrl}/auth/providers`)
 		.then(async (res) => {
 			if (!res.ok) {
-				return { github_enabled: false, github_client_id: null, mode: "token" };
+				return {
+					github_enabled: false,
+					github_client_id: null,
+					mode: "token",
+					providers: [],
+				};
 			}
 			const data = (await res.json()) as Record<string, unknown>;
+			const github_enabled = Boolean(data.github_enabled ?? data.github);
+			const mode = (data.mode as string) ?? "token";
+			let providers = Array.isArray(data.providers) ? (data.providers as string[]) : [];
+			if (providers.length === 0) {
+				if (github_enabled && mode !== "token") providers.push("github");
+			}
 			return {
-				github_enabled: Boolean(data.github_enabled ?? data.github),
+				github_enabled,
 				github_client_id: (data.github_client_id as string) ?? null,
-				mode: (data.mode as string) ?? "token",
+				mode,
+				providers,
 			};
 		})
-		.catch(() => ({ github_enabled: false, github_client_id: null, mode: "token" }));
+		.catch(() => ({
+			github_enabled: false,
+			github_client_id: null,
+			mode: "token",
+			providers: [],
+		}));
 }
 
 export interface GitHubLoginUrlResponse {

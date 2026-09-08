@@ -7,6 +7,7 @@ import {
 	Copy,
 	Download,
 	Gamepad2,
+	Plug,
 	Plus,
 	Power,
 	Radio,
@@ -39,11 +40,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
+	type AuthProvidersResponse,
 	type ClientLogEntry,
 	type ClientProfile,
 	type ClientStatusResponse,
 	type CumulativeStats,
 	clearClientLogs,
+	getAuthProviders,
 	getClientConfig,
 	getClientLogs,
 	getClientProfiles,
@@ -58,7 +61,13 @@ import {
 } from "@/lib/managementApi";
 import { type PanelConnection, deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
-import { encodePrismLink, parsePrismLink, resolveRemoteConnection } from "@/lib/prismLink";
+import {
+	SUPPORTED_LINK_PROTOCOLS,
+	encodePrismLink,
+	extractProtocolAndAddress,
+	parsePrismLink,
+	resolveRemoteConnection,
+} from "@/lib/prismLink";
 import { usePolling } from "@/lib/usePolling";
 import { cn } from "@/lib/utils";
 
@@ -103,7 +112,7 @@ function getLoopbackTargetForService(idx: number, port: string): string {
 function ClientDashboardPage() {
 	const location = useLocation();
 	const navigate = useNavigate();
-	const { connection, authSession, isAdmin, saveConnection } = usePanelSession();
+	const { connection, authSession, isAdmin, saveConnection, clearConnection } = usePanelSession();
 	const isDesktop = useMemo(() => isDesktopApp(), []);
 
 	const clientConnection = useMemo<PanelConnection>(
@@ -144,6 +153,8 @@ function ClientDashboardPage() {
 
 	// Remote link input for one-click device flow
 	const [remoteLinkInput, setRemoteLinkInput] = useState("");
+	const [linkProtocol, setLinkProtocol] = useState<string>("quic://");
+	const [copiedLink, setCopiedLink] = useState(false);
 	const [loginAdminUnlocked, setLoginAdminUnlocked] = useState(false);
 
 	// Throughput sparkline history
@@ -203,8 +214,11 @@ function ClientDashboardPage() {
 		});
 	}, [logs, logFilterLevel, logSearchQuery]);
 
-	// GitHub auth modal state
-	const [githubAuthOpen, setGithubAuthOpen] = useState(false);
+	// Login modal & auth state
+	const [loginModalOpen, setLoginModalOpen] = useState(false);
+	const [checkingProviders, setCheckingProviders] = useState(false);
+	const [providersResult, setProvidersResult] = useState<AuthProvidersResponse | null>(null);
+	const [providersError, setProvidersError] = useState<string | null>(null);
 	const [authServerUrl, setAuthServerUrl] = useState("http://127.0.0.1:8080");
 	const [authError, setAuthError] = useState<string | null>(null);
 	const [oauthLoading, setOauthLoading] = useState(false);
@@ -486,24 +500,114 @@ function ClientDashboardPage() {
 		}
 	};
 
-	// Start GitHub OAuth directly from the user's remote link
-	const handleStartGitHubAuthFromLink = (customLink?: string) => {
-		const raw = (customLink ?? remoteLinkInput).trim() || serverAddr;
+	// Handle protocol dropdown selection
+	const handleSelectProtocol = (newProtocol: string) => {
+		setLinkProtocol(newProtocol);
+		const matched = SUPPORTED_LINK_PROTOCOLS.find((p) => p.value === newProtocol);
+		if (matched?.transport) {
+			setTransport(matched.transport);
+		}
+	};
+
+	// Handle address input change (auto detect and select protocol if present)
+	const handleAddressChange = (val: string) => {
+		const { protocol, address } = extractProtocolAndAddress(val);
+		if (protocol) {
+			const matched = SUPPORTED_LINK_PROTOCOLS.find(
+				(p) => p.value.toLowerCase() === protocol.toLowerCase(),
+			);
+			if (matched) {
+				setLinkProtocol(matched.value);
+				if (matched.transport) {
+					setTransport(matched.transport);
+				}
+			} else {
+				setLinkProtocol(protocol);
+			}
+			setRemoteLinkInput(address);
+		} else {
+			setRemoteLinkInput(val);
+		}
+	};
+
+	// Handle paste event (auto detect protocol when pasting link)
+	const handleAddressPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+		const text = e.clipboardData.getData("text");
+		if (!text) return;
+		const { protocol, address } = extractProtocolAndAddress(text);
+		if (protocol) {
+			e.preventDefault();
+			const matched = SUPPORTED_LINK_PROTOCOLS.find(
+				(p) => p.value.toLowerCase() === protocol.toLowerCase(),
+			);
+			if (matched) {
+				setLinkProtocol(matched.value);
+				if (matched.transport) {
+					setTransport(matched.transport);
+				}
+			} else {
+				setLinkProtocol(protocol);
+			}
+			setRemoteLinkInput(address);
+		}
+	};
+
+	// Handle copy event on address input (ensure full protocol link is copied)
+	const handleAddressCopy = (e: React.ClipboardEvent<HTMLInputElement>) => {
+		const sel = window.getSelection()?.toString();
+		if (sel && sel.trim() === remoteLinkInput.trim() && !remoteLinkInput.includes("://")) {
+			e.preventDefault();
+			e.clipboardData.setData("text/plain", `${linkProtocol}${remoteLinkInput}`);
+		}
+	};
+
+	// Connect from remote link: query providers and open select login method dialog
+	const handleConnectFromLink = async (customLink?: string) => {
+		let raw = (customLink ?? remoteLinkInput).trim();
+		if (!raw && serverAddr) {
+			raw = `${linkProtocol}${serverAddr}`;
+		} else if (raw && !raw.includes("://")) {
+			raw = `${linkProtocol}${raw}`;
+		}
 		if (!raw) {
-			setAuthError("请输入远端链接或服务器地址");
-			setGithubAuthOpen(true);
+			setError("请输入远端链接或服务器地址");
 			return;
 		}
 
 		const resolved = resolveRemoteConnection(raw);
 		setServerAddr(resolved.serverAddr);
-		if (resolved.transport) setTransport(resolved.transport);
+		if (resolved.transport) {
+			setTransport(resolved.transport);
+			const matched = SUPPORTED_LINK_PROTOCOLS.find((p) => p.transport === resolved.transport);
+			if (matched) setLinkProtocol(matched.value);
+		}
 		if (resolved.name) setProfileName(resolved.name);
 		if (resolved.listenAddr) setListenAddr(resolved.listenAddr);
-		if (resolved.authToken) setAuthToken(resolved.authToken);
 
-		setAuthServerUrl(resolved.managementUrl);
-		startGitHubAuthWithUrl(resolved.managementUrl, resolved.serverAddr);
+		const targetAuthUrl = resolved.managementUrl;
+		setAuthServerUrl(targetAuthUrl);
+		setAuthError(null);
+		setProvidersError(null);
+		setLoginModalOpen(true);
+		setCheckingProviders(true);
+
+		try {
+			const norm = normalizeBaseUrl(targetAuthUrl);
+			const providers = await getAuthProviders(norm);
+			setProvidersResult(providers);
+		} catch (err) {
+			setProvidersError(
+				err instanceof Error ? err.message : "无法获取远端登录方式，请检查网络或服务端配置",
+			);
+			setProvidersResult({
+				github_enabled: false,
+				github_client_id: null,
+				mode: "token",
+				providers: [],
+			});
+		} finally {
+			setCheckingProviders(false);
+		}
 	};
 
 	// Listen for Deep Link OAuth and Profile events
@@ -532,7 +636,10 @@ function ClientDashboardPage() {
 						auto_connect_panel: autoConnectPanel,
 					},
 				}).catch(() => {});
-				setGithubAuthOpen(false);
+				if (autoConnectPanel && authServerUrl) {
+					saveConnection({ baseUrl: normalizeBaseUrl(authServerUrl), token });
+				}
+				setLoginModalOpen(false);
 			}
 		};
 
@@ -744,7 +851,6 @@ function ClientDashboardPage() {
 		if (parsed.name) setProfileName(parsed.name);
 		setServerAddr(parsed.server_addr);
 		if (parsed.transport) setTransport(parsed.transport);
-		if (parsed.auth_token !== undefined) setAuthToken(parsed.auth_token);
 		if (parsed.listen_addr) setListenAddr(parsed.listen_addr);
 		if (parsed.fake_lan_broadcast !== undefined) {
 			setFakeLanBroadcast(parsed.fake_lan_broadcast);
@@ -794,7 +900,7 @@ function ClientDashboardPage() {
 
 	return (
 		<div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden bg-background text-foreground">
-			{/* 1. Overview Page: 连接与服务 (Connection & Services) */}
+			{/* 1. Overview Page: 连接 (Connection) */}
 			{currentTab === "overview" ? (
 				<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
 					{/* Page Header Bar */}
@@ -803,7 +909,7 @@ function ClientDashboardPage() {
 							<Gamepad2 className="h-4 w-4 text-primary flex-none" />
 							<div className="min-w-0">
 								<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-									连接与服务
+									连接
 								</h1>
 								<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
 									远端节点连接、隧道运行状态与服务发现
@@ -868,12 +974,16 @@ function ClientDashboardPage() {
 								<Button
 									size="sm"
 									variant="default"
-									disabled={actionLoading || oauthLoading}
-									onClick={() => void handleStartGitHubAuthFromLink()}
-									className="h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs bg-primary text-primary-foreground hover:bg-primary/90"
+									disabled={actionLoading || oauthLoading || checkingProviders}
+									onClick={() => void handleConnectFromLink()}
+									className="h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
 								>
-									<Github className="h-3.5 w-3.5" />
-									<span>登录</span>
+									{checkingProviders ? (
+										<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+									) : (
+										<Plug className="h-3.5 w-3.5" />
+									)}
+									<span>连接</span>
 								</Button>
 							)}
 
@@ -974,32 +1084,78 @@ function ClientDashboardPage() {
 							</div>
 
 							<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-								<div className="relative flex-1 min-w-0">
-									<Input
-										value={remoteLinkInput}
-										onChange={(e) => setRemoteLinkInput(e.target.value)}
-										placeholder="输入远端链接或服务器地址，如 play.example.com:7000 或 relay.example.com"
-										className="h-8 text-xs font-mono pr-7"
-									/>
-									{remoteLinkInput ? (
-										<button
-											type="button"
-											onClick={() => setRemoteLinkInput("")}
-											className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-											title="清空"
-										>
-											<X className="h-3 w-3" />
-										</button>
-									) : null}
+								<div className="relative flex-1 min-w-0 flex items-stretch">
+									<select
+										aria-label="选择连接协议"
+										value={linkProtocol}
+										onChange={(e) => handleSelectProtocol(e.target.value)}
+										className="h-8 rounded-l-md rounded-r-none border border-r-0 border-input bg-muted/60 px-2 text-xs font-mono font-semibold text-foreground outline-none focus:ring-1 focus:ring-ring shrink-0 cursor-pointer hover:bg-muted transition-colors"
+									>
+										{SUPPORTED_LINK_PROTOCOLS.map((p) => (
+											<option key={p.value} value={p.value}>
+												{p.label}
+											</option>
+										))}
+									</select>
+									<div className="relative flex-1 min-w-0">
+										<Input
+											value={remoteLinkInput}
+											onChange={(e) => handleAddressChange(e.target.value)}
+											onPaste={handleAddressPaste}
+											onCopy={handleAddressCopy}
+											placeholder="play.example.com:7000 或 relay.example.com"
+											className="h-8 text-xs font-mono rounded-l-none pr-14"
+										/>
+										{remoteLinkInput ? (
+											<div className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center gap-1">
+												<button
+													type="button"
+													onClick={() => {
+														const full = remoteLinkInput.includes("://")
+															? remoteLinkInput
+															: `${linkProtocol}${remoteLinkInput}`;
+														navigator.clipboard.writeText(full);
+														setCopiedLink(true);
+														setTimeout(() => setCopiedLink(false), 1500);
+													}}
+													className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+													title="复制完整连接"
+												>
+													{copiedLink ? (
+														<Check className="h-3 w-3 text-emerald-500" />
+													) : (
+														<Copy className="h-3 w-3" />
+													)}
+												</button>
+												<button
+													type="button"
+													onClick={() => setRemoteLinkInput("")}
+													className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+													title="清空"
+												>
+													<X className="h-3 w-3" />
+												</button>
+											</div>
+										) : null}
+									</div>
 								</div>
 
 								<Button
-									onClick={() => void handleStartGitHubAuthFromLink()}
-									disabled={oauthLoading}
+									onClick={() => void handleConnectFromLink()}
+									disabled={actionLoading || oauthLoading || checkingProviders}
 									className="h-8 px-3.5 text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs flex-none cursor-pointer"
 								>
-									<Github className="h-3.5 w-3.5" />
-									<span>{oauthLoading ? "正在获取授权..." : "通过 GitHub 登录"}</span>
+									{checkingProviders ? (
+										<>
+											<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+											<span>正在连接...</span>
+										</>
+									) : (
+										<>
+											<Plug className="h-3.5 w-3.5" />
+											<span>连接</span>
+										</>
+									)}
 								</Button>
 							</div>
 						</div>
@@ -1291,13 +1447,12 @@ function ClientDashboardPage() {
 						</div>
 
 						<div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/40 pt-1">
-							{!authSession?.authenticated ? (
+							{!authSession?.authenticated && !authToken ? (
 								<div className="flex h-full flex-col items-center justify-center py-8 text-center text-muted-foreground">
 									<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
-									<p className="text-xs font-medium text-foreground">未登录 GitHub 账号</p>
+									<p className="text-xs font-medium text-foreground">未完成身份认证</p>
 									<p className="text-[11px] text-muted-foreground max-w-sm mt-1">
-										服务端默认允许所有人连接，但登录前仅限进行登录操作。请先在上方完成 GitHub
-										登录以获取服务访问权限。
+										服务端默认允许所有人连接，但登录前仅限进行登录操作。请先在上方连接并完成登录以获取服务访问权限。
 									</p>
 								</div>
 							) : status?.known_services && status.known_services.length > 0 ? (
@@ -1713,7 +1868,12 @@ function ClientDashboardPage() {
 										<select
 											aria-label="Transport Protocol"
 											value={transport}
-											onChange={(e) => setTransport(e.target.value)}
+											onChange={(e) => {
+												const val = e.target.value;
+												setTransport(val);
+												const matched = SUPPORTED_LINK_PROTOCOLS.find((item) => item.transport === val);
+												if (matched) setLinkProtocol(matched.value);
+											}}
 											className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
 										>
 											<option value="quic">QUIC (极速抗丢包，推荐)</option>
@@ -1807,7 +1967,7 @@ function ClientDashboardPage() {
 							<Input
 								value={importUrl}
 								onChange={(e) => setImportUrl(e.target.value)}
-								placeholder="prism://play.example.com:7000?token=..."
+								placeholder="quic://play.example.com:7000 或 prism://play.example.com:7000?name=..."
 							/>
 							{importError ? <p className="text-xs text-destructive">{importError}</p> : null}
 						</CardContent>
@@ -1827,86 +1987,156 @@ function ClientDashboardPage() {
 				</div>
 			) : null}
 
-			{/* GitHub Device Auth Modal */}
-			{githubAuthOpen ? (
+			{/* 选择登录方式对话框 (Select Login Method Modal) */}
+			{loginModalOpen ? (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 sm:p-4 backdrop-blur-xs">
-					<Card className="w-full max-w-sm sm:max-w-lg shadow-xl">
+					<Card className="w-full max-w-sm sm:max-w-lg shadow-xl border-border bg-card">
 						<CardHeader className="flex flex-row items-center justify-between pb-3">
-							<div className="flex items-center gap-2">
-								<Github className="h-5 w-5" />
-								<CardTitle>GitHub 授权登录</CardTitle>
+							<div className="flex items-center gap-2 min-w-0">
+								<Plug className="h-5 w-5 text-primary flex-none" />
+								<div className="min-w-0">
+									<CardTitle className="text-sm sm:text-base font-bold">选择登录方式</CardTitle>
+									<CardDescription className="text-xs truncate">
+										远端节点：<code className="text-foreground font-mono">{serverAddr || "未指定"}</code>
+									</CardDescription>
+								</div>
 							</div>
 							<Button
 								variant="ghost"
 								size="icon-xs"
 								onClick={() => {
-									setGithubAuthOpen(false);
+									setLoginModalOpen(false);
 									setAuthError(null);
+									setProvidersError(null);
 								}}
 							>
 								<X className="h-4 w-4" />
 							</Button>
 						</CardHeader>
-						<CardContent className="space-y-4">
-							<p className="text-sm text-muted-foreground">
-								通过 GitHub 授权登录，直接向服务端获取当前客户端访问凭证。
-							</p>
-
-							<div className="space-y-1.5">
-								<label className="text-xs font-medium text-muted-foreground">
-									Auth Server Address
-								</label>
-								<Input
-									value={authServerUrl}
-									onChange={(e) => setAuthServerUrl(e.target.value)}
-									disabled={oauthLoading}
-								/>
-							</div>
-
-							{authError ? (
-								<div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-									{authError}
-								</div>
-							) : null}
-
-							{authToken ? (
-								<div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-500">
-									<CheckCircle2 className="h-5 w-5 flex-none" />
-									<div className="text-xs">
-										<p className="font-semibold">GitHub 授权已完成！</p>
-										{isAdmin || loginAdminUnlocked ? (
-											<p className="text-emerald-400 font-medium mt-0.5">
-												已确认管理员身份，侧边栏管理控制台已为您解锁。
-											</p>
-										) : (
-											<p>访问凭证已保存至客户端配置。</p>
-										)}
-									</div>
+						<CardContent className="space-y-3.5">
+							{checkingProviders ? (
+								<div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-2.5">
+									<RotateCcw className="h-7 w-7 animate-spin text-primary" />
+									<p className="text-xs">正在探测远端支持的登录方式...</p>
 								</div>
 							) : (
-								<div className="space-y-4">
-									<p className="text-xs text-muted-foreground leading-relaxed">
-										客户端将通过内部协议从服务器获取授权地址，并在系统默认浏览器中打开 GitHub
-										授权页面。 授权完成后，浏览器通过 Deep Link
-										自动唤起客户端完成登录，不依赖浏览器直接访问服务端。
-									</p>
-									<Button
-										onClick={() => startGitHubAuthWithUrl(authServerUrl, serverAddr)}
-										disabled={oauthLoading}
-										className="w-full gap-2 cursor-pointer disabled:opacity-50"
-									>
-										<Github className="h-4 w-4" />
-										<span>{oauthLoading ? "正在获取授权链接..." : "前往 GitHub 授权登录"}</span>
-									</Button>
-								</div>
+								<>
+									<div className="space-y-1">
+										<div className="flex items-center justify-between">
+											<label className="text-[11px] font-medium text-muted-foreground">
+												远端管理服务地址 (Auth Server URL)
+											</label>
+											<button
+												type="button"
+												onClick={() => void handleConnectFromLink()}
+												className="text-primary hover:underline text-[11px] cursor-pointer flex items-center gap-1"
+											>
+												<RotateCcw className="h-3 w-3" />
+												重新探测
+											</button>
+										</div>
+										<Input
+											value={authServerUrl}
+											onChange={(e) => setAuthServerUrl(e.target.value)}
+											className="h-8 text-xs font-mono"
+											disabled={oauthLoading}
+										/>
+									</div>
+
+									{providersError ? (
+										<div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-500 flex items-start gap-2">
+											<WifiOff className="h-4 w-4 flex-none mt-0.5" />
+											<div className="flex-1 min-w-0">
+												<p>{providersError}</p>
+											</div>
+										</div>
+									) : null}
+
+									{authError ? (
+										<div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
+											{authError}
+										</div>
+									) : null}
+
+									{authToken ? (
+										<div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-500">
+											<CheckCircle2 className="h-5 w-5 flex-none" />
+											<div className="text-xs">
+												<p className="font-semibold">已完成登录与凭证配置！</p>
+												{isAdmin || loginAdminUnlocked ? (
+													<p className="text-emerald-400 font-medium mt-0.5">
+														已确认管理员身份，侧边栏管理控制台已解锁。
+													</p>
+												) : (
+													<p className="text-muted-foreground mt-0.5">访问凭证已保存至客户端配置。</p>
+												)}
+											</div>
+										</div>
+									) : (
+										<div className="space-y-2.5 pt-1">
+											<div className="text-xs font-medium text-muted-foreground">
+												远端支持以下登录方式，请选择：
+											</div>
+
+											<div className="grid gap-2.5">
+												{/* 1. GitHub OAuth Method */}
+												{(providersResult?.github_enabled ||
+													providersResult?.providers?.includes("github")) && (
+													<div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2 hover:border-primary/40 transition-colors">
+														<div className="flex items-center justify-between">
+															<div className="flex items-center gap-2">
+																<div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground/10 text-foreground">
+																	<Github className="h-4 w-4" />
+																</div>
+																<div>
+																	<div className="text-xs font-bold text-foreground">
+																		GitHub 授权登录
+																	</div>
+																	<div className="text-[11px] text-muted-foreground">
+																		通过 GitHub OAuth 授权获取访问凭证
+																	</div>
+																</div>
+															</div>
+															<Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">
+																推荐
+															</Badge>
+														</div>
+														<p className="text-[11px] text-muted-foreground leading-relaxed">
+															在浏览器中打开 GitHub 授权页面，授权完成后由 Deep Link 自动唤起客户端完成登录。
+														</p>
+														<Button
+															size="sm"
+															onClick={() => startGitHubAuthWithUrl(authServerUrl, serverAddr)}
+															disabled={oauthLoading}
+															className="w-full h-8 text-xs font-semibold gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
+														>
+															<Github className="h-3.5 w-3.5" />
+															<span>{oauthLoading ? "正在获取授权链接..." : "前往 GitHub 授权登录"}</span>
+														</Button>
+													</div>
+												)}
+												{/* If remote returns no login methods */}
+												{providersResult &&
+													!providersResult.github_enabled &&
+													(!providersResult.providers || !providersResult.providers.includes("github")) && (
+														<div className="rounded-lg border border-muted bg-muted/20 p-4 text-center text-xs text-muted-foreground">
+															远端节点未开启授权登录（如 GitHub OAuth），请联系服务端管理员开启配置。
+														</div>
+													)}
+											</div>
+										</div>
+									)}
+								</>
 							)}
 						</CardContent>
-						<CardFooter className="flex justify-end border-t border-border pt-4">
+						<CardFooter className="flex justify-end border-t border-border pt-3">
 							<Button
 								variant="outline"
+								size="sm"
 								onClick={() => {
-									setGithubAuthOpen(false);
+									setLoginModalOpen(false);
 									setAuthError(null);
+									setProvidersError(null);
 								}}
 							>
 								关闭

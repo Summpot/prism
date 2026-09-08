@@ -123,7 +123,7 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 					</div>
 					<SidebarNavItem
 						to="/client"
-						label="连接与服务"
+						label="连接"
 						icon={<Gamepad2 className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>

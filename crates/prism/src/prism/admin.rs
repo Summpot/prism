@@ -851,18 +851,26 @@ pub struct AuthProvidersResponse {
     pub github_enabled: bool,
     pub github_client_id: Option<String>,
     pub mode: String,
+    pub providers: Vec<String>,
 }
 
 async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let (github_enabled, github_client_id, mode) = if let Some(ref am) = st.auth_manager {
-        if let Some(gh) = am.github_config() {
-            (true, Some(gh.client_id.clone()), "deeplink".to_string())
+    let (github_enabled, github_client_id, mode, providers) =
+        if let Some(ref am) = st.auth_manager {
+            let gh = am.github_config();
+            let gh_enabled = gh.is_some();
+            let gh_client_id = gh.map(|g| g.client_id.clone());
+            let mode_str = am.auth_mode().to_string();
+
+            let mut providers = Vec::new();
+            if gh_enabled && mode_str != "token" {
+                providers.push("github".to_string());
+            }
+
+            (gh_enabled, gh_client_id, mode_str, providers)
         } else {
-            (false, None, "token".to_string())
-        }
-    } else {
-        (false, None, "token".to_string())
-    };
+            (false, None, "token".to_string(), Vec::new())
+        };
 
     (
         StatusCode::OK,
@@ -870,6 +878,7 @@ async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse 
             github_enabled,
             github_client_id,
             mode,
+            providers,
         }),
     )
 }

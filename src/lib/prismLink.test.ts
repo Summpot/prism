@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { encodePrismLink, parsePrismLink, resolveRemoteConnection } from "./prismLink";
+import {
+	encodePrismLink,
+	extractProtocolAndAddress,
+	parsePrismLink,
+	resolveRemoteConnection,
+} from "./prismLink";
 
 describe("prismLink", () => {
 	it("encodes and decodes standard prism:// links", () => {
@@ -60,12 +65,11 @@ describe("prismLink", () => {
 
 	it("resolves various remote connection string formats", () => {
 		const fromPrism = resolveRemoteConnection(
-			"prism://play.example.com:7000?token=mytoken&transport=kcp",
+			"prism://play.example.com:7000?transport=kcp",
 		);
 		expect(fromPrism.managementUrl).toBe("http://play.example.com:8080");
 		expect(fromPrism.serverAddr).toBe("play.example.com:7000");
 		expect(fromPrism.transport).toBe("kcp");
-		expect(fromPrism.authToken).toBe("mytoken");
 
 		const fromHttp = resolveRemoteConnection("http://192.168.1.50:8080");
 		expect(fromHttp.managementUrl).toBe("http://192.168.1.50:8080");
@@ -78,5 +82,44 @@ describe("prismLink", () => {
 		const fromBare = resolveRemoteConnection("relay.mydomain.org");
 		expect(fromBare.managementUrl).toBe("http://relay.mydomain.org:8080");
 		expect(fromBare.serverAddr).toBe("relay.mydomain.org:7000");
+
+		const fromQuic = resolveRemoteConnection("quic://play.example.com:7000");
+		expect(fromQuic.serverAddr).toBe("play.example.com:7000");
+		expect(fromQuic.transport).toBe("quic");
+
+		const fromTcp = resolveRemoteConnection("tcp://10.0.0.1:9000");
+		expect(fromTcp.serverAddr).toBe("10.0.0.1:9000");
+		expect(fromTcp.transport).toBe("tcp");
+
+		const fromWs = resolveRemoteConnection("ws://gateway.org:8000");
+		expect(fromWs.serverAddr).toBe("gateway.org:8000");
+		expect(fromWs.transport).toBe("websocket");
+	});
+
+	it("extracts protocol and address correctly", () => {
+		expect(extractProtocolAndAddress("prism://play.example.com:7000?transport=kcp")).toEqual({
+			protocol: "kcp://",
+			address: "play.example.com:7000",
+		});
+		expect(extractProtocolAndAddress("prism://play.example.com:7000")).toEqual({
+			protocol: "quic://",
+			address: "play.example.com:7000",
+		});
+		expect(extractProtocolAndAddress("QUIC://node.com:7000")).toEqual({
+			protocol: "quic://",
+			address: "node.com:7000",
+		});
+		expect(extractProtocolAndAddress("tcp://1.2.3.4:7000")).toEqual({
+			protocol: "tcp://",
+			address: "1.2.3.4:7000",
+		});
+		expect(extractProtocolAndAddress("play.example.com:7000")).toEqual({
+			protocol: null,
+			address: "play.example.com:7000",
+		});
+		expect(extractProtocolAndAddress("")).toEqual({
+			protocol: null,
+			address: "",
+		});
 	});
 });

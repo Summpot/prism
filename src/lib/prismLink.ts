@@ -25,6 +25,53 @@ export function encodePrismLink(profile: Partial<ClientProfile>): string {
 	return `prism://${server}${queryString ? `?${queryString}` : ""}`;
 }
 
+export const SUPPORTED_LINK_PROTOCOLS = [
+	{ value: "quic://", label: "quic://", transport: "quic" },
+	{ value: "tcp://", label: "tcp://", transport: "tcp" },
+	{ value: "kcp://", label: "kcp://", transport: "kcp" },
+	{ value: "ws://", label: "ws://", transport: "websocket" },
+	{ value: "wss://", label: "wss://", transport: "websocket" },
+] as const;
+
+/**
+ * Extracts transport protocol prefix (if present) and address portion from a connection string.
+ * For prism:// configuration links, extracts the underlying transport protocol and server address.
+ */
+export function extractProtocolAndAddress(raw: string): { protocol: string | null; address: string } {
+	const trimmed = raw.trim();
+	if (!trimmed) {
+		return { protocol: null, address: "" };
+	}
+
+	// Handle prism:// invite/configuration links: extract underlying transport protocol and host:port
+	if (trimmed.toLowerCase().startsWith("prism://")) {
+		const parsed = parsePrismLink(trimmed);
+		if (parsed?.server_addr) {
+			const transport = parsed.transport || "quic";
+			const protocol =
+				transport === "websocket" || transport === "ws"
+					? "ws://"
+					: transport === "wss"
+						? "wss://"
+						: `${transport}://`;
+			return {
+				protocol,
+				address: parsed.server_addr,
+			};
+		}
+	}
+
+	const match = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)(.*)$/);
+	if (match) {
+		return {
+			protocol: match[1].toLowerCase(),
+			address: match[2].trim(),
+		};
+	}
+
+	return { protocol: null, address: trimmed };
+}
+
 /**
  * Parses a `prism://` link or base64-encoded profile string.
  */
@@ -48,18 +95,25 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 		}
 	}
 
-	// Standard prism:// URI
-	if (trimmed.startsWith("prism://")) {
+	// Standard prism:// or transport:// URI (quic://, tcp://, kcp://, ws://, wss://)
+	const transportMatch = trimmed.match(/^(prism|quic|tcp|kcp|ws|wss):\/\/(.*)$/i);
+	if (transportMatch) {
 		try {
-			// Replace scheme with https so URL can parse it
-			const fakeUrl = new URL(trimmed.replace(/^prism:\/\//i, "https://"));
+			const scheme = transportMatch[1].toLowerCase();
+			const fakeUrl = new URL(trimmed.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i, "https://"));
 			const server_addr = fakeUrl.host;
 			if (!server_addr) {
 				return null;
 			}
 
+			const defaultTransport =
+				scheme === "prism"
+					? "quic"
+					: scheme === "ws" || scheme === "wss"
+						? "websocket"
+						: scheme;
 			const name = fakeUrl.searchParams.get("name") || "";
-			const transport = fakeUrl.searchParams.get("transport") || "quic";
+			const transport = fakeUrl.searchParams.get("transport") || defaultTransport;
 			const auth_token = fakeUrl.searchParams.get("token") || "";
 			const listen_addr = fakeUrl.searchParams.get("listen") || "127.0.0.1:25565";
 			const fakeLanParam = fakeUrl.searchParams.get("fake_lan");
@@ -125,7 +179,6 @@ export interface ResolvedRemoteConnection {
 	managementUrl: string;
 	serverAddr: string;
 	transport: string;
-	authToken?: string;
 	name?: string;
 	listenAddr: string;
 	fakeLanBroadcast: boolean;
@@ -176,7 +229,6 @@ export function resolveRemoteConnection(raw: string): ResolvedRemoteConnection {
 			managementUrl,
 			serverAddr: parsed.server_addr,
 			transport: parsed.transport || "quic",
-			authToken: parsed.auth_token,
 			name: parsed.name,
 			listenAddr: parsed.listen_addr || "127.0.0.1:25565",
 			fakeLanBroadcast: parsed.fake_lan_broadcast ?? true,

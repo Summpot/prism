@@ -280,6 +280,11 @@ impl AuthManager {
         self.config.github.as_ref().filter(|g| g.enabled)
     }
 
+    /// Returns the configured auth mode ("hybrid", "oauth", or "token").
+    pub fn auth_mode(&self) -> &str {
+        &self.config.mode
+    }
+
     /// Verifies any presented token (Client PAT, Admin Token, or legacy PSK).
     pub async fn verify_token(&self, raw_token: &str) -> Option<AuthIdentity> {
         let raw_token = raw_token.trim();

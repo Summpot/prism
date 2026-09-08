@@ -12,9 +12,8 @@ use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 use thiserror::Error;
-use wasmer::{
-    Engine, Function, FunctionEnv, FunctionEnvMut, Instance, Memory, Module, Pages, Store,
-    TypedFunction, imports,
+use wasmtime::{
+    Caller, Engine, Instance, Linker, Memory, Module, Store, TypedFunc, WasmParams, WasmResults,
 };
 
 #[derive(Debug, Error)]
@@ -439,19 +438,9 @@ impl Default for DynamicSymbolTable {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct HostEnv {
-    pub memory: Option<Memory>,
     pub sym_table: Arc<Mutex<DynamicSymbolTable>>,
-}
-
-impl Default for HostEnv {
-    fn default() -> Self {
-        Self {
-            memory: None,
-            sym_table: Arc::new(Mutex::new(DynamicSymbolTable::default())),
-        }
-    }
 }
 
 /// Standalone RSA PKCS#1 v1.5 decryption helper.
@@ -613,7 +602,7 @@ pub async fn recompress_packet_stream<W: tokio::io::AsyncWrite + Unpin>(
 }
 
 pub fn host_crypto_rsa_decrypt(
-    mut env: FunctionEnvMut<HostEnv>,
+    mut caller: Caller<'_, HostEnv>,
     key_ptr: i32,
     key_len: i32,
     in_ptr: i32,
@@ -623,27 +612,31 @@ pub fn host_crypto_rsa_decrypt(
     if key_ptr < 0 || key_len <= 0 || in_ptr < 0 || in_len <= 0 || out_ptr < 0 {
         return -3;
     }
-    let (data, store) = env.data_and_store_mut();
-    let memory = match data.memory.as_ref() {
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -3,
     };
-    let view = memory.view(&store);
-    let mem_size = view.data_size();
+    let mem_size = memory.data_size(&caller);
 
-    let key_end = (key_ptr as u64).saturating_add(key_len as u64);
-    let in_end = (in_ptr as u64).saturating_add(in_len as u64);
+    let key_end = (key_ptr as usize).saturating_add(key_len as usize);
+    let in_end = (in_ptr as usize).saturating_add(in_len as usize);
     if key_end > mem_size || in_end > mem_size {
         return -3;
     }
 
     let mut key_bytes = vec![0u8; key_len as usize];
-    if view.read(key_ptr as u64, &mut key_bytes).is_err() {
+    if memory
+        .read(&caller, key_ptr as usize, &mut key_bytes)
+        .is_err()
+    {
         return -3;
     }
 
     let mut in_bytes = vec![0u8; in_len as usize];
-    if view.read(in_ptr as u64, &mut in_bytes).is_err() {
+    if memory
+        .read(&caller, in_ptr as usize, &mut in_bytes)
+        .is_err()
+    {
         return -3;
     }
 
@@ -652,12 +645,15 @@ pub fn host_crypto_rsa_decrypt(
         Err(code) => return code,
     };
 
-    let out_end = (out_ptr as u64).saturating_add(decrypted.len() as u64);
+    let out_end = (out_ptr as usize).saturating_add(decrypted.len());
     if out_end > mem_size {
         return -3;
     }
 
-    if view.write(out_ptr as u64, &decrypted).is_err() {
+    if memory
+        .write(&mut caller, out_ptr as usize, &decrypted)
+        .is_err()
+    {
         return -3;
     }
 
@@ -665,7 +661,7 @@ pub fn host_crypto_rsa_decrypt(
 }
 
 pub fn host_crypto_aes_cfb8(
-    mut env: FunctionEnvMut<HostEnv>,
+    mut caller: Caller<'_, HostEnv>,
     key_ptr: i32,
     iv_ptr: i32,
     data_ptr: i32,
@@ -678,34 +674,32 @@ pub fn host_crypto_aes_cfb8(
     if data_len == 0 {
         return 0;
     }
-    let (data, store) = env.data_and_store_mut();
-    let memory = match data.memory.as_ref() {
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -1,
     };
-    let view = memory.view(&store);
-    let mem_size = view.data_size();
+    let mem_size = memory.data_size(&caller);
 
-    let key_end = (key_ptr as u64).saturating_add(16);
-    let iv_end = (iv_ptr as u64).saturating_add(16);
-    let data_end = (data_ptr as u64).saturating_add(data_len as u64);
+    let key_end = (key_ptr as usize).saturating_add(16);
+    let iv_end = (iv_ptr as usize).saturating_add(16);
+    let data_end = (data_ptr as usize).saturating_add(data_len as usize);
 
     if key_end > mem_size || iv_end > mem_size || data_end > mem_size {
         return -1;
     }
 
     let mut key = [0u8; 16];
-    if view.read(key_ptr as u64, &mut key).is_err() {
+    if memory.read(&caller, key_ptr as usize, &mut key).is_err() {
         return -1;
     }
 
     let mut iv = [0u8; 16];
-    if view.read(iv_ptr as u64, &mut iv).is_err() {
+    if memory.read(&caller, iv_ptr as usize, &mut iv).is_err() {
         return -1;
     }
 
     let mut buf = vec![0u8; data_len as usize];
-    if view.read(data_ptr as u64, &mut buf).is_err() {
+    if memory.read(&caller, data_ptr as usize, &mut buf).is_err() {
         return -1;
     }
 
@@ -713,11 +707,11 @@ pub fn host_crypto_aes_cfb8(
         return code;
     }
 
-    if view.write(data_ptr as u64, &buf).is_err() {
+    if memory.write(&mut caller, data_ptr as usize, &buf).is_err() {
         return -1;
     }
 
-    if view.write(iv_ptr as u64, &iv).is_err() {
+    if memory.write(&mut caller, iv_ptr as usize, &iv).is_err() {
         return -1;
     }
 
@@ -725,7 +719,7 @@ pub fn host_crypto_aes_cfb8(
 }
 
 pub fn host_deflate_decompress(
-    mut env: FunctionEnvMut<HostEnv>,
+    mut caller: Caller<'_, HostEnv>,
     in_ptr: i32,
     in_len: i32,
     out_ptr: i32,
@@ -737,22 +731,20 @@ pub fn host_deflate_decompress(
     if in_len == 0 {
         return 0;
     }
-    let (data, mut store) = env.data_and_store_mut();
-    let memory = match data.memory.as_ref() {
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -1,
     };
-    let mem_size = memory.view(&store).data_size();
+    let mem_size = memory.data_size(&caller);
 
-    let in_end = (in_ptr as u64).saturating_add(in_len as u64);
+    let in_end = (in_ptr as usize).saturating_add(in_len as usize);
     if in_end > mem_size {
         return -1;
     }
 
     let mut in_bytes = vec![0u8; in_len as usize];
     if memory
-        .view(&store)
-        .read(in_ptr as u64, &mut in_bytes)
+        .read(&caller, in_ptr as usize, &mut in_bytes)
         .is_err()
     {
         return -1;
@@ -767,21 +759,17 @@ pub fn host_deflate_decompress(
         return -3;
     }
 
-    let out_end = (out_ptr as u64).saturating_add(decompressed.len() as u64);
+    let out_end = (out_ptr as usize).saturating_add(decompressed.len());
     if out_end > mem_size {
         let delta = out_end - mem_size;
         let pages = delta.div_ceil(65536);
-        if memory
-            .grow(&mut store, wasmer::Pages(pages as u32))
-            .is_err()
-        {
+        if memory.grow(&mut caller, pages as u64).is_err() {
             return -3;
         }
     }
 
     if memory
-        .view(&store)
-        .write(out_ptr as u64, &decompressed)
+        .write(&mut caller, out_ptr as usize, &decompressed)
         .is_err()
     {
         return -3;
@@ -791,7 +779,7 @@ pub fn host_deflate_decompress(
 }
 
 pub fn host_deflate_compress(
-    mut env: FunctionEnvMut<HostEnv>,
+    mut caller: Caller<'_, HostEnv>,
     in_ptr: i32,
     in_len: i32,
     out_ptr: i32,
@@ -801,21 +789,22 @@ pub fn host_deflate_compress(
     if in_ptr < 0 || in_len < 0 || out_ptr < 0 || out_max_len < 0 {
         return -1;
     }
-    let (data, store) = env.data_and_store_mut();
-    let memory = match data.memory.as_ref() {
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -1,
     };
-    let view = memory.view(&store);
-    let mem_size = view.data_size();
+    let mem_size = memory.data_size(&caller);
 
-    let in_end = (in_ptr as u64).saturating_add(in_len as u64);
+    let in_end = (in_ptr as usize).saturating_add(in_len as usize);
     if in_end > mem_size {
         return -1;
     }
 
     let mut in_bytes = vec![0u8; in_len as usize];
-    if view.read(in_ptr as u64, &mut in_bytes).is_err() {
+    if memory
+        .read(&caller, in_ptr as usize, &mut in_bytes)
+        .is_err()
+    {
         return -1;
     }
 
@@ -828,46 +817,51 @@ pub fn host_deflate_compress(
         return -3;
     }
 
-    let out_end = (out_ptr as u64).saturating_add(compressed.len() as u64);
+    let out_end = (out_ptr as usize).saturating_add(compressed.len());
     if out_end > mem_size {
         return -3;
     }
 
-    if view.write(out_ptr as u64, &compressed).is_err() {
+    if memory
+        .write(&mut caller, out_ptr as usize, &compressed)
+        .is_err()
+    {
         return -3;
     }
 
     compressed.len() as i32
 }
 
-pub fn host_sym_intern(mut env: FunctionEnvMut<HostEnv>, str_ptr: i32, str_len: i32) -> i64 {
+pub fn host_sym_intern(mut caller: Caller<'_, HostEnv>, str_ptr: i32, str_len: i32) -> i64 {
     if str_ptr < 0 || str_len < 0 {
         return -1;
     }
-    let (data, store) = env.data_and_store_mut();
-    let memory = match data.memory.as_ref() {
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -1,
     };
-    let view = memory.view(&store);
-    let mem_size = view.data_size();
+    let mem_size = memory.data_size(&caller);
 
-    let end = (str_ptr as u64).saturating_add(str_len as u64);
+    let end = (str_ptr as usize).saturating_add(str_len as usize);
     if end > mem_size {
         return -1;
     }
 
     let mut sym_bytes = vec![0u8; str_len as usize];
-    if view.read(str_ptr as u64, &mut sym_bytes).is_err() {
+    if memory
+        .read(&caller, str_ptr as usize, &mut sym_bytes)
+        .is_err()
+    {
         return -1;
     }
 
-    let mut table = data.sym_table.lock().unwrap();
+    let table_arc = caller.data().sym_table.clone();
+    let mut table = table_arc.lock().unwrap();
     table.intern(&sym_bytes)
 }
 
 pub fn host_sym_resolve(
-    mut env: FunctionEnvMut<HostEnv>,
+    mut caller: Caller<'_, HostEnv>,
     index: i32,
     out_ptr: i32,
     max_len: i32,
@@ -875,97 +869,86 @@ pub fn host_sym_resolve(
     if index <= 0 || out_ptr < 0 || max_len < 0 {
         return -1;
     }
-    let (data, store) = env.data_and_store_mut();
-    let memory = match data.memory.as_ref() {
-        Some(m) => m,
-        None => return -1,
-    };
-    let view = memory.view(&store);
-    let mem_size = view.data_size();
-
-    let table = data.sym_table.lock().unwrap();
-    let sym_bytes = match table.resolve(index) {
-        Some(s) => s,
-        None => return -1,
+    let table_arc = caller.data().sym_table.clone();
+    let sym_bytes = {
+        let table = table_arc.lock().unwrap();
+        match table.resolve(index) {
+            Some(s) => s.to_vec(),
+            None => return -1,
+        }
     };
 
     if sym_bytes.len() > max_len as usize {
         return -3;
     }
 
-    let out_end = (out_ptr as u64).saturating_add(sym_bytes.len() as u64);
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return -1,
+    };
+    let mem_size = memory.data_size(&caller);
+
+    let out_end = (out_ptr as usize).saturating_add(sym_bytes.len());
     if out_end > mem_size {
         return -2;
     }
 
-    if view.write(out_ptr as u64, sym_bytes).is_err() {
+    if memory
+        .write(&mut caller, out_ptr as usize, &sym_bytes)
+        .is_err()
+    {
         return -2;
     }
 
     sym_bytes.len() as i32
 }
 
-pub fn create_prism_imports(store: &mut Store, env: &FunctionEnv<HostEnv>) -> wasmer::Imports {
-    let rsa_fn = Function::new_typed_with_env(store, env, host_crypto_rsa_decrypt);
-    let aes_fn = Function::new_typed_with_env(store, env, host_crypto_aes_cfb8);
-    let decompress_fn = Function::new_typed_with_env(store, env, host_deflate_decompress);
-    let compress_fn = Function::new_typed_with_env(store, env, host_deflate_compress);
-    let sym_intern_fn = Function::new_typed_with_env(store, env, host_sym_intern);
-    let sym_resolve_fn = Function::new_typed_with_env(store, env, host_sym_resolve);
-
-    imports! {
-        "prism" => {
-            "crypto_rsa_decrypt" => rsa_fn,
-            "crypto_aes_cfb8" => aes_fn,
-            "deflate_decompress" => decompress_fn,
-            "deflate_compress" => compress_fn,
-            "sym_intern" => sym_intern_fn,
-            "sym_resolve" => sym_resolve_fn,
-        },
-    }
+pub fn create_prism_linker(engine: &Engine) -> anyhow::Result<Linker<HostEnv>> {
+    let mut linker = Linker::new(engine);
+    linker.func_wrap("prism", "crypto_rsa_decrypt", host_crypto_rsa_decrypt)?;
+    linker.func_wrap("prism", "crypto_aes_cfb8", host_crypto_aes_cfb8)?;
+    linker.func_wrap("prism", "deflate_decompress", host_deflate_decompress)?;
+    linker.func_wrap("prism", "deflate_compress", host_deflate_compress)?;
+    linker.func_wrap("prism", "sym_intern", host_sym_intern)?;
+    linker.func_wrap("prism", "sym_resolve", host_sym_resolve)?;
+    Ok(linker)
 }
 
 pub struct WasmProtocolSession {
-    store: Store,
+    store: Store<HostEnv>,
     #[allow(dead_code)]
     instance: Instance,
     memory: Memory,
+    poll_fn: Option<TypedFunc<(i32, i32, i32), i64>>,
     #[allow(dead_code)]
-    env: FunctionEnv<HostEnv>,
-    poll_fn: Option<TypedFunction<(i32, i32, i32), i64>>,
-    #[allow(dead_code)]
-    set_data_fn: Option<TypedFunction<(i32, i32), i32>>,
+    set_data_fn: Option<TypedFunc<(i32, i32), i32>>,
     state: SessionState,
 }
-
-unsafe impl Send for WasmProtocolSession {}
 
 #[allow(dead_code)]
 impl WasmProtocolSession {
     pub fn new(engine: &Engine, module: &Module) -> anyhow::Result<Self> {
-        let mut store = Store::new(engine.clone());
-        let env = FunctionEnv::new(&mut store, HostEnv::default());
-        let import_object = create_prism_imports(&mut store, &env);
-
-        let instance = Instance::new(&mut store, module, &import_object)
-            .context("session: instantiate wasm module")?;
+        let mut store = Store::new(engine, HostEnv::default());
+        let linker = create_prism_linker(engine)?;
+        let instance = linker
+            .instantiate(&mut store, module)
+            .map_err(|e| anyhow::anyhow!("session: instantiate wasm module: {e}"))?;
 
         let memory = instance
-            .exports
-            .get_memory("memory")
-            .map_err(|e| anyhow::anyhow!("session: wasm missing exported memory 'memory': {e}"))?
-            .clone();
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| anyhow::anyhow!("session: wasm missing exported memory 'memory'"))?;
 
-        env.as_mut(&mut store).memory = Some(memory.clone());
-
-        let poll_fn = instance.exports.get_typed_function(&store, "poll").ok();
-        let set_data_fn = instance.exports.get_typed_function(&store, "set_data").ok();
+        let poll_fn = instance
+            .get_typed_func::<(i32, i32, i32), i64>(&mut store, "poll")
+            .ok();
+        let set_data_fn = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "set_data")
+            .ok();
 
         Ok(Self {
             store,
             instance,
             memory,
-            env,
             poll_fn,
             set_data_fn,
             state: SessionState::Handshake,
@@ -974,8 +957,8 @@ impl WasmProtocolSession {
 
     pub fn from_wat(wat: impl AsRef<[u8]>) -> anyhow::Result<Self> {
         let engine = Engine::default();
-        let store = Store::new(engine.clone());
-        let module = Module::new(&store, wat.as_ref()).context("session: compile wat module")?;
+        let module = Module::new(&engine, wat.as_ref())
+            .map_err(|e| anyhow::anyhow!("session: compile wat module: {e}"))?;
         Self::new(&engine, &module)
     }
 
@@ -996,23 +979,48 @@ impl WasmProtocolSession {
     }
 
     pub fn sym_table(&self) -> Arc<Mutex<DynamicSymbolTable>> {
-        self.env.as_ref(&self.store).sym_table.clone()
+        self.store.data().sym_table.clone()
     }
 
     pub fn memory(&self) -> &Memory {
         &self.memory
     }
 
-    pub fn store(&self) -> &Store {
+    pub fn store(&self) -> &Store<HostEnv> {
         &self.store
     }
 
-    pub fn store_mut(&mut self) -> &mut Store {
+    pub fn store_mut(&mut self) -> &mut Store<HostEnv> {
         &mut self.store
     }
 
     pub fn instance(&self) -> &Instance {
         &self.instance
+    }
+
+    pub fn get_typed_func<Params, Results>(
+        &mut self,
+        name: &str,
+    ) -> anyhow::Result<TypedFunc<Params, Results>>
+    where
+        Params: WasmParams,
+        Results: WasmResults,
+    {
+        self.instance
+            .get_typed_func(&mut self.store, name)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    pub fn read_memory(&self, offset: usize, buf: &mut [u8]) -> Result<(), MiddlewareError> {
+        self.memory
+            .read(&self.store, offset, buf)
+            .map_err(|e| MiddlewareError::Fatal(format!("wasm read memory failed: {e}")))
+    }
+
+    pub fn write_memory(&mut self, offset: usize, data: &[u8]) -> Result<(), MiddlewareError> {
+        self.memory
+            .write(&mut self.store, offset, data)
+            .map_err(|e| MiddlewareError::Fatal(format!("wasm write memory failed: {e}")))
     }
 
     pub fn set_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
@@ -1025,25 +1033,24 @@ impl WasmProtocolSession {
             }
         };
 
-        let needed = (data.len() as u64).max(65536 * 4);
-        let mem_size = self.memory.view(&self.store).data_size();
+        let needed = (data.len() as usize).max(65536 * 4);
+        let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
             let delta = needed - mem_size;
             let pages = delta.div_ceil(65536);
             self.memory
-                .grow(&mut self.store, Pages(pages as u32))
+                .grow(&mut self.store, pages as u64)
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
         }
 
         if !data.is_empty() {
             self.memory
-                .view(&self.store)
-                .write(0, data)
+                .write(&mut self.store, 0, data)
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm write set_data failed: {e}")))?;
         }
 
         let code = set_data_fn
-            .call(&mut self.store, 0, data.len() as i32)
+            .call(&mut self.store, (0, data.len() as i32))
             .map_err(|e| MiddlewareError::Fatal(format!("wasm set_data call failed: {e}")))?;
 
         Ok(code)
@@ -1059,25 +1066,24 @@ impl WasmProtocolSession {
             }
         };
 
-        let needed = ((buf.len() as u64) + 65536).max(65536 * 4);
-        let mem_size = self.memory.view(&self.store).data_size();
+        let needed = ((buf.len() as usize) + 65536).max(65536 * 4);
+        let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
             let delta = needed - mem_size;
             let pages = delta.div_ceil(65536);
             self.memory
-                .grow(&mut self.store, Pages(pages as u32))
+                .grow(&mut self.store, pages as u64)
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
         }
 
         if !buf.is_empty() {
             self.memory
-                .view(&self.store)
-                .write(0, buf)
+                .write(&mut self.store, 0, buf)
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
         }
 
         let res = poll_fn
-            .call(&mut self.store, 0, buf.len() as i32, self.state as i32)
+            .call(&mut self.store, (0, buf.len() as i32, self.state as i32))
             .map_err(|e| MiddlewareError::Fatal(format!("wasm poll call failed: {e}")))?;
 
         let action = ((res as u64) >> 32) as u32;
@@ -1087,33 +1093,37 @@ impl WasmProtocolSession {
             SessionState::Handshake => match action {
                 0 => Ok(PollResult::Handshake(HandshakeResult::NeedMoreData)),
                 1 => {
-                    let view = self.memory.view(&self.store);
-                    if (value as u64) + 16 > view.data_size() {
+                    let mem_size = self.memory.data_size(&self.store);
+                    if (value as usize) + 16 > mem_size {
                         return Err(MiddlewareError::Fatal(format!(
                             "route match struct pointer out of bounds: {value}"
                         )));
                     }
                     let mut header = [0u8; 16];
-                    view.read(value as u64, &mut header).map_err(|e| {
-                        MiddlewareError::Fatal(format!("read route struct failed: {e}"))
-                    })?;
+                    self.memory
+                        .read(&self.store, value as usize, &mut header)
+                        .map_err(|e| {
+                            MiddlewareError::Fatal(format!("read route struct failed: {e}"))
+                        })?;
 
-                    let host_ptr = u32::from_le_bytes(header[0..4].try_into().unwrap());
-                    let host_len = u32::from_le_bytes(header[4..8].try_into().unwrap());
-                    let rw_ptr = u32::from_le_bytes(header[8..12].try_into().unwrap());
-                    let rw_len = u32::from_le_bytes(header[12..16].try_into().unwrap());
+                    let host_ptr = u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
+                    let host_len = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+                    let rw_ptr = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
+                    let rw_len = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
 
                     let mut host = None;
                     if host_len > 0 {
-                        if (host_ptr as u64) + (host_len as u64) > view.data_size() {
+                        if host_ptr + host_len > mem_size {
                             return Err(MiddlewareError::Fatal(
                                 "host pointer out of bounds".into(),
                             ));
                         }
-                        let mut hbuf = vec![0u8; host_len as usize];
-                        view.read(host_ptr as u64, &mut hbuf).map_err(|e| {
-                            MiddlewareError::Fatal(format!("read host failed: {e}"))
-                        })?;
+                        let mut hbuf = vec![0u8; host_len];
+                        self.memory
+                            .read(&self.store, host_ptr, &mut hbuf)
+                            .map_err(|e| {
+                                MiddlewareError::Fatal(format!("read host failed: {e}"))
+                            })?;
                         let h = String::from_utf8_lossy(&hbuf).trim().to_ascii_lowercase();
                         if !h.is_empty() {
                             host = Some(h);
@@ -1122,15 +1132,17 @@ impl WasmProtocolSession {
 
                     let mut rewrite = None;
                     if rw_len > 0 {
-                        if (rw_ptr as u64) + (rw_len as u64) > view.data_size() {
+                        if rw_ptr + rw_len > mem_size {
                             return Err(MiddlewareError::Fatal(
                                 "rewrite pointer out of bounds".into(),
                             ));
                         }
-                        let mut rwbuf = vec![0u8; rw_len as usize];
-                        view.read(rw_ptr as u64, &mut rwbuf).map_err(|e| {
-                            MiddlewareError::Fatal(format!("read rewrite failed: {e}"))
-                        })?;
+                        let mut rwbuf = vec![0u8; rw_len];
+                        self.memory
+                            .read(&self.store, rw_ptr, &mut rwbuf)
+                            .map_err(|e| {
+                                MiddlewareError::Fatal(format!("read rewrite failed: {e}"))
+                            })?;
                         rewrite = Some(rwbuf);
                     }
 
@@ -1158,34 +1170,38 @@ impl WasmProtocolSession {
                     payload: None,
                 })),
                 3 | 4 => {
-                    let view = self.memory.view(&self.store);
-                    let ptr = value as u64;
-                    if ptr + 12 > view.data_size() {
+                    let mem_size = self.memory.data_size(&self.store);
+                    let ptr = value as usize;
+                    if ptr + 12 > mem_size {
                         return Err(MiddlewareError::Fatal(format!(
                             "stream frame struct pointer out of bounds: {value}"
                         )));
                     }
                     let mut header = [0u8; 12];
-                    view.read(ptr, &mut header).map_err(|e| {
-                        MiddlewareError::Fatal(format!("read stream frame struct failed: {e}"))
-                    })?;
+                    self.memory
+                        .read(&self.store, ptr, &mut header)
+                        .map_err(|e| {
+                            MiddlewareError::Fatal(format!("read stream frame struct failed: {e}"))
+                        })?;
 
                     let consumed_len =
                         u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
-                    let payload_ptr = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64;
+                    let payload_ptr = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
                     let payload_len =
                         u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
 
-                    if payload_ptr + (payload_len as u64) > view.data_size() {
+                    if payload_ptr + payload_len > mem_size {
                         return Err(MiddlewareError::Fatal(format!(
                             "stream payload pointer out of bounds: {payload_ptr} + {payload_len}"
                         )));
                     }
 
                     let mut payload = vec![0u8; payload_len];
-                    view.read(payload_ptr, &mut payload).map_err(|e| {
-                        MiddlewareError::Fatal(format!("read stream payload failed: {e}"))
-                    })?;
+                    self.memory
+                        .read(&self.store, payload_ptr, &mut payload)
+                        .map_err(|e| {
+                            MiddlewareError::Fatal(format!("read stream payload failed: {e}"))
+                        })?;
 
                     let priority = if action == 4 {
                         FramePriority::Urgent
@@ -1259,8 +1275,8 @@ impl WasmMiddleware {
         }
 
         let engine = Engine::default();
-        let store = Store::new(engine.clone());
-        let module = Module::new(&store, wat_bytes).context("middleware: compile wat module")?;
+        let module = Module::new(&engine, wat_bytes)
+            .map_err(|e| anyhow::anyhow!("middleware: compile wat module: {e}"))?;
 
         Ok(Self {
             name: name.to_string(),
@@ -1749,51 +1765,37 @@ mod tests {
         )"#;
 
         let engine = Engine::default();
-        let store = Store::new(engine.clone());
-        let module = Module::new(&store, test_wat).expect("compile wat");
+        let module = Module::new(&engine, test_wat).expect("compile wat");
         let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
 
         let key_bytes = pkcs1_der.as_bytes();
-        let key_offset = 1000u64;
-        let in_offset = 3000u64;
-        let out_offset = 5000u64;
+        let key_offset = 1000usize;
+        let in_offset = 3000usize;
+        let out_offset = 5000usize;
 
-        session
-            .memory()
-            .view(session.store())
-            .write(key_offset, key_bytes)
-            .unwrap();
-        session
-            .memory()
-            .view(session.store())
-            .write(in_offset, &ciphertext)
-            .unwrap();
+        session.write_memory(key_offset, key_bytes).unwrap();
+        session.write_memory(in_offset, &ciphertext).unwrap();
 
-        let test_fn: TypedFunction<(i32, i32, i32, i32, i32), i32> = session
-            .instance()
-            .exports
-            .get_typed_function(session.store(), "test_decrypt")
-            .unwrap();
+        let test_fn: TypedFunc<(i32, i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_decrypt").unwrap();
 
         let written = test_fn
             .call(
                 session.store_mut(),
-                key_offset as i32,
-                key_bytes.len() as i32,
-                in_offset as i32,
-                ciphertext.len() as i32,
-                out_offset as i32,
+                (
+                    key_offset as i32,
+                    key_bytes.len() as i32,
+                    in_offset as i32,
+                    ciphertext.len() as i32,
+                    out_offset as i32,
+                ),
             )
             .expect("call test_decrypt");
 
         assert_eq!(written, plaintext.len() as i32);
 
         let mut read_buf = vec![0u8; plaintext.len()];
-        session
-            .memory()
-            .view(session.store())
-            .read(out_offset, &mut read_buf)
-            .unwrap();
+        session.read_memory(out_offset, &mut read_buf).unwrap();
         assert_eq!(&read_buf, plaintext);
     }
 
@@ -1844,81 +1846,57 @@ mod tests {
         )"#;
 
         let engine = Engine::default();
-        let store = Store::new(engine.clone());
-        let module = Module::new(&store, test_wat).expect("compile wat");
+        let module = Module::new(&engine, test_wat).expect("compile wat");
         let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
 
-        let key_offset = 100u64;
-        let iv_offset = 200u64;
-        let data_offset = 300u64;
+        let key_offset = 100usize;
+        let iv_offset = 200usize;
+        let data_offset = 300usize;
 
-        session
-            .memory()
-            .view(session.store())
-            .write(key_offset, &key)
-            .unwrap();
-        session
-            .memory()
-            .view(session.store())
-            .write(iv_offset, &iv)
-            .unwrap();
-        session
-            .memory()
-            .view(session.store())
-            .write(data_offset, &plaintext)
-            .unwrap();
+        session.write_memory(key_offset, &key).unwrap();
+        session.write_memory(iv_offset, &iv).unwrap();
+        session.write_memory(data_offset, &plaintext).unwrap();
 
-        let test_fn: TypedFunction<(i32, i32, i32, i32, i32), i32> = session
-            .instance()
-            .exports
-            .get_typed_function(session.store(), "test_aes")
-            .unwrap();
+        let test_fn: TypedFunc<(i32, i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_aes").unwrap();
 
         // Encrypt in WASM
         let res = test_fn
             .call(
                 session.store_mut(),
-                key_offset as i32,
-                iv_offset as i32,
-                data_offset as i32,
-                plaintext.len() as i32,
-                1,
+                (
+                    key_offset as i32,
+                    iv_offset as i32,
+                    data_offset as i32,
+                    plaintext.len() as i32,
+                    1,
+                ),
             )
             .expect("call test_aes encrypt");
         assert_eq!(res, 0);
 
         let mut read_cipher = [0u8; 16];
-        session
-            .memory()
-            .view(session.store())
-            .read(data_offset, &mut read_cipher)
-            .unwrap();
+        session.read_memory(data_offset, &mut read_cipher).unwrap();
         assert_eq!(read_cipher, expected_ciphertext);
 
         // Reset IV in WASM memory and decrypt in WASM
-        session
-            .memory()
-            .view(session.store())
-            .write(iv_offset, &iv)
-            .unwrap();
+        session.write_memory(iv_offset, &iv).unwrap();
         let res2 = test_fn
             .call(
                 session.store_mut(),
-                key_offset as i32,
-                iv_offset as i32,
-                data_offset as i32,
-                plaintext.len() as i32,
-                0,
+                (
+                    key_offset as i32,
+                    iv_offset as i32,
+                    data_offset as i32,
+                    plaintext.len() as i32,
+                    0,
+                ),
             )
             .expect("call test_aes decrypt");
         assert_eq!(res2, 0);
 
         let mut read_plain = [0u8; 16];
-        session
-            .memory()
-            .view(session.store())
-            .read(data_offset, &mut read_plain)
-            .unwrap();
+        session.read_memory(data_offset, &mut read_plain).unwrap();
         assert_eq!(read_plain, plaintext);
     }
 
@@ -1953,40 +1931,31 @@ mod tests {
         )"#;
 
         let engine = Engine::default();
-        let store = Store::new(engine.clone());
-        let module = Module::new(&store, test_wat).expect("compile wat");
+        let module = Module::new(&engine, test_wat).expect("compile wat");
         let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
 
-        let in_offset = 1000u64;
-        let comp_offset = 3000u64;
-        let decomp_offset = 6000u64;
+        let in_offset = 1000usize;
+        let comp_offset = 3000usize;
+        let decomp_offset = 6000usize;
 
-        session
-            .memory()
-            .view(session.store())
-            .write(in_offset, payload)
-            .unwrap();
+        session.write_memory(in_offset, payload).unwrap();
 
-        let comp_fn: TypedFunction<(i32, i32, i32, i32, i32), i32> = session
-            .instance()
-            .exports
-            .get_typed_function(session.store(), "test_compress")
-            .unwrap();
+        let comp_fn: TypedFunc<(i32, i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_compress").unwrap();
 
-        let decomp_fn: TypedFunction<(i32, i32, i32, i32), i32> = session
-            .instance()
-            .exports
-            .get_typed_function(session.store(), "test_decompress")
-            .unwrap();
+        let decomp_fn: TypedFunc<(i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_decompress").unwrap();
 
         let comp_len = comp_fn
             .call(
                 session.store_mut(),
-                in_offset as i32,
-                payload.len() as i32,
-                comp_offset as i32,
-                1000,
-                6,
+                (
+                    in_offset as i32,
+                    payload.len() as i32,
+                    comp_offset as i32,
+                    1000,
+                    6,
+                ),
             )
             .expect("call compress");
         assert!(comp_len > 0);
@@ -1994,19 +1963,14 @@ mod tests {
         let decomp_len = decomp_fn
             .call(
                 session.store_mut(),
-                comp_offset as i32,
-                comp_len,
-                decomp_offset as i32,
-                1000,
+                (comp_offset as i32, comp_len, decomp_offset as i32, 1000),
             )
             .expect("call decompress");
         assert_eq!(decomp_len, payload.len() as i32);
 
         let mut read_decomp = vec![0u8; payload.len()];
         session
-            .memory()
-            .view(session.store())
-            .read(decomp_offset, &mut read_decomp)
+            .read_memory(decomp_offset, &mut read_decomp)
             .unwrap();
         assert_eq!(&read_decomp, payload);
     }
@@ -2170,28 +2134,20 @@ mod tests {
 
         let wat_bytes = fs::read(&wat_path).expect("read minecraft.wat");
         let mut session = WasmProtocolSession::from_wat(&wat_bytes).expect("session");
-        let memory = session.memory().clone();
-
         // 1. Test set_data
         let test_key = b"RSA_PRIVATE_KEY_MOCK_DATA_1234567890";
         // Write test key at offset 1000
-        memory.view(session.store()).write(1000, test_key).unwrap();
+        session.write_memory(1000, test_key).unwrap();
         let res = session.set_data(test_key).unwrap();
         assert_eq!(res, 0);
 
         // Verify stored at 196608 and length at 196604
         let mut len_bytes = [0u8; 4];
-        memory
-            .view(session.store())
-            .read(196604, &mut len_bytes)
-            .unwrap();
+        session.read_memory(196604, &mut len_bytes).unwrap();
         assert_eq!(u32::from_le_bytes(len_bytes), test_key.len() as u32);
 
         let mut read_key = vec![0u8; test_key.len()];
-        memory
-            .view(session.store())
-            .read(196608, &mut read_key)
-            .unwrap();
+        session.read_memory(196608, &mut read_key).unwrap();
         assert_eq!(&read_key, test_key);
 
         // 2. Test poll state == 0 (Handshaking)
@@ -2364,26 +2320,20 @@ mod tests {
         "#;
 
         let engine = Engine::default();
-        let mut store = Store::new(engine.clone());
-        let module = Module::new(&store, wat).unwrap();
-        let env = FunctionEnv::new(&mut store, HostEnv::default());
-        let imports = create_prism_imports(&mut store, &env);
-        let instance = Instance::new(&mut store, &module, &imports).unwrap();
-        let memory = instance.exports.get_memory("memory").unwrap().clone();
-        env.as_mut(&mut store).memory = Some(memory.clone());
+        let mut store = Store::new(&engine, HostEnv::default());
+        let module = Module::new(&engine, wat).unwrap();
+        let linker = create_prism_linker(&engine).unwrap();
+        let instance = linker.instantiate(&mut store, &module).unwrap();
+        let memory = instance.get_memory(&mut store, "memory").unwrap();
 
-        let test_intern: TypedFunction<i32, i64> = instance
-            .exports
-            .get_typed_function(&store, "test_intern")
-            .unwrap();
-        let test_resolve: TypedFunction<i32, i32> = instance
-            .exports
-            .get_typed_function(&store, "test_resolve")
-            .unwrap();
+        let test_intern: TypedFunc<i32, i64> =
+            instance.get_typed_func(&mut store, "test_intern").unwrap();
+        let test_resolve: TypedFunc<i32, i32> =
+            instance.get_typed_func(&mut store, "test_resolve").unwrap();
 
         // Write "minecraft:brand" to memory at offset 0
         let symbol = b"minecraft:brand";
-        memory.view(&store).write(0, symbol).unwrap();
+        memory.write(&mut store, 0, symbol).unwrap();
 
         // Call test_intern -> should be newly added (1 << 32) | 1
         let res = test_intern.call(&mut store, symbol.len() as i32).unwrap();
@@ -2395,7 +2345,7 @@ mod tests {
         assert_eq!(written, symbol.len() as i32);
 
         let mut read_back = vec![0u8; symbol.len()];
-        memory.view(&store).read(100, &mut read_back).unwrap();
+        memory.read(&store, 100, &mut read_back).unwrap();
         assert_eq!(&read_back, symbol);
 
         // Call test_intern again -> should return existing (0 << 32) | 1

@@ -378,7 +378,6 @@ Prism is developed against **Rust stable**.
 ### Prerequisites
 
 - **Rust**: stable toolchain
-- **LLVM / Clang**: Required for Wasmer V8 engine compilation (`libclang` and `llvm-objcopy`). On Windows, install LLVM using standard installers (e.g. `winget install LLVM.LLVM` or the official installer from [LLVM GitHub Releases](https://github.com/llvm/llvm-project/releases)). **Do not use portable extractions such as Scoop to install LLVM on Windows**, as they do not properly register Clang with Windows SDK / MSVC UCRT headers, causing `stddef.h` header resolution errors during `bindgen` builds. Ensure `LIBCLANG_PATH` points to the LLVM `bin` directory if not automatically detected.
 - **Node.js & pnpm**: Node.js 22+, pnpm 12+ (for frontend panel)
 
 Frontend panel:

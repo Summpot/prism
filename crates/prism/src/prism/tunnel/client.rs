@@ -42,8 +42,8 @@ pub type ClientLogEntry = crate::prism::logging::LogEntry;
 pub struct Client {
     config: TunnelClientConfig,
     middleware_dir: Option<PathBuf>,
-    wasm_module: Option<Arc<wasmer::Module>>,
-    wasm_engine: wasmer::Engine,
+    wasm_module: Option<Arc<wasmtime::Module>>,
+    wasm_engine: wasmtime::Engine,
     known_services: Arc<RwLock<Vec<RegisteredService>>>,
     broadcaster: Option<Arc<FakeLanBroadcaster>>,
     current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
@@ -55,7 +55,7 @@ pub struct Client {
 impl Client {
     /// Creates a new `Client` from [`TunnelClientConfig`].
     pub fn new(config: TunnelClientConfig) -> anyhow::Result<Self> {
-        let wasm_engine = wasmer::Engine::default();
+        let wasm_engine = wasmtime::Engine::default();
         let wasm_module = Self::try_compile_middleware(&wasm_engine, &config.middleware, None)?;
 
         let broadcaster = if config.fake_lan_broadcast {
@@ -181,10 +181,10 @@ impl Client {
     }
 
     fn try_compile_middleware(
-        engine: &wasmer::Engine,
+        engine: &wasmtime::Engine,
         middleware_name: &Option<String>,
         middleware_dir: Option<&Path>,
-    ) -> anyhow::Result<Option<Arc<wasmer::Module>>> {
+    ) -> anyhow::Result<Option<Arc<wasmtime::Module>>> {
         let Some(name) = middleware_name else {
             return Ok(None);
         };
@@ -197,8 +197,7 @@ impl Client {
         let path = Path::new(name);
         if path.is_file() {
             let bytes = std::fs::read(path)?;
-            let store = wasmer::Store::new(engine.clone());
-            let module = wasmer::Module::new(&store, bytes)?;
+            let module = wasmtime::Module::new(engine, bytes)?;
             return Ok(Some(Arc::new(module)));
         }
 
@@ -207,23 +206,20 @@ impl Client {
             let direct = dir.join(name);
             if direct.is_file() {
                 let bytes = std::fs::read(&direct)?;
-                let store = wasmer::Store::new(engine.clone());
-                let module = wasmer::Module::new(&store, bytes)?;
+                let module = wasmtime::Module::new(engine, bytes)?;
                 return Ok(Some(Arc::new(module)));
             }
             let with_ext = dir.join(format!("{name}.wat"));
             if with_ext.is_file() {
                 let bytes = std::fs::read(&with_ext)?;
-                let store = wasmer::Store::new(engine.clone());
-                let module = wasmer::Module::new(&store, bytes)?;
+                let module = wasmtime::Module::new(engine, bytes)?;
                 return Ok(Some(Arc::new(module)));
             }
         }
 
         // 3. Built-in default middlewares (e.g. "minecraft", "tls_sni")
         if let Some(wat) = get_default_middleware_wat(name) {
-            let store = wasmer::Store::new(engine.clone());
-            let module = wasmer::Module::new(&store, wat.as_bytes())?;
+            let module = wasmtime::Module::new(engine, wat.as_bytes())?;
             return Ok(Some(Arc::new(module)));
         }
 
@@ -712,8 +708,8 @@ async fn handle_player_connection(
     peer_addr: std::net::SocketAddr,
     current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
     known_services: Arc<RwLock<Vec<RegisteredService>>>,
-    wasm_engine: wasmer::Engine,
-    wasm_module: Option<Arc<wasmer::Module>>,
+    wasm_engine: wasmtime::Engine,
+    wasm_module: Option<Arc<wasmtime::Module>>,
     config: TunnelClientConfig,
     optimizer_stats: SharedOptimizerStats,
 ) -> anyhow::Result<()> {

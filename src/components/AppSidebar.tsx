@@ -24,7 +24,6 @@ import { cn } from "@/lib/utils";
 
 interface NavItemProps {
 	to: string;
-	search?: Record<string, string>;
 	label: string;
 	icon: React.ReactNode;
 	badge?: string;
@@ -32,29 +31,19 @@ interface NavItemProps {
 	exact?: boolean;
 }
 
-function SidebarNavItem({ to, search, label, icon, badge, onClick, exact }: NavItemProps) {
+function SidebarNavItem({ to, label, icon, badge, onClick, exact }: NavItemProps) {
 	const location = useLocation();
 
-	// Check if active based on path and search tab
 	const isActive = (() => {
-		if (search?.tab) {
-			const currentTab = new URLSearchParams(location.search).get("tab");
-			return location.pathname === to && currentTab === search.tab;
-		}
-		if (to === "/client" && !search?.tab) {
-			const currentTab = new URLSearchParams(location.search).get("tab");
-			return location.pathname === to && (!currentTab || currentTab === "overview");
-		}
 		if (exact || to === "/") {
 			return location.pathname === to;
 		}
-		return location.pathname.startsWith(to);
+		return location.pathname === to || location.pathname.startsWith(to + "/");
 	})();
 
 	return (
 		<Link
 			to={to}
-			search={search}
 			onClick={onClick}
 			className={cn(
 				"group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium transition-all",
@@ -116,34 +105,35 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 			{/* Navigation Section List */}
 			<div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-4 scrollbar-thin">
-				{/* 1. Client Category */}
+				{/* 1. Client Category (Always visible to all users) */}
 				<div className="space-y-1">
 					<div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
-						客户端 (Client)
+						桌面客户端 (Client)
 					</div>
 					<SidebarNavItem
-						to="/client"
+						to="/"
+						exact
 						label="连接"
 						icon={<Gamepad2 className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
 					<SidebarNavItem
-						to="/client"
-						search={{ tab: "logs" }}
+						to="/logs"
+						exact
 						label="运行日志"
 						icon={<Terminal className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
 					<SidebarNavItem
-						to="/client"
-						search={{ tab: "settings" }}
+						to="/settings"
+						exact
 						label="隧道配置"
 						icon={<Settings2 className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
 				</div>
 
-				{/* 2. Admin Control Panel Category (Shown only if isAdmin is true) */}
+				{/* 2. Admin Control Panel Category (Shown ONLY if isAdmin is true) */}
 				{isAdmin ? (
 					<div className="space-y-1 pt-1 border-t border-border/50">
 						<button
@@ -171,38 +161,38 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 						{adminExpanded ? (
 							<div className="space-y-0.5 pl-1.5 border-l border-primary/20 ml-2">
 								<SidebarNavItem
-									to="/"
+									to="/admin"
 									exact
 									label="系统概览"
 									icon={<Activity className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
-									to="/nodes"
+									to="/admin/nodes"
 									label="节点管理"
 									icon={<Box className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
-									to="/connections"
+									to="/admin/connections"
 									label="实时连接"
 									icon={<Cable className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
-									to="/tunnel-services"
+									to="/admin/tunnel-services"
 									label="隧道服务"
 									icon={<Unplug className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
-									to="/runtime"
+									to="/admin/runtime"
 									label="运行时监控"
 									icon={<Gauge className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
-									to="/users"
+									to="/admin/users"
 									label="用户与权限"
 									icon={<Users className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
@@ -267,11 +257,11 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							<span>未连接远端节点</span>
 						</div>
 						<Link
-							to="/client"
+							to="/"
 							onClick={onNavigate}
 							className="inline-flex h-6 w-full items-center justify-center gap-1 rounded bg-primary/10 px-2 text-[10px] font-semibold text-primary hover:bg-primary/20 transition"
 						>
-							<span>输入远端链接</span>
+							<span>配置远端连接</span>
 						</Link>
 					</div>
 				)}

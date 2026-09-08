@@ -10,7 +10,9 @@ import { Minus, Square, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import Header from "@/components/Header";
+import { ClientModals } from "@/components/client/ClientModals";
 import { Button } from "@/components/ui/button";
+import { ClientProvider } from "@/context/ClientContext";
 import { setupDeepLinkListener } from "@/lib/deepLink";
 import { exchangeGitHubCode, getClientStatus } from "@/lib/managementApi";
 import {
@@ -122,7 +124,6 @@ function RootContent() {
 	const { connection, saveConnection } = usePanelSession();
 
 	const isDesktop = useMemo(() => isDesktopApp(), []);
-	const isClientPage = location.pathname === "/client";
 
 	useEffect(() => {
 		return setupDeepLinkListener((payload) => {
@@ -134,7 +135,7 @@ function RootContent() {
 				});
 				window.dispatchEvent(new CustomEvent("prism:deep-link-auth", { detail: payload }));
 				if (location.pathname === "/login") {
-					void navigate({ to: "/" });
+					void navigate({ to: payload.role === "admin" ? "/admin" : "/" });
 				}
 			} else if (payload.kind === "auth-code") {
 				window.dispatchEvent(
@@ -194,7 +195,7 @@ function RootContent() {
 								}),
 							);
 							if (location.pathname === "/login") {
-								void navigate({ to: "/" });
+								void navigate({ to: res.user.role === "admin" ? "/admin" : "/" });
 							}
 							return;
 						} catch (err) {
@@ -245,15 +246,7 @@ function RootContent() {
 			<div className="flex-1 min-h-0 flex overflow-hidden">
 				<Header />
 				<main className="flex-1 min-w-0 h-full overflow-hidden bg-background md:pt-0 pt-12 flex flex-col">
-					{isClientPage ? (
-						<Outlet />
-					) : (
-						<div className="flex-1 min-h-0 overflow-y-auto bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
-							<div className="mx-auto max-w-7xl">
-								<Outlet />
-							</div>
-						</div>
-					)}
+					<Outlet />
 				</main>
 			</div>
 		</div>
@@ -262,13 +255,16 @@ function RootContent() {
 
 function RootDocument() {
 	return (
-		<html lang="en" className="dark">
+		<html lang="zh-CN" className="dark">
 			<head>
 				<HeadContent />
 			</head>
 			<body className="min-h-screen bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary">
 				<PanelSessionProvider>
-					<RootContent />
+					<ClientProvider>
+						<RootContent />
+						<ClientModals />
+					</ClientProvider>
 				</PanelSessionProvider>
 				<Scripts />
 			</body>

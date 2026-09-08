@@ -15,9 +15,9 @@ import { getManagedNodes, type ManagedNodeSnapshot } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
 
-export const Route = createFileRoute("/nodes/")({ component: NodesIndexPage });
+export const Route = createFileRoute("/admin/nodes/")({ component: AdminNodesIndexPage });
 
-function NodesIndexPage() {
+function AdminNodesIndexPage() {
 	const { connection, ready } = usePanelSession();
 	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
 	const [loading, setLoading] = useState(false);
@@ -132,7 +132,7 @@ function NodesIndexPage() {
 				{filtered.map((node) => (
 					<Link
 						key={node.node_id}
-						to="/nodes/$nodeId"
+						to="/admin/nodes/$nodeId"
 						params={{ nodeId: node.node_id }}
 						className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 transition hover:border-cyan-400/25 hover:bg-cyan-400/8"
 					>

@@ -41,7 +41,7 @@ function LoginPage() {
 				};
 				saveConnection(nextConnection);
 				window.history.replaceState(null, "", window.location.pathname);
-				void navigate({ to: "/" });
+				void navigate({ to: "/admin" });
 			}
 		}
 	}, [baseUrl, navigate, saveConnection]);
@@ -86,7 +86,7 @@ function LoginPage() {
 			await getHealth(nextConnection);
 			await getManagementStatus(nextConnection);
 			saveConnection(nextConnection);
-			navigate({ to: "/" });
+			navigate({ to: "/admin" });
 		} catch (nextError) {
 			setError(nextError instanceof Error ? nextError.message : String(nextError));
 		} finally {

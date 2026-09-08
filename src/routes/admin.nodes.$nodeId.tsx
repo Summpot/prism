@@ -20,11 +20,11 @@ import {
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 
-export const Route = createFileRoute("/nodes/$nodeId")({
-	component: NodeDetailPage,
+export const Route = createFileRoute("/admin/nodes/$nodeId")({
+	component: AdminNodeDetailPage,
 });
 
-function NodeDetailPage() {
+function AdminNodeDetailPage() {
 	const params = Route.useParams();
 	const { connection, ready } = usePanelSession();
 	const [data, setData] = useState<ManagedNodeConfigResponse | null>(null);
@@ -91,7 +91,7 @@ function NodeDetailPage() {
 		return (
 			<div className="space-y-4">
 				<Link
-					to="/nodes"
+					to="/admin/nodes"
 					className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
 				>
 					<ArrowLeft className="h-4 w-4" />
@@ -108,7 +108,7 @@ function NodeDetailPage() {
 	return (
 		<div className="space-y-6">
 			<Link
-				to="/nodes"
+				to="/admin/nodes"
 				className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
 			>
 				<ArrowLeft className="h-4 w-4" />

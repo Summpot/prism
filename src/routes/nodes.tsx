@@ -1,7 +1,8 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/nodes")({ component: NodesLayout });
-
-function NodesLayout() {
-	return <Outlet />;
-}
+export const Route = createFileRoute("/nodes")({
+	beforeLoad: () => {
+		throw redirect({ to: "/admin/nodes" });
+	},
+	component: () => null,
+});

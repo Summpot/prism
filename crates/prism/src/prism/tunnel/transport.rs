@@ -39,15 +39,30 @@ pub struct WebSocketDialOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct WebTransportListenOptions {
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebTransportDialOptions {
+    #[allow(dead_code)]
+    pub server_name: String,
+    pub insecure_skip_verify: bool,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct TransportListenOptions {
     pub quic: QuicListenOptions,
     pub websocket: WebSocketListenOptions,
+    pub webtransport: WebTransportListenOptions,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TransportDialOptions {
     pub quic: QuicDialOptions,
     pub websocket: WebSocketDialOptions,
+    pub webtransport: WebTransportDialOptions,
 }
 
 #[async_trait]
@@ -84,16 +99,18 @@ pub trait TransportSession: Send + Sync {
 }
 
 pub fn parse_transport(name: &str) -> anyhow::Result<String> {
-    let mut n = name.trim().to_ascii_lowercase();
-    if n.is_empty() {
-        n = "tcp".into();
+    let n = name.trim().to_ascii_lowercase();
+    if n.is_empty() || n == "auto" {
+        return Ok("auto".into());
     }
     match n.as_str() {
+        "auto" => Ok("auto".into()),
         "tcp" | "udp" | "quic" => Ok(n),
         "ws" | "websocket" => Ok("websocket".into()),
         "wss" => Ok("wss".into()),
+        "webtransport" | "wt" => Ok("webtransport".into()),
         _ => anyhow::bail!(
-            "tunnel: unknown transport {name:?} (expected tcp|udp|quic|websocket|ws|wss)"
+            "tunnel: unknown transport {name:?} (expected auto|webtransport|wt|tcp|udp|quic|websocket|ws|wss)"
         ),
     }
 }
@@ -109,6 +126,7 @@ pub mod quic;
 pub mod tcp;
 pub mod udp;
 pub mod websocket;
+pub mod webtransport;
 
 pub fn transport_by_name(name: &str) -> anyhow::Result<Arc<dyn Transport>> {
     let n = parse_transport(name)?;
@@ -118,6 +136,7 @@ pub fn transport_by_name(name: &str) -> anyhow::Result<Arc<dyn Transport>> {
         "udp" => Ok(Arc::new(udp::UdpTransport::new())),
         "websocket" => Ok(Arc::new(websocket::WsTransport::new(false))),
         "wss" => Ok(Arc::new(websocket::WsTransport::new(true))),
+        "webtransport" => Ok(Arc::new(webtransport::WebTransportTransport::new())),
         _ => unreachable!(),
     }
 }

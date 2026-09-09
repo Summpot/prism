@@ -28,6 +28,10 @@ export interface ManagedTunnelEndpointDocument {
 		key_file?: string | null;
 		url_path?: string | null;
 	} | null;
+	webtransport?: {
+		cert_file?: string | null;
+		key_file?: string | null;
+	} | null;
 }
 
 export interface ManagedTunnelClientDocument {
@@ -41,6 +45,11 @@ export interface ManagedTunnelClientDocument {
 	websocket?: {
 		insecure_skip_verify: boolean;
 	} | null;
+	webtransport?: {
+		server_name?: string | null;
+		insecure_skip_verify: boolean;
+	} | null;
+	doh_servers?: string[] | null;
 }
 
 export interface ManagedTunnelServiceDocument {

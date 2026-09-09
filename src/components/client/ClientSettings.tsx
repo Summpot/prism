@@ -57,8 +57,8 @@ export function ClientSettings() {
 						onClick={() => {
 							const id = `profile-${Date.now()}`;
 							setProfileName("New Profile");
-							setServerAddr("127.0.0.1:7000");
-							setTransport("quic");
+							setServerAddr("relay.example.com");
+							setTransport("auto");
 							setListenAddr("127.0.0.1:25565");
 							setFakeLanBroadcast(true);
 							handleSelectProfile(id);
@@ -192,7 +192,7 @@ export function ClientSettings() {
 								<Input
 									value={serverAddr}
 									onChange={(e) => setServerAddr(e.target.value)}
-									placeholder="relay.example.com:7000"
+									placeholder="relay.example.com (端口可选，自动解析 SVCB)"
 									className="h-8 text-xs font-mono"
 								/>
 							</div>
@@ -214,9 +214,11 @@ export function ClientSettings() {
 									}}
 									className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
 								>
-									<option value="quic">QUIC (极速抗丢包，推荐)</option>
-									<option value="kcp">KCP (低延迟 UDP)</option>
+									<option value="auto">Auto (SVCB/HTTPS 自动协商与回退，推荐)</option>
+									<option value="webtransport">WebTransport (HTTP/3 over QUIC)</option>
+									<option value="quic">QUIC (极速抗丢包)</option>
 									<option value="tcp">TCP (标准流传输)</option>
+									<option value="kcp">KCP (低延迟 UDP)</option>
 									<option value="websocket">WebSocket (穿透受限网络)</option>
 								</select>
 							</div>

@@ -38,7 +38,7 @@ export function usePrismLink({
 	onConnectFromLink,
 }: UsePrismLinkProps) {
 	const [remoteLinkInput, setRemoteLinkInput] = useState("");
-	const [linkProtocol, setLinkProtocol] = useState<string>("quic://");
+	const [linkProtocol, setLinkProtocol] = useState<string>("auto://");
 	const [copied, setCopied] = useState<string | null>(null);
 
 	// Import modal state

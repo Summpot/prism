@@ -20,6 +20,12 @@ pub struct WebSocketServerOptions {
     pub key_file: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct WebTransportServerOptions {
+    pub cert_file: String,
+    pub key_file: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
     pub listen_addr: String,
@@ -27,6 +33,7 @@ pub struct ServerOptions {
     pub auth_token: String,
     pub quic: QuicServerOptions,
     pub websocket: WebSocketServerOptions,
+    pub webtransport: WebTransportServerOptions,
     pub manager: Arc<Manager>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
     pub admin_addr: Option<std::net::SocketAddr>,
@@ -64,6 +71,10 @@ impl Server {
                     websocket: crate::prism::tunnel::transport::WebSocketListenOptions {
                         cert_file: self.opts.websocket.cert_file.clone(),
                         key_file: self.opts.websocket.key_file.clone(),
+                    },
+                    webtransport: crate::prism::tunnel::transport::WebTransportListenOptions {
+                        cert_file: self.opts.webtransport.cert_file.clone(),
+                        key_file: self.opts.webtransport.key_file.clone(),
                     },
                 },
             )

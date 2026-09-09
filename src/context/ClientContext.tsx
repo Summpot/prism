@@ -8,6 +8,7 @@ import { openExternalUrl } from "@/lib/desktopWindow";
 import {
 	exchangeGitHubCode,
 	getAuthProviders,
+	getClientStatus,
 	getGitHubLoginUrl,
 	resetClientStats,
 	saveClientConfig,
@@ -57,9 +58,9 @@ export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
 	selectedProfileId: "",
 	profileName: "Default Realm",
 	setProfileName: () => {},
-	serverAddr: "127.0.0.1:7000",
+	serverAddr: "127.0.0.1",
 	setServerAddr: () => {},
-	transport: "quic",
+	transport: "auto",
 	setTransport: () => {},
 	authToken: "",
 	setAuthToken: () => {},
@@ -76,7 +77,7 @@ export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
 
 	remoteLinkInput: "",
 	setRemoteLinkInput: () => {},
-	linkProtocol: "quic://",
+	linkProtocol: "auto://",
 	setLinkProtocol: () => {},
 	handleSelectProtocol: () => {},
 	handleAddressChange: () => {},
@@ -477,7 +478,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 			const resolved = resolveRemoteConnection(raw);
 			const targetServerAddr = resolved.serverAddr;
-			const targetTransport = resolved.transport || "quic";
+			const targetTransport = resolved.transport || "auto";
 			setServerAddr(targetServerAddr);
 			setTransport(targetTransport);
 			const matched = SUPPORTED_LINK_PROTOCOLS.find((p) => p.transport === targetTransport);

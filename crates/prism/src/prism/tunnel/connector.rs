@@ -23,7 +23,7 @@ use crate::prism::tunnel::{
         OptimizedWriter, TrafficDirection,
     },
     protocol::{self, ProxyStreamKind, RegisterRequest, RegisteredService},
-    transport::{BoxedStream, TransportDialOptions, transport_by_name},
+    transport::{BoxedStream, TransportDialOptions},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +49,7 @@ pub struct ConnectorOptions {
     pub websocket: WebSocketConnectorOptions,
     pub middleware_dir: Option<PathBuf>,
     pub optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    pub doh_servers: Vec<String>,
 }
 
 pub struct Connector {
@@ -126,27 +127,37 @@ impl Connector {
         &self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
-        let tr = transport_by_name(&self.opts.transport)?;
-
-        let dial = async {
-            tr.dial(
-                &self.opts.server_addr,
-                TransportDialOptions {
-                    quic: crate::prism::tunnel::transport::QuicDialOptions {
-                        server_name: self.opts.quic.server_name.clone(),
-                        insecure_skip_verify: self.opts.quic.insecure_skip_verify,
-                        next_protos: vec![],
-                    },
-                    websocket: crate::prism::tunnel::transport::WebSocketDialOptions {
-                        server_name: self.opts.websocket.server_name.clone(),
-                        insecure_skip_verify: self.opts.websocket.insecure_skip_verify,
-                    },
-                },
-            )
-            .await
+        let dial_opts = TransportDialOptions {
+            quic: crate::prism::tunnel::transport::QuicDialOptions {
+                server_name: self.opts.quic.server_name.clone(),
+                insecure_skip_verify: self.opts.quic.insecure_skip_verify,
+                next_protos: vec![],
+            },
+            websocket: crate::prism::tunnel::transport::WebSocketDialOptions {
+                server_name: self.opts.websocket.server_name.clone(),
+                insecure_skip_verify: self.opts.websocket.insecure_skip_verify,
+            },
+            webtransport: crate::prism::tunnel::transport::WebTransportDialOptions {
+                server_name: self.opts.quic.server_name.clone(),
+                insecure_skip_verify: self.opts.quic.insecure_skip_verify,
+            },
         };
 
-        let sess = tokio::time::timeout(self.opts.dial_timeout, dial).await??;
+        let doh_refs: Vec<&str> = self.opts.doh_servers.iter().map(|s| s.as_str()).collect();
+        let custom_doh = if doh_refs.is_empty() { None } else { Some(doh_refs.as_slice()) };
+        let candidates = crate::prism::tunnel::negotiator::resolve_candidates(
+            &self.opts.server_addr,
+            Some(&self.opts.transport),
+            custom_doh,
+        )
+        .await?;
+
+        let (sess, chosen) = crate::prism::tunnel::negotiator::dial_with_fallback(
+            &candidates,
+            self.opts.dial_timeout,
+            &dial_opts,
+        )
+        .await?;
 
         // Register on first stream
         let mut reg = sess.open_stream().await?;
@@ -159,9 +170,10 @@ impl Connector {
         reg.shutdown().await?;
 
         tracing::info!(
-            transport=%tr.name(),
-            server=%self.opts.server_addr,
-            services=self.opts.services.len(),
+            transport = %chosen.protocol,
+            port = chosen.port,
+            server = %self.opts.server_addr,
+            services = self.opts.services.len(),
             "tunnel: connector registered"
         );
 

@@ -83,6 +83,11 @@ transport = "quic"
 cert_file = ""
 key_file = ""
 
+# Example WebTransport tunnel endpoint (HTTP/3 over QUIC):
+# [[tunnel.endpoints]]
+# listen_addr = ":443"
+# transport = "webtransport"
+#
 # Example WebSocket tunnel endpoint (ws or wss):
 # [[tunnel.endpoints]]
 # listen_addr = ":7002"
@@ -95,12 +100,12 @@ key_file = ""
 # key_file = ""
 
 # ============================================================================
-# ACME Automated Certificate Management (Cloudflare DNS-01)
+# ACME Automated Certificate Management & Cloudflare DNS SVCB Records
 # ============================================================================
 # Automatically acquires and renews trusted TLS certificates via RFC 8555 (Let's Encrypt)
-# using Cloudflare DNS-01 challenge. This enables trusted TLS certificates for
-# QUIC and WSS tunnel endpoints, including wildcard and apex domains, without needing
-# to expose HTTP port 80.
+# using Cloudflare DNS-01 challenge. Automatically publishes RFC 9460 HTTPS/SVCB
+# DNS records for WebTransport/QUIC/WSS endpoints, enabling portless client connections
+# and automatic protocol negotiation.
 #
 # [acme]
 # enabled = false
@@ -127,8 +132,8 @@ key_file = ""
 # Optional: tunnel connector host role (uncomment to expose private services).
 #
 # [tunnel.connector]
-# server_addr = "relay.example.com:7000"
-# transport = "quic" # tcp | udp | quic | websocket | wss
+# server_addr = "relay.example.com" # Port is optional when SVCB is published!
+# transport = "auto" # auto | webtransport | quic | websocket | tcp | udp
 # auth_token = "cluster-secret-token"
 # dial_timeout_ms = 5000
 #
@@ -160,8 +165,8 @@ key_file = ""
 # Optional: terminal client sidecar role (uncomment to enable client access).
 #
 # [tunnel.client]
-# server_addr = "relay.example.com:7000"
-# transport = "quic" # tcp | quic | kcp | websocket | wss
+# server_addr = "relay.example.com" # Port is optional when SVCB is published!
+# transport = "auto" # auto | webtransport | quic | websocket | tcp | udp
 # auth_token = "cluster-secret-token"
 # listen_addr = "127.0.0.1:25565"
 # middleware = "minecraft"

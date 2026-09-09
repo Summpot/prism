@@ -17,8 +17,8 @@ interface UseClientProfilesOptions {
 export function useClientProfiles(options?: UseClientProfilesOptions) {
 	const [profiles, setProfiles] = useState<ClientProfile[]>([]);
 	const [selectedProfileId, setSelectedProfileId] = useState<string>("");
-	const [serverAddr, setServerAddr] = useState("127.0.0.1:7000");
-	const [transport, setTransport] = useState("quic");
+	const [serverAddr, setServerAddr] = useState("127.0.0.1");
+	const [transport, setTransport] = useState("auto");
 	const [authToken, setAuthToken] = useState("");
 	const [listenAddr, setListenAddr] = useState("127.0.0.1:25565");
 	const [fakeLanBroadcast, setFakeLanBroadcast] = useState(true);
@@ -46,12 +46,12 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 					configLoadedRef.current = true;
 					if (resp.active_config) {
 						setProfileName(resp.active_config.profile_name || "Default Realm");
-						const sAddr = resp.active_config.server_addr || "127.0.0.1:7000";
+						const sAddr = resp.active_config.server_addr || "127.0.0.1";
 						setServerAddr(sAddr);
 						if (options?.onRemoteLinkInputSync) {
 							options.onRemoteLinkInputSync(sAddr);
 						}
-						setTransport(resp.active_config.transport || "quic");
+						setTransport(resp.active_config.transport || "auto");
 						setAuthToken(resp.active_config.auth_token || "");
 						setListenAddr(resp.active_config.listen_addr || "127.0.0.1:25565");
 						setFakeLanBroadcast(resp.active_config.fake_lan_broadcast ?? true);

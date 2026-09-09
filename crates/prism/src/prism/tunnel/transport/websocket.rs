@@ -653,6 +653,7 @@ mod tests {
             auth_token: "ws-secret".into(),
             quic: Default::default(),
             websocket: Default::default(),
+            webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
             admin_addr: None,
@@ -686,6 +687,7 @@ mod tests {
             websocket: Default::default(),
             middleware_dir: None,
             optimizer: None,
+            doh_servers: Vec::new(),
         })?;
 
         let conn_shutdown = shutdown_rx.clone();

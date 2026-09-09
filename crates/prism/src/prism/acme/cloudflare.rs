@@ -41,6 +41,40 @@ struct CreateDnsRecordRequest<'a> {
     ttl: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SvcbRecordData {
+    pub priority: u16,
+    pub target: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateSvcbDnsRecordRequest<'a> {
+    #[serde(rename = "type")]
+    record_type: &'a str,
+    name: &'a str,
+    ttl: u32,
+    data: SvcbRecordData,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CfDnsRecord<T> {
+    pub id: String,
+    #[serde(rename = "type")]
+    #[allow(dead_code)]
+    pub record_type: String,
+    #[allow(dead_code)]
+    pub name: String,
+    pub data: Option<T>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedEndpoint {
+    pub priority: u16,
+    pub port: u16,
+    pub alpn: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct DnsRecordResult {
     id: String,
@@ -48,16 +82,17 @@ struct DnsRecordResult {
 
 #[derive(Debug, Deserialize)]
 struct DohResponse {
-    #[serde(rename = "Status")]
+    #[serde(rename = "Status", alias = "status")]
     status: Option<i32>,
-    #[serde(rename = "Answer", default)]
+    #[serde(rename = "Answer", alias = "answer", default)]
     answer: Vec<DohAnswer>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DohAnswer {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", alias = "Type")]
     record_type: Option<u16>,
+    #[serde(rename = "data", alias = "Data")]
     data: String,
 }
 
@@ -263,6 +298,189 @@ impl CloudflareClient {
         Ok(())
     }
 
+    /// List HTTPS DNS records for a given domain in the zone.
+    pub async fn list_https_records(
+        &self,
+        zone_id: &str,
+        record_name: &str,
+    ) -> Result<Vec<CfDnsRecord<SvcbRecordData>>> {
+        let clean_name = record_name.trim().trim_end_matches('.');
+        let url = format!(
+            "{}/zones/{zone_id}/dns_records?type=HTTPS&name={clean_name}",
+            self.api_base_url
+        );
+
+        let resp = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_token))
+            .send()
+            .await
+            .context("send Cloudflare list HTTPS DNS records request")?;
+
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        let cf_resp: CfResponse<Vec<CfDnsRecord<SvcbRecordData>>> = serde_json::from_str(&body_text)
+            .with_context(|| format!("parse Cloudflare response (status {status}): {body_text}"))?;
+
+        if !cf_resp.success {
+            let err_msgs = cf_resp
+                .errors
+                .into_iter()
+                .map(|e| e.message)
+                .collect::<Vec<_>>()
+                .join("; ");
+            bail!("Cloudflare API error listing HTTPS records: {err_msgs}");
+        }
+
+        Ok(cf_resp.result.unwrap_or_default())
+    }
+
+    /// Publish or update an HTTPS / SVCB DNS record in Cloudflare.
+    pub async fn publish_https_record(
+        &self,
+        zone_id: &str,
+        record_name: &str,
+        priority: u16,
+        target: &str,
+        value: &str,
+    ) -> Result<String> {
+        let clean_name = record_name.trim().trim_end_matches('.');
+        let existing = self.list_https_records(zone_id, clean_name).await.unwrap_or_default();
+
+        let matching = existing.into_iter().find(|r| {
+            r.data.as_ref().map(|d| d.priority == priority).unwrap_or(false)
+        });
+
+        let data = SvcbRecordData {
+            priority,
+            target: target.to_string(),
+            value: value.to_string(),
+        };
+
+        if let Some(record) = matching {
+            let url = format!("{}/zones/{zone_id}/dns_records/{}", self.api_base_url, record.id);
+            let body = CreateSvcbDnsRecordRequest {
+                record_type: "HTTPS",
+                name: clean_name,
+                ttl: 300,
+                data,
+            };
+
+            let resp = self
+                .http_client
+                .put(&url)
+                .header("Authorization", format!("Bearer {}", self.api_token))
+                .json(&body)
+                .send()
+                .await
+                .context("send Cloudflare update HTTPS DNS record request")?;
+
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            let cf_resp: CfResponse<DnsRecordResult> = serde_json::from_str(&body_text)
+                .with_context(|| format!("parse Cloudflare response (status {status}): {body_text}"))?;
+
+            if !cf_resp.success {
+                let err_msgs = cf_resp.errors.into_iter().map(|e| e.message).collect::<Vec<_>>().join("; ");
+                bail!("Cloudflare API error updating HTTPS record: {err_msgs}");
+            }
+
+            tracing::info!(
+                zone_id = %zone_id,
+                record_name = %clean_name,
+                priority = priority,
+                value = %value,
+                "Cloudflare: updated HTTPS/SVCB DNS record"
+            );
+            Ok(record.id)
+        } else {
+            let url = format!("{}/zones/{zone_id}/dns_records", self.api_base_url);
+            let body = CreateSvcbDnsRecordRequest {
+                record_type: "HTTPS",
+                name: clean_name,
+                ttl: 300,
+                data,
+            };
+
+            let resp = self
+                .http_client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_token))
+                .json(&body)
+                .send()
+                .await
+                .context("send Cloudflare create HTTPS DNS record request")?;
+
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            let cf_resp: CfResponse<DnsRecordResult> = serde_json::from_str(&body_text)
+                .with_context(|| format!("parse Cloudflare response (status {status}): {body_text}"))?;
+
+            if !cf_resp.success {
+                let err_msgs = cf_resp.errors.into_iter().map(|e| e.message).collect::<Vec<_>>().join("; ");
+                bail!("Cloudflare API error creating HTTPS record: {err_msgs}");
+            }
+
+            let record_id = cf_resp
+                .result
+                .map(|r| r.id)
+                .ok_or_else(|| anyhow::anyhow!("missing record id in Cloudflare response"))?;
+
+            tracing::info!(
+                zone_id = %zone_id,
+                record_name = %clean_name,
+                priority = priority,
+                value = %value,
+                record_id = %record_id,
+                "Cloudflare: created HTTPS/SVCB DNS record"
+            );
+            Ok(record_id)
+        }
+    }
+
+    /// Synchronize all published endpoints into Cloudflare HTTPS records.
+    pub async fn sync_endpoint_svcb_records(
+        &self,
+        zone_id: &str,
+        domain: &str,
+        endpoints: &[PublishedEndpoint],
+    ) -> Result<()> {
+        let clean_domain = domain.trim().trim_start_matches("*.").trim_end_matches('.');
+        for ep in endpoints {
+            let value = format!("alpn=\"{}\" port={}", ep.alpn, ep.port);
+            self.publish_https_record(zone_id, clean_domain, ep.priority, ".", &value).await?;
+        }
+        Ok(())
+    }
+
+    /// Query DoH for HTTPS (type 65) records.
+    #[allow(dead_code)]
+    pub async fn query_doh_https(&self, domain: &str) -> Result<Vec<String>> {
+        let clean_domain = domain.trim().trim_end_matches('.');
+        let url = format!("{}?name={clean_domain}&type=HTTPS", self.doh_base_url);
+        let resp = self
+            .http_client
+            .get(&url)
+            .header("Accept", "application/dns-json")
+            .send()
+            .await
+            .context("query Cloudflare DoH for HTTPS record")?;
+
+        if !resp.status().is_success() {
+            bail!("DoH query failed with status {}", resp.status());
+        }
+
+        let doh: DohResponse = resp.json().await.context("parse DoH response")?;
+        let mut results = Vec::new();
+        for ans in doh.answer {
+            if ans.record_type == Some(65) || ans.record_type.is_none() {
+                results.push(ans.data);
+            }
+        }
+        Ok(results)
+    }
+
     /// Poll Cloudflare DNS over HTTPS to verify the TXT record has propagated.
     pub async fn wait_for_propagation(
         &self,
@@ -280,32 +498,57 @@ impl CloudflareClient {
             "Cloudflare: waiting for DNS TXT propagation"
         );
 
-        while start.elapsed() < timeout {
-            let url = format!("{}?name={}&type=TXT", self.doh_base_url, record_name);
-            let resp = self
-                .http_client
-                .get(&url)
-                .header("Accept", "application/dns-json")
-                .send()
-                .await;
+        let mut endpoints: Vec<String> = vec![self.doh_base_url.clone()];
+        if !self.doh_base_url.starts_with("http://127.0.0.1") && !self.doh_base_url.starts_with("http://localhost") {
+            endpoints.extend([
+                "https://1.1.1.1/dns-query".to_string(),
+                "https://8.8.8.8/resolve".to_string(),
+                "https://dns.google/resolve".to_string(),
+                "https://223.5.5.5/resolve".to_string(),
+                "https://dns.alidns.com/resolve".to_string(),
+            ]);
+        }
 
-            if let Ok(res) = resp {
-                if res.status().is_success() {
-                    if let Ok(doh) = res.json::<DohResponse>().await {
-                        if doh.status == Some(0) {
-                            for ans in doh.answer {
-                                // TXT type code is 16
-                                if ans.record_type == Some(16) || ans.record_type.is_none() {
-                                    let content = ans.data.trim().trim_matches('"');
-                                    if content == expected_clean {
-                                        tracing::info!(
-                                            record = %record_name,
-                                            elapsed_secs = start.elapsed().as_secs(),
-                                            "Cloudflare: DNS TXT propagation verified"
-                                        );
-                                        // Wait an extra 3 seconds for external recursive resolvers
-                                        tokio::time::sleep(Duration::from_secs(3)).await;
-                                        return Ok(());
+        while start.elapsed() < timeout {
+            use futures_util::stream::FuturesUnordered;
+            use futures_util::StreamExt;
+
+            let mut tasks = FuturesUnordered::new();
+            for ep in &endpoints {
+                let url = format!("{ep}?name={record_name}&type=TXT");
+                let client = self.http_client.clone();
+                let ep_str = ep.clone();
+                tasks.push(async move {
+                    let resp = client
+                        .get(&url)
+                        .header("Accept", "application/dns-json, application/json")
+                        .header("User-Agent", "prism/0.1.0")
+                        .send()
+                        .await;
+                    (ep_str, resp)
+                });
+            }
+
+            while let Some((ep, resp)) = tasks.next().await {
+                if let Ok(res) = resp {
+                    if res.status().is_success() {
+                        if let Ok(doh) = res.json::<DohResponse>().await {
+                            if doh.status == Some(0) {
+                                for ans in doh.answer {
+                                    // TXT type code is 16
+                                    if ans.record_type == Some(16) || ans.record_type.is_none() {
+                                        let content = ans.data.trim().trim_matches('"');
+                                        if content == expected_clean {
+                                            tracing::info!(
+                                                record = %record_name,
+                                                doh = %ep,
+                                                elapsed_secs = start.elapsed().as_secs(),
+                                                "Cloudflare: DNS TXT propagation verified via concurrent DoH"
+                                            );
+                                            // Wait an extra 3 seconds for external recursive resolvers
+                                            tokio::time::sleep(Duration::from_secs(3)).await;
+                                            return Ok(());
+                                        }
                                     }
                                 }
                             }

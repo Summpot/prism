@@ -31,7 +31,6 @@ use crate::prism::tunnel::protocol::{
 };
 use crate::prism::tunnel::transport::{
     QuicDialOptions, TransportDialOptions, TransportSession, WebSocketDialOptions,
-    transport_by_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -416,37 +415,54 @@ impl Client {
         local_port: u16,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
-        let tr = transport_by_name(&self.config.transport)?;
-
-        let dial = async {
-            tr.dial(
-                &self.config.server_addr,
-                TransportDialOptions {
-                    quic: QuicDialOptions {
-                        server_name: String::new(),
-                        insecure_skip_verify: true,
-                        next_protos: vec![],
-                    },
-                    websocket: WebSocketDialOptions {
-                        server_name: self
-                            .config
-                            .websocket
-                            .as_ref()
-                            .map(|w| w.server_name.clone())
-                            .unwrap_or_default(),
-                        insecure_skip_verify: self
-                            .config
-                            .websocket
-                            .as_ref()
-                            .map(|w| w.insecure_skip_verify)
-                            .unwrap_or(true),
-                    },
-                },
-            )
-            .await
+        let dial_opts = TransportDialOptions {
+            quic: QuicDialOptions {
+                server_name: String::new(),
+                insecure_skip_verify: true,
+                next_protos: vec![],
+            },
+            websocket: WebSocketDialOptions {
+                server_name: self
+                    .config
+                    .websocket
+                    .as_ref()
+                    .map(|w| w.server_name.clone())
+                    .unwrap_or_default(),
+                insecure_skip_verify: self
+                    .config
+                    .websocket
+                    .as_ref()
+                    .map(|w| w.insecure_skip_verify)
+                    .unwrap_or(true),
+            },
+            webtransport: crate::prism::tunnel::transport::WebTransportDialOptions {
+                server_name: String::new(),
+                insecure_skip_verify: true,
+            },
         };
 
-        let sess = tokio::time::timeout(self.dial_timeout, dial).await??;
+        let doh_refs: Vec<&str> = self.config.doh_servers.iter().map(|s| s.as_str()).collect();
+        let custom_doh = if doh_refs.is_empty() { None } else { Some(doh_refs.as_slice()) };
+        let candidates = crate::prism::tunnel::negotiator::resolve_candidates(
+            &self.config.server_addr,
+            Some(&self.config.transport),
+            custom_doh,
+        )
+        .await?;
+
+        let (sess, chosen) = crate::prism::tunnel::negotiator::dial_with_fallback(
+            &candidates,
+            self.dial_timeout,
+            &dial_opts,
+        )
+        .await?;
+
+        tracing::info!(
+            server = %self.config.server_addr,
+            protocol = %chosen.protocol,
+            port = chosen.port,
+            "Connected to server via negotiated protocol"
+        );
 
         // Register as client
         let mut reg = sess.open_stream().await?;
@@ -1408,6 +1424,7 @@ mod tests {
             motd_prefix: "[Prism] ".into(),
             optimizer: None,
             websocket: None,
+            doh_servers: Vec::new(),
         };
 
         let client = Client::new(cfg).expect("should initialize and compile builtin middleware");
@@ -1449,6 +1466,7 @@ mod tests {
                 key_file: "".into(),
             },
             websocket: Default::default(),
+            webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
             admin_addr: None,
@@ -1487,6 +1505,7 @@ mod tests {
                 websocket: Default::default(),
                 middleware_dir: None,
                 optimizer: None,
+                doh_servers: Vec::new(),
             },
         )
         .unwrap();
@@ -1516,6 +1535,7 @@ mod tests {
                 zstd_window_log: Some(23),
             }),
             websocket: None,
+            doh_servers: Vec::new(),
         })
         .unwrap();
 
@@ -1585,6 +1605,7 @@ mod tests {
             motd_prefix: "".into(),
             optimizer: None,
             websocket: None,
+            doh_servers: Vec::new(),
         };
 
         controller.start(cfg).await.unwrap();
@@ -1646,6 +1667,7 @@ mod tests {
                 key_file: "".into(),
             },
             websocket: Default::default(),
+            webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
             admin_addr: None,
@@ -1689,6 +1711,7 @@ mod tests {
                 websocket: Default::default(),
                 middleware_dir: None,
                 optimizer: None,
+                doh_servers: Vec::new(),
             },
         )
         .unwrap();
@@ -1715,6 +1738,7 @@ mod tests {
             motd_prefix: "[Prism] ".into(),
             optimizer: None, // None! Must auto-adopt from service catalog
             websocket: None,
+            doh_servers: Vec::new(),
         })
         .unwrap();
 
@@ -1813,6 +1837,7 @@ mod tests {
             motd_prefix: "".into(),
             optimizer: None,
             websocket: None,
+            doh_servers: Vec::new(),
         })
         .unwrap();
 
@@ -1874,6 +1899,7 @@ mod tests {
             auth_token: "secret".into(),
             quic: QuicServerOptions::default(),
             websocket: Default::default(),
+            webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
             admin_addr: Some(admin_addr),
@@ -1902,6 +1928,7 @@ mod tests {
                 motd_prefix: "".into(),
                 optimizer: None,
                 websocket: None,
+                doh_servers: Vec::new(),
             })
             .unwrap(),
         );

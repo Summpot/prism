@@ -357,6 +357,7 @@ pub(crate) async fn do_client_start(
         motd_prefix: payload.motd_prefix,
         optimizer: payload.optimizer,
         websocket: None,
+        doh_servers: Vec::new(),
     };
 
     client.start(cfg).await.map_err(|err| err.to_string())

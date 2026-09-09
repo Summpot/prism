@@ -473,6 +473,8 @@ pub struct ManagedTunnelConnectorDocument {
     pub dial_timeout_ms: Option<i64>,
     pub quic: Option<ManagedQuicClientDocument>,
     pub websocket: Option<ManagedWebSocketClientDocument>,
+    #[serde(default)]
+    pub doh_servers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -493,6 +495,8 @@ pub struct ManagedTunnelClientDocument {
     pub optimizer: Option<ManagedOptimizerClientDocument>,
     pub discovery: Option<ManagedClientDiscoveryDocument>,
     pub websocket: Option<ManagedWebSocketClientDocument>,
+    #[serde(default)]
+    pub doh_servers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -676,6 +680,7 @@ pub struct TunnelConnectorConfig {
     pub dial_timeout: Duration,
     pub quic: Option<QuicClientConfig>,
     pub websocket: Option<WebSocketClientConfig>,
+    pub doh_servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -689,6 +694,7 @@ pub struct TunnelClientConfig {
     pub motd_prefix: String,
     pub optimizer: Option<OptimizerClientConfig>,
     pub websocket: Option<WebSocketClientConfig>,
+    pub doh_servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1045,6 +1051,8 @@ struct FileTunnelConnector {
     dial_timeout_ms: Option<i64>,
     quic: Option<FileQuicClient>,
     websocket: Option<FileWebSocketClient>,
+    #[serde(default)]
+    doh_servers: Option<StringOrVec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1060,6 +1068,8 @@ struct FileTunnelClient {
     optimizer: Option<FileOptimizerClient>,
     discovery: Option<FileClientDiscovery>,
     websocket: Option<FileWebSocketClient>,
+    #[serde(default)]
+    doh_servers: Option<StringOrVec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1427,7 +1437,7 @@ impl Config {
                     transport: conn
                         .transport
                         .clone()
-                        .unwrap_or_else(|| "tcp".into())
+                        .unwrap_or_else(|| "auto".into())
                         .trim()
                         .to_ascii_lowercase(),
                     auth_token,
@@ -1443,6 +1453,11 @@ impl Config {
                         server_name: w.server_name.clone().unwrap_or_default().trim().to_string(),
                         insecure_skip_verify: w.insecure_skip_verify,
                     }),
+                    doh_servers: conn
+                        .doh_servers
+                        .clone()
+                        .map(|s| s.into_vec())
+                        .unwrap_or_default(),
                 });
             }
 
@@ -1487,7 +1502,7 @@ impl Config {
                     transport: c
                         .transport
                         .clone()
-                        .unwrap_or_else(|| "tcp".into())
+                        .unwrap_or_else(|| "auto".into())
                         .trim()
                         .to_ascii_lowercase(),
                     auth_token,
@@ -1500,6 +1515,11 @@ impl Config {
                         server_name: w.server_name.clone().unwrap_or_default().trim().to_string(),
                         insecure_skip_verify: w.insecure_skip_verify,
                     }),
+                    doh_servers: c
+                        .doh_servers
+                        .clone()
+                        .map(|s| s.into_vec())
+                        .unwrap_or_default(),
                 });
             }
 
@@ -1929,6 +1949,13 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                         server_name: ws.server_name.clone(),
                         insecure_skip_verify: ws.insecure_skip_verify,
                     }),
+                    doh_servers: connector.doh_servers.as_ref().and_then(|v| {
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some(StringOrVec::Many(v.clone()))
+                        }
+                    }),
                 }),
             client: tunnel.client.as_ref().map(|client| FileTunnelClient {
                 server_addr: client.server_addr.clone(),
@@ -1970,6 +1997,13 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 websocket: client.websocket.as_ref().map(|ws| FileWebSocketClient {
                     server_name: ws.server_name.clone(),
                     insecure_skip_verify: ws.insecure_skip_verify,
+                }),
+                doh_servers: client.doh_servers.as_ref().and_then(|v| {
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(StringOrVec::Many(v.clone()))
+                    }
                 }),
             }),
             services: Some(
@@ -2662,6 +2696,7 @@ zstd_level = 4
                     dial_timeout_ms: Some(5000),
                     quic: None,
                     websocket: None,
+                    doh_servers: None,
                 }),
                 client: Some(ManagedTunnelClientDocument {
                     server_addr: "relay.example.com:7000".into(),
@@ -2674,6 +2709,7 @@ zstd_level = 4
                     optimizer: None,
                     discovery: None,
                     websocket: None,
+                    doh_servers: None,
                 }),
                 ..Default::default()
             }),
@@ -2690,6 +2726,7 @@ zstd_level = 4
                     dial_timeout_ms: Some(5000),
                     quic: None,
                     websocket: None,
+                    doh_servers: None,
                 }),
                 client: Some(ManagedTunnelClientDocument {
                     server_addr: "relay.example.com:7000".into(),
@@ -2702,6 +2739,7 @@ zstd_level = 4
                     optimizer: None,
                     discovery: None,
                     websocket: None,
+                    doh_servers: None,
                 }),
                 ..Default::default()
             }),
@@ -2718,6 +2756,7 @@ zstd_level = 4
                     dial_timeout_ms: Some(5000),
                     quic: None,
                     websocket: None,
+                    doh_servers: None,
                 }),
                 client: Some(ManagedTunnelClientDocument {
                     server_addr: "relay.example.com:7000".into(),
@@ -2730,6 +2769,7 @@ zstd_level = 4
                     optimizer: None,
                     discovery: None,
                     websocket: None,
+                    doh_servers: None,
                 }),
                 ..Default::default()
             }),

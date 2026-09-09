@@ -47,7 +47,7 @@ describe("prismLink", () => {
 		const parsed = parsePrismLink("prism://1.2.3.4:7000");
 		expect(parsed).not.toBeNull();
 		expect(parsed?.server_addr).toBe("1.2.3.4:7000");
-		expect(parsed?.transport).toBe("quic");
+		expect(parsed?.transport).toBe("auto");
 		expect(parsed?.listen_addr).toBe("127.0.0.1:25565");
 		expect(parsed?.fake_lan_broadcast).toBe(true);
 	});
@@ -56,6 +56,7 @@ describe("prismLink", () => {
 		const parsed = parsePrismLink("relay.prism.gg:7000");
 		expect(parsed).not.toBeNull();
 		expect(parsed?.server_addr).toBe("relay.prism.gg:7000");
+		expect(parsed?.transport).toBe("auto");
 	});
 
 	it("returns null for invalid inputs", () => {
@@ -71,19 +72,26 @@ describe("prismLink", () => {
 
 		const fromHttp = resolveRemoteConnection("http://192.168.1.50:8080");
 		expect(fromHttp.managementUrl).toBe("http://192.168.1.50:8080");
-		expect(fromHttp.serverAddr).toBe("192.168.1.50:7000");
+		expect(fromHttp.serverAddr).toBe("192.168.1.50");
+		expect(fromHttp.transport).toBe("auto");
 
 		const fromHost = resolveRemoteConnection("relay.mydomain.org:7000");
 		expect(fromHost.managementUrl).toBe("http://relay.mydomain.org:8080");
 		expect(fromHost.serverAddr).toBe("relay.mydomain.org:7000");
+		expect(fromHost.transport).toBe("auto");
 
 		const fromBare = resolveRemoteConnection("relay.mydomain.org");
 		expect(fromBare.managementUrl).toBe("http://relay.mydomain.org:8080");
-		expect(fromBare.serverAddr).toBe("relay.mydomain.org:7000");
+		expect(fromBare.serverAddr).toBe("relay.mydomain.org");
+		expect(fromBare.transport).toBe("auto");
 
 		const fromQuic = resolveRemoteConnection("quic://play.example.com:7000");
 		expect(fromQuic.serverAddr).toBe("play.example.com:7000");
 		expect(fromQuic.transport).toBe("quic");
+
+		const fromWt = resolveRemoteConnection("wt://play.example.com:7000");
+		expect(fromWt.serverAddr).toBe("play.example.com:7000");
+		expect(fromWt.transport).toBe("webtransport");
 
 		const fromTcp = resolveRemoteConnection("tcp://10.0.0.1:9000");
 		expect(fromTcp.serverAddr).toBe("10.0.0.1:9000");
@@ -100,11 +108,15 @@ describe("prismLink", () => {
 			address: "play.example.com:7000",
 		});
 		expect(extractProtocolAndAddress("prism://play.example.com:7000")).toEqual({
-			protocol: "quic://",
+			protocol: "auto://",
 			address: "play.example.com:7000",
 		});
 		expect(extractProtocolAndAddress("QUIC://node.com:7000")).toEqual({
 			protocol: "quic://",
+			address: "node.com:7000",
+		});
+		expect(extractProtocolAndAddress("wt://node.com:7000")).toEqual({
+			protocol: "wt://",
 			address: "node.com:7000",
 		});
 		expect(extractProtocolAndAddress("tcp://1.2.3.4:7000")).toEqual({

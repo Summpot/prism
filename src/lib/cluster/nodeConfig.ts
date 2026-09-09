@@ -84,6 +84,12 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 						url_path: endpoint.websocket.url_path?.trim() || "",
 					}
 				: undefined,
+			webtransport: endpoint.webtransport
+				? {
+						cert_file: endpoint.webtransport.cert_file?.trim() || "",
+						key_file: endpoint.webtransport.key_file?.trim() || "",
+					}
+				: undefined,
 		}))
 		.filter((endpoint) => endpoint.listen_addr);
 
@@ -101,7 +107,7 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 	const client = tunnel.client?.server_addr.trim()
 		? {
 				server_addr: tunnel.client.server_addr.trim(),
-				transport: tunnel.client.transport.trim() || "tcp",
+				transport: tunnel.client.transport.trim() || "auto",
 				dial_timeout_ms: tunnel.client.dial_timeout_ms ?? 5000,
 				quic: tunnel.client.quic
 					? {
@@ -112,6 +118,12 @@ function normalizeTunnel(tunnel: ManagedTunnelDocument | null | undefined) {
 				websocket: tunnel.client.websocket
 					? {
 							insecure_skip_verify: tunnel.client.websocket.insecure_skip_verify,
+						}
+					: undefined,
+				webtransport: tunnel.client.webtransport
+					? {
+							server_name: tunnel.client.webtransport.server_name?.trim() || "",
+							insecure_skip_verify: tunnel.client.webtransport.insecure_skip_verify,
 						}
 					: undefined,
 			}
@@ -247,10 +259,10 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 					message: "Tunnel endpoint address is required.",
 				});
 			}
-			if (!["tcp", "udp", "quic", "websocket", "ws", "wss"].includes(endpoint.transport)) {
+			if (!["tcp", "udp", "quic", "websocket", "ws", "wss", "webtransport", "wt"].includes(endpoint.transport)) {
 				issues.push({
 					path: `tunnel.endpoints.${index}.transport`,
-					message: "Transport must be tcp, udp, quic, or websocket.",
+					message: "Transport must be tcp, udp, quic, websocket, or webtransport.",
 				});
 			}
 		});
@@ -264,11 +276,11 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 
 		if (
 			tunnel.client &&
-			!["tcp", "udp", "quic", "websocket", "ws", "wss"].includes(tunnel.client.transport)
+			!["auto", "tcp", "udp", "quic", "websocket", "ws", "wss", "webtransport", "wt"].includes(tunnel.client.transport)
 		) {
 			issues.push({
 				path: "tunnel.client.transport",
-				message: "Client transport must be tcp, udp, quic, or websocket.",
+				message: "Client transport must be auto, tcp, udp, quic, websocket, or webtransport.",
 			});
 		}
 

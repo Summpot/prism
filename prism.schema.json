@@ -388,11 +388,32 @@
 				"listen_addr": { "$ref": "#/$defs/nonEmptyString" },
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "udp", "quic", "websocket", "ws", "wss"],
+					"enum": ["tcp", "udp", "quic", "websocket", "ws", "wss", "webtransport", "wt"],
 					"default": "tcp"
 				},
 				"quic": { "$ref": "#/$defs/quicServer" },
-				"websocket": { "$ref": "#/$defs/websocketServer" }
+				"websocket": { "$ref": "#/$defs/websocketServer" },
+				"webtransport": { "$ref": "#/$defs/webtransportServer" }
+			}
+		},
+		"webtransportServer": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"cert_file": {
+					"type": "string",
+					"description": "Path to TLS certificate PEM file. If empty, Prism uses ACME or generates a self-signed cert.",
+					"default": ""
+				},
+				"key_file": {
+					"type": "string",
+					"description": "Path to TLS private key PEM file. If empty, Prism uses ACME or generates a self-signed key.",
+					"default": ""
+				},
+				"use_acme": {
+					"type": "boolean",
+					"description": "Whether this endpoint should use the ACME certificate. Defaults to true when ACME is enabled and cert_file is empty."
+				}
 			}
 		},
 		"websocketServer": {
@@ -442,12 +463,12 @@
 			"properties": {
 				"server_addr": {
 					"$ref": "#/$defs/nonEmptyString",
-					"description": "Tunnel server address."
+					"description": "Tunnel server address (hostname, hostname:port, or domain without port for automatic SVCB discovery)."
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "udp", "quic", "kcp", "websocket", "ws", "wss"],
-					"default": "tcp"
+					"enum": ["auto", "tcp", "udp", "quic", "kcp", "websocket", "ws", "wss", "webtransport", "wt"],
+					"default": "auto"
 				},
 				"auth_token": {
 					"type": "string",
@@ -460,7 +481,12 @@
 					"default": 5000
 				},
 				"quic": { "$ref": "#/$defs/quicClient" },
-				"websocket": { "$ref": "#/$defs/websocketClient" }
+				"websocket": { "$ref": "#/$defs/websocketClient" },
+				"webtransport": { "$ref": "#/$defs/webtransportClient" },
+				"doh_servers": {
+					"description": "Optional list of DoH provider URLs used concurrently for SVCB/HTTPS auto-discovery.",
+					"$ref": "#/$defs/stringOrStrings"
+				}
 			}
 		},
 		"tunnelClient": {
@@ -470,12 +496,12 @@
 			"properties": {
 				"server_addr": {
 					"$ref": "#/$defs/nonEmptyString",
-					"description": "Tunnel server address."
+					"description": "Tunnel server address (hostname, hostname:port, or domain without port for automatic SVCB discovery)."
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["tcp", "quic", "kcp", "udp", "websocket", "ws", "wss"],
-					"default": "tcp"
+					"enum": ["auto", "tcp", "quic", "kcp", "udp", "websocket", "ws", "wss", "webtransport", "wt"],
+					"default": "auto"
 				},
 				"auth_token": {
 					"type": "string",
@@ -524,7 +550,13 @@
 						}
 					}
 				},
-				"websocket": { "$ref": "#/$defs/websocketClient" }
+				"quic": { "$ref": "#/$defs/quicClient" },
+				"websocket": { "$ref": "#/$defs/websocketClient" },
+				"webtransport": { "$ref": "#/$defs/webtransportClient" },
+				"doh_servers": {
+					"description": "Optional list of DoH provider URLs used concurrently for SVCB/HTTPS auto-discovery.",
+					"$ref": "#/$defs/stringOrStrings"
+				}
 			}
 		},
 		"optimizerClient": {
@@ -573,6 +605,22 @@
 				"insecure_skip_verify": {
 					"type": "boolean",
 					"description": "Skip TLS certificate verification for WSS (dev/testing only).",
+					"default": false
+				}
+			}
+		},
+		"webtransportClient": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"server_name": {
+					"type": "string",
+					"description": "TLS SNI / server name used for WebTransport.",
+					"default": ""
+				},
+				"insecure_skip_verify": {
+					"type": "boolean",
+					"description": "Skip TLS verification (dev/testing only).",
 					"default": false
 				}
 			}

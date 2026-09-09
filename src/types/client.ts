@@ -1,4 +1,5 @@
-import type { OptimizerStatsSnapshot } from "./admin";
+import type { AuthProvidersResponse, OptimizerStatsSnapshot, UserRecord } from "./admin";
+export type { AuthProvidersResponse, UserRecord };
 
 export interface CumulativeStats {
 	raw_bytes: number;
@@ -80,4 +81,112 @@ export interface ClientLogEntry {
 	level: string;
 	target: string;
 	message: string;
+}
+
+export interface ClientContextValue {
+	// Status & Metrics
+	status: ClientStatusResponse | null;
+	cumulativeStats: CumulativeStats | null;
+	statsViewMode: "session" | "lifetime";
+	setStatsViewMode: (mode: "session" | "lifetime") => void;
+	throughputSamples: number[];
+	uptimeSeconds: number;
+	formatUptime: (seconds: number) => string;
+	isRunning: boolean;
+	isConnected: boolean;
+	isConnecting: boolean;
+	rawBytes: number;
+	wireBytes: number;
+	savedRatio: number;
+
+	// Actions & State
+	actionLoading: boolean;
+	error: string | null;
+	setError: (err: string | null) => void;
+	copied: string | null;
+	copyText: (text: string, id: string) => void;
+	handleConnect: () => Promise<void>;
+	handleDisconnect: () => Promise<void>;
+	handleToggleTunnel: () => void;
+	handleResetStats: () => Promise<void>;
+	handleShareLink: () => void;
+
+	// Profiles & Active Form
+	profiles: ClientProfile[];
+	selectedProfileId: string;
+	profileName: string;
+	setProfileName: (val: string) => void;
+	serverAddr: string;
+	setServerAddr: (val: string) => void;
+	transport: string;
+	setTransport: (val: string) => void;
+	authToken: string;
+	setAuthToken: (val: string) => void;
+	listenAddr: string;
+	setListenAddr: (val: string) => void;
+	fakeLanBroadcast: boolean;
+	setFakeLanBroadcast: (val: boolean) => void;
+	autoConnectPanel: boolean;
+	setAutoConnectPanel: (val: boolean) => void;
+	managementUrl: string;
+	handleSelectProfile: (id: string) => void;
+	handleSaveProfile: () => Promise<void>;
+	handleDeleteProfile: (id: string) => Promise<void>;
+
+	// Remote Link Input
+	remoteLinkInput: string;
+	setRemoteLinkInput: (val: string) => void;
+	linkProtocol: string;
+	setLinkProtocol: (proto: string) => void;
+	handleSelectProtocol: (proto: string) => void;
+	handleAddressChange: (val: string) => void;
+	handleAddressPaste: (e: React.ClipboardEvent<HTMLInputElement>) => void;
+	handleAddressCopy: (e: React.ClipboardEvent<HTMLInputElement>) => void;
+	handleConnectFromLink: (customLink?: string) => Promise<void>;
+
+	// Logs
+	logs: ClientLogEntry[];
+	filteredLogs: ClientLogEntry[];
+	logFilterLevel: string;
+	setLogFilterLevel: (level: string) => void;
+	logSearchQuery: string;
+	setLogSearchQuery: (q: string) => void;
+	autoScrollLogs: boolean;
+	setAutoScrollLogs: (enabled: boolean) => void;
+	isAtBottom: boolean;
+	logsContainerRef: React.RefObject<HTMLDivElement | null>;
+	handleLogsScroll: () => void;
+	scrollToBottom: (smooth?: boolean) => void;
+	handleClearLogs: () => Promise<void>;
+	handleCopyAllLogs: () => void;
+
+	// Modals & OAuth
+	loginModalOpen: boolean;
+	setLoginModalOpen: (open: boolean) => void;
+	checkingProviders: boolean;
+	providersResult: AuthProvidersResponse | null;
+	providersError: string | null;
+	setProvidersError: (err: string | null) => void;
+	authServerUrl: string;
+	setAuthServerUrl: (url: string) => void;
+	authError: string | null;
+	setAuthError: (err: string | null) => void;
+	oauthLoading: boolean;
+	oauthWaitingCallback: boolean;
+	setOauthWaitingCallback: (waiting: boolean) => void;
+	oauthExchanging: boolean;
+	manualCallbackInput: string;
+	setManualCallbackInput: (val: string) => void;
+	startGitHubAuthWithUrl: (targetAuthUrl: string, targetServerAddr?: string) => Promise<void>;
+	handleRedetectProviders: (overrideUrl?: string) => Promise<void>;
+	loginAdminUnlocked: boolean;
+
+	// Import modal
+	importModalOpen: boolean;
+	setImportModalOpen: (open: boolean) => void;
+	importUrl: string;
+	setImportUrl: (url: string) => void;
+	importError: string | null;
+	setImportError: (err: string | null) => void;
+	handleImportLink: () => void;
 }

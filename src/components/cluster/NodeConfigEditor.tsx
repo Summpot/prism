@@ -848,6 +848,7 @@ function TunnelSection({
 										<option value="udp">udp (KCP)</option>
 										<option value="quic">quic</option>
 										<option value="websocket">websocket</option>
+										<option value="webtransport">webtransport (HTTP/3)</option>
 									</select>
 								</Field>
 								<div className="flex items-end">
@@ -962,6 +963,44 @@ function TunnelSection({
 									</Field>
 								</div>
 							) : null}
+							{endpoint.transport === "webtransport" ? (
+								<div className="mt-4 grid gap-4 md:grid-cols-2">
+									<Field title="WebTransport cert file" hint="Empty = auto ACME / self-signed">
+										<input
+											value={endpoint.webtransport?.cert_file ?? ""}
+											onChange={(event) => {
+												const endpoints = [...tunnel.endpoints];
+												endpoints[index] = {
+													...endpoint,
+													webtransport: {
+														cert_file: event.target.value,
+														key_file: endpoint.webtransport?.key_file ?? "",
+													},
+												};
+												updateTunnel({ endpoints });
+											}}
+											className={fieldClassName}
+										/>
+									</Field>
+									<Field title="WebTransport key file" hint="Empty = auto ACME / self-signed">
+										<input
+											value={endpoint.webtransport?.key_file ?? ""}
+											onChange={(event) => {
+												const endpoints = [...tunnel.endpoints];
+												endpoints[index] = {
+													...endpoint,
+													webtransport: {
+														cert_file: endpoint.webtransport?.cert_file ?? "",
+														key_file: event.target.value,
+													},
+												};
+												updateTunnel({ endpoints });
+											}}
+											className={fieldClassName}
+										/>
+									</Field>
+								</div>
+							) : null}
 						</div>
 					))}
 					<SecondaryButton
@@ -1021,9 +1060,11 @@ function TunnelSection({
 										}
 										className={fieldClassName}
 									>
+										<option value="auto">auto (SVCB/HTTPS 自动协商与回退)</option>
+										<option value="webtransport">webtransport (HTTP/3)</option>
+										<option value="quic">quic</option>
 										<option value="tcp">tcp</option>
 										<option value="udp">udp (KCP)</option>
-										<option value="quic">quic</option>
 										<option value="websocket">websocket</option>
 									</select>
 								</Field>
@@ -1115,6 +1156,49 @@ function TunnelSection({
 											className="h-4 w-4 accent-cyan-400"
 										/>
 										Skip TLS certificate verification (WSS)
+									</label>
+								</div>
+							) : null}
+							{tunnel.client.transport === "webtransport" ? (
+								<div className="mt-4 grid gap-4 md:grid-cols-2">
+									<Field title="WebTransport server name" hint="TLS SNI">
+										<input
+											value={tunnel.client.webtransport?.server_name ?? ""}
+											onChange={(event) =>
+												tunnel.client &&
+												updateTunnel({
+													client: {
+														...tunnel.client,
+														webtransport: {
+															server_name: event.target.value,
+															insecure_skip_verify:
+																tunnel.client.webtransport?.insecure_skip_verify ?? false,
+														},
+													},
+												})
+											}
+											className={fieldClassName}
+										/>
+									</Field>
+									<label className="flex items-end gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+										<input
+											type="checkbox"
+											checked={tunnel.client.webtransport?.insecure_skip_verify ?? false}
+											onChange={(event) =>
+												tunnel.client &&
+												updateTunnel({
+													client: {
+														...tunnel.client,
+														webtransport: {
+															server_name: tunnel.client.webtransport?.server_name ?? "",
+															insecure_skip_verify: event.target.checked,
+														},
+													},
+												})
+											}
+											className="h-4 w-4 accent-cyan-400"
+										/>
+										Skip TLS certificate verification
 									</label>
 								</div>
 							) : null}

@@ -11,7 +11,7 @@ export function encodePrismLink(profile: Partial<ClientProfile>): string {
 	if (profile.name) {
 		params.set("name", profile.name);
 	}
-	if (profile.transport && profile.transport !== "quic") {
+	if (profile.transport && profile.transport !== "auto") {
 		params.set("transport", profile.transport);
 	}
 	if (profile.listen_addr && profile.listen_addr !== "127.0.0.1:25565") {
@@ -26,6 +26,8 @@ export function encodePrismLink(profile: Partial<ClientProfile>): string {
 }
 
 export const SUPPORTED_LINK_PROTOCOLS = [
+	{ value: "auto://", label: "auto:// (自动协商)", transport: "auto" },
+	{ value: "wt://", label: "wt://", transport: "webtransport" },
 	{ value: "quic://", label: "quic://", transport: "quic" },
 	{ value: "tcp://", label: "tcp://", transport: "tcp" },
 	{ value: "kcp://", label: "kcp://", transport: "kcp" },
@@ -50,13 +52,17 @@ export function extractProtocolAndAddress(raw: string): {
 	if (trimmed.toLowerCase().startsWith("prism://")) {
 		const parsed = parsePrismLink(trimmed);
 		if (parsed?.server_addr) {
-			const transport = parsed.transport || "quic";
+			const transport = parsed.transport || "auto";
 			const protocol =
-				transport === "websocket" || transport === "ws"
-					? "ws://"
-					: transport === "wss"
-						? "wss://"
-						: `${transport}://`;
+				transport === "auto"
+					? "auto://"
+					: transport === "webtransport" || transport === "wt"
+						? "wt://"
+						: transport === "websocket" || transport === "ws"
+							? "ws://"
+							: transport === "wss"
+								? "wss://"
+								: `${transport}://`;
 			return {
 				protocol,
 				address: parsed.server_addr,
@@ -98,8 +104,8 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 		}
 	}
 
-	// Standard prism:// or transport:// URI (quic://, tcp://, kcp://, ws://, wss://)
-	const transportMatch = trimmed.match(/^(prism|quic|tcp|kcp|ws|wss):\/\/(.*)$/i);
+	// Standard prism:// or transport:// URI (auto://, wt://, quic://, tcp://, kcp://, ws://, wss://)
+	const transportMatch = trimmed.match(/^(prism|auto|wt|webtransport|quic|tcp|kcp|ws|wss):\/\/(.*)$/i);
 	if (transportMatch) {
 		try {
 			const scheme = transportMatch[1].toLowerCase();
@@ -110,7 +116,13 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 			}
 
 			const defaultTransport =
-				scheme === "prism" ? "quic" : scheme === "ws" || scheme === "wss" ? "websocket" : scheme;
+				scheme === "prism" || scheme === "auto"
+					? "auto"
+					: scheme === "wt" || scheme === "webtransport"
+						? "webtransport"
+						: scheme === "ws" || scheme === "wss"
+							? "websocket"
+							: scheme;
 			const name = fakeUrl.searchParams.get("name") || "";
 			const transport = fakeUrl.searchParams.get("transport") || defaultTransport;
 			const auth_token = fakeUrl.searchParams.get("token") || "";
@@ -131,7 +143,7 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 		}
 	}
 
-	// Fallback: If user just pasted "relay.example.com:7000" or plain "relay.example.com"
+	// Fallback: If user just pasted "relay.example.com" or "relay.example.com:7000"
 	if (!trimmed.includes(" ")) {
 		// http or https url
 		if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
@@ -140,8 +152,8 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 				const host = url.hostname;
 				return {
 					name: host,
-					server_addr: `${host}:7000`,
-					transport: "quic",
+					server_addr: host,
+					transport: "auto",
 					listen_addr: "127.0.0.1:25565",
 					fake_lan_broadcast: true,
 				};
@@ -154,7 +166,7 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 			return {
 				name: trimmed,
 				server_addr: trimmed,
-				transport: "quic",
+				transport: "auto",
 				listen_addr: "127.0.0.1:25565",
 				fake_lan_broadcast: true,
 			};
@@ -163,8 +175,8 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 		if (/^[a-zA-Z0-9.-]+$/.test(trimmed)) {
 			return {
 				name: trimmed,
-				server_addr: `${trimmed}:7000`,
-				transport: "quic",
+				server_addr: trimmed,
+				transport: "auto",
 				listen_addr: "127.0.0.1:25565",
 				fake_lan_broadcast: true,
 			};
@@ -191,8 +203,8 @@ export function resolveRemoteConnection(raw: string): ResolvedRemoteConnection {
 	if (!trimmed) {
 		return {
 			managementUrl: "http://127.0.0.1:8080",
-			serverAddr: "127.0.0.1:7000",
-			transport: "quic",
+			serverAddr: "127.0.0.1",
+			transport: "auto",
 			listenAddr: "127.0.0.1:25565",
 			fakeLanBroadcast: true,
 		};
@@ -206,8 +218,8 @@ export function resolveRemoteConnection(raw: string): ResolvedRemoteConnection {
 			const cleanUrl = trimmed.replace(/\/+$/, "");
 			return {
 				managementUrl: cleanUrl,
-				serverAddr: `${host}:7000`,
-				transport: "quic",
+				serverAddr: host,
+				transport: "auto",
 				listenAddr: "127.0.0.1:25565",
 				fakeLanBroadcast: true,
 			};
@@ -227,7 +239,7 @@ export function resolveRemoteConnection(raw: string): ResolvedRemoteConnection {
 		return {
 			managementUrl,
 			serverAddr: parsed.server_addr,
-			transport: parsed.transport || "quic",
+			transport: parsed.transport || "auto",
 			name: parsed.name,
 			listenAddr: parsed.listen_addr || "127.0.0.1:25565",
 			fakeLanBroadcast: parsed.fake_lan_broadcast ?? true,
@@ -238,8 +250,8 @@ export function resolveRemoteConnection(raw: string): ResolvedRemoteConnection {
 	const host = trimmed.includes(":") ? trimmed.split(":")[0] : trimmed;
 	return {
 		managementUrl: `http://${host || "127.0.0.1"}:8080`,
-		serverAddr: trimmed.includes(":") ? trimmed : `${trimmed}:7000`,
-		transport: "quic",
+		serverAddr: trimmed,
+		transport: "auto",
 		listenAddr: "127.0.0.1:25565",
 		fakeLanBroadcast: true,
 	};

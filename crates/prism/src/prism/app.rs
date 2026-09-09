@@ -350,6 +350,7 @@ pub async fn run(
     // Tunnel server.
     if tunnel_server_enabled {
         let mut acme_cert_paths = None;
+        let mut acme_mgr_opt = None;
         if let Some(ref acme_cfg) = cfg.acme {
             if acme_cfg.enabled {
                 let acme_mgr = crate::prism::acme::AcmeManager::new(acme_cfg.clone(), &paths.workdir);
@@ -362,6 +363,7 @@ pub async fn run(
                             Ok(())
                         });
                         acme_cert_paths = Some(paths);
+                        acme_mgr_opt = Some(acme_mgr);
                     }
                     Err(err) => {
                         tracing::error!(err = %err, "ACME: failed to ensure certificate");
@@ -393,12 +395,16 @@ pub async fn run(
                 transport: ep.transport.clone(),
                 auth_token: cfg.tunnel.auth_token.clone(),
                 quic: tunnel::server::QuicServerOptions {
-                    cert_file: quic_cert,
-                    key_file: quic_key,
+                    cert_file: quic_cert.clone(),
+                    key_file: quic_key.clone(),
                 },
                 websocket: tunnel::server::WebSocketServerOptions {
                     cert_file: ws_cert,
                     key_file: ws_key,
+                },
+                webtransport: tunnel::server::WebTransportServerOptions {
+                    cert_file: quic_cert,
+                    key_file: quic_key,
                 },
                 manager: tunnel_manager.clone(),
                 auth_manager: Some(auth_manager.clone()),
@@ -407,6 +413,42 @@ pub async fn run(
 
             let shutdown = shutdown_rx.clone();
             tasks.spawn(async move { server.listen_and_serve(shutdown).await });
+        }
+
+        if let Some(ref acme_mgr) = acme_mgr_opt {
+            let mut published = Vec::new();
+            for ep in &cfg.tunnel.endpoints {
+                let bind_addr = net::normalize_bind_addr(&ep.listen_addr);
+                let port = match bind_addr.rsplit_once(':') {
+                    Some((_, p)) => p.parse::<u16>().unwrap_or(0),
+                    None => 0,
+                };
+                if port == 0 {
+                    continue;
+                }
+                let proto = ep.transport.trim().to_ascii_lowercase();
+                let (priority, alpn) = match proto.as_str() {
+                    "webtransport" | "wt" => (1, "h3".to_string()),
+                    "quic" => (2, "prism-tunnel".to_string()),
+                    "websocket" | "ws" | "wss" => (3, "http/1.1".to_string()),
+                    "tcp" => (4, "prism-tcp".to_string()),
+                    _ => (5, proto.clone()),
+                };
+                published.push(crate::prism::acme::cloudflare::PublishedEndpoint {
+                    priority,
+                    port,
+                    alpn,
+                });
+            }
+            if !published.is_empty() {
+                let mgr = acme_mgr.clone();
+                tasks.spawn(async move {
+                    if let Err(err) = mgr.sync_svcb_records(&published).await {
+                        tracing::warn!(err = %err, "ACME: failed to sync SVCB records to Cloudflare");
+                    }
+                    Ok(())
+                });
+            }
         }
 
         if cfg.tunnel.auto_listen_services {
@@ -472,6 +514,7 @@ pub async fn run(
             websocket: ws_opts,
             middleware_dir: Some(paths.middleware_dir.clone()),
             optimizer: Some(optimizer.clone()),
+            doh_servers: conn.doh_servers.clone(),
         })?;
 
         let connector = Arc::new(connector);

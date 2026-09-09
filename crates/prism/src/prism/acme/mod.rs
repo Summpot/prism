@@ -254,6 +254,42 @@ impl AcmeManager {
         })
     }
 
+    /// Sync SVCB / HTTPS records to Cloudflare DNS for all configured domains.
+    pub async fn sync_svcb_records(
+        &self,
+        endpoints: &[crate::prism::acme::cloudflare::PublishedEndpoint],
+    ) -> Result<()> {
+        if self.config.cloudflare.api_token.trim().is_empty() || endpoints.is_empty() {
+            return Ok(());
+        }
+
+        let cf_client = CloudflareClient::new(
+            self.config.cloudflare.api_token.clone(),
+            if self.config.cloudflare.zone_id.trim().is_empty() {
+                None
+            } else {
+                Some(self.config.cloudflare.zone_id.trim().to_string())
+            },
+        );
+
+        for domain in &self.config.domains {
+            match cf_client.resolve_zone_id(domain).await {
+                Ok(zone_id) => {
+                    if let Err(err) = cf_client.sync_endpoint_svcb_records(&zone_id, domain, endpoints).await {
+                        tracing::warn!(domain = %domain, err = %err, "ACME: failed to sync SVCB records to Cloudflare");
+                    } else {
+                        tracing::info!(domain = %domain, "ACME: synchronized SVCB records to Cloudflare");
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(domain = %domain, err = %err, "ACME: failed to resolve zone ID for SVCB sync");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Background renewal loop checking certificate expiry daily.
     pub async fn run_renewal_loop(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         if !self.config.auto_renew {

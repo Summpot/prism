@@ -442,11 +442,13 @@ pub async fn run(
             }
             if !published.is_empty() {
                 let mgr = acme_mgr.clone();
-                tasks.spawn(async move {
+                // One-shot maintenance: must NOT join the supervised JoinSet.
+                // JoinSet tasks drive the shutdown/drain logic below; a task
+                // that returns Ok(()) immediately would trigger exit(0).
+                tokio::spawn(async move {
                     if let Err(err) = mgr.sync_svcb_records(&published).await {
                         tracing::warn!(err = %err, "ACME: failed to sync SVCB records to Cloudflare");
                     }
-                    Ok(())
                 });
             }
         }

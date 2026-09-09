@@ -5,6 +5,7 @@ import {
 	closeWindow,
 	invokeTauri,
 	isDesktopApp,
+	isWindowMaximized,
 	minimizeWindow,
 	openExternalUrl,
 	toggleMaximizeWindow,
@@ -56,6 +57,22 @@ describe("desktopWindow", () => {
 
 		await toggleMaximizeWindow();
 		expect(invokeMock).toHaveBeenCalledWith("plugin:window|toggle_maximize");
+	});
+
+	it("calls plugin:window|is_maximized and returns boolean in desktop app", async () => {
+		const invokeMock = vi.fn().mockResolvedValue(true);
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		const res = await isWindowMaximized();
+		expect(invokeMock).toHaveBeenCalledWith("plugin:window|is_maximized");
+		expect(res).toBe(true);
+	});
+
+	it("returns false from isWindowMaximized in non-desktop environment", async () => {
+		const res = await isWindowMaximized();
+		expect(res).toBe(false);
 	});
 
 	it("calls plugin:window|close when closing window in desktop app", async () => {

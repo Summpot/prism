@@ -2,6 +2,7 @@ import { Menu, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppSidebarContent } from "@/components/AppSidebar";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isDesktopApp } from "@/lib/desktopWindow";
 
 export { AppSidebarContent };
@@ -26,6 +27,7 @@ export default function Header() {
 						<img src="/logo192.png" alt="Prism" className="h-6 w-6 rounded-md object-contain" />
 						<span className="text-sm font-semibold text-foreground">Prism</span>
 					</div>
+					<LanguageSwitcher />
 				</div>
 			) : null}
 

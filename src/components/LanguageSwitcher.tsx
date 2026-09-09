@@ -1,21 +1,54 @@
-import { m } from "@/paraglide/messages";
-import { getLocale, locales, setLocale } from "@/paraglide/runtime";
+import { Check, Languages } from "lucide-react";
 
-export default function LanguageSwitcher() {
+import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
+import { getLocale, type locales, setLocale } from "@/paraglide/runtime";
+
+export default function LanguageSwitcher({ className }: { className?: string }) {
 	const currentLocale = getLocale();
 
 	return (
-		<label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-			<span>{m.language()}</span>
-			<select
-				value={currentLocale}
-				onChange={(event) => void setLocale(event.target.value as (typeof locales)[number])}
-				className="rounded border border-border bg-background px-1.5 py-1 text-[10px] text-foreground outline-none focus:ring-1 focus:ring-primary"
-				aria-label={m.language()}
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="xs"
+						className={cn(
+							"h-6 gap-1 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground rounded cursor-pointer",
+							className,
+						)}
+						title={m.language()}
+						aria-label={m.language()}
+					/>
+				}
 			>
-				<option value="en">{m.language_english()}</option>
-				<option value="zh-CN">{m.language_chinese()}</option>
-			</select>
-		</label>
+				<Languages className="h-3.5 w-3.5" />
+				<span className="font-mono text-[10.5px]">{currentLocale === "zh-CN" ? "简中" : "EN"}</span>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-32 text-xs">
+				<DropdownMenuItem
+					onClick={() => void setLocale("zh-CN" as (typeof locales)[number])}
+					className="flex items-center justify-between cursor-pointer"
+				>
+					<span>{m.language_chinese()}</span>
+					{currentLocale === "zh-CN" ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+				</DropdownMenuItem>
+				<DropdownMenuItem
+					onClick={() => void setLocale("en" as (typeof locales)[number])}
+					className="flex items-center justify-between cursor-pointer"
+				>
+					<span>{m.language_english()}</span>
+					{currentLocale === "en" ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }

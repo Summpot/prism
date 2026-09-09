@@ -57,6 +57,20 @@ export async function toggleMaximizeWindow(): Promise<void> {
 }
 
 /**
+ * Check if desktop application window is currently maximized.
+ */
+export async function isWindowMaximized(): Promise<boolean> {
+	const invoke = getTauriInvoke();
+	if (!invoke) return false;
+	try {
+		return Boolean(await invoke("plugin:window|is_maximized"));
+	} catch (err) {
+		console.warn("Failed to check if window is maximized:", err);
+		return false;
+	}
+}
+
+/**
  * Close desktop application window (hides to system tray).
  */
 export async function closeWindow(): Promise<void> {

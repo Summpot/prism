@@ -6,10 +6,10 @@ import {
 	useLocation,
 	useNavigate,
 } from "@tanstack/react-router";
-import { Minus, Square, X } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Header from "@/components/Header";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { ClientModals } from "@/components/client/ClientModals";
 import { Button } from "@/components/ui/button";
 import { ClientProvider } from "@/context/ClientContext";
@@ -18,6 +18,7 @@ import { exchangeGitHubCode, getClientStatus } from "@/lib/managementApi";
 import {
 	closeWindow,
 	isDesktopApp,
+	isWindowMaximized,
 	minimizeWindow,
 	toggleMaximizeWindow,
 } from "@/lib/desktopWindow";
@@ -61,6 +62,29 @@ export const Route = createRootRoute({
 });
 
 function DesktopTitleBar() {
+	const [isMaximized, setIsMaximized] = useState(false);
+
+	useEffect(() => {
+		let mounted = true;
+		const checkMaximized = async () => {
+			const max = await isWindowMaximized();
+			if (mounted) setIsMaximized(max);
+		};
+		void checkMaximized();
+
+		window.addEventListener("resize", checkMaximized);
+		return () => {
+			mounted = false;
+			window.removeEventListener("resize", checkMaximized);
+		};
+	}, []);
+
+	const handleToggleMaximize = async () => {
+		await toggleMaximizeWindow();
+		const max = await isWindowMaximized();
+		setIsMaximized(max);
+	};
+
 	return (
 		<div
 			data-tauri-drag-region
@@ -83,37 +107,76 @@ function DesktopTitleBar() {
 
 			<div className="flex-1 h-full" data-tauri-drag-region />
 
-			{/* Window Controls */}
+			{/* Window Controls & Language Switcher */}
 			<div className="flex items-center gap-0.5 -mr-1">
+				<LanguageSwitcher className="mr-1" />
 				<Button
 					variant="ghost"
 					size="icon-xs"
 					onClick={() => void minimizeWindow()}
-					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded"
+					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded cursor-pointer"
 					title={m.window_minimize()}
 					aria-label="Minimize window"
 				>
-					<Minus className="h-3 w-3" />
+					<svg
+						className="h-3 w-3"
+						viewBox="0 0 12 12"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="1.2"
+					>
+						<line x1="2" y1="6" x2="10" y2="6" />
+					</svg>
 				</Button>
 				<Button
 					variant="ghost"
 					size="icon-xs"
-					onClick={() => void toggleMaximizeWindow()}
-					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded"
-					title={m.window_maximize()}
-					aria-label="Maximize window"
+					onClick={() => void handleToggleMaximize()}
+					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded cursor-pointer"
+					title={isMaximized ? m.window_restore() : m.window_maximize()}
+					aria-label={isMaximized ? "Restore window" : "Maximize window"}
 				>
-					<Square className="h-2.5 w-2.5" />
+					{isMaximized ? (
+						<svg
+							className="h-2.5 w-2.5"
+							viewBox="0 0 12 12"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="1.2"
+						>
+							<path d="M3.5 2.5V1.5A1 1 0 0 1 4.5 0.5H10.5A1 1 0 0 1 11.5 1.5V7.5A1 1 0 0 1 10.5 8.5H9.5" />
+							<rect x="0.5" y="3.5" width="7" height="7" rx="1" />
+						</svg>
+					) : (
+						<svg
+							className="h-2.5 w-2.5"
+							viewBox="0 0 12 12"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="1.2"
+						>
+							<rect x="1.5" y="1.5" width="9" height="9" rx="1" />
+						</svg>
+					)}
 				</Button>
 				<Button
 					variant="ghost"
 					size="icon-xs"
 					onClick={() => void closeWindow()}
-					className="h-6 w-7 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors rounded"
+					className="h-6 w-7 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors rounded cursor-pointer"
 					title={m.window_close_tray()}
 					aria-label="Close window to tray"
 				>
-					<X className="h-3 w-3" />
+					<svg
+						className="h-3 w-3"
+						viewBox="0 0 12 12"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="1.2"
+					>
+						<line x1="2.5" y1="2.5" x2="9.5" y2="9.5" />
+						<line x1="9.5" y1="2.5" x2="2.5" y2="9.5" />
+					</svg>
 				</Button>
 			</div>
 		</div>

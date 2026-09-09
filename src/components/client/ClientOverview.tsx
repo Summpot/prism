@@ -18,6 +18,13 @@ import { useClient } from "@/context/ClientContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { formatBytes } from "@/lib/format";
 import { usePanelSession } from "@/lib/panelSession";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
@@ -223,18 +230,27 @@ export function ClientOverview() {
 
 					<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
 						<div className="relative flex-1 min-w-0 flex items-stretch">
-							<select
-								aria-label="选择连接协议"
+							<Select
 								value={linkProtocol}
-								onChange={(e) => handleSelectProtocol(e.target.value)}
-								className="h-8 rounded-l-md rounded-r-none border border-r-0 border-input bg-muted/60 px-2 text-xs font-mono font-semibold text-foreground outline-none focus:ring-1 focus:ring-ring shrink-0 cursor-pointer hover:bg-muted transition-colors"
+								onValueChange={(val) => {
+									if (val) handleSelectProtocol(val);
+								}}
+								items={SUPPORTED_LINK_PROTOCOLS}
 							>
-								{SUPPORTED_LINK_PROTOCOLS.map((p) => (
-									<option key={p.value} value={p.value}>
-										{p.label}
-									</option>
-								))}
-							</select>
+								<SelectTrigger
+									aria-label="选择连接协议"
+									className="h-8 w-fit min-w-[90px] rounded-l-md rounded-r-none border-r-0 border-input bg-muted/60 px-2.5 text-xs font-mono font-semibold text-foreground shadow-none focus-visible:ring-0 focus-visible:border-input shrink-0 cursor-pointer hover:bg-muted"
+								>
+									<SelectValue placeholder="协议" />
+								</SelectTrigger>
+								<SelectContent align="start" className="min-w-36 text-xs font-mono">
+									{SUPPORTED_LINK_PROTOCOLS.map((p) => (
+										<SelectItem key={p.value} value={p.value} className="text-xs font-mono">
+											{p.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
 							<div className="relative flex-1 min-w-0">
 								<Input
 									value={remoteLinkInput}

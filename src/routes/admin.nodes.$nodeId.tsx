@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, CircleSlash, RefreshCcw, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { ManagedConfigEditor } from "@/components/ManagedConfigEditor";
+import { NodeConfigEditor } from "@/components/cluster/NodeConfigEditor";
 import {
 	Badge,
 	ErrorBanner,
@@ -201,7 +201,7 @@ function AdminNodeDetailPage() {
 				</section>
 			) : null}
 
-			<ManagedConfigEditor
+			<NodeConfigEditor
 				initialConfig={data.desired_config ?? undefined}
 				isSaving={saving}
 				saveError={saveError}

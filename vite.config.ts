@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { devtools } from "@tanstack/devtools-vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
@@ -35,6 +36,7 @@ const config = defineConfig(({ command }) => ({
 		tsconfigPaths: true,
 	},
 	plugins: [
+		paraglideVitePlugin({ project: "./project.inlang" }),
 		...(isVitest || command !== "serve"
 			? []
 			: [

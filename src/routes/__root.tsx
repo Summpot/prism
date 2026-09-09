@@ -23,6 +23,8 @@ import {
 } from "@/lib/desktopWindow";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { PanelSessionProvider, usePanelSession } from "@/lib/panelSession";
+import { m } from "@/paraglide/messages";
+import { getLocale } from "@/paraglide/runtime";
 
 import appCss from "../styles.css?url";
 
@@ -88,7 +90,7 @@ function DesktopTitleBar() {
 					size="icon-xs"
 					onClick={() => void minimizeWindow()}
 					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded"
-					title="最小化"
+					title={m.window_minimize()}
 					aria-label="Minimize window"
 				>
 					<Minus className="h-3 w-3" />
@@ -98,7 +100,7 @@ function DesktopTitleBar() {
 					size="icon-xs"
 					onClick={() => void toggleMaximizeWindow()}
 					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded"
-					title="最大化 / 还原"
+					title={m.window_maximize()}
 					aria-label="Maximize window"
 				>
 					<Square className="h-2.5 w-2.5" />
@@ -108,7 +110,7 @@ function DesktopTitleBar() {
 					size="icon-xs"
 					onClick={() => void closeWindow()}
 					className="h-6 w-7 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors rounded"
-					title="最小化到托盘"
+					title={m.window_close_tray()}
 					aria-label="Close window to tray"
 				>
 					<X className="h-3 w-3" />
@@ -255,7 +257,7 @@ function RootContent() {
 
 function RootDocument() {
 	return (
-		<html lang="zh-CN" className="dark">
+		<html lang={getLocale()} className="dark">
 			<head>
 				<HeadContent />
 			</head>

@@ -14,6 +14,7 @@ import {
 } from "@/lib/managementApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 
@@ -123,20 +124,17 @@ function LoginPage() {
 					</div>
 					<div>
 						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
-							Prism control plane
+							{m.login_eyebrow()}
 						</div>
-						<h1 className="mt-2 text-3xl font-semibold text-white">Attach to management node.</h1>
+						<h1 className="mt-2 text-3xl font-semibold text-white">{m.login_title()}</h1>
 					</div>
 				</div>
 
-				<p className="mt-6 text-base leading-7 text-slate-400">
-					Connect this control plane to a Prism management endpoint. Sign in using GitHub OAuth or
-					enter a static panel token.
-				</p>
+				<p className="mt-6 text-base leading-7 text-slate-400">{m.login_description()}</p>
 
 				<div className="mt-8 space-y-6">
 					<label className="block space-y-2">
-						<span className="text-sm font-medium text-white">Management API Base URL</span>
+						<span className="text-sm font-medium text-white">{m.login_api_url()}</span>
 						<input
 							value={baseUrl}
 							onChange={(event) => setBaseUrl(event.target.value)}
@@ -150,14 +148,14 @@ function LoginPage() {
 						<div className="flex items-center justify-between">
 							<div className="flex items-center gap-2">
 								<Github className="h-5 w-5 text-white" />
-								<span className="text-sm font-semibold text-white">GitHub Authentication</span>
+								<span className="text-sm font-semibold text-white">{m.login_github()}</span>
 							</div>
 							{githubEnabled ? (
 								<span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
-									OAuth Enabled
+									{m.login_oauth_enabled()}
 								</span>
 							) : (
-								<span className="text-xs text-slate-500">Detected via /auth/providers</span>
+								<span className="text-xs text-slate-500">{m.login_oauth_detected()}</span>
 							)}
 						</div>
 						<div className="pt-1 space-y-2">
@@ -168,14 +166,10 @@ function LoginPage() {
 								className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15 cursor-pointer disabled:opacity-50"
 							>
 								<Github className="h-4 w-4" />
-								<span>
-									{oauthLoading ? "Requesting authorization URL..." : "Sign in with GitHub"}
-								</span>
+								<span>{oauthLoading ? m.login_requesting() : m.login_sign_in()}</span>
 							</button>
 							{isDesktopApp() ? (
-								<p className="text-xs text-slate-400 text-center">
-									将在浏览器中打开 GitHub 授权页面，授权后自动通过 Deep Link 唤起桌面端登录。
-								</p>
+								<p className="text-xs text-slate-400 text-center">{m.login_desktop_hint()}</p>
 							) : null}
 						</div>
 					</div>
@@ -185,15 +179,13 @@ function LoginPage() {
 							<div className="w-full border-t border-white/10" />
 						</div>
 						<div className="relative flex justify-center text-xs uppercase">
-							<span className="bg-slate-950 px-3 text-slate-400">
-								or connect with static bearer token
-							</span>
+							<span className="bg-slate-950 px-3 text-slate-400">{m.login_or_token()}</span>
 						</div>
 					</div>
 
 					<form onSubmit={connect} className="space-y-5">
 						<label className="block space-y-2">
-							<span className="text-sm font-medium text-white">Bearer Token</span>
+							<span className="text-sm font-medium text-white">{m.login_token()}</span>
 							<input
 								value={token}
 								onChange={(event) => setToken(event.target.value)}
@@ -210,7 +202,7 @@ function LoginPage() {
 						) : null}
 
 						<PrimaryButton type="submit" disabled={submitting || !baseUrl.trim() || !token.trim()}>
-							{submitting ? "Verifying endpoint…" : "Connect panel"}
+							{submitting ? m.login_verifying() : m.login_connect()}
 							<ArrowRight className="h-4 w-4" />
 						</PrimaryButton>
 					</form>

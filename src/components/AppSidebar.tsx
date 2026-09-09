@@ -17,10 +17,12 @@ import {
 import { useState } from "react";
 
 import { Github } from "@/components/icons/Github";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { usePanelSession } from "@/lib/panelSession";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
 
 interface NavItemProps {
 	to: string;
@@ -98,7 +100,7 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 								v0.1
 							</Badge>
 						</div>
-						<p className="truncate text-[10px] text-muted-foreground">Lightweight Tunnel & Proxy</p>
+						<p className="truncate text-[10px] text-muted-foreground">{m.brand_tagline()}</p>
 					</div>
 				</div>
 			</div>
@@ -108,26 +110,26 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 				{/* 1. Client Category (Always visible to all users) */}
 				<div className="space-y-1">
 					<div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
-						桌面客户端 (Client)
+						{m.nav_client()}
 					</div>
 					<SidebarNavItem
 						to="/"
 						exact
-						label="连接"
+						label={m.nav_connection()}
 						icon={<Gamepad2 className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
 					<SidebarNavItem
 						to="/logs"
 						exact
-						label="运行日志"
+						label={m.nav_logs()}
 						icon={<Terminal className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
 					<SidebarNavItem
 						to="/settings"
 						exact
-						label="隧道配置"
+						label={m.nav_tunnel_config()}
 						icon={<Settings2 className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
@@ -143,7 +145,7 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 						>
 							<div className="flex items-center gap-1.5">
 								<ShieldCheck className="h-3.5 w-3.5 text-primary" />
-								<span>管理控制台</span>
+								<span>{m.nav_admin()}</span>
 							</div>
 							<div className="flex items-center gap-1">
 								<span className="rounded bg-primary/20 px-1 py-0 text-[8.5px] font-bold text-primary">
@@ -163,37 +165,37 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 								<SidebarNavItem
 									to="/admin"
 									exact
-									label="系统概览"
+									label={m.nav_overview()}
 									icon={<Activity className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
 									to="/admin/nodes"
-									label="节点管理"
+									label={m.nav_nodes()}
 									icon={<Box className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
 									to="/admin/connections"
-									label="实时连接"
+									label={m.nav_connections()}
 									icon={<Cable className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
 									to="/admin/tunnel-services"
-									label="隧道服务"
+									label={m.nav_services()}
 									icon={<Unplug className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
 									to="/admin/runtime"
-									label="运行时监控"
+									label={m.nav_runtime()}
 									icon={<Gauge className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
 								<SidebarNavItem
 									to="/admin/users"
-									label="用户与权限"
+									label={m.nav_users()}
 									icon={<Users className="h-3.5 w-3.5" />}
 									onClick={onNavigate}
 								/>
@@ -222,7 +224,7 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							<div className="min-w-0 flex-1">
 								<div className="flex items-center gap-1.5">
 									<span className="text-xs font-semibold text-foreground truncate">
-										{authSession?.display_name || authSession?.username || "已登录"}
+										{authSession?.display_name || authSession?.username || m.session_logged_in()}
 									</span>
 									{isAdmin ? (
 										<span className="rounded bg-emerald-500/15 border border-emerald-500/30 px-1 py-0 text-[8.5px] font-bold text-emerald-400 flex-none">
@@ -247,24 +249,27 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							className="h-6 w-full gap-1 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive cursor-pointer"
 						>
 							<LogOut className="h-3 w-3" />
-							<span>断开并退出</span>
+							<span>{m.session_disconnect()}</span>
 						</Button>
 					</div>
 				) : (
 					<div className="rounded-lg border border-border/70 bg-background/60 p-2 space-y-1.5 text-center">
 						<div className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
 							<Radio className="h-3.5 w-3.5 text-muted-foreground/60" />
-							<span>未连接远端节点</span>
+							<span>{m.session_not_connected()}</span>
 						</div>
 						<Link
 							to="/"
 							onClick={onNavigate}
 							className="inline-flex h-6 w-full items-center justify-center gap-1 rounded bg-primary/10 px-2 text-[10px] font-semibold text-primary hover:bg-primary/20 transition"
 						>
-							<span>配置远端连接</span>
+							<span>{m.session_enter_link()}</span>
 						</Link>
 					</div>
 				)}
+				<div className="mt-2 flex justify-end">
+					<LanguageSwitcher />
+				</div>
 			</div>
 		</div>
 	);

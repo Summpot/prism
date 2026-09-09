@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use crate::prism::config::TunnelClientConfig;
 use crate::prism::middleware::{
     FramePriority, HandshakeResult, PollResult, SessionState, StreamResult, WasmProtocolSession,
-    get_default_middleware_wat,
+    compile_module_from_wat, get_default_middleware_wat, get_dynamic_middleware_config,
 };
 use crate::prism::net;
 use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
@@ -197,7 +197,7 @@ impl Client {
         let path = Path::new(name);
         if path.is_file() {
             let bytes = std::fs::read(path)?;
-            let module = wasmtime::Module::new(engine, bytes)?;
+            let (module, _) = compile_module_from_wat(engine, name, &bytes)?;
             return Ok(Some(Arc::new(module)));
         }
 
@@ -206,20 +206,20 @@ impl Client {
             let direct = dir.join(name);
             if direct.is_file() {
                 let bytes = std::fs::read(&direct)?;
-                let module = wasmtime::Module::new(engine, bytes)?;
+                let (module, _) = compile_module_from_wat(engine, name, &bytes)?;
                 return Ok(Some(Arc::new(module)));
             }
             let with_ext = dir.join(format!("{name}.wat"));
             if with_ext.is_file() {
                 let bytes = std::fs::read(&with_ext)?;
-                let module = wasmtime::Module::new(engine, bytes)?;
+                let (module, _) = compile_module_from_wat(engine, name, &bytes)?;
                 return Ok(Some(Arc::new(module)));
             }
         }
 
         // 3. Built-in default middlewares (e.g. "minecraft", "tls_sni")
         if let Some(wat) = get_default_middleware_wat(name) {
-            let module = wasmtime::Module::new(engine, wat.as_bytes())?;
+            let (module, _) = compile_module_from_wat(engine, name, wat.as_bytes())?;
             return Ok(Some(Arc::new(module)));
         }
 
@@ -884,6 +884,9 @@ async fn handle_player_connection(
                 let mut s = WasmProtocolSession::new(&wasm_engine, module).ok();
                 if let Some(ref mut sess) = s {
                     sess.set_state(SessionState::StreamingEgress);
+                    if let Some(cfg) = get_dynamic_middleware_config("minecraft") {
+                        let _ = sess.apply_config_map(&cfg);
+                    }
                 }
                 s
             } else {

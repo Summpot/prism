@@ -11,6 +11,7 @@ import {
 	StateCard,
 	ToggleChip,
 } from "@/components/ui";
+import { MiddlewareConfigEditor } from "@/components/MiddlewareConfigEditor";
 import { getConfigPath, getHealth, triggerReload } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
@@ -134,6 +135,8 @@ function AdminRuntimePage() {
 					compact
 				/>
 			</section>
+
+			<MiddlewareConfigEditor connection={connection} />
 		</div>
 	);
 }

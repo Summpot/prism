@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock, Mutex, RwLock as StdRwLock},
+    sync::{Arc, LazyLock, Mutex, RwLock as StdRwLock, Weak},
 };
 
 use aes::Aes128;
@@ -11,6 +11,7 @@ use anyhow::Context;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use wasmtime::{
     Caller, Engine, Instance, Linker, Memory, Module, Store, TypedFunc, WasmParams, WasmResults,
@@ -365,6 +366,229 @@ pub fn get_injected_middleware_data(name: &str, port: Option<u16>) -> Option<Vec
         .get(&(name_lower.clone(), port))
         .or_else(|| store.get(&(name_lower, None)))
         .cloned()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigFieldType {
+    U8,
+    U16,
+    U32,
+    I32,
+    I64,
+    Bool,
+    String,
+    ListString,
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigFieldSchema {
+    pub key: String,
+    pub field_type: ConfigFieldType,
+    pub label: String,
+    pub description: String,
+    pub default_value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MiddlewareConfigSchema {
+    pub name: String,
+    pub fields: Vec<ConfigFieldSchema>,
+}
+
+pub fn extract_component_schema(
+    engine: &Engine,
+    name: &str,
+    component: &wasmtime::component::Component,
+) -> MiddlewareConfigSchema {
+    let mut fields = Vec::new();
+    let comp_type = component.component_type();
+    for (export_name, item) in comp_type.exports(engine) {
+        if export_name == "config" {
+            if let wasmtime::component::types::ComponentItem::Type(
+                wasmtime::component::Type::Record(r),
+            ) = item.ty
+            {
+                for f in r.fields() {
+                    let key = f.name.to_string();
+                    let (field_type, default_val) = match f.ty {
+                        wasmtime::component::Type::U8 => {
+                            (ConfigFieldType::U8, serde_json::json!(1))
+                        }
+                        wasmtime::component::Type::U16 => {
+                            (ConfigFieldType::U16, serde_json::json!(0))
+                        }
+                        wasmtime::component::Type::U32 => {
+                            if key.contains("threshold") {
+                                (ConfigFieldType::U32, serde_json::json!(256))
+                            } else {
+                                (ConfigFieldType::U32, serde_json::json!(0))
+                            }
+                        }
+                        wasmtime::component::Type::S32 => {
+                            (ConfigFieldType::I32, serde_json::json!(0))
+                        }
+                        wasmtime::component::Type::S64 => {
+                            (ConfigFieldType::I64, serde_json::json!(0))
+                        }
+                        wasmtime::component::Type::Bool => {
+                            (ConfigFieldType::Bool, serde_json::json!(false))
+                        }
+                        wasmtime::component::Type::String => {
+                            if key.contains("targets") {
+                                (
+                                    ConfigFieldType::String,
+                                    serde_json::json!(
+                                        "224.0.2.60:4445,255.255.255.255:4445,127.0.0.1:4445"
+                                    ),
+                                )
+                            } else if key.contains("template") {
+                                (
+                                    ConfigFieldType::String,
+                                    serde_json::json!("[MOTD]{prefix}{name}[/MOTD][AD]{port}[/AD]"),
+                                )
+                            } else {
+                                (ConfigFieldType::String, serde_json::json!(""))
+                            }
+                        }
+                        wasmtime::component::Type::List(_) => {
+                            (ConfigFieldType::ListString, serde_json::json!([]))
+                        }
+                        other => (
+                            ConfigFieldType::Unsupported(format!("{other:?}")),
+                            serde_json::Value::Null,
+                        ),
+                    };
+
+                    let label = key
+                        .replace(['-', '_'], " ")
+                        .split_whitespace()
+                        .map(|word| {
+                            let mut c = word.chars();
+                            match c.next() {
+                                None => String::new(),
+                                Some(ch) => ch.to_uppercase().collect::<String>() + c.as_str(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                    let description = match key.as_str() {
+                        "recompress-threshold" | "recompress_threshold" => "Uncompressed payload size threshold (in bytes) to trigger Deflate recompression",
+                        "deflate-level" | "deflate_level" => "Deflate compression level (1 = fastest/low-latency, 9 = max compression)",
+                        "discovery-targets" | "discovery_targets" => "Comma-separated target broadcast/multicast IP:port list",
+                        "motd-template" | "motd_template" => "LAN broadcast discovery payload template string",
+                        _ => "",
+                    }.to_string();
+
+                    fields.push(ConfigFieldSchema {
+                        key,
+                        field_type,
+                        label,
+                        description,
+                        default_value: default_val,
+                    });
+                }
+            }
+        }
+    }
+
+    MiddlewareConfigSchema {
+        name: name.to_string(),
+        fields,
+    }
+}
+
+pub fn compile_module_from_wat(
+    engine: &Engine,
+    name: &str,
+    wat_bytes: &[u8],
+) -> anyhow::Result<(Module, Option<MiddlewareConfigSchema>)> {
+    let is_component = {
+        let s = std::str::from_utf8(wat_bytes).unwrap_or("");
+        s.lines()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty() && !l.starts_with(";;"))
+            .map(|l| l.starts_with("(component"))
+            .unwrap_or(false)
+    };
+    if is_component {
+        let component = wasmtime::component::Component::new(engine, wat_bytes)
+            .map_err(|e| anyhow::anyhow!("compile component '{name}': {e}"))?;
+        let schema = extract_component_schema(engine, name, &component);
+        let mut store = Store::new(engine, ());
+        let linker = wasmtime::component::Linker::new(engine);
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .map_err(|e| anyhow::anyhow!("instantiate component '{name}': {e}"))?;
+        let module = instance.get_module(&mut store, "main").ok_or_else(|| {
+            anyhow::anyhow!("component '{name}' does not export core module 'main'")
+        })?;
+        Ok((module, Some(schema)))
+    } else {
+        let module = Module::new(engine, wat_bytes)
+            .map_err(|e| anyhow::anyhow!("compile wat module '{name}': {e}"))?;
+        Ok((module, None))
+    }
+}
+
+static MIDDLEWARE_DYNAMIC_CONFIGS: LazyLock<
+    Arc<StdRwLock<HashMap<String, HashMap<String, serde_json::Value>>>>,
+> = LazyLock::new(|| Arc::new(StdRwLock::new(HashMap::new())));
+
+pub fn set_dynamic_middleware_config(name: &str, config: HashMap<String, serde_json::Value>) {
+    let mut store = MIDDLEWARE_DYNAMIC_CONFIGS.write().unwrap();
+    let name_key = name.trim().to_ascii_lowercase();
+    store.insert(name_key.clone(), config.clone());
+
+    broadcast_session_config_update(&name_key, &config);
+}
+
+pub fn get_dynamic_middleware_config(name: &str) -> Option<HashMap<String, serde_json::Value>> {
+    let store = MIDDLEWARE_DYNAMIC_CONFIGS.read().unwrap();
+    store.get(&name.trim().to_ascii_lowercase()).cloned()
+}
+
+pub fn reset_dynamic_middleware_config(name: &str) {
+    let mut store = MIDDLEWARE_DYNAMIC_CONFIGS.write().unwrap();
+    let name_key = name.trim().to_ascii_lowercase();
+    store.remove(&name_key);
+}
+
+pub fn get_all_dynamic_middleware_configs() -> HashMap<String, HashMap<String, serde_json::Value>> {
+    let store = MIDDLEWARE_DYNAMIC_CONFIGS.read().unwrap();
+    store.clone()
+}
+
+pub type SessionHandle = Arc<Mutex<WasmProtocolSession>>;
+static ACTIVE_SESSIONS: LazyLock<
+    Arc<StdRwLock<HashMap<String, Vec<Weak<Mutex<WasmProtocolSession>>>>>>,
+> = LazyLock::new(|| Arc::new(StdRwLock::new(HashMap::new())));
+
+pub fn register_active_session(name: &str, session: &SessionHandle) {
+    let mut registry = ACTIVE_SESSIONS.write().unwrap();
+    let list = registry
+        .entry(name.trim().to_ascii_lowercase())
+        .or_default();
+    list.retain(|w| w.upgrade().is_some());
+    list.push(Arc::downgrade(session));
+}
+
+pub fn broadcast_session_config_update(name: &str, config: &HashMap<String, serde_json::Value>) {
+    let mut registry = ACTIVE_SESSIONS.write().unwrap();
+    if let Some(list) = registry.get_mut(&name.trim().to_ascii_lowercase()) {
+        list.retain(|w| {
+            if let Some(s) = w.upgrade() {
+                if let Ok(mut session) = s.lock() {
+                    let _ = session.apply_config_map(config);
+                }
+                true
+            } else {
+                false
+            }
+        });
+    }
 }
 
 pub const DEFAULT_SYMBOL_TABLE_CAPACITY: usize = 1024;
@@ -958,9 +1182,14 @@ impl WasmProtocolSession {
 
     pub fn from_wat(wat: impl AsRef<[u8]>) -> anyhow::Result<Self> {
         let engine = Engine::default();
-        let module = Module::new(&engine, wat.as_ref())
-            .map_err(|e| anyhow::anyhow!("session: compile wat module: {e}"))?;
+        let (module, _) = compile_module_from_wat(&engine, "default", wat.as_ref())?;
         Self::new(&engine, &module)
+    }
+
+    pub fn into_shared(self, name: &str) -> SessionHandle {
+        let handle = Arc::new(Mutex::new(self));
+        register_active_session(name, &handle);
+        handle
     }
 
     pub fn state(&self) -> SessionState {
@@ -1055,6 +1284,101 @@ impl WasmProtocolSession {
             .map_err(|e| MiddlewareError::Fatal(format!("wasm set_data call failed: {e}")))?;
 
         Ok(code)
+    }
+
+    pub fn update_config(
+        &mut self,
+        key: &str,
+        val: &serde_json::Value,
+    ) -> Result<(), MiddlewareError> {
+        let mut map = HashMap::new();
+        map.insert(key.to_string(), val.clone());
+        self.apply_config_map(&map)
+    }
+
+    pub fn apply_config_map(
+        &mut self,
+        config: &HashMap<String, serde_json::Value>,
+    ) -> Result<(), MiddlewareError> {
+        for (key, val) in config {
+            let norm_key = key.replace('-', "_");
+            let func_name = format!("set_{norm_key}");
+
+            match val {
+                serde_json::Value::Number(n) => {
+                    if let Some(v) = n.as_i64() {
+                        if let Ok(func) = self
+                            .instance
+                            .get_typed_func::<(i32,), ()>(&mut self.store, &func_name)
+                        {
+                            let _ = func.call(&mut self.store, (v as i32,));
+                        } else if let Ok(func) = self
+                            .instance
+                            .get_typed_func::<(i32,), i32>(&mut self.store, &func_name)
+                        {
+                            let _ = func.call(&mut self.store, (v as i32,));
+                        } else if let Ok(func) = self
+                            .instance
+                            .get_typed_func::<(i64,), ()>(&mut self.store, &func_name)
+                        {
+                            let _ = func.call(&mut self.store, (v,));
+                        } else if let Ok(func) = self
+                            .instance
+                            .get_typed_func::<(i64,), i32>(&mut self.store, &func_name)
+                        {
+                            let _ = func.call(&mut self.store, (v,));
+                        }
+                    }
+                }
+                serde_json::Value::Bool(b) => {
+                    let v = if *b { 1i32 } else { 0i32 };
+                    if let Ok(func) = self
+                        .instance
+                        .get_typed_func::<(i32,), ()>(&mut self.store, &func_name)
+                    {
+                        let _ = func.call(&mut self.store, (v,));
+                    } else if let Ok(func) = self
+                        .instance
+                        .get_typed_func::<(i32,), i32>(&mut self.store, &func_name)
+                    {
+                        let _ = func.call(&mut self.store, (v,));
+                    }
+                }
+                serde_json::Value::String(s) => {
+                    let bytes = s.as_bytes();
+                    let scratch_ptr = 131072usize;
+                    let scratch_len = bytes.len();
+                    let mem_size = self.memory.data_size(&self.store);
+                    if scratch_ptr + scratch_len > mem_size {
+                        let needed = scratch_ptr + scratch_len;
+                        let delta = needed - mem_size;
+                        let pages = delta.div_ceil(65536);
+                        let _ = self.memory.grow(&mut self.store, pages as u64);
+                    }
+                    if self
+                        .memory
+                        .write(&mut self.store, scratch_ptr, bytes)
+                        .is_ok()
+                    {
+                        if let Ok(func) = self
+                            .instance
+                            .get_typed_func::<(i32, i32), ()>(&mut self.store, &func_name)
+                        {
+                            let _ = func
+                                .call(&mut self.store, (scratch_ptr as i32, scratch_len as i32));
+                        } else if let Ok(func) = self
+                            .instance
+                            .get_typed_func::<(i32, i32), i32>(&mut self.store, &func_name)
+                        {
+                            let _ = func
+                                .call(&mut self.store, (scratch_ptr as i32, scratch_len as i32));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub fn poll(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
@@ -1455,6 +1779,7 @@ pub struct WasmMiddleware {
     path_hint: String,
     engine: Engine,
     module: Module,
+    schema: Option<MiddlewareConfigSchema>,
 }
 
 impl WasmMiddleware {
@@ -1502,14 +1827,14 @@ impl WasmMiddleware {
         }
 
         let engine = Engine::default();
-        let module = Module::new(&engine, wat_bytes)
-            .map_err(|e| anyhow::anyhow!("middleware: compile wat module: {e}"))?;
+        let (module, schema) = compile_module_from_wat(&engine, name, &wat_bytes)?;
 
         Ok(Self {
             name: name.to_string(),
             path_hint,
             engine,
             module,
+            schema,
         })
     }
 
@@ -1520,7 +1845,12 @@ impl WasmMiddleware {
             path_hint: name.to_string(),
             engine,
             module,
+            schema: None,
         }
+    }
+
+    pub fn schema(&self) -> Option<&MiddlewareConfigSchema> {
+        self.schema.as_ref()
     }
 
     #[allow(dead_code)]
@@ -1534,7 +1864,18 @@ impl WasmMiddleware {
     }
 
     pub fn create_session(&self) -> anyhow::Result<WasmProtocolSession> {
-        WasmProtocolSession::new(&self.engine, &self.module)
+        let mut session = WasmProtocolSession::new(&self.engine, &self.module)?;
+        if let Some(config) = get_dynamic_middleware_config(&self.name) {
+            let _ = session.apply_config_map(&config);
+        }
+        Ok(session)
+    }
+
+    pub fn create_shared_session(&self) -> anyhow::Result<SessionHandle> {
+        let session = self.create_session()?;
+        let handle = Arc::new(Mutex::new(session));
+        register_active_session(&self.name, &handle);
+        Ok(handle)
     }
 
     fn apply_impl(
@@ -2706,5 +3047,121 @@ mod tests {
         );
         let default_payload = build_default_discovery_payload("生存服", 25565, "[Prism] ").unwrap();
         assert_eq!(default_payload, "[MOTD][Prism] 生存服[/MOTD][AD]25565[/AD]");
+    }
+
+    #[test]
+    fn test_component_syntax_parse() {
+        let sample = r#"(component
+            (type $Config (record
+                (field "recompress-threshold" u32)
+                (field "deflate-level" u8)
+                (field "discovery-targets" string)
+            ))
+            (export "config" (type $Config))
+            (core module $main
+                (memory (export "memory") 1)
+                (global $threshold (mut i32) (i32.const 256))
+                (func (export "set_threshold") (param $val i32)
+                    (global.set $threshold (local.get $val))
+                )
+                (func (export "get_threshold") (result i32)
+                    (global.get $threshold)
+                )
+                (func (export "poll") (param $buf_ptr i32) (param $buf_len i32) (param $state i32) (result i64)
+                    (i64.or
+                        (i64.shl (i64.extend_i32_u (local.get $state)) (i64.const 32))
+                        (i64.extend_i32_u (global.get $threshold))
+                    )
+                )
+            )
+            (core instance $inst (instantiate $main))
+            (func (export "set-threshold") (param "val" u32)
+                (canon lift (core func $inst "set_threshold"))
+            )
+            (func (export "get-threshold") (result u32)
+                (canon lift (core func $inst "get_threshold"))
+            )
+            (func (export "poll") (param "buf-ptr" u32) (param "buf-len" u32) (param "state" u32) (result s64)
+                (canon lift (core func $inst "poll"))
+            )
+            (export "main" (core module $main))
+        )"#;
+        let engine = Engine::default();
+        let component =
+            wasmtime::component::Component::new(&engine, sample).expect("parse component");
+        let component_type = component.component_type();
+        let mut found_config = false;
+        for (name, item) in component_type.exports(&engine) {
+            if name == "config" {
+                if let wasmtime::component::types::ComponentItem::Type(
+                    wasmtime::component::Type::Record(r),
+                ) = item.ty
+                {
+                    assert_eq!(r.fields().count(), 3);
+                    found_config = true;
+                }
+            }
+        }
+        assert!(found_config);
+
+        // Instantiate and test execution!
+        let mut store = Store::new(&engine, ());
+        let linker = wasmtime::component::Linker::new(&engine);
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .expect("instantiate component");
+        let core_module = instance
+            .get_module(&mut store, "main")
+            .expect("exported core module 'main'");
+        let mut core_store = Store::new(&engine, ());
+        let core_instance = wasmtime::Instance::new(&mut core_store, &core_module, &[])
+            .expect("instantiate core module");
+        let core_mem = core_instance
+            .get_memory(&mut core_store, "memory")
+            .expect("core memory");
+        assert_eq!(core_mem.data_size(&core_store), 65536);
+    }
+
+    #[test]
+    fn test_component_middleware_lifecycle() {
+        let mc_wat = get_default_middleware_wat("minecraft").expect("minecraft.wat");
+        let mw =
+            WasmMiddleware::from_wat("minecraft", mc_wat).expect("compile minecraft component");
+        let schema = mw.schema().expect("schema extracted");
+        assert_eq!(schema.name, "minecraft");
+        assert_eq!(schema.fields.len(), 4);
+
+        let threshold_field = schema
+            .fields
+            .iter()
+            .find(|f| f.key == "recompress-threshold")
+            .unwrap();
+        assert_eq!(threshold_field.field_type, ConfigFieldType::U32);
+
+        // Create shared active session
+        let session_handle = mw.create_shared_session().expect("create shared session");
+
+        // Verify initial discovery targets
+        {
+            let mut sess = session_handle.lock().unwrap();
+            let targets = sess.discovery_targets().unwrap().unwrap();
+            assert!(targets.contains(&"224.0.2.60:4445".to_string()));
+        }
+
+        // Dynamically update config via set_dynamic_middleware_config
+        let mut new_config = HashMap::new();
+        new_config.insert("recompress-threshold".to_string(), serde_json::json!(512));
+        new_config.insert(
+            "discovery-targets".to_string(),
+            serde_json::json!("10.0.0.1:4445,10.0.0.2:4445"),
+        );
+        set_dynamic_middleware_config("minecraft", new_config);
+
+        // Verify that the active live session was hot-updated immediately!
+        {
+            let mut sess = session_handle.lock().unwrap();
+            let targets = sess.discovery_targets().unwrap().unwrap();
+            assert_eq!(targets, vec!["10.0.0.1:4445", "10.0.0.2:4445"]);
+        }
     }
 }

@@ -573,3 +573,69 @@ export function updateManagedUser(
 		body: JSON.stringify(payload),
 	});
 }
+
+// ============================================================================
+// WASM Middleware Dynamic Configuration APIs
+// ============================================================================
+
+export interface ConfigFieldSchema {
+	key: string;
+	field_type: "u8" | "u16" | "u32" | "i32" | "i64" | "bool" | "string" | "list_string" | string;
+	label: string;
+	description: string;
+	default_value: any;
+}
+
+export interface MiddlewareConfigSchema {
+	name: string;
+	fields: ConfigFieldSchema[];
+}
+
+export interface MiddlewareItem {
+	name: string;
+	schema: MiddlewareConfigSchema | null;
+	effective_config: Record<string, any>;
+}
+
+export function listMiddlewares(connection: PanelConnection) {
+	return apiRequest<MiddlewareItem[]>(connection, "/middlewares");
+}
+
+export function getMiddlewareSchema(connection: PanelConnection, name: string) {
+	return apiRequest<MiddlewareConfigSchema>(
+		connection,
+		`/middlewares/${encodeURIComponent(name)}/schema`,
+	);
+}
+
+export function getMiddlewareConfig(connection: PanelConnection, name: string) {
+	return apiRequest<Record<string, any>>(
+		connection,
+		`/middlewares/${encodeURIComponent(name)}/config`,
+	);
+}
+
+export function updateMiddlewareConfig(
+	connection: PanelConnection,
+	name: string,
+	config: Record<string, any>,
+) {
+	return apiRequest<{ status: string; name: string; config: Record<string, any> }>(
+		connection,
+		`/middlewares/${encodeURIComponent(name)}/config`,
+		{
+			method: "PUT",
+			body: JSON.stringify(config),
+		},
+	);
+}
+
+export function resetMiddlewareConfig(connection: PanelConnection, name: string) {
+	return apiRequest<{ status: string; name: string; reset: boolean }>(
+		connection,
+		`/middlewares/${encodeURIComponent(name)}/config/reset`,
+		{
+			method: "POST",
+		},
+	);
+}

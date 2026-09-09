@@ -122,6 +122,16 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         )
         .route("/client/stats", axum::routing::delete(client_reset_stats))
         .route("/client/logs", get(client_logs).delete(client_clear_logs))
+        .route("/middlewares", get(list_middlewares))
+        .route("/middlewares/{name}/schema", get(get_middleware_schema))
+        .route(
+            "/middlewares/{name}/config",
+            get(get_middleware_config).put(put_middleware_config),
+        )
+        .route(
+            "/middlewares/{name}/config/reset",
+            post(reset_middleware_config),
+        )
         .route("/middlewares/{name}/data", post(post_middleware_data))
         .route("/auth/providers", get(auth_providers))
         .route("/auth/github/login", get(auth_github_login))
@@ -763,6 +773,155 @@ async fn post_middleware_data(
 }
 
 #[derive(Debug, Serialize)]
+pub struct MiddlewareItemResponse {
+    pub name: String,
+    pub schema: Option<crate::prism::middleware::MiddlewareConfigSchema>,
+    pub effective_config: std::collections::HashMap<String, serde_json::Value>,
+}
+
+async fn list_middlewares(
+    State(_st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let mut items = Vec::new();
+    let engine = wasmtime::Engine::default();
+
+    for (name, wat) in crate::prism::middleware::DEFAULT_MIDDLEWARES {
+        let (_, schema) =
+            crate::prism::middleware::compile_module_from_wat(&engine, name, wat.as_bytes())
+                .map_err(ApiError::bad_request)?;
+
+        let mut effective = std::collections::HashMap::new();
+        if let Some(ref s) = schema {
+            for f in &s.fields {
+                effective.insert(f.key.clone(), f.default_value.clone());
+            }
+        }
+        if let Some(overrides) = crate::prism::middleware::get_dynamic_middleware_config(name) {
+            for (k, v) in overrides {
+                effective.insert(k, v);
+            }
+        }
+
+        items.push(MiddlewareItemResponse {
+            name: name.to_string(),
+            schema,
+            effective_config: effective,
+        });
+    }
+
+    Ok((StatusCode::OK, Json(items)))
+}
+
+async fn get_middleware_schema(
+    AxumPath(name): AxumPath<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim();
+    let wat = crate::prism::middleware::get_default_middleware_wat(base_name)
+        .ok_or_else(|| ApiError::not_found(&format!("middleware '{name}' not found")))?;
+
+    let engine = wasmtime::Engine::default();
+    let (_, schema) =
+        crate::prism::middleware::compile_module_from_wat(&engine, base_name, wat.as_bytes())
+            .map_err(ApiError::bad_request)?;
+
+    let s = schema.ok_or_else(|| {
+        ApiError::not_found(&format!("middleware '{name}' has no component schema"))
+    })?;
+    Ok((StatusCode::OK, Json(s)))
+}
+
+async fn get_middleware_config(
+    AxumPath(name): AxumPath<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim();
+    let wat = crate::prism::middleware::get_default_middleware_wat(base_name)
+        .ok_or_else(|| ApiError::not_found(&format!("middleware '{name}' not found")))?;
+
+    let engine = wasmtime::Engine::default();
+    let (_, schema) =
+        crate::prism::middleware::compile_module_from_wat(&engine, base_name, wat.as_bytes())
+            .map_err(ApiError::bad_request)?;
+
+    let mut effective = std::collections::HashMap::new();
+    if let Some(ref s) = schema {
+        for f in &s.fields {
+            effective.insert(f.key.clone(), f.default_value.clone());
+        }
+    }
+    if let Some(overrides) = crate::prism::middleware::get_dynamic_middleware_config(base_name) {
+        for (k, v) in overrides {
+            effective.insert(k, v);
+        }
+    }
+
+    Ok((StatusCode::OK, Json(effective)))
+}
+
+async fn put_middleware_config(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+    AxumPath(name): AxumPath<String>,
+    Json(config): Json<std::collections::HashMap<String, serde_json::Value>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
+    let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim();
+
+    if let Some(ref storage) = st.storage {
+        storage
+            .save_middleware_config(base_name, &config)
+            .map_err(ApiError::bad_request)?;
+    }
+
+    crate::prism::middleware::set_dynamic_middleware_config(base_name, config.clone());
+
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ok",
+            "name": base_name,
+            "config": config,
+        })),
+    ))
+}
+
+async fn reset_middleware_config(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+    AxumPath(name): AxumPath<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
+    let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim();
+
+    if let Some(ref storage) = st.storage {
+        let _ = storage.delete_middleware_config(base_name);
+    }
+
+    crate::prism::middleware::reset_dynamic_middleware_config(base_name);
+
+    if let Some(wat) = crate::prism::middleware::get_default_middleware_wat(base_name) {
+        let engine = wasmtime::Engine::default();
+        if let Ok((_, Some(schema))) =
+            crate::prism::middleware::compile_module_from_wat(&engine, base_name, wat.as_bytes())
+        {
+            let mut defaults = std::collections::HashMap::new();
+            for f in schema.fields {
+                defaults.insert(f.key, f.default_value);
+            }
+            crate::prism::middleware::broadcast_session_config_update(base_name, &defaults);
+        }
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ok",
+            "name": base_name,
+            "reset": true,
+        })),
+    ))
+}
+
+#[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -892,22 +1051,22 @@ pub struct AuthProvidersResponse {
 }
 
 async fn auth_providers(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let (github_enabled, github_client_id, mode, providers) =
-        if let Some(ref am) = st.auth_manager {
-            let gh = am.github_config();
-            let gh_enabled = gh.is_some();
-            let gh_client_id = gh.map(|g| g.client_id.clone());
-            let mode_str = am.auth_mode().to_string();
+    let (github_enabled, github_client_id, mode, providers) = if let Some(ref am) = st.auth_manager
+    {
+        let gh = am.github_config();
+        let gh_enabled = gh.is_some();
+        let gh_client_id = gh.map(|g| g.client_id.clone());
+        let mode_str = am.auth_mode().to_string();
 
-            let mut providers = Vec::new();
-            if gh_enabled && mode_str != "token" {
-                providers.push("github".to_string());
-            }
+        let mut providers = Vec::new();
+        if gh_enabled && mode_str != "token" {
+            providers.push("github".to_string());
+        }
 
-            (gh_enabled, gh_client_id, mode_str, providers)
-        } else {
-            (false, None, "token".to_string(), Vec::new())
-        };
+        (gh_enabled, gh_client_id, mode_str, providers)
+    } else {
+        (false, None, "token".to_string(), Vec::new())
+    };
 
     (
         StatusCode::OK,
@@ -1469,11 +1628,7 @@ mod tests {
         let client = reqwest::Client::new();
 
         // Root returns JSON info indicating frontend is desktop-only
-        let root_resp = client
-            .get(format!("http://{addr}/"))
-            .send()
-            .await
-            .unwrap();
+        let root_resp = client.get(format!("http://{addr}/")).send().await.unwrap();
         assert_eq!(root_resp.status(), reqwest::StatusCode::OK);
         let root_json: serde_json::Value = root_resp.json().await.unwrap();
         assert_eq!(root_json["service"], "prism-admin-api");
@@ -1598,6 +1753,146 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reset_resp.status(), reqwest::StatusCode::OK);
+
+        let _ = shutdown_tx.send(true);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn test_middleware_config_api_endpoints() {
+        let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let rand_val = rand::random::<u64>();
+        let db_path = std::env::temp_dir().join(format!("prism_mw_api_test_{rand_val}.db"));
+        let storage = Arc::new(crate::prism::storage::StorageEngine::open(&db_path).unwrap());
+
+        let state = AdminState {
+            sessions: Arc::new(telemetry::SessionRegistry::new()),
+            optimizer: Arc::new(telemetry::OptimizerStatsRegistry::new()),
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth {
+                panel_token: Some("secret123".to_string()),
+                worker_token: None,
+                ..Default::default()
+            },
+            management: None,
+            worker: None,
+            client: None,
+            auth_manager: None,
+            storage: Some(storage.clone()),
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let mut rx = shutdown_rx;
+                    while rx.changed().await.is_ok() {
+                        if *rx.borrow() {
+                            break;
+                        }
+                    }
+                })
+                .await
+                .ok();
+        });
+
+        let http = reqwest::Client::new();
+
+        // 1. GET /middlewares
+        let resp = http
+            .get(format!("http://{addr}/middlewares"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+        let mc = items.iter().find(|i| i["name"] == "minecraft").unwrap();
+        assert!(mc["schema"].get("fields").is_some());
+
+        // 2. GET /middlewares/minecraft/schema
+        let resp = http
+            .get(format!("http://{addr}/middlewares/minecraft/schema"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let schema: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(schema["name"], "minecraft");
+
+        // 3. GET /middlewares/minecraft/config
+        let resp = http
+            .get(format!("http://{addr}/middlewares/minecraft/config"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let cfg: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(cfg["recompress-threshold"], 256);
+
+        // 4. PUT /middlewares/minecraft/config
+        let mut update = std::collections::HashMap::new();
+        update.insert("recompress-threshold", serde_json::json!(1024));
+        update.insert("deflate-level", serde_json::json!(6));
+
+        let put_resp = http
+            .put(format!("http://{addr}/middlewares/minecraft/config"))
+            .header("Authorization", "Bearer secret123")
+            .json(&update)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put_resp.status(), reqwest::StatusCode::OK);
+
+        // Verify effective config is updated
+        let resp = http
+            .get(format!("http://{addr}/middlewares/minecraft/config"))
+            .send()
+            .await
+            .unwrap();
+        let updated_cfg: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(updated_cfg["recompress-threshold"], 1024);
+        assert_eq!(updated_cfg["deflate-level"], 6);
+
+        // Verify persisted to SQLite DB
+        let db_cfg = storage
+            .load_middleware_config("minecraft")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            db_cfg.get("recompress-threshold").unwrap(),
+            &serde_json::json!(1024)
+        );
+
+        // 5. POST /middlewares/minecraft/config/reset
+        let reset_resp = http
+            .post(format!("http://{addr}/middlewares/minecraft/config/reset"))
+            .header("Authorization", "Bearer secret123")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reset_resp.status(), reqwest::StatusCode::OK);
+
+        // Verify DB cleared and effective config reset to defaults
+        assert!(
+            storage
+                .load_middleware_config("minecraft")
+                .unwrap()
+                .is_none()
+        );
+        let resp = http
+            .get(format!("http://{addr}/middlewares/minecraft/config"))
+            .send()
+            .await
+            .unwrap();
+        let reset_cfg: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(reset_cfg["recompress-threshold"], 256);
 
         let _ = shutdown_tx.send(true);
         let _ = std::fs::remove_file(db_path);

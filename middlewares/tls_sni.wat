@@ -13,8 +13,14 @@
 ;;         Action 0 (NEED_MORE_DATA): TLS record incomplete
 ;;         Action 1 (FRAME_DEFER): sliced TLS record frame, Value = total record bytes
 
-(module
-  (memory (export "memory") 4)
+(component
+  (type $Config (record
+    (field "dummy" u32)
+  ))
+  (export "config" (type $Config))
+
+  (core module $main
+    (memory (export "memory") 4)
 
   ;; ---------------------------------------------------------------------------
   ;; Helper: Pack Action (high 32 bits) and Value (low 32 bits) into i64
@@ -294,4 +300,7 @@
     ;; Unknown state: NO_MATCH (Action 2)
     (call $pack_result (i32.const 2) (i32.const 0))
   )
+  )
+
+  (export "main" (core module $main))
 )

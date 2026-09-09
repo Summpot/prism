@@ -14,7 +14,8 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::prism::middleware::{
-    FramePriority, PollResult, SessionState, StreamResult, WasmMiddleware, WasmProtocolSession,
+    FramePriority, PollResult, SessionHandle, SessionState, StreamResult, WasmMiddleware,
+    WasmProtocolSession,
 };
 use crate::prism::tunnel::{
     optimizer::{
@@ -295,7 +296,7 @@ pub async fn run_optimized_tcp_pipeline(
         opt_writer.add_stats(optimizer.service(&meta.name));
         opt_writer.add_stats(optimizer.global());
     }
-    let mut wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
+    let wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
 
     let outbound_task = tokio::spawn(async move {
         let mut read_buf = Vec::with_capacity(64 * 1024);
@@ -318,11 +319,15 @@ pub async fn run_optimized_tcp_pipeline(
                     }
                     read_buf.extend_from_slice(&tmp[..n]);
 
-                    if let Some(ref mut sess) = wasm_session {
+                    if let Some(ref sess_handle) = wasm_session {
                         let mut offset = 0;
                         while offset < read_buf.len() {
                             let slice = &read_buf[offset..];
-                            match sess.poll(slice) {
+                            let poll_res = {
+                                let mut sess = sess_handle.lock().unwrap();
+                                sess.poll(slice)
+                            };
+                            match poll_res {
                                 Ok(PollResult::Stream(StreamResult::Frame {
                                     len,
                                     priority,
@@ -399,7 +404,7 @@ pub async fn run_optimized_tcp_pipeline(
 pub fn load_wasm_session(
     mw_name: Option<&str>,
     middleware_dir: Option<&Path>,
-) -> anyhow::Result<Option<WasmProtocolSession>> {
+) -> anyhow::Result<Option<SessionHandle>> {
     let Some(name) = mw_name else {
         return Ok(None);
     };
@@ -416,7 +421,7 @@ pub fn load_wasm_session(
         for path in &candidates {
             if path.exists() {
                 let mw = WasmMiddleware::from_wat_path(base_name, path)?;
-                found = Some(mw.create_session()?);
+                found = Some(mw.create_shared_session()?);
                 break;
             }
         }
@@ -429,23 +434,31 @@ pub fn load_wasm_session(
         let path = Path::new(name);
         if path.exists() {
             let mw = WasmMiddleware::from_wat_path(base_name, path)?;
-            sess = Some(mw.create_session()?);
+            sess = Some(mw.create_shared_session()?);
         }
     }
 
     if sess.is_none() {
         if let Some(wat) = crate::prism::middleware::get_default_middleware_wat(base_name) {
-            sess = Some(WasmProtocolSession::from_wat(wat)?);
+            let s = WasmProtocolSession::from_wat(wat)?;
+            sess = Some(s.into_shared(base_name));
         }
     }
 
-    let Some(mut sess) = sess else {
+    let Some(sess) = sess else {
         anyhow::bail!("middleware not found: {name}");
     };
 
-    sess.set_state(SessionState::Streaming);
-    if let Some(data) = crate::prism::middleware::get_injected_middleware_data(base_name, None) {
-        let _ = sess.set_data(&data);
+    {
+        let mut s = sess.lock().unwrap();
+        s.set_state(SessionState::Streaming);
+        if let Some(data) = crate::prism::middleware::get_injected_middleware_data(base_name, None)
+        {
+            let _ = s.set_data(&data);
+        }
+        if let Some(config) = crate::prism::middleware::get_dynamic_middleware_config(base_name) {
+            let _ = s.apply_config_map(&config);
+        }
     }
 
     Ok(Some(sess))

@@ -16,10 +16,22 @@
 ;;         Action 2 (FRAME_URGENT): sliced packet (KeepAlive / Ping / Pong), Value = total packet bytes
 ;;   - set_data(ptr, len) -> i32: copies injected data (e.g. RSA private key) to offset 196608, returns 0
 
-(module
+(component
   ;; ---------------------------------------------------------------------------
-  ;; Host Imports in namespace "prism" (Must precede memories, globals, funcs)
+  ;; Declarative Configuration Schema (Component Type Definition)
   ;; ---------------------------------------------------------------------------
+  (type $Config (record
+    (field "recompress-threshold" u32)
+    (field "deflate-level" u8)
+    (field "discovery-targets" string)
+    (field "motd-template" string)
+  ))
+  (export "config" (type $Config))
+
+  (core module $main
+    ;; ---------------------------------------------------------------------------
+    ;; Host Imports in namespace "prism" (Must precede memories, globals, funcs)
+    ;; ---------------------------------------------------------------------------
 
   ;; RSA PKCS#1 v1.5 private key decryption
   (import "prism" "crypto_rsa_decrypt"
@@ -98,10 +110,65 @@
   (data (i32.const 65740) "[/AD]")
 
   ;; ---------------------------------------------------------------------------
-  ;; Internal State Globals
+  ;; Internal State Globals & Dynamic Configuration
   ;; ---------------------------------------------------------------------------
 
   (global $injected_len (mut i32) (i32.const 0))
+  (global $recompress_threshold (mut i32) (i32.const 256))
+  (global $deflate_level (mut i32) (i32.const 1))
+  (global $targets_ptr (mut i32) (i32.const 65600))
+  (global $targets_len (mut i32) (i32.const 51))
+  (global $template_ptr (mut i32) (i32.const 65660))
+  (global $template_len (mut i32) (i32.const 42))
+
+  (func $set_recompress_threshold (export "set_recompress_threshold") (param $val i32)
+    (global.set $recompress_threshold (local.get $val))
+  )
+
+  (func $set_deflate_level (export "set_deflate_level") (param $val i32)
+    (global.set $deflate_level (local.get $val))
+  )
+
+  (func $set_discovery_targets (export "set_discovery_targets") (param $ptr i32) (param $len i32)
+    (if (i32.and (i32.gt_s (local.get $len) (i32.const 0)) (i32.le_s (local.get $len) (i32.const 1024)))
+      (then
+        (call $memcpy (i32.const 132000) (local.get $ptr) (local.get $len))
+        (global.set $targets_ptr (i32.const 132000))
+        (global.set $targets_len (local.get $len))
+      )
+    )
+  )
+
+  (func $set_discovery_template (export "set_discovery_template") (export "set_motd_template") (param $ptr i32) (param $len i32)
+    (if (i32.and (i32.gt_s (local.get $len) (i32.const 0)) (i32.le_s (local.get $len) (i32.const 1024)))
+      (then
+        (call $memcpy (i32.const 133024) (local.get $ptr) (local.get $len))
+        (global.set $template_ptr (i32.const 133024))
+        (global.set $template_len (local.get $len))
+      )
+    )
+  )
+
+  (func (export "update_config")
+    (param $threshold i32)
+    (param $level i32)
+    (param $targets_ptr i32) (param $targets_len i32)
+    (param $template_ptr i32) (param $template_len i32)
+    (result i32)
+    (if (i32.ge_s (local.get $threshold) (i32.const 0))
+      (then (call $set_recompress_threshold (local.get $threshold)))
+    )
+    (if (i32.ge_s (local.get $level) (i32.const 0))
+      (then (call $set_deflate_level (local.get $level)))
+    )
+    (if (i32.gt_s (local.get $targets_len) (i32.const 0))
+      (then (call $set_discovery_targets (local.get $targets_ptr) (local.get $targets_len)))
+    )
+    (if (i32.gt_s (local.get $template_len) (i32.const 0))
+      (then (call $set_discovery_template (local.get $template_ptr) (local.get $template_len)))
+    )
+    (i32.const 0)
+  )
 
   ;; ---------------------------------------------------------------------------
   ;; Utility Functions
@@ -636,8 +703,8 @@
         (local.set $raw_payload_ptr (i32.add (local.get $p) (local.get $data_len_n)))
         (local.set $raw_payload_len (i32.sub (local.get $pkt_len) (local.get $data_len_n)))
 
-        ;; Recompress threshold: 256 bytes
-        (if (i32.ge_u (local.get $raw_payload_len) (i32.const 256))
+        ;; Recompress threshold: dynamic threshold from global
+        (if (i32.ge_u (local.get $raw_payload_len) (global.get $recompress_threshold))
           (then
             ;; Compress into Page 4 + 16 (262160), leaving 16 bytes headroom for two VarInts
             (local.set $comp_len
@@ -646,7 +713,7 @@
                 (local.get $raw_payload_len)
                 (i32.const 262160)
                 (i32.const 3145712)
-                (i32.const 1)
+                (global.get $deflate_level)
               )
             )
             (if (i32.gt_s (local.get $comp_len) (i32.const 0))
@@ -756,37 +823,31 @@
   )
 
   ;; discovery_targets(out_ptr, out_max_len) -> i32
-  ;; Writes the default discovery target addresses (comma-separated):
-  ;; "224.0.2.60:4445,255.255.255.255:4445,127.0.0.1:4445"
+  ;; Writes the discovery target addresses (comma-separated).
   ;; Returns written byte count, or -1 if out_max_len is too small.
   (func (export "discovery_targets")
     (param $out_ptr i32)
     (param $out_max_len i32)
     (result i32)
-    (local $len i32)
-    (local.set $len (i32.const 51))
-    (if (i32.lt_s (local.get $out_max_len) (local.get $len))
+    (if (i32.lt_s (local.get $out_max_len) (global.get $targets_len))
       (then (return (i32.const -1)))
     )
-    (call $memcpy (local.get $out_ptr) (i32.const 65600) (local.get $len))
-    (local.get $len)
+    (call $memcpy (local.get $out_ptr) (global.get $targets_ptr) (global.get $targets_len))
+    (global.get $targets_len)
   )
 
   ;; discovery_template(out_ptr, out_max_len) -> i32
-  ;; Writes the discovery payload template string:
-  ;; "[MOTD]{prefix}{name}[/MOTD][AD]{port}[/AD]"
+  ;; Writes the discovery payload template string.
   ;; Returns written byte count, or -1 if out_max_len is too small.
   (func (export "discovery_template")
     (param $out_ptr i32)
     (param $out_max_len i32)
     (result i32)
-    (local $len i32)
-    (local.set $len (i32.const 42))
-    (if (i32.lt_s (local.get $out_max_len) (local.get $len))
+    (if (i32.lt_s (local.get $out_max_len) (global.get $template_len))
       (then (return (i32.const -1)))
     )
-    (call $memcpy (local.get $out_ptr) (i32.const 65660) (local.get $len))
-    (local.get $len)
+    (call $memcpy (local.get $out_ptr) (global.get $template_ptr) (global.get $template_len))
+    (global.get $template_len)
   )
 
   ;; build_discovery_payload(name_ptr, name_len, port, prefix_ptr, prefix_len, out_ptr, out_max_len) -> i32
@@ -850,4 +911,7 @@
     ;; Return total written bytes
     (i32.sub (local.get $curr) (local.get $out_ptr))
   )
+  )
+
+  (export "main" (core module $main))
 )

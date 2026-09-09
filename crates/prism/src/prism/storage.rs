@@ -116,6 +116,12 @@ impl StorageEngine {
                 saved_ratio REAL NOT NULL DEFAULT 0.0,
                 sessions_count INTEGER NOT NULL DEFAULT 0,
                 last_session_at INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS middleware_configs (
+                name TEXT PRIMARY KEY,
+                config_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );",
         )?;
 
@@ -413,6 +419,93 @@ impl StorageEngine {
         )?;
         Ok(())
     }
+
+    // ========================================================================
+    // Middleware Dynamic Configs Operations
+    // ========================================================================
+
+    /// Persists dynamic middleware configuration JSON for a named middleware.
+    pub fn save_middleware_config(
+        &self,
+        name: &str,
+        config: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> anyhow::Result<()> {
+        let json_str = serde_json::to_string(config)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
+        conn.execute(
+            "INSERT INTO middleware_configs (name, config_json, updated_at)
+             VALUES (?1, ?2, unixepoch())
+             ON CONFLICT(name) DO UPDATE SET
+                 config_json = excluded.config_json,
+                 updated_at = excluded.updated_at",
+            params![name.trim().to_ascii_lowercase(), json_str],
+        )?;
+        Ok(())
+    }
+
+    /// Loads the stored dynamic middleware configuration for a named middleware if any.
+    pub fn load_middleware_config(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<Option<std::collections::HashMap<String, serde_json::Value>>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
+        let mut stmt =
+            conn.prepare("SELECT config_json FROM middleware_configs WHERE name = ?1")?;
+        let mut rows = stmt.query(params![name.trim().to_ascii_lowercase()])?;
+        if let Some(row) = rows.next()? {
+            let s: String = row.get(0)?;
+            let cfg = serde_json::from_str(&s)?;
+            Ok(Some(cfg))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Loads all stored dynamic middleware configurations across all middlewares.
+    pub fn load_all_middleware_configs(
+        &self,
+    ) -> anyhow::Result<
+        std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+    > {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
+        let mut stmt = conn.prepare("SELECT name, config_json FROM middleware_configs")?;
+        let rows = stmt.query_map([], |row| {
+            let name: String = row.get(0)?;
+            let s: String = row.get(1)?;
+            Ok((name, s))
+        })?;
+
+        let mut out = std::collections::HashMap::new();
+        for r in rows {
+            let (name, s) = r?;
+            if let Ok(cfg) = serde_json::from_str(&s) {
+                out.insert(name, cfg);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Deletes stored dynamic configuration for a named middleware, resetting it to default.
+    pub fn delete_middleware_config(&self, name: &str) -> anyhow::Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
+        conn.execute(
+            "DELETE FROM middleware_configs WHERE name = ?1",
+            params![name.trim().to_ascii_lowercase()],
+        )?;
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -534,6 +627,45 @@ mod tests {
         storage.reset_cumulative_stats().unwrap();
         let cum_reset = storage.load_cumulative_stats().unwrap();
         assert_eq!(cum_reset.raw_bytes, 0);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_middleware_config_storage() {
+        let path = temp_db_path();
+        let storage = StorageEngine::open(&path).expect("open sqlite");
+
+        let mut config = std::collections::HashMap::new();
+        config.insert("recompress-threshold".to_string(), serde_json::json!(512));
+        config.insert(
+            "discovery-targets".to_string(),
+            serde_json::json!("127.0.0.1:4445"),
+        );
+
+        storage
+            .save_middleware_config("minecraft", &config)
+            .expect("save config");
+
+        let loaded = storage
+            .load_middleware_config("minecraft")
+            .expect("load config")
+            .expect("some config");
+        assert_eq!(
+            loaded.get("recompress-threshold").unwrap(),
+            &serde_json::json!(512)
+        );
+
+        let all = storage.load_all_middleware_configs().expect("load all");
+        assert!(all.contains_key("minecraft"));
+
+        storage
+            .delete_middleware_config("minecraft")
+            .expect("delete config");
+        let after_delete = storage
+            .load_middleware_config("minecraft")
+            .expect("load config");
+        assert!(after_delete.is_none());
 
         let _ = std::fs::remove_file(path);
     }

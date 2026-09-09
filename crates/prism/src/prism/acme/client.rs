@@ -28,6 +28,45 @@ pub fn resolve_directory_url(url_or_preset: &str) -> String {
     }
 }
 
+pub fn directory_url_slug(url_or_preset: &str) -> String {
+    let s = url_or_preset.trim();
+    if s.is_empty()
+        || s.eq_ignore_ascii_case("production")
+        || s.eq_ignore_ascii_case("letsencrypt")
+        || s == LetsEncrypt::Production.url()
+    {
+        "production".to_string()
+    } else if s.eq_ignore_ascii_case("staging")
+        || s.eq_ignore_ascii_case("letsencrypt-staging")
+        || s == LetsEncrypt::Staging.url()
+    {
+        "staging".to_string()
+    } else if s.eq_ignore_ascii_case("zerossl")
+        || s == ZeroSsl::Production.url()
+    {
+        "zerossl".to_string()
+    } else {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(s.as_bytes());
+        let hash: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        let safe_prefix: String = s
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
+            .take(24)
+            .collect();
+        if safe_prefix.is_empty() {
+            format!("custom_{}", &hash[..12])
+        } else {
+            format!("custom_{}_{}", safe_prefix, &hash[..8])
+        }
+    }
+}
+
 pub struct AcmeClient {
     cf_client: CloudflareClient,
     directory_url: String,

@@ -113,7 +113,8 @@ key_file = ""
 # email = "admin@example.com"
 # # Directory URL preset: "production" (default), "staging", or full ACME directory URL
 # directory_url = "production"
-# # Directory to store certificates, keys, and account credentials (defaults to <workdir>/acme)
+# # Base directory to store certificates, keys, and account credentials (defaults to <workdir>/acme).
+# # Files are automatically organized into subdirectories by environment (e.g. <storage_dir>/production, <storage_dir>/staging).
 # storage_dir = ""
 # # Number of days before certificate expiration to attempt renewal (default: 30)
 # renew_before_days = 30

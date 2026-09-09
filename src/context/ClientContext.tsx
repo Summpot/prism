@@ -104,6 +104,7 @@ export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
 	setLoginModalOpen: () => {},
 	checkingProviders: false,
 	providersResult: null,
+	setProvidersResult: () => {},
 	providersError: null,
 	setProvidersError: () => {},
 	authServerUrl: "http://127.0.0.1:8080",
@@ -347,7 +348,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				setActionLoading(true);
 				setOauthExchanging(true);
 				setOauthWaitingCallback(false);
-				setLoginModalOpen(true);
 				setAuthError(null);
 				setProvidersError(null);
 				try {
@@ -488,7 +488,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 			setAuthError(null);
 			setProvidersError(null);
-			setLoginModalOpen(true);
+			setProvidersResult(null);
 			setCheckingProviders(true);
 			setActionLoading(true);
 
@@ -566,21 +566,25 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					try {
 						providers = await getAuthProviders(candidateUrls[0]);
 						successfulUrl = candidateUrls[0];
-					} catch (err) {
-						setProvidersError(
-							err instanceof Error ? err.message : "无法获取远端登录方式，请检查网络或服务端配置",
-						);
+					} catch {
+						// Remote node may not have management auth service; keep silent
 					}
 				}
 
 				setAuthServerUrl(successfulUrl);
-				if (providers) {
+				const hasValidProviders = Boolean(
+					providers && (providers.github_enabled || (providers.providers && providers.providers.length > 0)),
+				);
+				if (hasValidProviders) {
 					setProvidersResult(providers);
+				} else {
+					setProvidersResult(null);
 				}
 			} catch (err) {
-				setProvidersError(
-					err instanceof Error ? err.message : "连接远端或获取登录方式失败，请检查网络",
+				setError(
+					err instanceof Error ? err.message : "连接远端节点失败，请检查网络",
 				);
+				setProvidersResult(null);
 			} finally {
 				setCheckingProviders(false);
 				setActionLoading(false);
@@ -616,7 +620,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setOauthWaitingCallback(false);
 			setOauthExchanging(true);
 			setAuthError(null);
-			setLoginModalOpen(true);
 		};
 
 		const handleExchangeError = (event: Event) => {
@@ -806,6 +809,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setLoginModalOpen,
 			checkingProviders,
 			providersResult,
+			setProvidersResult,
 			providersError,
 			setProvidersError,
 			authServerUrl,
@@ -841,6 +845,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			loginModalOpen,
 			checkingProviders,
 			providersResult,
+			setProvidersResult,
 			providersError,
 			authServerUrl,
 			authError,

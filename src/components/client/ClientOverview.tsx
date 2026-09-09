@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
 	Activity,
 	Check,
@@ -8,7 +8,6 @@ import {
 	Power,
 	Radio,
 	RotateCcw,
-	Settings2,
 	WifiOff,
 	X,
 } from "lucide-react";
@@ -87,7 +86,6 @@ function ThroughputSparkline({ samples }: { samples: number[] }) {
 }
 
 export function ClientOverview() {
-	const navigate = useNavigate();
 	const { authSession, isAdmin, clearConnection } = usePanelSession();
 	const [copiedLink, setCopiedLink] = useState(false);
 
@@ -111,11 +109,7 @@ export function ClientOverview() {
 		copyText,
 		handleConnect,
 		handleDisconnect,
-		handleToggleTunnel,
 		handleResetStats,
-		profiles,
-		selectedProfileId,
-		handleSelectProfile,
 		profileName,
 		serverAddr,
 		transport,
@@ -131,108 +125,23 @@ export function ClientOverview() {
 		handleAddressCopy,
 		handleConnectFromLink,
 		checkingProviders,
+		providersResult,
+		setProvidersResult,
+		authServerUrl,
+		authError,
+		setAuthError,
 		oauthLoading,
+		oauthWaitingCallback,
+		setOauthWaitingCallback,
+		oauthExchanging,
+		manualCallbackInput,
+		setManualCallbackInput,
+		startGitHubAuthWithUrl,
 		loginAdminUnlocked,
 	} = useClient();
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
-			{/* Page Header Bar */}
-			<div className="flex flex-none select-none items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
-				<div className="flex items-center gap-2 min-w-0">
-					<Gamepad2 className="h-4 w-4 text-primary flex-none" />
-					<div className="min-w-0">
-						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-							连接
-						</h1>
-						<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
-							远端节点连接、隧道运行状态与服务发现
-						</p>
-					</div>
-					{isConnected ? (
-						<span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-500 ring-1 ring-emerald-500/30">
-							<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-							ONLINE
-						</span>
-					) : isConnecting ? (
-						<span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-500 ring-1 ring-amber-500/30">
-							<span className="h-1.5 w-1.5 animate-ping rounded-full bg-amber-500" />
-							CONNECTING
-						</span>
-					) : (
-						<span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-							<span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-							OFFLINE
-						</span>
-					)}
-				</div>
-
-				{/* Quick Controls */}
-				<div className="flex items-center gap-1.5 flex-none">
-					{profiles.length > 0 ? (
-						<select
-							aria-label="选择配置集"
-							value={selectedProfileId}
-							onChange={(e) => handleSelectProfile(e.target.value)}
-							className="h-7 max-w-[120px] sm:max-w-[170px] truncate rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
-						>
-							{profiles.map((p) => (
-								<option key={p.id} value={p.id}>
-									{p.name}
-								</option>
-							))}
-						</select>
-					) : null}
-
-					{authSession?.authenticated ? (
-						<Button
-							size="sm"
-							variant={isRunning ? "destructive" : "default"}
-							disabled={actionLoading}
-							onClick={handleToggleTunnel}
-							className={cn(
-								"h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs",
-								isRunning
-									? "bg-emerald-600 hover:bg-emerald-700 text-white"
-									: "bg-primary text-primary-foreground hover:bg-primary/90",
-							)}
-						>
-							{actionLoading ? (
-								<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Power className="h-3.5 w-3.5" />
-							)}
-							<span>{isRunning ? "已连接" : "启动连接"}</span>
-						</Button>
-					) : (
-						<Button
-							size="sm"
-							variant="default"
-							disabled={actionLoading || oauthLoading || checkingProviders}
-							onClick={() => void handleConnectFromLink()}
-							className="h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-						>
-							{checkingProviders ? (
-								<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Plug className="h-3.5 w-3.5" />
-							)}
-							<span>连接</span>
-						</Button>
-					)}
-
-					<Button
-						variant="outline"
-						size="icon-xs"
-						onClick={() => void navigate({ to: "/settings" })}
-						title="前往隧道配置"
-						className="h-7 w-7 text-xs flex-none cursor-pointer"
-					>
-						<Settings2 className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
-					</Button>
-				</div>
-			</div>
-
 			{error ? (
 				<div className="flex flex-none items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
 					<span className="truncate">{error}</span>
@@ -287,6 +196,8 @@ export function ClientOverview() {
 							onClick={() => {
 								clearConnection();
 								setAuthToken("");
+								setProvidersResult(null);
+								setAuthError(null);
 								if (status?.running) {
 									void handleDisconnect();
 								}
@@ -384,10 +295,160 @@ export function ClientOverview() {
 							)}
 						</Button>
 					</div>
+
+					{/* 探测到 Provider 后的滑出式选择菜单 (Slide-out Provider Selection & Inline Auth) */}
+					{oauthExchanging ? (
+						<div className="border-t border-border/60 pt-2.5 flex items-center justify-center py-3 gap-2.5 text-muted-foreground animate-in fade-in-0 slide-in-from-top-2 duration-300">
+							<RotateCcw className="h-4 w-4 animate-spin text-primary" />
+							<span className="text-xs font-medium text-foreground">
+								正在兑换 GitHub 授权凭证...
+							</span>
+						</div>
+					) : oauthWaitingCallback ? (
+						<div className="border-t border-border/60 pt-2.5 space-y-2.5 animate-in fade-in-0 slide-in-from-top-2 duration-300">
+							<div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2.5">
+								<div className="flex items-center justify-between">
+									<div className="flex items-center gap-2">
+										<RotateCcw className="h-4 w-4 animate-spin text-primary" />
+										<span className="text-xs font-bold text-foreground">等待 GitHub 授权完成</span>
+									</div>
+									<Button
+										variant="ghost"
+										size="xs"
+										onClick={() => {
+											setOauthWaitingCallback(false);
+											setAuthError(null);
+										}}
+										className="h-6 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+									>
+										返回
+									</Button>
+								</div>
+								<p className="text-[11px] text-muted-foreground leading-relaxed">
+									已在默认浏览器中打开 GitHub 授权页面。完成授权后，系统将自动唤起客户端完成登录。
+								</p>
+								<div className="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="xs"
+										onClick={() => void startGitHubAuthWithUrl(authServerUrl, serverAddr)}
+										disabled={oauthLoading}
+										className="h-7 text-xs gap-1.5 cursor-pointer"
+									>
+										<RotateCcw className="h-3 w-3" />
+										重新打开授权页面
+									</Button>
+								</div>
+								{authError ? (
+									<div className="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+										{authError}
+									</div>
+								) : null}
+								<div className="flex items-center gap-2 pt-0.5">
+									<Input
+										value={manualCallbackInput}
+										onChange={(e) => setManualCallbackInput(e.target.value)}
+										placeholder="未自动唤起？手动粘贴回调链接或验证码"
+										className="h-7 text-xs font-mono"
+									/>
+									<Button
+										size="xs"
+										className="h-7 text-xs flex-none px-3 cursor-pointer"
+										disabled={!manualCallbackInput.trim() || oauthLoading}
+										onClick={() => void handleConnectFromLink(manualCallbackInput.trim())}
+									>
+										验证
+									</Button>
+								</div>
+							</div>
+						</div>
+					) : providersResult && (providersResult.github_enabled !== false || (providersResult.providers && providersResult.providers.length > 0)) ? (
+						<div className="border-t border-border/60 pt-2.5 space-y-2 animate-in fade-in-0 slide-in-from-top-2 duration-300">
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-1.5">
+									<span className="text-xs font-semibold text-foreground">
+										已探测到该节点支持的登录方式
+									</span>
+									<Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary">
+										可选登录
+									</Badge>
+								</div>
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									onClick={() => {
+										setProvidersResult(null);
+										setAuthError(null);
+									}}
+									className="h-5 w-5 text-muted-foreground hover:text-foreground cursor-pointer"
+									title="收起"
+								>
+									<X className="h-3.5 w-3.5" />
+								</Button>
+							</div>
+
+							{authError ? (
+								<div className="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+									{authError}
+								</div>
+							) : null}
+
+							<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+								{providersResult.github_enabled !== false ? (
+									<button
+										type="button"
+										disabled={oauthLoading}
+										onClick={() => void startGitHubAuthWithUrl(authServerUrl, serverAddr)}
+										className="flex items-center gap-2.5 rounded-lg border border-border bg-card hover:border-primary/50 hover:bg-accent/40 p-2.5 text-left transition cursor-pointer group disabled:opacity-50"
+									>
+										<div className="flex h-8 w-8 items-center justify-center rounded-md bg-foreground text-background shrink-0">
+											<Github className="h-4 w-4" />
+										</div>
+										<div className="min-w-0 flex-1">
+											<div className="flex items-center gap-1.5">
+												<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+													GitHub 授权登录
+												</span>
+												<Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">
+													推荐
+												</Badge>
+											</div>
+											<p className="text-[10px] text-muted-foreground truncate">
+												绑定账号身份与访问权限
+											</p>
+										</div>
+									</button>
+								) : null}
+
+								<button
+									type="button"
+									onClick={() => {
+										setProvidersResult(null);
+										setAuthError(null);
+									}}
+									className="flex items-center gap-2.5 rounded-lg border border-border bg-card hover:border-primary/50 hover:bg-accent/40 p-2.5 text-left transition cursor-pointer group"
+								>
+									<div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground shrink-0">
+										<Plug className="h-4 w-4" />
+									</div>
+									<div className="min-w-0 flex-1">
+										<div className="flex items-center gap-1.5">
+											<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+												保持匿名连接
+											</span>
+										</div>
+										<p className="text-[10px] text-muted-foreground truncate">
+											直接作为访客使用当前隧道
+										</p>
+									</div>
+								</button>
+							</div>
+						</div>
+					) : null}
 				</div>
 			)}
 
-			{/* 隧道连接与实时状态卡片 (Active Tunnel Status) */}
+			{/* 隧道连接与实时状态卡片 (Active Tunnel Status) - 架构上保留支持未来多服务器/多隧道并行连接的扩展能力 */}
 			<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
 				<div className="flex items-center justify-between gap-2">
 					<div className="flex items-center gap-2 min-w-0 flex-1">
@@ -416,7 +477,9 @@ export function ClientOverview() {
 									variant="secondary"
 									className="font-mono text-[9px] uppercase px-1 py-0 h-4 flex-none"
 								>
-									{status?.transport || transport}
+									{isConnected
+										? (status?.actual_transport || (status?.transport && status.transport !== "auto" ? status.transport : null) || transport)
+										: (status?.transport || transport)}
 								</Badge>
 							</div>
 							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">

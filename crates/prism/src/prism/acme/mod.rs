@@ -141,11 +141,14 @@ impl AcmeManager {
     }
 
     pub fn resolve_paths(&self) -> (PathBuf, PathBuf, PathBuf) {
-        let storage_dir = if !self.config.storage_dir.trim().is_empty() {
+        let base_dir = if !self.config.storage_dir.trim().is_empty() {
             PathBuf::from(self.config.storage_dir.trim())
         } else {
             self.workdir.join("acme")
         };
+
+        let env_slug = client::directory_url_slug(&self.config.directory_url);
+        let storage_dir = base_dir.join(env_slug);
 
         let cert_file = if !self.config.cert_file.trim().is_empty() {
             PathBuf::from(self.config.cert_file.trim())
@@ -409,5 +412,85 @@ mod tests {
         assert!(matches!(val, CertValidity::NeedsRenewal { .. }));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_directory_url_slug() {
+        assert_eq!(client::directory_url_slug(""), "production");
+        assert_eq!(client::directory_url_slug("production"), "production");
+        assert_eq!(client::directory_url_slug("PRODUCTION"), "production");
+        assert_eq!(client::directory_url_slug("letsencrypt"), "production");
+        assert_eq!(
+            client::directory_url_slug("https://acme-v02.api.letsencrypt.org/directory"),
+            "production"
+        );
+
+        assert_eq!(client::directory_url_slug("staging"), "staging");
+        assert_eq!(client::directory_url_slug("STAGING"), "staging");
+        assert_eq!(client::directory_url_slug("letsencrypt-staging"), "staging");
+        assert_eq!(
+            client::directory_url_slug("https://acme-staging-v02.api.letsencrypt.org/directory"),
+            "staging"
+        );
+
+        assert_eq!(client::directory_url_slug("zerossl"), "zerossl");
+        assert_eq!(
+            client::directory_url_slug("https://acme.zerossl.com/v2/DV90"),
+            "zerossl"
+        );
+
+        let custom_slug = client::directory_url_slug("https://ca.internal.local/acme/directory");
+        assert!(custom_slug.starts_with("custom_"));
+    }
+
+    #[test]
+    fn test_resolve_paths_isolation() {
+        let temp_workdir = std::env::temp_dir().join(format!("prism_test_workdir_{}", rand::random::<u64>()));
+
+        // 1. Default storage_dir with staging
+        let mut cfg_staging = AcmeConfig::default();
+        cfg_staging.directory_url = "staging".into();
+        let mgr_staging = AcmeManager::new(cfg_staging, &temp_workdir);
+        let (storage_staging, cert_staging, key_staging) = mgr_staging.resolve_paths();
+
+        assert_eq!(storage_staging, temp_workdir.join("acme").join("staging"));
+        assert_eq!(cert_staging, temp_workdir.join("acme").join("staging").join("cert.pem"));
+        assert_eq!(key_staging, temp_workdir.join("acme").join("staging").join("key.pem"));
+
+        // 2. Default storage_dir with production
+        let mut cfg_prod = AcmeConfig::default();
+        cfg_prod.directory_url = "production".into();
+        let mgr_prod = AcmeManager::new(cfg_prod, &temp_workdir);
+        let (storage_prod, cert_prod, key_prod) = mgr_prod.resolve_paths();
+
+        assert_eq!(storage_prod, temp_workdir.join("acme").join("production"));
+        assert_eq!(cert_prod, temp_workdir.join("acme").join("production").join("cert.pem"));
+        assert_eq!(key_prod, temp_workdir.join("acme").join("production").join("key.pem"));
+
+        // Staging and production paths must not collide
+        assert_ne!(storage_staging, storage_prod);
+        assert_ne!(cert_staging, cert_prod);
+        assert_ne!(key_staging, key_prod);
+
+        // 3. Custom storage_dir
+        let mut cfg_custom = AcmeConfig::default();
+        cfg_custom.storage_dir = temp_workdir.join("custom_acme").to_string_lossy().to_string();
+        cfg_custom.directory_url = "staging".into();
+        let mgr_custom = AcmeManager::new(cfg_custom, &temp_workdir);
+        let (storage_custom, cert_custom, _) = mgr_custom.resolve_paths();
+
+        assert_eq!(storage_custom, temp_workdir.join("custom_acme").join("staging"));
+        assert_eq!(cert_custom, temp_workdir.join("custom_acme").join("staging").join("cert.pem"));
+
+        // 4. Explicit cert_file / key_file override
+        let mut cfg_explicit = AcmeConfig::default();
+        cfg_explicit.cert_file = temp_workdir.join("my_cert.pem").to_string_lossy().to_string();
+        cfg_explicit.key_file = temp_workdir.join("my_key.pem").to_string_lossy().to_string();
+        let mgr_explicit = AcmeManager::new(cfg_explicit, &temp_workdir);
+        let (storage_explicit, cert_explicit, key_explicit) = mgr_explicit.resolve_paths();
+
+        assert_eq!(storage_explicit, temp_workdir.join("acme").join("production"));
+        assert_eq!(cert_explicit, temp_workdir.join("my_cert.pem"));
+        assert_eq!(key_explicit, temp_workdir.join("my_key.pem"));
     }
 }

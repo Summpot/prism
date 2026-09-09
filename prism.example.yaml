@@ -87,6 +87,9 @@ tunnel:
 #     - "*.tunnel.example.com"
 #   email: "admin@example.com"
 #   directory_url: "production" # production | staging | URL
+#   # Base directory to store certificates, keys, and accounts (defaults to <workdir>/acme).
+#   # Subdirectories are automatically created per environment (e.g. <storage_dir>/production, <storage_dir>/staging).
+#   storage_dir: ""
 #   renew_before_days: 30
 #   auto_renew: true
 #   cloudflare:

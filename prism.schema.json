@@ -833,15 +833,15 @@
 				},
 				"storage_dir": {
 					"type": "string",
-					"description": "Directory to store issued certificates, private keys, and account credentials. Defaults to <workdir>/acme."
+					"description": "Base directory to store issued certificates, private keys, and account credentials (defaults to <workdir>/acme). Environments are isolated in subdirectories (e.g. <storage_dir>/production, <storage_dir>/staging)."
 				},
 				"cert_file": {
 					"type": "string",
-					"description": "Explicit path to save the certificate PEM file. Defaults to <storage_dir>/cert.pem."
+					"description": "Explicit path to save the certificate PEM file. Defaults to <storage_dir>/<environment>/cert.pem."
 				},
 				"key_file": {
 					"type": "string",
-					"description": "Explicit path to save the private key PEM file. Defaults to <storage_dir>/key.pem."
+					"description": "Explicit path to save the private key PEM file. Defaults to <storage_dir>/<environment>/key.pem."
 				},
 				"renew_before_days": {
 					"type": "integer",

@@ -29,6 +29,7 @@ export interface ClientStatusResponse {
 	state: string; // "idle" | "connecting" | "connected" | "disconnected"
 	server_addr: string;
 	transport: string;
+	actual_transport?: string | null;
 	listen_addr: string;
 	fake_lan_broadcast: boolean;
 	known_services: ClientRegisteredService[];
@@ -165,6 +166,7 @@ export interface ClientContextValue {
 	setLoginModalOpen: (open: boolean) => void;
 	checkingProviders: boolean;
 	providersResult: AuthProvidersResponse | null;
+	setProvidersResult: (result: AuthProvidersResponse | null) => void;
 	providersError: string | null;
 	setProvidersError: (err: string | null) => void;
 	authServerUrl: string;

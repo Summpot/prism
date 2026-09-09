@@ -49,6 +49,7 @@ pub struct Client {
     admin_bridge: Arc<RwLock<Option<AdminTunnelBridge>>>,
     dial_timeout: Duration,
     optimizer_stats: SharedOptimizerStats,
+    active_transport: Arc<RwLock<Option<String>>>,
 }
 
 impl Client {
@@ -76,6 +77,7 @@ impl Client {
             admin_bridge: Arc::new(RwLock::new(None)),
             dial_timeout: Duration::from_secs(5),
             optimizer_stats,
+            active_transport: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -162,6 +164,12 @@ impl Client {
         } else {
             None
         };
+        let active_proto = self.active_transport.read().await.clone();
+        let display_transport = if connected {
+            active_proto.clone().unwrap_or_else(|| self.config.transport.clone())
+        } else {
+            self.config.transport.clone()
+        };
         ClientStatusSnapshot {
             running: true,
             state: if connected {
@@ -170,7 +178,8 @@ impl Client {
                 "connecting".to_string()
             },
             server_addr: self.config.server_addr.clone(),
-            transport: self.config.transport.clone(),
+            transport: display_transport,
+            actual_transport: active_proto,
             listen_addr: self.config.listen_addr.clone(),
             fake_lan_broadcast: self.config.fake_lan_broadcast,
             known_services: services,
@@ -373,8 +382,9 @@ impl Client {
                 }
             }
 
-            // Disconnected: clear active session and clear broadcaster list
+            // Disconnected: clear active session, negotiated transport, and broadcaster list
             *self.current_sess.write().await = None;
+            *self.active_transport.write().await = None;
             if let Some(b) = self.admin_bridge.write().await.take() {
                 b.close();
             }
@@ -398,6 +408,7 @@ impl Client {
             h.abort();
         }
         *self.current_sess.write().await = None;
+        *self.active_transport.write().await = None;
         if let Some(b) = self.admin_bridge.write().await.take() {
             b.close();
         }
@@ -494,8 +505,9 @@ impl Client {
             }
         };
 
-        // Store active session for player connections only after registration is accepted
+        // Store active session and negotiated transport for player connections only after registration is accepted
         *self.current_sess.write().await = Some(sess.clone());
+        *self.active_transport.write().await = Some(chosen.protocol.clone());
 
         match AdminTunnelBridge::start(self.current_sess.clone()).await {
             Ok(bridge) => {
@@ -1131,6 +1143,8 @@ pub struct ClientStatusSnapshot {
     pub state: String,
     pub server_addr: String,
     pub transport: String,
+    #[serde(default)]
+    pub actual_transport: Option<String>,
     pub listen_addr: String,
     pub fake_lan_broadcast: bool,
     pub known_services: Vec<RegisteredService>,
@@ -1146,6 +1160,7 @@ impl Default for ClientStatusSnapshot {
             state: "idle".to_string(),
             server_addr: String::new(),
             transport: "quic".to_string(),
+            actual_transport: None,
             listen_addr: "127.0.0.1:25565".to_string(),
             fake_lan_broadcast: true,
             known_services: Vec::new(),

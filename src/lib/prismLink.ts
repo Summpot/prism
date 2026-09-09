@@ -26,7 +26,7 @@ export function encodePrismLink(profile: Partial<ClientProfile>): string {
 }
 
 export const SUPPORTED_LINK_PROTOCOLS = [
-	{ value: "auto://", label: "auto:// (自动协商)", transport: "auto" },
+	{ value: "auto://", label: "auto://", transport: "auto" },
 	{ value: "wt://", label: "wt://", transport: "webtransport" },
 	{ value: "quic://", label: "quic://", transport: "quic" },
 	{ value: "tcp://", label: "tcp://", transport: "tcp" },

@@ -57,6 +57,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "2.0"
+url = "2.5"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 tokio = { version = "1.53", features = [
 	"macros",
@@ -86,5 +87,8 @@ tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"]
 tokio-rustls = "0.26"
 x509-parser = "0.18"
 wtransport = { version = "0.7", features = ["self-signed", "dangerous-configuration"] }
-hickory-resolver = { version = "0.26.2", default-features = false, features = ["system-config", "tokio"] }
+hickory-resolver = { version = "0.26.2", default-features = false, features = [
+	"system-config",
+	"tokio",
+] }
 

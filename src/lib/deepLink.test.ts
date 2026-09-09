@@ -67,6 +67,18 @@ describe("parseDeepLink", () => {
 		});
 	});
 
+	it("parses HTTP/HTTPS authorization callback links with code", () => {
+		const result = parseDeepLink(
+			"http://127.0.0.1:8080/auth/github/callback?code=gho_abcdef123&state=state123",
+		);
+
+		expect(result).toEqual({
+			kind: "auth-code",
+			code: "gho_abcdef123",
+			state: "state123",
+		});
+	});
+
 	it("returns unknown for non-prism links", () => {
 		expect(parseDeepLink("https://example.com")).toEqual({
 			kind: "unknown",

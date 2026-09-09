@@ -7,7 +7,7 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { Minus, Square, X } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import Header from "@/components/Header";
 import { ClientModals } from "@/components/client/ClientModals";
@@ -127,17 +127,29 @@ function RootContent() {
 
 	const isDesktop = useMemo(() => isDesktopApp(), []);
 
+	const locationRef = useRef(location);
+	const navigateRef = useRef(navigate);
+	const connectionRef = useRef(connection);
+	const saveConnectionRef = useRef(saveConnection);
+
+	useEffect(() => {
+		locationRef.current = location;
+		navigateRef.current = navigate;
+		connectionRef.current = connection;
+		saveConnectionRef.current = saveConnection;
+	});
+
 	useEffect(() => {
 		return setupDeepLinkListener((payload) => {
 			if (payload.kind === "auth") {
-				const currentBaseUrl = connection?.baseUrl || "";
-				saveConnection({
+				const currentBaseUrl = connectionRef.current?.baseUrl || "";
+				saveConnectionRef.current({
 					baseUrl: currentBaseUrl,
 					token: payload.token,
 				});
 				window.dispatchEvent(new CustomEvent("prism:deep-link-auth", { detail: payload }));
-				if (location.pathname === "/login") {
-					void navigate({ to: payload.role === "admin" ? "/admin" : "/" });
+				if (locationRef.current.pathname === "/login") {
+					void navigateRef.current({ to: payload.role === "admin" ? "/admin" : "/" });
 				}
 			} else if (payload.kind === "auth-code") {
 				window.dispatchEvent(
@@ -164,8 +176,11 @@ function RootContent() {
 						// ignore
 					}
 
-					if (connection?.baseUrl && !candidates.includes(connection.baseUrl)) {
-						candidates.push(connection.baseUrl);
+					if (
+						connectionRef.current?.baseUrl &&
+						!candidates.includes(connectionRef.current.baseUrl)
+					) {
+						candidates.push(connectionRef.current.baseUrl);
 					}
 
 					// Fallback to default in-band tunnel admin bridge port
@@ -182,7 +197,7 @@ function RootContent() {
 								window.localStorage.removeItem("prism_pending_auth_url");
 								window.sessionStorage.removeItem("prism_pending_auth_url");
 							}
-							saveConnection({
+							saveConnectionRef.current({
 								baseUrl: norm,
 								token: res.token,
 							});
@@ -196,8 +211,8 @@ function RootContent() {
 									},
 								}),
 							);
-							if (location.pathname === "/login") {
-								void navigate({ to: res.user.role === "admin" ? "/admin" : "/" });
+							if (locationRef.current.pathname === "/login") {
+								void navigateRef.current({ to: res.user.role === "admin" ? "/admin" : "/" });
 							}
 							return;
 						} catch (err) {
@@ -225,7 +240,7 @@ function RootContent() {
 				);
 			}
 		});
-	}, [connection?.baseUrl, location.pathname, navigate, saveConnection]);
+	}, []);
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {

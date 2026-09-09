@@ -4167,6 +4167,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "wasmtime",
  "wtransport",
  "x509-parser",

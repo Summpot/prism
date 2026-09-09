@@ -136,6 +136,7 @@ export function ClientOverview() {
 		oauthExchanging,
 		manualCallbackInput,
 		setManualCallbackInput,
+		handleManualOAuthCallback,
 		startGitHubAuthWithUrl,
 		loginAdminUnlocked,
 	} = useClient();
@@ -348,6 +349,11 @@ export function ClientOverview() {
 									<Input
 										value={manualCallbackInput}
 										onChange={(e) => setManualCallbackInput(e.target.value)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter" && manualCallbackInput.trim() && !oauthLoading) {
+												void handleManualOAuthCallback(manualCallbackInput.trim());
+											}
+										}}
 										placeholder="未自动唤起？手动粘贴回调链接或验证码"
 										className="h-7 text-xs font-mono"
 									/>
@@ -355,21 +361,26 @@ export function ClientOverview() {
 										size="xs"
 										className="h-7 text-xs flex-none px-3 cursor-pointer"
 										disabled={!manualCallbackInput.trim() || oauthLoading}
-										onClick={() => void handleConnectFromLink(manualCallbackInput.trim())}
+										onClick={() => void handleManualOAuthCallback(manualCallbackInput.trim())}
 									>
 										验证
 									</Button>
 								</div>
 							</div>
 						</div>
-					) : providersResult && (providersResult.github_enabled !== false || (providersResult.providers && providersResult.providers.length > 0)) ? (
+					) : providersResult &&
+					  (providersResult.github_enabled !== false ||
+							(providersResult.providers && providersResult.providers.length > 0)) ? (
 						<div className="border-t border-border/60 pt-2.5 space-y-2 animate-in fade-in-0 slide-in-from-top-2 duration-300">
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-1.5">
 									<span className="text-xs font-semibold text-foreground">
 										已探测到该节点支持的登录方式
 									</span>
-									<Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary">
+									<Badge
+										variant="outline"
+										className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary"
+									>
 										可选登录
 									</Badge>
 								</div>
@@ -478,8 +489,12 @@ export function ClientOverview() {
 									className="font-mono text-[9px] uppercase px-1 py-0 h-4 flex-none"
 								>
 									{isConnected
-										? (status?.actual_transport || (status?.transport && status.transport !== "auto" ? status.transport : null) || transport)
-										: (status?.transport || transport)}
+										? status?.actual_transport ||
+											(status?.transport && status.transport !== "auto"
+												? status.transport
+												: null) ||
+											transport
+										: status?.transport || transport}
 								</Badge>
 							</div>
 							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">

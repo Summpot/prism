@@ -179,6 +179,7 @@ export interface ClientContextValue {
 	oauthExchanging: boolean;
 	manualCallbackInput: string;
 	setManualCallbackInput: (val: string) => void;
+	handleManualOAuthCallback: (input: string) => Promise<void>;
 	startGitHubAuthWithUrl: (targetAuthUrl: string, targetServerAddr?: string) => Promise<void>;
 	handleRedetectProviders: (overrideUrl?: string) => Promise<void>;
 	loginAdminUnlocked: boolean;

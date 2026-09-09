@@ -117,6 +117,7 @@ export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
 	oauthExchanging: false,
 	manualCallbackInput: "",
 	setManualCallbackInput: () => {},
+	handleManualOAuthCallback: async () => {},
 	startGitHubAuthWithUrl: async () => {},
 	handleRedetectProviders: async () => {},
 	loginAdminUnlocked: false,
@@ -328,121 +329,18 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		[authServerUrl, status?.admin_url],
 	);
 
-	// Connect from remote link: initiate tunnel client connection
-	const handleConnectFromLink = useCallback(
-		async (customLink?: string) => {
-			let raw = (customLink ?? prismLink.remoteLinkInput).trim();
-			if (!raw && serverAddr) {
-				raw = `${prismLink.linkProtocol}${serverAddr}`;
-			} else if (raw && !raw.includes("://")) {
-				raw = `${prismLink.linkProtocol}${raw}`;
-			}
-			if (!raw) {
-				setError("请输入远端链接或服务器地址");
-				return;
-			}
+	// Manual OAuth callback exchange handler (supports prism://, http(s)://, code=..., or bare code)
+	const handleManualOAuthCallback = useCallback(
+		async (input: string) => {
+			const raw = input.trim();
+			if (!raw) return;
 
-			// Handle direct OAuth code or Token callback links pasted by user
+			let code = "";
+			let customOrigin: string | null = null;
+
 			const deep = parseDeepLink(raw);
 			if (deep.kind === "auth-code") {
-				setActionLoading(true);
-				setOauthExchanging(true);
-				setOauthWaitingCallback(false);
-				setAuthError(null);
-				setProvidersError(null);
-				try {
-					const candidateUrls: string[] = [];
-					if (typeof window !== "undefined") {
-						const fromLocal = window.localStorage.getItem("prism_pending_auth_url");
-						const fromSession = window.sessionStorage.getItem("prism_pending_auth_url");
-						if (fromLocal && !candidateUrls.includes(fromLocal)) candidateUrls.push(fromLocal);
-						if (fromSession && !candidateUrls.includes(fromSession))
-							candidateUrls.push(fromSession);
-					}
-					if (status?.admin_url && !candidateUrls.includes(status.admin_url)) {
-						candidateUrls.push(status.admin_url);
-					}
-					if (authServerUrl && !candidateUrls.includes(authServerUrl)) {
-						candidateUrls.push(authServerUrl);
-					}
-					if (serverAddr) {
-						const derived = deriveManagementUrl(serverAddr);
-						if (derived && !candidateUrls.includes(derived)) {
-							candidateUrls.push(derived);
-						}
-					}
-					if (!candidateUrls.includes("http://127.0.0.1:18080")) {
-						candidateUrls.push("http://127.0.0.1:18080");
-					}
-
-					let res: { token: string; user: UserRecord; token_id: string } | null = null;
-					let activeUrl = candidateUrls[0];
-					let lastErr: unknown = null;
-					for (const u of candidateUrls) {
-						try {
-							res = await exchangeGitHubCode(
-								{ baseUrl: normalizeBaseUrl(u), token: "" },
-								deep.code,
-							);
-							activeUrl = u;
-							break;
-						} catch (err) {
-							lastErr = err;
-						}
-					}
-
-					if (!res) {
-						throw new Error(
-							lastErr instanceof Error
-								? lastErr.message
-								: "GitHub 授权码兑换凭证失败，验证码可能已失效，请重新发起登录",
-						);
-					}
-
-					setAuthToken(res.token);
-					if (res.user?.role?.toLowerCase() === "admin") {
-						setLoginAdminUnlocked(true);
-					}
-					saveClientConfig({
-						active_profile_id: selectedProfileId || null,
-						active_config: {
-							server_addr: serverAddr,
-							transport,
-							auth_token: res.token,
-							listen_addr: listenAddr,
-							fake_lan_broadcast: fakeLanBroadcast,
-							auto_connect_panel: autoConnectPanel,
-						},
-					}).catch(() => {});
-					if (autoConnectPanel && activeUrl) {
-						saveConnection({ baseUrl: normalizeBaseUrl(activeUrl), token: res.token });
-					}
-					setLoginModalOpen(false);
-					setOauthWaitingCallback(false);
-					setOauthExchanging(false);
-					setAuthError(null);
-					void startClient({
-						server_addr: serverAddr,
-						transport,
-						auth_token: res.token,
-						listen_addr: listenAddr,
-						fake_lan_broadcast: fakeLanBroadcast,
-						profile_id: selectedProfileId || undefined,
-						profile_name: profileName || undefined,
-					}).then(() => {
-						fetchStatus();
-						fetchLogs();
-					});
-					prismLink.setRemoteLinkInput("");
-					setManualCallbackInput("");
-				} catch (err) {
-					setAuthError(err instanceof Error ? err.message : String(err));
-				} finally {
-					setActionLoading(false);
-					setCheckingProviders(false);
-					setOauthExchanging(false);
-				}
-				return;
+				code = deep.code;
 			} else if (deep.kind === "auth") {
 				setAuthToken(deep.token);
 				if (deep.role?.toLowerCase() === "admin") {
@@ -459,7 +357,8 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 						auto_connect_panel: autoConnectPanel,
 					},
 				}).catch(() => {});
-				setLoginModalOpen(false);
+				setOauthWaitingCallback(false);
+				setManualCallbackInput("");
 				void startClient({
 					server_addr: serverAddr,
 					transport,
@@ -472,7 +371,164 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					fetchStatus();
 					fetchLogs();
 				});
+				return;
+			} else if (raw.includes("code=")) {
+				const match = raw.match(/[?&]code=([a-zA-Z0-9_-]+)/);
+				if (match) code = match[1];
+			} else if (/^[a-zA-Z0-9_-]{16,64}$/.test(raw)) {
+				code = raw;
+			}
+
+			if (raw.toLowerCase().startsWith("http://") || raw.toLowerCase().startsWith("https://")) {
+				try {
+					const u = new URL(raw);
+					customOrigin = u.origin;
+				} catch {
+					// ignore
+				}
+			}
+
+			if (!code) {
+				setAuthError("未识别到有效的 GitHub 授权码或回调链接，请检查输入");
+				return;
+			}
+
+			setActionLoading(true);
+			setOauthExchanging(true);
+			setOauthWaitingCallback(false);
+			setAuthError(null);
+			setProvidersError(null);
+
+			try {
+				const candidateUrls: string[] = [];
+				if (customOrigin && !candidateUrls.includes(customOrigin)) {
+					candidateUrls.push(customOrigin);
+				}
+				if (typeof window !== "undefined") {
+					const fromLocal = window.localStorage.getItem("prism_pending_auth_url");
+					const fromSession = window.sessionStorage.getItem("prism_pending_auth_url");
+					if (fromLocal && !candidateUrls.includes(fromLocal)) candidateUrls.push(fromLocal);
+					if (fromSession && !candidateUrls.includes(fromSession)) candidateUrls.push(fromSession);
+				}
+				if (status?.admin_url && !candidateUrls.includes(status.admin_url)) {
+					candidateUrls.push(status.admin_url);
+				}
+				if (authServerUrl && !candidateUrls.includes(authServerUrl)) {
+					candidateUrls.push(authServerUrl);
+				}
+				if (serverAddr) {
+					const derived = deriveManagementUrl(serverAddr);
+					if (derived && !candidateUrls.includes(derived)) {
+						candidateUrls.push(derived);
+					}
+				}
+				if (!candidateUrls.includes("http://127.0.0.1:18080")) {
+					candidateUrls.push("http://127.0.0.1:18080");
+				}
+
+				let res: { token: string; user: UserRecord; token_id: string } | null = null;
+				let activeUrl = candidateUrls[0];
+				let lastErr: unknown = null;
+				for (const u of candidateUrls) {
+					try {
+						res = await exchangeGitHubCode({ baseUrl: normalizeBaseUrl(u), token: "" }, code);
+						activeUrl = u;
+						break;
+					} catch (err) {
+						lastErr = err;
+					}
+				}
+
+				if (!res) {
+					throw new Error(
+						lastErr instanceof Error
+							? lastErr.message
+							: "GitHub 授权码兑换凭证失败，验证码可能已失效，请重新发起登录",
+					);
+				}
+
+				setAuthToken(res.token);
+				if (res.user?.role?.toLowerCase() === "admin") {
+					setLoginAdminUnlocked(true);
+				}
+				saveClientConfig({
+					active_profile_id: selectedProfileId || null,
+					active_config: {
+						server_addr: serverAddr,
+						transport,
+						auth_token: res.token,
+						listen_addr: listenAddr,
+						fake_lan_broadcast: fakeLanBroadcast,
+						auto_connect_panel: autoConnectPanel,
+					},
+				}).catch(() => {});
+				if (autoConnectPanel && activeUrl) {
+					saveConnection({ baseUrl: normalizeBaseUrl(activeUrl), token: res.token });
+				}
+				setLoginModalOpen(false);
+				setOauthWaitingCallback(false);
+				setOauthExchanging(false);
+				setAuthError(null);
+				void startClient({
+					server_addr: serverAddr,
+					transport,
+					auth_token: res.token,
+					listen_addr: listenAddr,
+					fake_lan_broadcast: fakeLanBroadcast,
+					profile_id: selectedProfileId || undefined,
+					profile_name: profileName || undefined,
+				}).then(() => {
+					fetchStatus();
+					fetchLogs();
+				});
 				prismLink.setRemoteLinkInput("");
+				setManualCallbackInput("");
+			} catch (err) {
+				setAuthError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setActionLoading(false);
+				setCheckingProviders(false);
+				setOauthExchanging(false);
+			}
+		},
+		[
+			authServerUrl,
+			autoConnectPanel,
+			fakeLanBroadcast,
+			fetchLogs,
+			fetchStatus,
+			listenAddr,
+			prismLink,
+			profileName,
+			saveConnection,
+			selectedProfileId,
+			serverAddr,
+			setAuthToken,
+			status?.admin_url,
+			transport,
+		],
+	);
+
+	// Connect from remote link: initiate tunnel client connection
+	const handleConnectFromLink = useCallback(
+		async (customLink?: string) => {
+			let raw = (customLink ?? prismLink.remoteLinkInput).trim();
+			if (!raw && serverAddr) {
+				raw = `${prismLink.linkProtocol}${serverAddr}`;
+			}
+
+			// Handle direct OAuth code or Token callback links pasted by user first
+			const deep = parseDeepLink(raw);
+			if (deep.kind === "auth-code" || deep.kind === "auth") {
+				await handleManualOAuthCallback(raw);
+				return;
+			}
+
+			if (raw && !raw.includes("://")) {
+				raw = `${prismLink.linkProtocol}${raw}`;
+			}
+			if (!raw) {
+				setError("请输入远端链接或服务器地址");
 				return;
 			}
 
@@ -573,7 +629,8 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 				setAuthServerUrl(successfulUrl);
 				const hasValidProviders = Boolean(
-					providers && (providers.github_enabled || (providers.providers && providers.providers.length > 0)),
+					providers &&
+					(providers.github_enabled || (providers.providers && providers.providers.length > 0)),
 				);
 				if (hasValidProviders) {
 					setProvidersResult(providers);
@@ -581,9 +638,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					setProvidersResult(null);
 				}
 			} catch (err) {
-				setError(
-					err instanceof Error ? err.message : "连接远端节点失败，请检查网络",
-				);
+				setError(err instanceof Error ? err.message : "连接远端节点失败，请检查网络");
 				setProvidersResult(null);
 			} finally {
 				setCheckingProviders(false);
@@ -822,6 +877,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			oauthExchanging,
 			manualCallbackInput,
 			setManualCallbackInput,
+			handleManualOAuthCallback,
 			startGitHubAuthWithUrl,
 			handleRedetectProviders,
 			loginAdminUnlocked,
@@ -861,6 +917,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			startGitHubAuthWithUrl,
 			handleRedetectProviders,
 			handleConnectFromLink,
+			handleManualOAuthCallback,
 		],
 	);
 

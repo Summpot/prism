@@ -27,6 +27,10 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 
 	const configLoadedRef = useRef(false);
 	const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const optionsRef = useRef(options);
+	useEffect(() => {
+		optionsRef.current = options;
+	});
 
 	const managementUrl = useMemo(
 		() => deriveManagementUrl(serverAddr) || "http://127.0.0.1:8080",
@@ -38,8 +42,8 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 		getClientConfig()
 			.then((resp) => {
 				setProfiles(resp.profiles);
-				if (resp.cumulative_stats && options?.onCumulativeStatsLoaded) {
-					options.onCumulativeStatsLoaded(resp.cumulative_stats);
+				if (resp.cumulative_stats && optionsRef.current?.onCumulativeStatsLoaded) {
+					optionsRef.current.onCumulativeStatsLoaded(resp.cumulative_stats);
 				}
 
 				if (!configLoadedRef.current) {
@@ -48,8 +52,8 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 						setProfileName(resp.active_config.profile_name || "Default Realm");
 						const sAddr = resp.active_config.server_addr || "127.0.0.1";
 						setServerAddr(sAddr);
-						if (options?.onRemoteLinkInputSync) {
-							options.onRemoteLinkInputSync(sAddr);
+						if (optionsRef.current?.onRemoteLinkInputSync) {
+							optionsRef.current.onRemoteLinkInputSync(sAddr);
 						}
 						setTransport(resp.active_config.transport || "auto");
 						setAuthToken(resp.active_config.auth_token || "");
@@ -68,7 +72,7 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 				getClientProfiles()
 					.then((list) => {
 						setProfiles(list);
-						if (list.length > 0 && !selectedProfileId && !configLoadedRef.current) {
+						if (list.length > 0 && !configLoadedRef.current) {
 							configLoadedRef.current = true;
 							const first = list[0];
 							setSelectedProfileId(first.id);
@@ -82,7 +86,7 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 					})
 					.catch(() => {});
 			});
-	}, [options, selectedProfileId]);
+	}, []);
 
 	useEffect(() => {
 		fetchClientConfigData();

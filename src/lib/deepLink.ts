@@ -24,29 +24,47 @@ export type DeepLinkPayload =
 	  };
 
 /**
- * Parses any incoming `prism://` URL into structured DeepLinkPayload.
+ * Parses any incoming `prism://` URL, HTTP(S) auth callback URL, or raw auth code into structured DeepLinkPayload.
  */
 export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 	const trimmed = rawUrl.trim();
-	if (!trimmed.toLowerCase().startsWith("prism://")) {
+	if (!trimmed) {
 		return { kind: "unknown", raw: trimmed };
 	}
 
-	const withoutScheme = trimmed.slice("prism://".length);
+	let targetString = trimmed;
+	let isAuthEndpoint = false;
 
-	// Check for auth callback or login formats:
-	// - prism://auth/callback?token=xxx&user_id=yyy&username=zzz&role=Admin
-	// - prism://auth/callback?code=xxx&state=yyy (direct GitHub custom scheme callback)
-	// - prism://login#token=xxx
-	// - prism://login?token=xxx
-	const isAuthEndpoint =
-		withoutScheme.startsWith("auth/callback") ||
-		withoutScheme.startsWith("auth/github/callback") ||
-		withoutScheme.startsWith("oauth/callback") ||
-		withoutScheme.startsWith("login") ||
-		withoutScheme.startsWith("auth?") ||
-		withoutScheme.startsWith("auth#") ||
-		withoutScheme.includes("code=");
+	if (trimmed.toLowerCase().startsWith("prism://")) {
+		targetString = trimmed.slice("prism://".length);
+		isAuthEndpoint =
+			targetString.startsWith("auth/callback") ||
+			targetString.startsWith("auth/github/callback") ||
+			targetString.startsWith("oauth/callback") ||
+			targetString.startsWith("login") ||
+			targetString.startsWith("auth?") ||
+			targetString.startsWith("auth#") ||
+			targetString.includes("code=");
+	} else if (
+		trimmed.toLowerCase().startsWith("http://") ||
+		trimmed.toLowerCase().startsWith("https://")
+	) {
+		try {
+			const u = new URL(trimmed);
+			if (
+				u.searchParams.has("code") ||
+				u.searchParams.has("token") ||
+				u.pathname.includes("auth")
+			) {
+				isAuthEndpoint = true;
+				targetString = u.pathname.replace(/^\//, "") + u.search + u.hash;
+			}
+		} catch {
+			// ignore
+		}
+	} else if (trimmed.includes("code=")) {
+		isAuthEndpoint = true;
+	}
 
 	if (isAuthEndpoint) {
 		let token = "";
@@ -56,11 +74,11 @@ export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 		let username: string | undefined;
 		let role: string | undefined;
 
-		const queryIdx = withoutScheme.indexOf("?");
-		const hashIdx = withoutScheme.indexOf("#");
+		const queryIdx = targetString.indexOf("?");
+		const hashIdx = targetString.indexOf("#");
 
 		if (queryIdx !== -1) {
-			const queryPart = withoutScheme.slice(
+			const queryPart = targetString.slice(
 				queryIdx + 1,
 				hashIdx !== -1 && hashIdx > queryIdx ? hashIdx : undefined,
 			);
@@ -74,7 +92,7 @@ export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 		}
 
 		if (hashIdx !== -1) {
-			const hashPart = withoutScheme.slice(
+			const hashPart = targetString.slice(
 				hashIdx + 1,
 				queryIdx !== -1 && queryIdx > hashIdx ? queryIdx : undefined,
 			);
@@ -107,12 +125,14 @@ export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 	}
 
 	// Check if it matches a node/client profile link
-	const profile = parsePrismLink(trimmed);
-	if (profile?.server_addr) {
-		return {
-			kind: "profile",
-			profile,
-		};
+	if (trimmed.toLowerCase().startsWith("prism://")) {
+		const profile = parsePrismLink(trimmed);
+		if (profile?.server_addr) {
+			return {
+				kind: "profile",
+				profile,
+			};
+		}
 	}
 
 	return { kind: "unknown", raw: trimmed };

@@ -135,6 +135,7 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/middlewares/{name}/data", post(post_middleware_data))
         .route("/auth/providers", get(auth_providers))
         .route("/auth/github/login", get(auth_github_login))
+        .route("/auth/github/callback", get(auth_github_callback))
         .route("/auth/github/exchange", post(auth_github_exchange))
         .route("/auth/session", get(auth_session))
         .route(
@@ -1119,6 +1120,169 @@ async fn auth_github_login(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct GitHubCallbackQuery {
+    pub code: Option<String>,
+    pub state: Option<String>,
+    pub error: Option<String>,
+    pub error_description: Option<String>,
+}
+
+async fn auth_github_callback(
+    Query(query): Query<GitHubCallbackQuery>,
+) -> impl IntoResponse {
+    let content = if let Some(code) = query.code.as_deref() {
+        let clean_code = code.trim();
+        let state_param = query
+            .state
+            .as_deref()
+            .map(|s| format!("&state={}", s.trim()))
+            .unwrap_or_default();
+        let deep_link = format!("prism://auth/callback?code={clean_code}{state_param}");
+        format!(
+            r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prism - GitHub 授权完成</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #090d16;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }}
+        .card {{
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 480px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+        }}
+        .icon {{
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 16px;
+            background: #0284c7;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+        }}
+        h2 {{ margin: 0 0 12px; font-size: 20px; font-weight: 600; color: #f8fafc; }}
+        p {{ margin: 0 0 24px; font-size: 14px; color: #94a3b8; line-height: 1.5; }}
+        .btn {{
+            display: inline-block;
+            background: #0284c7;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 4px;
+            cursor: pointer;
+            border: none;
+            transition: background 0.2s;
+        }}
+        .btn:hover {{ background: #0369a1; }}
+        .btn-secondary {{
+            background: #1f2937;
+            color: #cbd5e1;
+        }}
+        .btn-secondary:hover {{ background: #374151; }}
+        .code-box {{
+            margin-top: 20px;
+            padding: 12px;
+            background: #030712;
+            border: 1px solid #1f2937;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            word-break: break-all;
+            color: #38bdf8;
+            user-select: all;
+        }}
+        .tip {{
+            margin-top: 16px;
+            font-size: 12px;
+            color: #64748b;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">✓</div>
+        <h2>GitHub 授权成功</h2>
+        <p>正在自动唤起 Prism 客户端完成登录...</p>
+        <div>
+            <a id="deep-link-btn" href="{deep_link}" class="btn">打开 Prism 客户端</a>
+            <button id="copy-btn" class="btn btn-secondary" onclick="copyCode()">复制授权码</button>
+        </div>
+        <div class="code-box" id="code-display">{clean_code}</div>
+        <div class="tip">如未自动打开客户端，可点击上方按钮唤起，或复制授权码粘贴到客户端</div>
+    </div>
+    <script>
+        window.location.href = "{deep_link}";
+        function copyCode() {{
+            navigator.clipboard.writeText("{clean_code}").then(function() {{
+                var btn = document.getElementById("copy-btn");
+                btn.innerText = "已复制！";
+                setTimeout(function() {{ btn.innerText = "复制授权码"; }}, 2000);
+            }});
+        }}
+    </script>
+</body>
+</html>"#
+        )
+    } else {
+        let err_msg = query
+            .error_description
+            .as_deref()
+            .or(query.error.as_deref())
+            .unwrap_or("未获得有效授权码");
+        format!(
+            r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Prism - 授权失败</title>
+    <style>
+        body {{ font-family: sans-serif; background: #090d16; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }}
+        .card {{ background: #111827; border: 1px solid #ef4444; border-radius: 16px; padding: 32px; max-width: 480px; width: 100%; text-align: center; }}
+        h2 {{ color: #ef4444; }}
+        p {{ color: #94a3b8; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>GitHub 授权失败</h2>
+        <p>{err_msg}</p>
+    </div>
+</body>
+</html>"#
+        )
+    };
+
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        content,
+    )
+}
+
+#[derive(Debug, Deserialize)]
 pub struct GitHubExchangeRequest {
     pub code: String,
 }
@@ -1761,6 +1925,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_middleware_config_api_endpoints() {
+        crate::prism::middleware::reset_dynamic_middleware_config("minecraft");
         let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -1897,5 +2062,49 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn test_auth_github_callback_endpoint() {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let sessions = Arc::new(telemetry::SessionRegistry::new());
+        let (reload_tx, _) = tokio::sync::watch::channel(telemetry::ReloadSignal::new());
+        let state = AdminState {
+            sessions: sessions.clone(),
+            optimizer: Arc::new(telemetry::OptimizerStatsRegistry::new()),
+            config_path: PathBuf::from("prism.toml"),
+            reload_tx,
+            tunnel: None,
+            auth: AdminAuth::default(),
+            management: None,
+            worker: None,
+            client: None,
+            auth_manager: None,
+            storage: None,
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = build_router(state);
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(wait_shutdown(shutdown_rx))
+                .await;
+        });
+
+        let http = reqwest::Client::new();
+        let resp = http
+            .get(format!("http://{addr}/auth/github/callback?code=mock_code_123&state=test_state"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let text = resp.text().await.unwrap();
+        assert!(text.contains("prism://auth/callback?code=mock_code_123&state=test_state"));
+        assert!(text.contains("打开 Prism 客户端"));
+        assert!(text.contains("mock_code_123"));
+
+        let _ = shutdown_tx.send(true);
     }
 }

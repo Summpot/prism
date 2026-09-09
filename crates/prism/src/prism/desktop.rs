@@ -199,11 +199,22 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     // 2. Run Tauri desktop application
     tauri::Builder::default()
         .manage(desktop_client_state)
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
+            }
+            #[cfg(desktop)]
+            {
+                use tauri::Emitter;
+                for arg in &args {
+                    if arg.starts_with("prism://") {
+                        if let Ok(url) = url::Url::parse(arg) {
+                            let _ = app.emit("deep-link://new-url", vec![url]);
+                        }
+                    }
+                }
             }
         }))
         .plugin(tauri_plugin_deep_link::init())

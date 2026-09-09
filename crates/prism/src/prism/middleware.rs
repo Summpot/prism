@@ -3163,5 +3163,7 @@ mod tests {
             let targets = sess.discovery_targets().unwrap().unwrap();
             assert_eq!(targets, vec!["10.0.0.1:4445", "10.0.0.2:4445"]);
         }
+
+        reset_dynamic_middleware_config("minecraft");
     }
 }

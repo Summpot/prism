@@ -30,6 +30,10 @@ struct Cli {
     /// Force launch desktop GUI client.
     #[arg(long)]
     gui: bool,
+
+    /// Deep link URL or extra positional arguments (e.g. prism://...)
+    #[arg(trailing_var_arg = true)]
+    extra_args: Vec<String>,
 }
 
 #[tokio::main]
@@ -98,3 +102,16 @@ async fn main() -> anyhow::Result<()> {
 
     prism::run(cli.config, cli.workdir, cli.middleware_dir).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_accepts_deep_link_url() {
+        let args = ["prism", "prism://auth/callback?code=test12345"];
+        let cli = Cli::try_parse_from(args).expect("Cli must accept deep link url");
+        assert_eq!(cli.extra_args, vec!["prism://auth/callback?code=test12345"]);
+    }
+}
+

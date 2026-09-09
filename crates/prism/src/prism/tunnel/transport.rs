@@ -147,7 +147,8 @@ mod tests {
 
     #[test]
     fn test_parse_transport_websocket_variants() {
-        assert_eq!(parse_transport("").unwrap(), "tcp");
+        assert_eq!(parse_transport("").unwrap(), "auto");
+        assert_eq!(parse_transport("auto").unwrap(), "auto");
         assert_eq!(parse_transport("tcp").unwrap(), "tcp");
         assert_eq!(parse_transport("udp").unwrap(), "udp");
         assert_eq!(parse_transport("quic").unwrap(), "quic");
@@ -156,6 +157,8 @@ mod tests {
         assert_eq!(parse_transport("  WebSocket  ").unwrap(), "websocket");
         assert_eq!(parse_transport("wss").unwrap(), "wss");
         assert_eq!(parse_transport("  WSS  ").unwrap(), "wss");
+        assert_eq!(parse_transport("wt").unwrap(), "webtransport");
+        assert_eq!(parse_transport("webtransport").unwrap(), "webtransport");
         assert!(parse_transport("unknown").is_err());
     }
 
@@ -164,5 +167,7 @@ mod tests {
         assert_eq!(transport_by_name("ws").unwrap().name(), "websocket");
         assert_eq!(transport_by_name("websocket").unwrap().name(), "websocket");
         assert_eq!(transport_by_name("wss").unwrap().name(), "wss");
+        assert_eq!(transport_by_name("webtransport").unwrap().name(), "webtransport");
+        assert_eq!(transport_by_name("wt").unwrap().name(), "webtransport");
     }
 }

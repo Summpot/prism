@@ -2624,7 +2624,7 @@ enabled = true
         let cfg = load_config(&cfg_path).expect("load_config");
 
         let client = cfg.tunnel.client.as_ref().expect("client configured");
-        assert_eq!(client.transport, "tcp");
+        assert_eq!(client.transport, "auto");
         assert!(!client.fake_lan_broadcast);
         assert_eq!(client.motd_prefix, "[Prism] ");
         let c_opt = client.optimizer.as_ref().expect("client optimizer");

@@ -65,14 +65,14 @@ jobs:
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             desktop: true
-            upx: false
+            upx: true
             artifact_compression: 0
           - os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             desktop: true
-            upx: false
+            upx: true
             artifact_compression: 0
           # musl stays headless: Tauri/WebKit is not available in the musl images.
           - os: linux
@@ -110,7 +110,7 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             desktop: true
-            upx: false
+            upx: true
             artifact_compression: 0
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
@@ -191,7 +191,7 @@ jobs:
             VERSION="dev-${GITHUB_SHA:0:7}"
           fi
 
-          OUTDIR="dist"
+          OUTDIR="binaries"
           mkdir -p "${OUTDIR}"
 
           TARGET="${{ matrix.target }}"
@@ -207,7 +207,7 @@ jobs:
             $version = "dev-$($env:GITHUB_SHA.Substring(0,7))"
           }
 
-          $outdir = "dist"
+          $outdir = "binaries"
           New-Item -ItemType Directory -Force -Path $outdir | Out-Null
 
           $target = "${{ matrix.target }}"
@@ -217,7 +217,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: prism-rust-binaries-${{ matrix.target }}
-          path: dist/*
+          path: binaries/*
           compression-level: ${{ matrix.artifact_compression }}
 
   release:

@@ -20,6 +20,7 @@ import {
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/connections")({
 	component: AdminConnectionsPage,
@@ -70,23 +71,23 @@ function AdminConnectionsPage() {
 	}, [conns, query]);
 
 	if (!ready) {
-		return <StateCard label="Restoring session…" />;
+		return <StateCard label={m.common_restoring_session()} />;
 	}
 
 	if (!connection) {
-		return <StateCard label="Connect the panel to a management node before viewing connections." />;
+		return <StateCard label={m.common_connect_panel()} />;
 	}
 
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				eyebrow="Proxy plane"
-				title="Active connections"
-				description="Live snapshot of TCP/UDP sessions held open by the proxy plane on this management endpoint."
+				eyebrow={m.admin_proxy_plane()}
+				title={m.admin_active_connections()}
+				description={m.admin_active_connections_description()}
 				actions={
 					<>
 						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
-							Auto-refresh {autoRefresh ? "on" : "off"}
+							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
 						{optimizerStats?.global && optimizerStats.global.raw_bytes > 0 ? (
@@ -115,7 +116,7 @@ function AdminConnectionsPage() {
 			<SearchInput
 				value={query}
 				onChange={setQuery}
-				placeholder="Filter by client, host, upstream…"
+				placeholder={m.admin_filter_connections()}
 			/>
 
 			{error ? <ErrorBanner message={error} onRetry={fetchConns} /> : null}
@@ -126,12 +127,12 @@ function AdminConnectionsPage() {
 						<table className="w-full text-sm">
 							<thead>
 								<tr className="border-b border-white/8 text-xs uppercase tracking-[0.2em] text-slate-500">
-									<th className="px-5 py-4 text-left font-medium">Client</th>
-									<th className="px-5 py-4 text-left font-medium">Host</th>
-									<th className="px-5 py-4 text-left font-medium">Upstream</th>
-									<th className="px-5 py-4 text-left font-medium">Optimizer</th>
-									<th className="px-5 py-4 text-left font-medium">Started</th>
-									<th className="px-5 py-4 text-left font-medium">Duration</th>
+									<th className="px-5 py-4 text-left font-medium">{m.admin_client()}</th>
+									<th className="px-5 py-4 text-left font-medium">{m.admin_host()}</th>
+									<th className="px-5 py-4 text-left font-medium">{m.admin_upstream()}</th>
+									<th className="px-5 py-4 text-left font-medium">{m.admin_optimizer()}</th>
+									<th className="px-5 py-4 text-left font-medium">{m.admin_started()}</th>
+									<th className="px-5 py-4 text-left font-medium">{m.admin_duration()}</th>
 								</tr>
 							</thead>
 							<tbody className="divide-y divide-white/5">
@@ -227,8 +228,8 @@ function AdminConnectionsPage() {
 				<EmptyState
 					label={
 						conns.length === 0
-							? "No active proxy connections at this moment."
-							: "No connections match the current filter."
+							? m.admin_no_connections()
+							: m.admin_no_connection_match()
 					}
 				/>
 			) : null}

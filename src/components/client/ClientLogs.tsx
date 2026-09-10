@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
 
 export function ClientLogs() {
 	const {
@@ -33,10 +34,10 @@ export function ClientLogs() {
 					<Terminal className="h-4 w-4 text-primary flex-none" />
 					<div className="min-w-0">
 						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-							运行日志
+							{m.client_logs_title()}
 						</h1>
 						<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
-							客户端与隧道连接的实时事件与传输记录
+							{m.client_logs_description()}
 						</p>
 					</div>
 					<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-mono">
@@ -69,7 +70,7 @@ export function ClientLogs() {
 					<div className="relative w-28 sm:w-36">
 						<Search className="pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
 						<Input
-							placeholder="筛选日志..."
+							placeholder={m.client_logs_filter()}
 							value={logSearchQuery}
 							onChange={(e) => setLogSearchQuery(e.target.value)}
 							className="h-7 pl-6 pr-2 text-xs font-mono"
@@ -89,7 +90,9 @@ export function ClientLogs() {
 						}}
 						className="h-7 text-xs px-2 cursor-pointer"
 					>
-						滚动吸附: {autoScrollLogs ? (isAtBottom ? "开启" : "暂停") : "关闭"}
+						{m.client_logs_scroll({
+							state: autoScrollLogs ? (isAtBottom ? m.client_logs_on() : m.client_logs_paused()) : m.client_logs_off(),
+						})}
 					</Button>
 
 					<Button
@@ -98,7 +101,7 @@ export function ClientLogs() {
 						onClick={handleClearLogs}
 						className="h-7 text-xs px-2 text-destructive hover:bg-destructive/10 cursor-pointer"
 					>
-						清空
+						{m.client_logs_clear()}
 					</Button>
 
 					<Button
@@ -112,7 +115,7 @@ export function ClientLogs() {
 						) : (
 							<Copy className="h-3 w-3" />
 						)}
-						<span>{copied === "all-logs" ? "已复制" : "复制全部"}</span>
+						<span>{copied === "all-logs" ? m.common_copied() : m.client_logs_copy_all()}</span>
 					</Button>
 				</div>
 			</div>
@@ -168,7 +171,7 @@ export function ClientLogs() {
 					) : (
 						<div className="flex h-full flex-col items-center justify-center text-slate-500 py-8">
 							<Terminal className="mb-2 h-8 w-8 opacity-40" />
-							<p className="text-xs">暂无客户端运行日志记录</p>
+							<p className="text-xs">{m.client_logs_empty()}</p>
 						</div>
 					)}
 				</div>
@@ -184,7 +187,7 @@ export function ClientLogs() {
 						className="absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1 text-xs font-medium shadow-lg transition-all duration-150 backdrop-blur cursor-pointer"
 					>
 						<ArrowDown className="h-3 w-3" />
-						<span>跳转到最新</span>
+						<span>{m.client_logs_latest()}</span>
 					</button>
 				) : null}
 			</div>

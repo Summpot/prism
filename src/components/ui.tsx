@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
 
 export function PageHeader({
 	eyebrow,
@@ -81,7 +82,7 @@ export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: (
 					onClick={onRetry}
 					className="border-destructive/30 hover:bg-destructive/20"
 				>
-					Retry
+					{m.common_retry()}
 				</Button>
 			) : null}
 		</div>
@@ -236,7 +237,7 @@ export function PrimaryButton({
 export function RefreshButton({
 	onClick,
 	loading,
-	label = "Refresh",
+	label = m.common_refresh(),
 }: {
 	onClick: () => void;
 	loading?: boolean;
@@ -253,14 +254,14 @@ export function RefreshButton({
 export function SearchInput({
 	value,
 	onChange,
-	placeholder = "Filter…",
+	placeholder = m.common_filter(),
 }: {
 	value: string;
 	onChange: (value: string) => void;
 	placeholder?: string;
 }) {
 	return (
-		<div className="relative min-w-[12rem] flex-1">
+		<div className="relative min-w-48 flex-1">
 			<Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 			<Input
 				value={value}

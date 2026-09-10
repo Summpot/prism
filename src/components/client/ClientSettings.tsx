@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
 
 export function ClientSettings() {
 	const {
@@ -41,10 +42,10 @@ export function ClientSettings() {
 				<div className="flex items-center gap-2 min-w-0">
 					<div className="min-w-0">
 						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-							隧道配置与配置集
+							{m.client_settings_title()}
 						</h1>
 						<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
-							管理连接配置集 (Profiles) 与底层网络传输协议参数
+							{m.client_settings_description()}
 						</p>
 					</div>
 				</div>
@@ -66,7 +67,7 @@ export function ClientSettings() {
 						className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
 					>
 						<Plus className="h-3.5 w-3.5" />
-						<span>新建配置集</span>
+						<span>{m.client_new_profile()}</span>
 					</Button>
 
 					<Button
@@ -76,7 +77,7 @@ export function ClientSettings() {
 						className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
 					>
 						<Download className="h-3.5 w-3.5 text-primary" />
-						<span>导入链接</span>
+						<span>{m.client_import_link()}</span>
 					</Button>
 
 					<Button
@@ -90,7 +91,7 @@ export function ClientSettings() {
 						) : (
 							<Share2 className="h-3.5 w-3.5 text-primary" />
 						)}
-						<span>{copied === "share" ? "已复制" : "分享配置"}</span>
+						<span>{copied === "share" ? m.common_copied() : m.client_share_config()}</span>
 					</Button>
 				</div>
 			</div>
@@ -100,9 +101,9 @@ export function ClientSettings() {
 				{/* Left Column: Saved Profiles List */}
 				<div className="md:col-span-5 flex flex-col min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs space-y-2">
 					<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
-						<span className="text-xs font-semibold text-foreground">已保存配置集</span>
+						<span className="text-xs font-semibold text-foreground">{m.client_saved_profiles()}</span>
 						<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-							{profiles.length} 个配置
+							{m.client_profile_count({ count: profiles.length })}
 						</Badge>
 					</div>
 
@@ -126,12 +127,12 @@ export function ClientSettings() {
 												</span>
 												{isSelected ? (
 													<Badge className="bg-primary text-primary-foreground text-[9px] px-1 py-0 h-3.5">
-														当前
+															{m.client_current()}
 													</Badge>
 												) : null}
 											</div>
 											<div className="font-mono text-[10px] text-muted-foreground truncate">
-												{p.server_addr} ({p.transport.toUpperCase()}) &bull; 本地: {p.listen_addr}
+														{p.server_addr} ({p.transport.toUpperCase()}) &bull; {m.client_local()}: {p.listen_addr}
 											</div>
 										</div>
 
@@ -144,7 +145,7 @@ export function ClientSettings() {
 													void handleDeleteProfile(p.id);
 												}}
 												className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 cursor-pointer"
-												title="删除配置集"
+														title={m.client_delete_profile()}
 											>
 												<Trash2 className="h-3 w-3" />
 											</Button>
@@ -154,7 +155,7 @@ export function ClientSettings() {
 							})
 						) : (
 							<div className="py-8 text-center text-xs text-muted-foreground">
-								暂无已保存配置集，点击上方“新建配置集”或“导入链接”创建。
+								{m.client_no_profiles()}
 							</div>
 						)}
 					</div>
@@ -164,10 +165,10 @@ export function ClientSettings() {
 				<div className="md:col-span-7 flex flex-col min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs overflow-y-auto space-y-3">
 					<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
 						<span className="text-xs font-semibold text-foreground truncate">
-							编辑配置: {profileName || "未命名配置"}
+							{m.client_edit_profile({ name: profileName || m.client_new() })}
 						</span>
 						<span className="text-[10px] text-muted-foreground">
-							ID: {selectedProfileId || "新建"}
+							ID: {selectedProfileId || m.client_new()}
 						</span>
 					</div>
 
@@ -175,24 +176,24 @@ export function ClientSettings() {
 						<div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
 							<div className="space-y-1">
 								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									配置集名称
+									{m.client_profile_name()}
 								</label>
 								<Input
 									value={profileName}
 									onChange={(e) => setProfileName(e.target.value)}
-									placeholder="例如: 我的游戏服务器"
+									placeholder={m.client_profile_name_placeholder()}
 									className="h-8 text-xs"
 								/>
 							</div>
 
 							<div className="space-y-1">
 								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									远端中继服务器地址
+									{m.client_relay_address()}
 								</label>
 								<Input
 									value={serverAddr}
 									onChange={(e) => setServerAddr(e.target.value)}
-									placeholder="relay.example.com (端口可选，自动解析 SVCB)"
+									placeholder={m.client_relay_placeholder()}
 									className="h-8 text-xs font-mono"
 								/>
 							</div>
@@ -201,10 +202,10 @@ export function ClientSettings() {
 						<div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
 							<div className="space-y-1">
 								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									传输协议 (Transport)
+									{m.client_transport()}
 								</label>
 								<select
-									aria-label="传输协议"
+									aria-label={m.client_transport()}
 									value={transport}
 									onChange={(e) => {
 										const val = e.target.value;
@@ -214,18 +215,18 @@ export function ClientSettings() {
 									}}
 									className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
 								>
-									<option value="auto">Auto (SVCB/HTTPS 自动协商与回退，推荐)</option>
+									<option value="auto">Auto (SVCB/HTTPS)</option>
 									<option value="webtransport">WebTransport (HTTP/3 over QUIC)</option>
-									<option value="quic">QUIC (极速抗丢包)</option>
-									<option value="tcp">TCP (标准流传输)</option>
-									<option value="kcp">KCP (低延迟 UDP)</option>
-									<option value="websocket">WebSocket (穿透受限网络)</option>
+									<option value="quic">QUIC</option>
+									<option value="tcp">TCP</option>
+									<option value="kcp">KCP</option>
+									<option value="websocket">WebSocket</option>
 								</select>
 							</div>
 
 							<div className="space-y-1">
 								<label className="text-[10px] uppercase font-bold text-muted-foreground">
-									本地监听端口 / Ingress
+									{m.client_listen_address()}
 								</label>
 								<Input
 									value={listenAddr}
@@ -241,10 +242,10 @@ export function ClientSettings() {
 							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">
 								<div>
 									<div className="font-medium text-xs text-foreground">
-										Minecraft 局域网广播 (LAN Discovery)
+										{m.client_lan_broadcast()}
 									</div>
 									<div className="text-[10px] text-muted-foreground">
-										在局域网内自动广播游戏服务，便于客户端发现
+										{m.client_lan_broadcast_hint()}
 									</div>
 								</div>
 								<Switch checked={fakeLanBroadcast} onCheckedChange={setFakeLanBroadcast} />
@@ -253,10 +254,10 @@ export function ClientSettings() {
 							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">
 								<div>
 									<div className="font-medium text-xs text-foreground">
-										控制面板自动连接 (Auto-Connect Panel)
+										{m.client_auto_connect_panel()}
 									</div>
 									<div className="text-[10px] text-muted-foreground">
-										自动同步管理面板与鉴权状态 ({managementUrl})
+										{m.client_auto_connect_panel_hint({ url: managementUrl })}
 									</div>
 								</div>
 								<Switch checked={autoConnectPanel} onCheckedChange={setAutoConnectPanel} />
@@ -273,7 +274,7 @@ export function ClientSettings() {
 								onClick={() => void handleDeleteProfile(selectedProfileId)}
 								className="h-7 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
 							>
-								删除此配置
+								{m.client_delete_this_profile()}
 							</Button>
 						) : (
 							<div />
@@ -285,7 +286,7 @@ export function ClientSettings() {
 							className="h-7 text-xs gap-1 px-3.5 cursor-pointer"
 						>
 							<Check className="h-3.5 w-3.5" />
-							<span>保存配置集</span>
+							<span>{m.client_save_profile()}</span>
 						</Button>
 					</div>
 				</div>

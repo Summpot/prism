@@ -9,6 +9,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { m } from "@/paraglide/messages";
 
 export function ClientModals() {
 	const {
@@ -28,16 +29,16 @@ export function ClientModals() {
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 sm:p-4 backdrop-blur-xs">
 					<Card className="w-full max-w-sm sm:max-w-lg shadow-xl">
 						<CardHeader>
-							<CardTitle>导入 Prism 节点配置</CardTitle>
+							<CardTitle>{m.client_import_title()}</CardTitle>
 							<CardDescription>
-								粘贴 <code className="text-primary">prism://</code> 链接或服务端地址
+								{m.client_import_description()}
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="space-y-3">
 							<Input
 								value={importUrl}
 								onChange={(e) => setImportUrl(e.target.value)}
-								placeholder="quic://play.example.com:7000 或 prism://play.example.com:7000?name=..."
+								placeholder={m.client_import_placeholder()}
 							/>
 							{importError ? <p className="text-xs text-destructive">{importError}</p> : null}
 						</CardContent>
@@ -49,9 +50,9 @@ export function ClientModals() {
 									setImportError(null);
 								}}
 							>
-								取消
+								{m.common_cancel()}
 							</Button>
-							<Button onClick={handleImportLink}>导入并应用</Button>
+							<Button onClick={handleImportLink}>{m.client_import_apply()}</Button>
 						</CardFooter>
 					</Card>
 				</div>

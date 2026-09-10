@@ -29,6 +29,7 @@ import { formatBytes } from "@/lib/format";
 import { usePanelSession } from "@/lib/panelSession";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages";
 import { useState } from "react";
 
 function parsePort(listenAddr: string): string {
@@ -174,20 +175,20 @@ export function ClientOverview() {
 						<div className="min-w-0">
 							<div className="flex items-center gap-1.5">
 								<span className="text-xs font-bold text-foreground truncate">
-									{authSession.display_name || authSession.username || "已登录"}
+									{authSession.display_name || authSession.username || m.session_logged_in()}
 								</span>
 								{isAdmin ? (
 									<Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] px-1.5 py-0 h-4">
-										管理员
+										{m.client_admin()}
 									</Badge>
 								) : (
 									<Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
-										成员
+										{m.client_member()}
 									</Badge>
 								)}
 							</div>
 							<p className="text-[10px] font-mono text-muted-foreground truncate">
-								远端节点: {serverAddr || "默认节点"}
+								{m.client_default_node()}: {serverAddr || m.client_default_node()}
 							</p>
 						</div>
 					</div>
@@ -195,7 +196,7 @@ export function ClientOverview() {
 					<div className="flex items-center gap-2 flex-none">
 						{isAdmin || loginAdminUnlocked ? (
 							<Link to="/admin" className="text-[11px] font-bold text-primary hover:underline">
-								进入管理控制台 &rarr;
+								{m.client_admin_console()}
 							</Link>
 						) : null}
 						<Button
@@ -212,7 +213,7 @@ export function ClientOverview() {
 							}}
 							className="h-7 text-xs px-2.5 text-muted-foreground hover:text-destructive cursor-pointer"
 						>
-							<span>退出登录</span>
+							<span>{m.client_sign_out()}</span>
 						</Button>
 					</div>
 				</div>
@@ -221,10 +222,10 @@ export function ClientOverview() {
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-1.5">
 							<Radio className="h-4 w-4 text-primary" />
-							<span className="text-xs font-bold text-foreground">连接远端节点与登录</span>
+							<span className="text-xs font-bold text-foreground">{m.client_connect_and_login()}</span>
 						</div>
 						<span className="text-[11px] text-muted-foreground">
-							服务端默认允许所有人连接；登录前仅限进行登录操作
+							{m.client_anonymous_hint()}
 						</span>
 					</div>
 
@@ -238,10 +239,10 @@ export function ClientOverview() {
 								items={SUPPORTED_LINK_PROTOCOLS}
 							>
 								<SelectTrigger
-									aria-label="选择连接协议"
-									className="h-8 w-fit min-w-[90px] rounded-l-md rounded-r-none border-r-0 border-input bg-muted/60 px-2.5 text-xs font-mono font-semibold text-foreground shadow-none focus-visible:ring-0 focus-visible:border-input shrink-0 cursor-pointer hover:bg-muted"
+									aria-label={m.client_select_protocol()}
+									className="h-8 w-fit min-w-22.5 rounded-l-md rounded-r-none border-r-0 border-input bg-muted/60 px-2.5 text-xs font-mono font-semibold text-foreground shadow-none focus-visible:ring-0 focus-visible:border-input shrink-0 cursor-pointer hover:bg-muted"
 								>
-									<SelectValue placeholder="协议" />
+									<SelectValue placeholder={m.client_protocol()} />
 								</SelectTrigger>
 								<SelectContent align="start" className="min-w-36 text-xs font-mono">
 									{SUPPORTED_LINK_PROTOCOLS.map((p) => (
@@ -257,7 +258,7 @@ export function ClientOverview() {
 									onChange={(e) => handleAddressChange(e.target.value)}
 									onPaste={handleAddressPaste}
 									onCopy={handleAddressCopy}
-									placeholder="play.example.com:7000 或 relay.example.com"
+									placeholder={m.client_remote_placeholder()}
 									className="h-8 text-xs font-mono rounded-l-none pr-14"
 								/>
 								{remoteLinkInput ? (
@@ -273,7 +274,7 @@ export function ClientOverview() {
 												setTimeout(() => setCopiedLink(false), 1500);
 											}}
 											className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-											title="复制完整连接"
+											title={m.client_copy_connection()}
 										>
 											{copiedLink ? (
 												<Check className="h-3 w-3 text-emerald-500" />
@@ -285,7 +286,7 @@ export function ClientOverview() {
 											type="button"
 											onClick={() => setRemoteLinkInput("")}
 											className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-											title="清空"
+											title={m.client_clear()}
 										>
 											<X className="h-3 w-3" />
 										</button>
@@ -302,12 +303,12 @@ export function ClientOverview() {
 							{checkingProviders ? (
 								<>
 									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-									<span>正在连接...</span>
+									<span>{m.client_connecting()}</span>
 								</>
 							) : (
 								<>
 									<Plug className="h-3.5 w-3.5" />
-									<span>连接</span>
+									<span>{m.client_connect()}</span>
 								</>
 							)}
 						</Button>
@@ -318,7 +319,7 @@ export function ClientOverview() {
 						<div className="border-t border-border/60 pt-2.5 flex items-center justify-center py-3 gap-2.5 text-muted-foreground animate-in fade-in-0 slide-in-from-top-2 duration-300">
 							<RotateCcw className="h-4 w-4 animate-spin text-primary" />
 							<span className="text-xs font-medium text-foreground">
-								正在兑换 GitHub 授权凭证...
+								{m.client_exchange_github()}
 							</span>
 						</div>
 					) : oauthWaitingCallback ? (
@@ -327,7 +328,7 @@ export function ClientOverview() {
 								<div className="flex items-center justify-between">
 									<div className="flex items-center gap-2">
 										<RotateCcw className="h-4 w-4 animate-spin text-primary" />
-										<span className="text-xs font-bold text-foreground">等待 GitHub 授权完成</span>
+										<span className="text-xs font-bold text-foreground">{m.client_wait_github()}</span>
 									</div>
 									<Button
 										variant="ghost"
@@ -338,11 +339,11 @@ export function ClientOverview() {
 										}}
 										className="h-6 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
 									>
-										返回
+										{m.client_back()}
 									</Button>
 								</div>
 								<p className="text-[11px] text-muted-foreground leading-relaxed">
-									已在默认浏览器中打开 GitHub 授权页面。完成授权后，系统将自动唤起客户端完成登录。
+									{m.client_github_browser_hint()}
 								</p>
 								<div className="flex items-center gap-2">
 									<Button
@@ -353,7 +354,7 @@ export function ClientOverview() {
 										className="h-7 text-xs gap-1.5 cursor-pointer"
 									>
 										<RotateCcw className="h-3 w-3" />
-										重新打开授权页面
+										{m.client_reopen_authorization()}
 									</Button>
 								</div>
 								{authError ? (
@@ -370,7 +371,7 @@ export function ClientOverview() {
 												void handleManualOAuthCallback(manualCallbackInput.trim());
 											}
 										}}
-										placeholder="未自动唤起？手动粘贴回调链接或验证码"
+										placeholder={m.client_callback_placeholder()}
 										className="h-7 text-xs font-mono"
 									/>
 									<Button
@@ -379,7 +380,7 @@ export function ClientOverview() {
 										disabled={!manualCallbackInput.trim() || oauthLoading}
 										onClick={() => void handleManualOAuthCallback(manualCallbackInput.trim())}
 									>
-										验证
+										{m.client_verify()}
 									</Button>
 								</div>
 							</div>
@@ -391,13 +392,13 @@ export function ClientOverview() {
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-1.5">
 									<span className="text-xs font-semibold text-foreground">
-										已探测到该节点支持的登录方式
+																{m.client_login_methods_detected()}
 									</span>
 									<Badge
 										variant="outline"
 										className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary"
 									>
-										可选登录
+																	{m.client_optional_login()}
 									</Badge>
 								</div>
 								<Button
@@ -408,7 +409,7 @@ export function ClientOverview() {
 										setAuthError(null);
 									}}
 									className="h-5 w-5 text-muted-foreground hover:text-foreground cursor-pointer"
-									title="收起"
+									title={m.client_collapse()}
 								>
 									<X className="h-3.5 w-3.5" />
 								</Button>
@@ -434,14 +435,14 @@ export function ClientOverview() {
 										<div className="min-w-0 flex-1">
 											<div className="flex items-center gap-1.5">
 												<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-													GitHub 授权登录
+															{m.client_github_login()}
 												</span>
 												<Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">
-													推荐
+															{m.client_recommended()}
 												</Badge>
 											</div>
 											<p className="text-[10px] text-muted-foreground truncate">
-												绑定账号身份与访问权限
+														{m.client_identity_hint()}
 											</p>
 										</div>
 									</button>
@@ -461,11 +462,11 @@ export function ClientOverview() {
 									<div className="min-w-0 flex-1">
 										<div className="flex items-center gap-1.5">
 											<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-												保持匿名连接
+															{m.client_anonymous()}
 											</span>
 										</div>
 										<p className="text-[10px] text-muted-foreground truncate">
-											直接作为访客使用当前隧道
+															{m.client_guest_hint()}
 										</p>
 									</div>
 								</button>
@@ -534,7 +535,7 @@ export function ClientOverview() {
 							) : (
 								<Power className="h-3.5 w-3.5" />
 							)}
-							<span>断开隧道</span>
+							<span>{m.client_disconnect_tunnel()}</span>
 						</Button>
 					) : authSession?.authenticated ? (
 						<Button
@@ -549,11 +550,11 @@ export function ClientOverview() {
 							) : (
 								<Power className="h-3.5 w-3.5" />
 							)}
-							<span>启动连接</span>
+							<span>{m.client_start_connection()}</span>
 						</Button>
 					) : (
 						<span className="text-[11px] font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-							等待登录
+							{m.client_waiting_for_login()}
 						</span>
 					)}
 				</div>
@@ -564,7 +565,7 @@ export function ClientOverview() {
 						{/* Mode Switcher */}
 						<div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
 							<span className="font-semibold uppercase tracking-wider text-[9px]">
-								{statsViewMode === "session" ? "Current Session" : "Cumulative Lifetime"}
+								{statsViewMode === "session" ? m.client_current_session() : m.client_cumulative_lifetime()}
 							</span>
 							<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
 								<button
@@ -577,7 +578,7 @@ export function ClientOverview() {
 											: "text-muted-foreground hover:text-foreground",
 									)}
 								>
-									Session
+									{m.client_session()}
 								</button>
 								<button
 									type="button"
@@ -589,7 +590,7 @@ export function ClientOverview() {
 											: "text-muted-foreground hover:text-foreground",
 									)}
 								>
-									Lifetime
+									{m.client_lifetime()}
 								</button>
 							</div>
 						</div>
@@ -598,7 +599,7 @@ export function ClientOverview() {
 						<div className="grid grid-cols-4 gap-1.5 text-center font-mono">
 							<div className="rounded bg-muted/40 px-1.5 py-1">
 								<div className="text-[9px] uppercase text-muted-foreground">
-									{statsViewMode === "session" ? "Uptime" : "Sessions"}
+									{statsViewMode === "session" ? m.client_uptime() : m.client_sessions()}
 								</div>
 								<div className="text-xs font-bold text-foreground truncate">
 									{statsViewMode === "session"
@@ -607,7 +608,7 @@ export function ClientOverview() {
 								</div>
 							</div>
 							<div className="rounded bg-muted/40 px-1.5 py-1">
-								<div className="text-[9px] uppercase text-muted-foreground">Raw</div>
+								<div className="text-[9px] uppercase text-muted-foreground">{m.client_raw()}</div>
 								<div className="text-xs font-bold text-foreground truncate">
 									{formatBytes(
 										statsViewMode === "session"
@@ -617,7 +618,7 @@ export function ClientOverview() {
 								</div>
 							</div>
 							<div className="rounded bg-muted/40 px-1.5 py-1">
-								<div className="text-[9px] uppercase text-muted-foreground">Wire</div>
+								<div className="text-[9px] uppercase text-muted-foreground">{m.client_wire()}</div>
 								<div className="text-xs font-bold text-foreground truncate">
 									{formatBytes(
 										statsViewMode === "session"
@@ -627,7 +628,7 @@ export function ClientOverview() {
 								</div>
 							</div>
 							<div className="rounded bg-muted/40 px-1.5 py-1">
-								<div className="text-[9px] uppercase text-emerald-500">Saved</div>
+								<div className="text-[9px] uppercase text-emerald-500">{m.client_saved()}</div>
 								<div className="text-xs font-bold text-emerald-500 truncate">
 									{statsViewMode === "session"
 										? `${savedRatio.toFixed(1)}%`
@@ -645,7 +646,7 @@ export function ClientOverview() {
 						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
 							<div className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between">
 								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
-									<span className="text-primary font-bold">↑</span> Up
+										<span className="text-primary font-bold">↑</span> {m.client_up()}
 								</span>
 								<span className="font-semibold text-foreground truncate ml-1">
 									{formatBytes(status?.stats.uplink?.wire_bytes ?? 0)}
@@ -656,7 +657,7 @@ export function ClientOverview() {
 							</div>
 							<div className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between">
 								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
-									<span className="text-primary font-bold">↓</span> Down
+										<span className="text-primary font-bold">↓</span> {m.client_down()}
 								</span>
 								<span className="font-semibold text-foreground truncate ml-1">
 									{formatBytes(status?.stats.downlink?.wire_bytes ?? 0)}
@@ -670,7 +671,7 @@ export function ClientOverview() {
 								title={`Est. transfer saved: -${(status?.stats.est_transfer_time_saved_ms ?? 0).toFixed(1)}ms, CPU processing: +${(status?.stats.est_processing_time_ms ?? 0).toFixed(1)}ms`}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									Latency
+									{m.client_latency()}
 								</span>
 								<span
 									className={cn(
@@ -706,12 +707,12 @@ export function ClientOverview() {
 							{fakeLanBroadcast ? (
 								<div className="flex items-center gap-1 flex-none bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-medium">
 									<Gamepad2 className="h-3 w-3" />
-									<span>LAN Active</span>
+									<span>{m.client_lan_active()}</span>
 									<button
 										type="button"
 										onClick={() => copyText(status?.listen_addr || listenAddr, "lan-btn")}
 										className="ml-0.5 hover:opacity-80 cursor-pointer"
-										title="复制局域网地址"
+										title={m.client_copy_lan_address()}
 									>
 										{copied === "lan-btn" ? (
 											<Check className="h-2.5 w-2.5 text-emerald-500" />
@@ -729,7 +730,7 @@ export function ClientOverview() {
 					<div className="border-t border-border/60 pt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
 						<div className="flex items-center gap-1.5 truncate">
 							<span className="font-semibold uppercase tracking-wider text-[9px] text-primary">
-								历史统计
+											{m.client_history_stats()}
 							</span>
 							<span className="font-mono truncate">
 								{formatBytes(cumulativeStats.raw_bytes)} raw &bull;{" "}
@@ -747,9 +748,9 @@ export function ClientOverview() {
 							size="xs"
 							onClick={handleResetStats}
 							className="h-5 px-1.5 text-[9px] text-muted-foreground hover:text-destructive cursor-pointer"
-							title="重置累计统计"
+							title={m.client_reset_stats()}
 						>
-							重置
+							{m.client_reset()}
 						</Button>
 					</div>
 				) : null}
@@ -758,9 +759,9 @@ export function ClientOverview() {
 			{/* 已发现远端服务卡片 (Discovered Remote Services) */}
 			<div className="flex-1 min-h-0 flex flex-col rounded-lg border border-border bg-card p-3 shadow-xs">
 				<div className="flex items-center justify-between pb-2 border-b border-border/50 flex-none">
-					<span className="text-xs font-semibold text-foreground">已发现远端服务</span>
+					<span className="text-xs font-semibold text-foreground">{m.client_discovered_services()}</span>
 					<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-						{status?.known_services.length || 0} active
+						{status?.known_services.length || 0} {m.client_active()}
 					</Badge>
 				</div>
 
@@ -768,9 +769,9 @@ export function ClientOverview() {
 					{!authSession?.authenticated && !status?.server_addr ? (
 						<div className="flex h-full flex-col items-center justify-center py-8 text-center text-muted-foreground">
 							<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
-							<p className="text-xs font-medium text-foreground">未连接远端服务</p>
+							<p className="text-xs font-medium text-foreground">{m.client_not_connected_service()}</p>
 							<p className="text-[11px] text-muted-foreground max-w-sm mt-1">
-								在上方输入远端节点连接地址并连接，即可查看此节点发布的代理服务与虚拟局域网端口映射。
+								{m.client_service_hint()}
 							</p>
 						</div>
 					) : status?.known_services && status.known_services.length > 0 ? (
@@ -817,7 +818,7 @@ export function ClientOverview() {
 										) : (
 											<Copy className="h-3 w-3" />
 										)}
-										<span>{copied === svc.name ? "Copied" : "Copy"}</span>
+										<span>{copied === svc.name ? m.common_copied() : m.client_copy()}</span>
 									</Button>
 								</div>
 							);
@@ -827,8 +828,8 @@ export function ClientOverview() {
 							<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
 							<p className="text-xs">
 								{isConnected
-									? "等待 Connector 发布远端服务..."
-									: "连接到 Prism 服务器以查看发布的服务。"}
+									? m.client_waiting_services()
+									: m.client_connect_server_services()}
 							</p>
 						</div>
 					)}

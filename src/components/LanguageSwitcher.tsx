@@ -31,7 +31,9 @@ export default function LanguageSwitcher({ className }: { className?: string }) 
 				}
 			>
 				<Languages className="h-3.5 w-3.5" />
-				<span className="font-mono text-[10.5px]">{currentLocale === "zh-CN" ? "简中" : "EN"}</span>
+				<span className="font-mono text-[10.5px]">
+					{currentLocale === "zh-CN" ? m.language_chinese_short() : m.language_english_short()}
+				</span>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-32 text-xs">
 				<DropdownMenuItem

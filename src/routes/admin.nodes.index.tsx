@@ -14,6 +14,7 @@ import { formatRelative, formatTime } from "@/lib/format";
 import { getManagedNodes, type ManagedNodeSnapshot } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/nodes/")({ component: AdminNodesIndexPage });
 
@@ -78,27 +79,27 @@ function AdminNodesIndexPage() {
 	}, [filter, nodes, query]);
 
 	if (!ready) {
-		return <StateCard label="Restoring session…" />;
+		return <StateCard label={m.common_restoring_session()} />;
 	}
 
 	if (!connection) {
-		return <StateCard label="Connect the panel to a management node before browsing workers." />;
+		return <StateCard label={m.common_connect_panel()} />;
 	}
 
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				eyebrow="Managed nodes"
-				title="Prism worker inventory"
-				description="Track active versus passive connectivity, revision drift, restart pressure, and jump into the structured config editor."
+				eyebrow={m.admin_managed_nodes()}
+				title={m.admin_worker_inventory()}
+				description={m.admin_worker_inventory_description()}
 				actions={
 					<>
 						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
-							Auto-refresh {autoRefresh ? "on" : "off"}
+							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchNodes} loading={loading} />
 						<div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-							{loading ? "Refreshing…" : `${nodes.length} nodes`}
+							{loading ? m.admin_refreshing() : m.admin_nodes_count({ count: nodes.length })}
 						</div>
 					</>
 				}
@@ -108,15 +109,15 @@ function AdminNodesIndexPage() {
 				<SearchInput
 					value={query}
 					onChange={setQuery}
-					placeholder="Filter by node id, mode, agent URL, error…"
+					placeholder={m.admin_filter_nodes()}
 				/>
 				<div className="flex flex-wrap gap-2">
 					{(
 						[
-							["all", "All"],
-							["drift", "Drift"],
-							["restart", "Restart"],
-							["error", "Errors"],
+							["all", m.admin_all()],
+							["drift", m.admin_drift()],
+							["restart", m.admin_restart()],
+							["error", m.admin_errors()],
 						] as const
 					).map(([value, label]) => (
 						<ToggleChip key={value} active={filter === value} onClick={() => setFilter(value)}>
@@ -140,7 +141,7 @@ function AdminNodesIndexPage() {
 							<div>
 								<div className="text-xl font-semibold text-white">{node.node_id}</div>
 								<div className="mt-2 text-sm text-slate-400">
-									Mode <span className="text-cyan-200">{node.connection_mode ?? "unknown"}</span>
+									{m.admin_mode()} <span className="text-cyan-200">{node.connection_mode ?? m.admin_unknown()}</span>
 									{node.agent_url ? (
 										<>
 											{" · "}
@@ -151,21 +152,21 @@ function AdminNodesIndexPage() {
 							</div>
 							<div className="flex flex-col items-end gap-2">
 								<Badge tone={node.pending_restart ? "warn" : "ok"}>
-									{node.pending_restart ? "restart pending" : "in sync"}
+									{node.pending_restart ? m.admin_restart_pending() : m.admin_in_sync()}
 								</Badge>
 								{node.desired_revision !== node.applied_revision ? (
-									<Badge tone="info">revision drift</Badge>
+									<Badge tone="info">{m.admin_revision_drift()}</Badge>
 								) : null}
 							</div>
 						</div>
 						<div className="mt-5 grid gap-3 sm:grid-cols-2">
-							<Value label="Desired revision" value={node.desired_revision} />
-							<Value label="Applied revision" value={node.applied_revision} />
+							<Value label={m.admin_desired_revision()} value={node.desired_revision} />
+							<Value label={m.admin_applied_revision()} value={node.applied_revision} />
 							<Value
-								label="Last seen"
+								label={m.admin_last_seen()}
 								value={`${formatRelative(node.last_seen_unix_ms)} · ${formatTime(node.last_seen_unix_ms, "short")}`}
 							/>
-							<Value label="Apply error" value={node.last_apply_error || "none"} />
+							<Value label={m.admin_apply_error()} value={node.last_apply_error || m.admin_none()} />
 						</div>
 					</Link>
 				))}
@@ -174,8 +175,8 @@ function AdminNodesIndexPage() {
 					<StateCard
 						label={
 							nodes.length === 0
-								? "No managed workers have enrolled yet."
-								: "No nodes match the current filter."
+								? m.admin_no_workers()
+								: m.admin_no_nodes_match()
 						}
 					/>
 				) : null}

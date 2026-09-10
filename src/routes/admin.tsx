@@ -3,6 +3,7 @@ import { RotateCcw, ShieldAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { usePanelSession } from "@/lib/panelSession";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin")({
 	component: AdminLayout,
@@ -29,10 +30,10 @@ function AdminLayout() {
 					</div>
 					<div className="space-y-1.5">
 						<h2 className="text-xl font-bold text-white tracking-tight">
-							管理控制台仅对管理员开放
+							{m.admin_access_denied_title()}
 						</h2>
 						<p className="text-xs text-slate-400 leading-relaxed">
-							当前未连接管理节点或当前登录账号非管理员。请先登录管理员账号或返回桌面端使用代理连接功能。
+							{m.admin_access_denied_description()}
 						</p>
 					</div>
 					<div className="flex items-center justify-center gap-3 pt-3">
@@ -42,14 +43,14 @@ function AdminLayout() {
 							onClick={() => void navigate({ to: "/" })}
 							className="text-xs border-white/10 text-slate-200 hover:bg-white/10"
 						>
-							返回客户端
+							{m.admin_back_client()}
 						</Button>
 						<Button
 							size="sm"
 							onClick={() => void navigate({ to: "/login" })}
 							className="text-xs bg-primary text-primary-foreground hover:bg-primary/90"
 						>
-							前往管理登录
+							{m.admin_go_login()}
 						</Button>
 					</div>
 				</div>

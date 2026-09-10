@@ -25,6 +25,7 @@ import type {
 	ClientProfile,
 	UserRecord,
 } from "@/types/client";
+import { m } from "@/paraglide/messages";
 
 export type { ClientContextValue };
 
@@ -321,7 +322,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				setProvidersResult(providers);
 				setAuthServerUrl(norm);
 			} catch (err) {
-				setProvidersError(err instanceof Error ? err.message : "探测失败，无法连接到远端服务");
+				setProvidersError(err instanceof Error ? err.message : m.client_probe_failed());
 			} finally {
 				setCheckingProviders(false);
 			}
@@ -389,7 +390,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			}
 
 			if (!code) {
-				setAuthError("未识别到有效的 GitHub 授权码或回调链接，请检查输入");
+				setAuthError(m.client_invalid_github_callback());
 				return;
 			}
 
@@ -443,7 +444,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					throw new Error(
 						lastErr instanceof Error
 							? lastErr.message
-							: "GitHub 授权码兑换凭证失败，验证码可能已失效，请重新发起登录",
+							: m.client_github_exchange_failed(),
 					);
 				}
 
@@ -528,7 +529,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				raw = `${prismLink.linkProtocol}${raw}`;
 			}
 			if (!raw) {
-				setError("请输入远端链接或服务器地址");
+				setError(m.client_link_required());
 				return;
 			}
 
@@ -638,7 +639,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					setProvidersResult(null);
 				}
 			} catch (err) {
-				setError(err instanceof Error ? err.message : "连接远端节点失败，请检查网络");
+				setError(err instanceof Error ? err.message : m.client_connection_failed());
 				setProvidersResult(null);
 			} finally {
 				setCheckingProviders(false);
@@ -682,7 +683,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setOauthWaitingCallback(false);
 			setOauthExchanging(false);
 			setOauthLoading(false);
-			setAuthError(customEvent.detail?.error || "授权验证失败，请重试");
+			setAuthError(customEvent.detail?.error || m.client_authorization_failed());
 		};
 
 		const handleDeepLinkAuth = (event: Event) => {

@@ -289,7 +289,7 @@ function RootContent() {
 								error:
 									lastErr instanceof Error
 										? lastErr.message
-										: "GitHub 授权码兑换凭证失败，验证码可能已失效，请重新发起登录",
+										: m.client_github_exchange_failed(),
 							},
 						}),
 					);

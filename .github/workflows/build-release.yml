@@ -50,6 +50,9 @@ jobs:
       - name: Frontend build
         run: pnpm build
 
+      - name: Check desktop webview shell
+        run: test -f dist/client/index.html
+
   rust-binaries:
     name: rust binaries (${{ matrix.os }}/${{ matrix.arch }} / ${{ matrix.target }})
     needs: test-rust
@@ -61,39 +64,54 @@ jobs:
             arch: amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            upx: true
+            desktop: true
+            upx: false
+            artifact_compression: 0
           - os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            upx: true
+            desktop: true
+            upx: false
+            artifact_compression: 0
+          # musl stays headless: Tauri/WebKit is not available in the musl images.
           - os: linux
             arch: amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
             container: ghcr.io/blackdex/rust-musl:x86_64-musl-stable
+            desktop: false
             upx: true
+            artifact_compression: 0
           - os: linux
             arch: arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             container: ghcr.io/blackdex/rust-musl:aarch64-musl-stable
+            desktop: false
             upx: true
+            artifact_compression: 0
           - os: darwin
             arch: amd64
             runner: macos-15-intel
             target: x86_64-apple-darwin
+            desktop: true
             upx: false
+            artifact_compression: 6
           - os: darwin
             arch: arm64
             runner: macos-latest
             target: aarch64-apple-darwin
+            desktop: true
             upx: false
+            artifact_compression: 6
           - os: windows
             arch: amd64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            upx: true
+            desktop: true
+            upx: false
+            artifact_compression: 0
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     steps:
@@ -102,24 +120,55 @@ jobs:
       - name: Install Rust toolchain
         if: ${{ !matrix.container }}
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-binaries-${{ matrix.target }}
 
-      - name: Build (release) (unix)
-        if: runner.os != 'Windows'
+      - name: Install Linux desktop dependencies
+        if: matrix.desktop && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev
+
+      - name: Setup Node
+        if: matrix.desktop
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        if: matrix.desktop
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm --version
+
+      - name: Install frontend deps
+        if: matrix.desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (release) (headless)
+        if: ${{ !matrix.desktop }}
         shell: bash
         run: |
           set -euo pipefail
           cargo build --release -p prism --no-default-features --target "${{ matrix.target }}"
 
-      - name: Build (release) (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo build --release -p prism --target "${{ matrix.target }}"
+      - name: Build (release) (desktop)
+        if: matrix.desktop
+        env:
+          PKG_CONFIG_ALLOW_CROSS: "1"
+        run: pnpm exec tauri build --no-bundle --ci --target ${{ matrix.target }}
 
       - name: Compress binary with UPX
         if: matrix.upx
@@ -169,7 +218,7 @@ jobs:
         with:
           name: prism-rust-binaries-${{ matrix.target }}
           path: dist/*
-          compression-level: 0
+          compression-level: ${{ matrix.artifact_compression }}
 
   release:
     runs-on: ubuntu-latest

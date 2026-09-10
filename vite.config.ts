@@ -53,6 +53,9 @@ const config = defineConfig(({ command }) => ({
 					tanstackStart({
 						spa: {
 							enabled: true,
+							prerender: {
+								outputPath: "/index.html",
+							},
 						},
 					}),
 				]),

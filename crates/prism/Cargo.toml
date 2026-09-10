@@ -19,6 +19,9 @@ desktop = [
 	"dep:tauri-plugin-deep-link",
 	"dep:tauri-plugin-single-instance",
 ]
+# Production desktop builds must enable this so the webview loads
+# embedded frontendDist instead of build.devUrl (http://localhost:3000).
+custom-protocol = ["desktop", "tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2", default-features = false, optional = true, features = [] }

@@ -5,6 +5,8 @@
 	"scripts": {
 		"dev": "vite dev --port 3000",
 		"build": "vite build",
+		"tauri": "tauri",
+		"build:desktop": "tauri build --no-bundle --ci",
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
 		"format": "oxfmt",

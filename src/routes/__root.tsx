@@ -307,7 +307,10 @@ function RootContent() {
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
-			if (location.pathname === "/_shell.html") {
+			if (
+				location.pathname === "/_shell.html" ||
+				location.pathname === "/index.html"
+			) {
 				void navigate({ to: "/", replace: true });
 			}
 		}

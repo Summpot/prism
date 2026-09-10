@@ -194,9 +194,8 @@ function AdminDashboardPage() {
 					value={
 						optimizerStats?.global && optimizerStats.global.raw_bytes > 0
 							? `${formatBytes(optimizerStats.global.saved_bytes)} (${formatPercentage(optimizerStats.global.saved_ratio)})${
-									optimizerStats.global.net_latency_saved_ms &&
-									optimizerStats.global.net_latency_saved_ms > 0
-										? ` · ↓ -${optimizerStats.global.net_latency_saved_ms.toFixed(1)}ms`
+									optimizerStats.global.net_gain_ms > 0
+										? ` · net -${optimizerStats.global.net_gain_ms.toFixed(1)}ms`
 										: ""
 								}`
 							: "0 B"

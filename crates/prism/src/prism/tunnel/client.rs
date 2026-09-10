@@ -24,7 +24,7 @@ use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
 use crate::prism::tunnel::optimizer::{
     BatcherConfig, CompressorConfig, DEFAULT_BUFFER_THRESHOLD, DecompressorConfig, OptimizedReader,
     OptimizedWriter, OptimizerStats, OptimizerStatsSnapshot, SharedOptimizerStats,
-    TrafficDirection,
+    TrafficDirection, unix_ms,
 };
 use crate::prism::tunnel::protocol::{
     self, FLAG_OPTIMIZER, FLAG_RAW, ProxyStreamKind, RegisterRequest, RegisteredService,
@@ -933,14 +933,18 @@ async fn handle_player_connection(
                         let written = sess
                             .process_egress_stream(&mut pending, &mut player_wr)
                             .await?;
-                        optimizer_stats
-                            .add_direction_raw_bytes(TrafficDirection::Downlink, written as u64);
+                        optimizer_stats.add_direction_raw_bytes(
+                            TrafficDirection::Downlink,
+                            written as u64,
+                            unix_ms(),
+                        );
                     }
                     if !pending.is_empty() {
                         player_wr.write_all(&pending).await?;
                         optimizer_stats.add_direction_raw_bytes(
                             TrafficDirection::Downlink,
                             pending.len() as u64,
+                            unix_ms(),
                         );
                     }
                 } else {

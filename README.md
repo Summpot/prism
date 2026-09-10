@@ -256,6 +256,7 @@ Implemented endpoints:
 - `GET /health` → JSON `{ "ok": true }`
 - `GET /conns` → JSON snapshot of active sessions
 - `GET /tunnel/services` → JSON snapshot of registered tunnel services
+- `GET /stats/optimizer` → JSON `{ global, services }` traffic-optimizer accounting
 - `GET /config` → JSON with the resolved config path
 - `POST /reload` → sends a best-effort reload signal and returns a sequence number
 
@@ -280,6 +281,30 @@ Operational notes:
   `worker_token` / worker auth token for worker sync)
 - The admin router still uses **permissive CORS**; authentication protects
   writes, but deployments should still scope exposure carefully
+
+### Optimizer accounting
+
+`GET /stats/optimizer` reports three separate items per direction instead of a single
+synthetic latency number:
+
+1. **Transfer gain** (`transfer_gain_ms`) — bytes kept off the wire (`saved_bytes`)
+   converted at the link rate Prism measured, not a fixed constant. The rate is the
+   duration-weighted throughput of observed socket drains, exposed as `link_rate_bps`;
+   while `link_rate_measured` is `false` the 20 Mbps fallback is still an assumption,
+   so consumers should label such a value as an estimate.
+2. **Batching penalty** (`batching_penalty_ms`) — time the time-slice aggregator queued
+   a flow before compressing it. The default window is one 20 ms tick.
+3. **Compression penalty** (`compression_penalty_ms`) — host-local CPU spent compressing
+   (writer side) or decompressing (reader side) that direction.
+
+`net_gain_ms` is `transfer_gain - batching_penalty - compression_penalty`. Uplink and
+downlink are independent tasks, so **penalties are never summed for the aggregate**:
+`net_gain_ms` at the top level is the *minimum* net gain across directions carrying
+traffic, i.e. a floor. The peer's CPU cost is excluded on purpose — it runs on the other
+host, in parallel with this host's work. Byte counters stay additive, because bytes are
+additive even when the two pipes run in parallel. `window` and `uplink`/`downlink`
+`window` fields cover the last 60 s; `batching_delay`/`compression_time` expose
+p50/p90/p99/max in microseconds over the lifetime of the process.
 
 ## Authentication and access control
 

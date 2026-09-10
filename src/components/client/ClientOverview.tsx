@@ -29,6 +29,7 @@ import { formatBytes } from "@/lib/format";
 import { usePanelSession } from "@/lib/panelSession";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
+import type { DirectionStatsSnapshot } from "@/types/admin";
 import { m } from "@/paraglide/messages";
 import { useState } from "react";
 
@@ -64,6 +65,25 @@ function getLoopbackTargetForService(idx: number, port: string): string {
 		}
 	}
 	return port === "25565" ? ip : `${ip}:${port}`;
+}
+
+/** Positive values are latency gains, shown as a reduction (-X.Xms). */
+function formatGainMs(value: number): string {
+	if (value > 0) return `-${value.toFixed(1)}ms`;
+	if (value < 0) return `+${Math.abs(value).toFixed(1)}ms`;
+	return "0.0ms";
+}
+
+/** Positive values are latency costs, shown as an increase (+X.Xms). */
+function formatCostMs(value: number): string {
+	if (value > 0) return `+${value.toFixed(1)}ms`;
+	if (value < 0) return `-${Math.abs(value).toFixed(1)}ms`;
+	return "0.0ms";
+}
+
+function directionTooltip(label: string, dir?: DirectionStatsSnapshot): string {
+	if (!dir) return `${label} net: 0.0ms`;
+	return `${label} net: ${dir.net_gain_ms.toFixed(1)}ms · gain ${dir.transfer_gain_ms.toFixed(1)}ms · batching cost ${dir.batching_penalty_ms.toFixed(1)}ms · compression cost ${dir.compression_penalty_ms.toFixed(1)}ms · batch p99 ${dir.batching_delay.p99_us.toFixed(0)}µs`;
 }
 
 function ThroughputSparkline({ samples }: { samples: number[] }) {
@@ -148,6 +168,15 @@ export function ClientOverview() {
 		startGitHubAuthWithUrl,
 		loginAdminUnlocked,
 	} = useClient();
+
+	const transferGainMs = status?.stats.transfer_gain_ms ?? 0;
+	const netGainMs = status?.stats.net_gain_ms ?? 0;
+	const batchingCostMs = (status?.stats.batching_delay_us ?? 0) / 1000;
+	const compressionCostMs =
+		((status?.stats.compression_time_us ?? 0) + (status?.stats.decompression_time_us ?? 0)) / 1000;
+	const linkRateText = status?.stats.link_rate_measured
+		? `Measured link rate: ${((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1)} Mbps`
+		: `Estimated link rate: ${((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1)} Mbps (measuring)`;
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
@@ -642,52 +671,101 @@ export function ClientOverview() {
 							</div>
 						</div>
 
-						{/* Optimizer Directional & Latency Breakdown */}
+						{/* Optimizer Directional & Accounting Breakdown */}
 						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
-							<div className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between">
+							<div
+								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
+								title={directionTooltip("Uplink", status?.stats.uplink)}
+							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
-										<span className="text-primary font-bold">↑</span> {m.client_up()}
+									<span className="text-primary font-bold">↑</span> {m.client_up()}
 								</span>
 								<span className="font-semibold text-foreground truncate ml-1">
-									{formatBytes(status?.stats.uplink?.wire_bytes ?? 0)}
+									{formatBytes(status?.stats.uplink.wire_bytes ?? 0)}
 									<span className="text-muted-foreground font-normal text-[9px] ml-1">
-										({((status?.stats.uplink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
-									</span>
-								</span>
-							</div>
-							<div className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between">
-								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
-										<span className="text-primary font-bold">↓</span> {m.client_down()}
-								</span>
-								<span className="font-semibold text-foreground truncate ml-1">
-									{formatBytes(status?.stats.downlink?.wire_bytes ?? 0)}
-									<span className="text-muted-foreground font-normal text-[9px] ml-1">
-										({((status?.stats.downlink?.saved_ratio ?? 0) * 100).toFixed(0)}%)
+										({((status?.stats.uplink.saved_ratio ?? 0) * 100).toFixed(0)}%)
 									</span>
 								</span>
 							</div>
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={`Est. transfer saved: -${(status?.stats.est_transfer_time_saved_ms ?? 0).toFixed(1)}ms, CPU processing: +${(status?.stats.est_processing_time_ms ?? 0).toFixed(1)}ms`}
+								title={directionTooltip("Downlink", status?.stats.downlink)}
+							>
+								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
+									<span className="text-primary font-bold">↓</span> {m.client_down()}
+								</span>
+								<span className="font-semibold text-foreground truncate ml-1">
+									{formatBytes(status?.stats.downlink.wire_bytes ?? 0)}
+									<span className="text-muted-foreground font-normal text-[9px] ml-1">
+										({((status?.stats.downlink.saved_ratio ?? 0) * 100).toFixed(0)}%)
+									</span>
+								</span>
+							</div>
+							<div
+								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
+								title={`${linkRateText} · floor across directions`}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									{m.client_latency()}
+									{m.client_net()}
 								</span>
 								<span
 									className={cn(
 										"font-semibold text-[10px]",
-										(status?.stats.net_latency_saved_ms ?? 0) > 0
+										netGainMs > 0
 											? "text-emerald-500"
-											: (status?.stats.net_latency_saved_ms ?? 0) < 0
+											: netGainMs < 0
 												? "text-amber-500"
 												: "text-muted-foreground",
 									)}
 								>
-									{(status?.stats.net_latency_saved_ms ?? 0) > 0
-										? `-${(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
-										: (status?.stats.net_latency_saved_ms ?? 0) < 0
-											? `+${Math.abs(status?.stats.net_latency_saved_ms ?? 0).toFixed(1)}ms`
-											: "0.0ms"}
+									{formatGainMs(netGainMs)}
+								</span>
+							</div>
+						</div>
+
+						{/* Optimizer gain vs. batching/compression costs */}
+						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+							<div
+								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
+								title={linkRateText}
+							>
+								<span className="text-[9px] font-sans font-medium text-muted-foreground">
+									{m.client_gain()}
+								</span>
+								<span className="font-semibold text-emerald-500 text-[10px]">
+									{formatGainMs(transferGainMs)}
+								</span>
+							</div>
+							<div
+								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
+								title={`Batching delay: ${batchingCostMs.toFixed(1)}ms (lifetime, both directions)`}
+							>
+								<span className="text-[9px] font-sans font-medium text-muted-foreground">
+									{m.client_batching()}
+								</span>
+								<span
+									className={cn(
+										"font-semibold text-[10px]",
+										batchingCostMs !== 0 ? "text-amber-500" : "text-muted-foreground",
+									)}
+								>
+									{formatCostMs(batchingCostMs)}
+								</span>
+							</div>
+							<div
+								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
+								title={`Compression + decompression CPU: ${compressionCostMs.toFixed(1)}ms (lifetime, both directions)`}
+							>
+								<span className="text-[9px] font-sans font-medium text-muted-foreground">
+									{m.client_compression()}
+								</span>
+								<span
+									className={cn(
+										"font-semibold text-[10px]",
+										compressionCostMs !== 0 ? "text-amber-500" : "text-muted-foreground",
+									)}
+								>
+									{formatCostMs(compressionCostMs)}
 								</span>
 							</div>
 						</div>

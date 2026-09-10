@@ -33,10 +33,6 @@ pub struct SessionInfo {
     pub downlink_raw_bytes: u64,
     #[serde(default)]
     pub downlink_wire_bytes: u64,
-    #[serde(default)]
-    pub est_latency_improvement_ms: f64,
-    #[serde(default)]
-    pub est_latency_degradation_ms: f64,
 }
 
 impl SessionInfo {
@@ -54,8 +50,6 @@ impl SessionInfo {
             uplink_wire_bytes: 0,
             downlink_raw_bytes: 0,
             downlink_wire_bytes: 0,
-            est_latency_improvement_ms: 0.0,
-            est_latency_degradation_ms: 0.0,
         }
     }
 }
@@ -97,8 +91,6 @@ impl SessionRegistry {
                 info.uplink_wire_bytes = snap.uplink.wire_bytes;
                 info.downlink_raw_bytes = snap.downlink.raw_bytes;
                 info.downlink_wire_bytes = snap.downlink.wire_bytes;
-                info.est_latency_improvement_ms = snap.est_transfer_time_saved_ms;
-                info.est_latency_degradation_ms = snap.est_processing_time_ms;
             }
             out.push(info);
         }

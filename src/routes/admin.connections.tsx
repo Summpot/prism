@@ -96,9 +96,8 @@ function AdminConnectionsPage() {
 								<span>
 									Optimizer: Saved {formatBytes(optimizerStats.global.saved_bytes)} (
 									{formatPercentage(optimizerStats.global.saved_ratio)})
-									{optimizerStats.global.net_latency_saved_ms &&
-									optimizerStats.global.net_latency_saved_ms > 0
-										? ` · Latency -${optimizerStats.global.net_latency_saved_ms.toFixed(1)}ms`
+									{optimizerStats.global.net_gain_ms > 0
+										? ` · net -${optimizerStats.global.net_gain_ms.toFixed(1)}ms`
 										: ""}
 								</span>
 							</div>

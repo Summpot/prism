@@ -10,8 +10,36 @@ export interface SessionInfo {
 	uplink_wire_bytes?: number;
 	downlink_raw_bytes?: number;
 	downlink_wire_bytes?: number;
-	est_latency_improvement_ms?: number;
-	est_latency_degradation_ms?: number;
+}
+
+export interface Quantiles {
+	p50_us: number;
+	p90_us: number;
+	p99_us: number;
+	max_us: number;
+}
+
+export interface DirectionWindowSnapshot {
+	window_ms: number;
+	raw_bytes: number;
+	wire_bytes: number;
+	saved_bytes: number;
+	saved_ratio: number;
+	batches: number;
+	transfer_gain_ms: number;
+	batching_penalty_ms: number;
+	compression_penalty_ms: number;
+	net_gain_ms: number;
+}
+
+export interface WindowSnapshot {
+	window_ms: number;
+	raw_bytes: number;
+	wire_bytes: number;
+	saved_bytes: number;
+	saved_ratio: number;
+	batches: number;
+	transfer_gain_ms: number;
 }
 
 export interface DirectionStatsSnapshot {
@@ -20,11 +48,17 @@ export interface DirectionStatsSnapshot {
 	saved_bytes: number;
 	saved_ratio: number;
 	batches: number;
+	batching_delay_us: number;
 	compression_time_us: number;
 	decompression_time_us: number;
-	est_transfer_time_saved_ms: number;
-	est_processing_time_ms: number;
-	net_latency_saved_ms: number;
+	link_rate_bps: number;
+	transfer_gain_ms: number;
+	batching_penalty_ms: number;
+	compression_penalty_ms: number;
+	net_gain_ms: number;
+	batching_delay: Quantiles;
+	compression_time: Quantiles;
+	window: DirectionWindowSnapshot;
 }
 
 export interface OptimizerStatsSnapshot {
@@ -35,14 +69,18 @@ export interface OptimizerStatsSnapshot {
 	urgent_batches: number;
 	timer_batches: number;
 	threshold_batches: number;
-	uplink?: DirectionStatsSnapshot;
-	downlink?: DirectionStatsSnapshot;
-	compression_time_us?: number;
-	decompression_time_us?: number;
-	batching_delay_us?: number;
-	est_transfer_time_saved_ms?: number;
-	est_processing_time_ms?: number;
-	net_latency_saved_ms?: number;
+	link_rate_bps: number;
+	link_rate_measured: boolean;
+	link_rate_bytes: number;
+	link_rate_busy_us: number;
+	transfer_gain_ms: number;
+	net_gain_ms: number;
+	batching_delay_us: number;
+	compression_time_us: number;
+	decompression_time_us: number;
+	uplink: DirectionStatsSnapshot;
+	downlink: DirectionStatsSnapshot;
+	window: WindowSnapshot;
 }
 
 export interface OptimizerOverviewResponse {

@@ -1583,10 +1583,18 @@ mod tests {
         svc_stats.inc_timer();
 
         let global_stats = optimizer.global();
-        global_stats.add_raw_bytes(1000);
-        global_stats.add_wire_bytes(200);
-        global_stats.inc_urgent();
-        global_stats.inc_timer();
+        global_stats.add_direction_raw_bytes(
+            tunnel::optimizer::TrafficDirection::Uplink,
+            1000,
+            tunnel::optimizer::unix_ms(),
+        );
+        global_stats.record_batch(
+            tunnel::optimizer::TrafficDirection::Uplink,
+            200,
+            15_000,
+            5_000,
+            tunnel::optimizer::unix_ms(),
+        );
 
         let state = AdminState {
             sessions: Arc::new(telemetry::SessionRegistry::new()),
@@ -1626,6 +1634,18 @@ mod tests {
         assert_eq!(resp_json["global"]["wire_bytes"], 200);
         assert_eq!(resp_json["global"]["saved_bytes"], 800);
         assert_eq!(resp_json["global"]["saved_ratio"], 0.8);
+        // Itemised accounting: measured link rate, per-direction penalties, net floor.
+        assert!(resp_json["global"]["link_rate_bps"].is_number());
+        let up = &resp_json["global"]["uplink"];
+        assert_eq!(up["batching_penalty_ms"], 15.0);
+        assert_eq!(up["compression_penalty_ms"], 5.0);
+        let (gain, net) = (
+            up["transfer_gain_ms"].as_f64().unwrap(),
+            up["net_gain_ms"].as_f64().unwrap(),
+        );
+        assert!((gain - net - 20.0).abs() < 1e-6, "gain {gain}, net {net}");
+        assert_eq!(resp_json["global"]["net_gain_ms"], up["net_gain_ms"]);
+        assert!(resp_json["global"]["window"].is_object());
         assert_eq!(resp_json["services"]["gto"]["raw_bytes"], 1000);
         assert_eq!(resp_json["services"]["gto"]["urgent_batches"], 1);
 

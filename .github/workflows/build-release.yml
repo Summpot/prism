@@ -130,7 +130,7 @@ jobs:
             target/${{ matrix.target }}/release/prism${{ matrix.os == 'windows' && '.exe' || '' }}
           args: --best
 
-      - name: Package (unix)
+      - name: Prepare binary (unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -145,20 +145,10 @@ jobs:
           OUTDIR="dist"
           mkdir -p "${OUTDIR}"
 
-          OS="${{ matrix.os }}"
-          ARCH="${{ matrix.arch }}"
-
           TARGET="${{ matrix.target }}"
-          BASENAME="prism_${VERSION}_${TARGET}"
-          TMPDIR="${OUTDIR}/${BASENAME}"
-          mkdir -p "${TMPDIR}"
+          cp -v "target/${TARGET}/release/prism" "${OUTDIR}/prism_${VERSION}_${TARGET}"
 
-          cp -v "target/${TARGET}/release/prism" "${TMPDIR}/prism"
-
-          tar -C "${OUTDIR}" -czf "${OUTDIR}/${BASENAME}.tar.gz" "${BASENAME}"
-          rm -rf "${TMPDIR}"
-
-      - name: Package (windows)
+      - name: Prepare binary (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -171,24 +161,15 @@ jobs:
           $outdir = "dist"
           New-Item -ItemType Directory -Force -Path $outdir | Out-Null
 
-          $os = "${{ matrix.os }}"
-          $arch = "${{ matrix.arch }}"
-
           $target = "${{ matrix.target }}"
-          $basename = "prism_${version}_${target}"
-          $tmpdir = Join-Path $outdir $basename
-          New-Item -ItemType Directory -Force -Path $tmpdir | Out-Null
-
-          Copy-Item -Force -Path "target/$target/release/prism.exe" -Destination (Join-Path $tmpdir "prism.exe")
-
-          Compress-Archive -Path $tmpdir -DestinationPath (Join-Path $outdir "$basename.zip") -Force
-          Remove-Item -Recurse -Force $tmpdir
+          Copy-Item -Force -Path "target/$target/release/prism.exe" -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
 
       - name: upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: prism-rust-binaries-${{ matrix.target }}
           path: dist/*
+          compression-level: 0
 
   release:
     runs-on: ubuntu-latest
@@ -208,9 +189,9 @@ jobs:
           set -euo pipefail
           cd dist
           shopt -s nullglob
-          files=( *.zip *.tar.gz )
+          files=( prism_* )
           if (( ${#files[@]} == 0 )); then
-            echo "no release archives found in dist/" >&2
+            echo "no release binaries found in dist/" >&2
             exit 1
           fi
           sha256sum "${files[@]}" > checksums.txt

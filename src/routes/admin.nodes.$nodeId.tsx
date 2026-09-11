@@ -19,6 +19,7 @@ import {
 	updateManagedNodeConfig,
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/nodes/$nodeId")({
 	component: AdminNodeDetailPage,
@@ -76,15 +77,15 @@ function AdminNodeDetailPage() {
 	};
 
 	if (!ready) {
-		return <StateCard label="Restoring session…" />;
+		return <StateCard label={m.common_restoring_session()} />;
 	}
 
 	if (!connection) {
-		return <StateCard label="Connect the panel to a management node before opening node detail." />;
+		return <StateCard label={m.nodetail_connect_panel()} />;
 	}
 
 	if (loading && !data) {
-		return <StateCard label="Loading node detail…" />;
+		return <StateCard label={m.nodetail_loading()} />;
 	}
 
 	if (error || !data) {
@@ -95,9 +96,9 @@ function AdminNodeDetailPage() {
 					className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
 				>
 					<ArrowLeft className="h-4 w-4" />
-					Back to nodes
+					{m.nodetail_back()}
 				</Link>
-				<ErrorBanner message={error || "Node not found."} onRetry={fetchData} />
+				<ErrorBanner message={error || m.nodetail_not_found()} onRetry={fetchData} />
 			</div>
 		);
 	}
@@ -112,21 +113,21 @@ function AdminNodeDetailPage() {
 				className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
 			>
 				<ArrowLeft className="h-4 w-4" />
-				Back to nodes
+				{m.nodetail_back()}
 			</Link>
 
 			<PageHeader
-				eyebrow="Node detail"
+				eyebrow={m.nodetail_eyebrow()}
 				title={node.node_id}
-				description="Review desired versus applied revisions, inspect restart pressure, and edit the next structured config revision for this worker."
+				description={m.nodetail_description()}
 				actions={
 					<>
 						{node.pending_restart ? (
-							<Badge tone="warn">restart required</Badge>
+							<Badge tone="warn">{m.nodetail_restart_required()}</Badge>
 						) : (
-							<Badge tone="ok">steady</Badge>
+							<Badge tone="ok">{m.nodetail_steady()}</Badge>
 						)}
-						{drifted ? <Badge tone="info">revision drift</Badge> : null}
+						{drifted ? <Badge tone="info">{m.nodetail_revision_drift()}</Badge> : null}
 						<RefreshButton onClick={fetchData} loading={loading} />
 					</>
 				}
@@ -134,22 +135,22 @@ function AdminNodeDetailPage() {
 
 			<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 				<MetricCard
-					label="Connection mode"
-					value={node.connection_mode ?? "unknown"}
+					label={m.nodetail_connection_mode()}
+					value={node.connection_mode ?? m.admin_unknown()}
 					icon={<ServerCog className="h-5 w-5" />}
 				/>
 				<MetricCard
-					label="Desired revision"
+					label={m.admin_desired_revision()}
 					value={node.desired_revision}
 					icon={<RefreshCcw className="h-5 w-5" />}
 				/>
 				<MetricCard
-					label="Applied revision"
+					label={m.admin_applied_revision()}
 					value={node.applied_revision}
 					icon={<CircleSlash className="h-5 w-5" />}
 				/>
 				<MetricCard
-					label="Last seen"
+					label={m.admin_last_seen()}
 					value={`${formatRelative(node.last_seen_unix_ms)} · ${formatTime(node.last_seen_unix_ms, "short")}`}
 					icon={<AlertTriangle className="h-5 w-5" />}
 					compact
@@ -160,13 +161,15 @@ function AdminNodeDetailPage() {
 				<section className="grid gap-4 md:grid-cols-3">
 					{node.agent_url ? (
 						<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 text-sm">
-							<div className="text-xs uppercase tracking-[0.2em] text-slate-500">Agent URL</div>
+							<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+								{m.nodetail_agent_url()}
+							</div>
 							<div className="mt-2 break-all text-white">{node.agent_url}</div>
 						</div>
 					) : null}
 					<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 text-sm">
 						<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-							Last apply attempt
+							{m.nodetail_last_apply_attempt()}
 						</div>
 						<div className="mt-2 text-white">
 							{formatTime(node.last_apply_attempt_unix_ms, "short")}
@@ -174,7 +177,7 @@ function AdminNodeDetailPage() {
 					</div>
 					<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 text-sm">
 						<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-							Last apply success
+							{m.nodetail_last_apply_success()}
 						</div>
 						<div className="mt-2 text-white">
 							{formatTime(node.last_apply_success_unix_ms, "short")}
@@ -185,7 +188,7 @@ function AdminNodeDetailPage() {
 
 			{node.restart_reasons.length > 0 ? (
 				<section className="rounded-3xl border border-amber-400/20 bg-amber-400/8 p-5 text-sm text-amber-100">
-					<div className="font-semibold">Restart reasons</div>
+					<div className="font-semibold">{m.nodetail_restart_reasons()}</div>
 					<ul className="mt-3 list-disc space-y-2 pl-5">
 						{node.restart_reasons.map((reason) => (
 							<li key={reason}>{reason}</li>
@@ -196,7 +199,7 @@ function AdminNodeDetailPage() {
 
 			{node.last_apply_error ? (
 				<section className="rounded-3xl border border-red-400/20 bg-red-400/8 p-5 text-sm text-red-100">
-					<div className="font-semibold">Last apply error</div>
+					<div className="font-semibold">{m.nodetail_last_apply_error()}</div>
 					<div className="mt-2 whitespace-pre-wrap break-all">{node.last_apply_error}</div>
 				</section>
 			) : null}

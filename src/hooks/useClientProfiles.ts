@@ -7,6 +7,7 @@ import {
 	saveClientProfiles,
 } from "@/lib/client/clientIpc";
 import { deriveManagementUrl } from "@/lib/panelConnection";
+import { m } from "@/paraglide/messages";
 import type { ClientProfile, CumulativeStats } from "@/types/client";
 
 interface UseClientProfilesOptions {
@@ -22,7 +23,8 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 	const [authToken, setAuthToken] = useState("");
 	const [listenAddr, setListenAddr] = useState("127.0.0.1:25565");
 	const [fakeLanBroadcast, setFakeLanBroadcast] = useState(true);
-	const [profileName, setProfileName] = useState("Default Realm");
+	// Explicit `string` keeps the setter plain: the default name is stored data, not a localized string.
+	const [profileName, setProfileName] = useState<string>(m.client_default_realm());
 	const [autoConnectPanel, setAutoConnectPanel] = useState(true);
 
 	const configLoadedRef = useRef(false);
@@ -49,7 +51,7 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 				if (!configLoadedRef.current) {
 					configLoadedRef.current = true;
 					if (resp.active_config) {
-						setProfileName(resp.active_config.profile_name || "Default Realm");
+						setProfileName(resp.active_config.profile_name || m.client_default_realm());
 						const sAddr = resp.active_config.server_addr || "127.0.0.1";
 						setServerAddr(sAddr);
 						if (optionsRef.current?.onRemoteLinkInputSync) {

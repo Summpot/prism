@@ -94,8 +94,10 @@ function AdminConnectionsPage() {
 							<div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
 								<Zap className="h-4 w-4 text-emerald-400" />
 								<span>
-									Optimizer: Saved {formatBytes(optimizerStats.global.saved_bytes)} (
-									{formatPercentage(optimizerStats.global.saved_ratio)})
+									{m.admin_optimizer_saved({
+										bytes: formatBytes(optimizerStats.global.saved_bytes),
+										percentage: formatPercentage(optimizerStats.global.saved_ratio),
+									})}
 									{optimizerStats.global.net_gain_ms > 0
 										? ` · net -${optimizerStats.global.net_gain_ms.toFixed(1)}ms`
 										: ""}
@@ -105,8 +107,10 @@ function AdminConnectionsPage() {
 						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
 							<Cable className="h-4 w-4 text-cyan-300" />
 							{loading
-								? "Loading…"
-								: `${filtered.length}/${conns.length} connection${conns.length === 1 ? "" : "s"}`}
+								? m.common_loading()
+								: conns.length === 1
+									? m.admin_connections_count_one({ shown: filtered.length, total: conns.length })
+									: m.admin_connections_count({ shown: filtered.length, total: conns.length })}
 						</div>
 					</>
 				}
@@ -207,17 +211,17 @@ function AdminConnectionsPage() {
 									<span className="font-mono text-sm text-cyan-200/85">{conn.client}</span>
 								</div>
 								<div className="grid grid-cols-2 gap-3">
-									<MiniValue label="Host" value={conn.host || "—"} />
-									<MiniValue label="Upstream" value={conn.upstream} />
+									<MiniValue label={m.admin_host()} value={conn.host || "—"} />
+									<MiniValue label={m.admin_upstream()} value={conn.upstream} />
 									<MiniValue
-										label="Optimizer"
+										label={m.admin_optimizer()}
 										value={
 											conn.raw_bytes || conn.wire_bytes
 												? `${formatBytes(conn.raw_bytes)} → ${formatBytes(conn.wire_bytes)}`
 												: "—"
 										}
 									/>
-									<MiniValue label="Duration" value={formatDuration(conn.started_at_unix_ms)} />
+									<MiniValue label={m.admin_duration()} value={formatDuration(conn.started_at_unix_ms)} />
 								</div>
 							</div>
 						))}

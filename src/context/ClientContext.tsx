@@ -57,7 +57,7 @@ export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
 
 	profiles: [],
 	selectedProfileId: "",
-	profileName: "Default Realm",
+	profileName: m.client_default_realm(),
 	setProfileName: () => {},
 	serverAddr: "127.0.0.1",
 	setServerAddr: () => {},

@@ -16,6 +16,7 @@ import {
 import { getTunnelServices, type ServiceSnapshot } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/tunnel-services")({
 	component: AdminTunnelServicesPage,
@@ -78,35 +79,35 @@ function AdminTunnelServicesPage() {
 	}, [primaryOnly, query, services]);
 
 	if (!ready) {
-		return <StateCard label="Restoring session…" />;
+		return <StateCard label={m.common_restoring_session()} />;
 	}
 
 	if (!connection) {
-		return (
-			<StateCard label="Connect the panel to a management node before viewing tunnel services." />
-		);
+		return <StateCard label={m.services_connect_panel()} />;
 	}
 
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				eyebrow="Tunnel plane"
-				title="Registered tunnel services"
-				description="Services registered by tunnel clients. Primary owners handle routing traffic; secondary registrations wait as failover candidates."
+				eyebrow={m.services_eyebrow()}
+				title={m.services_title()}
+				description={m.services_description()}
 				actions={
 					<>
 						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
-							Auto-refresh {autoRefresh ? "on" : "off"}
+							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<ToggleChip active={primaryOnly} onClick={() => setPrimaryOnly((value) => !value)}>
-							Primary only
+							{m.services_primary_only()}
 						</ToggleChip>
 						<RefreshButton onClick={fetchServices} loading={loading} />
 						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
 							<Unplug className="h-4 w-4 text-cyan-300" />
 							{loading
-								? "Loading…"
-								: `${filtered.length}/${services.length} service${services.length === 1 ? "" : "s"}`}
+								? m.common_loading()
+								: services.length === 1
+									? m.services_count_one({ shown: filtered.length, total: services.length })
+									: m.services_count({ shown: filtered.length, total: services.length })}
 						</div>
 					</>
 				}
@@ -115,7 +116,7 @@ function AdminTunnelServicesPage() {
 			<SearchInput
 				value={query}
 				onChange={setQuery}
-				placeholder="Filter by service, client, address…"
+				placeholder={m.services_filter()}
 			/>
 
 			{error ? <ErrorBanner message={error} onRetry={fetchServices} /> : null}
@@ -134,24 +135,33 @@ function AdminTunnelServicesPage() {
 										<div className="text-xl font-semibold text-white">{snapshot.service.name}</div>
 									</div>
 									<div className="mt-2 text-sm text-slate-400">
-										Client <span className="font-mono text-cyan-200/85">{snapshot.client_id}</span>
+										{m.services_client()}{" "}
+										<span className="font-mono text-cyan-200/85">{snapshot.client_id}</span>
 									</div>
 								</div>
 								<div className="flex flex-wrap items-center justify-end gap-2">
 									<Badge tone={snapshot.primary ? "ok" : "neutral"}>
-										{snapshot.primary ? "Primary" : "Secondary"}
+										{snapshot.primary ? m.services_primary() : m.services_secondary()}
 									</Badge>
-									{snapshot.service.route_only ? <Badge tone="info">Route only</Badge> : null}
+									{snapshot.service.route_only ? (
+										<Badge tone="info">{m.services_route_only()}</Badge>
+									) : null}
 								</div>
 							</div>
 
 							<div className="mt-5 grid gap-3 sm:grid-cols-2">
-								<InfoValue label="Protocol" value={snapshot.service.proto} />
-								<InfoValue label="Local addr" value={snapshot.service.local_addr || "—"} />
-								<InfoValue label="Remote addr" value={snapshot.service.remote_addr || "—"} />
-								<InfoValue label="Remote peer" value={snapshot.remote} />
+								<InfoValue label={m.services_protocol()} value={snapshot.service.proto} />
+								<InfoValue label={m.services_local_addr()} value={snapshot.service.local_addr || "—"} />
+								<InfoValue
+									label={m.services_remote_addr()}
+									value={snapshot.service.remote_addr || "—"}
+								/>
+								<InfoValue label={m.services_remote_peer()} value={snapshot.remote} />
 								{snapshot.service.masquerade_host ? (
-									<InfoValue label="Masquerade host" value={snapshot.service.masquerade_host} />
+									<InfoValue
+										label={m.services_masquerade_host()}
+										value={snapshot.service.masquerade_host}
+									/>
 								) : null}
 							</div>
 						</div>
@@ -160,11 +170,7 @@ function AdminTunnelServicesPage() {
 			) : !loading ? (
 				<EmptyState
 					icon={<Shield className="h-8 w-8" />}
-					label={
-						services.length === 0
-							? "No tunnel services registered. Tunnel clients appear here when they connect and register services."
-							: "No services match the current filter."
-					}
+					label={services.length === 0 ? m.services_empty() : m.services_no_match()}
 				/>
 			) : null}
 		</div>

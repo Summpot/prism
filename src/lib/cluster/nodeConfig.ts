@@ -6,6 +6,7 @@ import type {
 	ManagedTunnelEndpointDocument,
 	ManagedTunnelServiceDocument,
 } from "@/types/cluster";
+import { m } from "@/paraglide/messages";
 
 export interface ConfigIssue {
 	path: string;
@@ -191,21 +192,21 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 		if (!listener.listen_addr) {
 			issues.push({
 				path: `listeners.${index}.listen_addr`,
-				message: "Listener address is required.",
+				message: m.nodeconfig_err_listener_addr(),
 			});
 		}
 
 		if (listener.protocol !== "tcp" && listener.protocol !== "udp") {
 			issues.push({
 				path: `listeners.${index}.protocol`,
-				message: "Protocol must be tcp or udp.",
+				message: m.nodeconfig_err_listener_protocol(),
 			});
 		}
 
 		if (listener.protocol === "udp" && !listener.upstream) {
 			issues.push({
 				path: `listeners.${index}.upstream`,
-				message: "UDP listeners require an upstream.",
+				message: m.nodeconfig_err_udp_upstream(),
 			});
 		}
 	});
@@ -214,25 +215,25 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 		if (route.hosts.length === 0) {
 			issues.push({
 				path: `routes.${index}.hosts`,
-				message: "At least one route host is required.",
+				message: m.nodeconfig_err_route_hosts(),
 			});
 		}
 		if (route.upstreams.length === 0) {
 			issues.push({
 				path: `routes.${index}.upstreams`,
-				message: "At least one route upstream is required.",
+				message: m.nodeconfig_err_route_upstreams(),
 			});
 		}
 		if (route.middlewares.length === 0) {
 			issues.push({
 				path: `routes.${index}.middlewares`,
-				message: "Routing routes require at least one middleware.",
+				message: m.nodeconfig_err_route_middlewares(),
 			});
 		}
 		if (!["sequential", "random", "round-robin"].includes(route.strategy)) {
 			issues.push({
 				path: `routes.${index}.strategy`,
-				message: "Strategy must be sequential, random, or round-robin.",
+				message: m.nodeconfig_err_route_strategy(),
 			});
 		}
 	});
@@ -244,8 +245,7 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 		if (!hasHostnameRouting) {
 			issues.push({
 				path: "listeners",
-				message:
-					"Hostname routes need at least one TCP listener with an empty upstream (hostname-routing mode).",
+				message: m.nodeconfig_err_hostname_listener(),
 			});
 		}
 	}
@@ -256,13 +256,13 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 			if (!endpoint.listen_addr) {
 				issues.push({
 					path: `tunnel.endpoints.${index}.listen_addr`,
-					message: "Tunnel endpoint address is required.",
+					message: m.nodeconfig_err_tunnel_endpoint_addr(),
 				});
 			}
 			if (!["tcp", "udp", "quic", "websocket", "ws", "wss", "webtransport", "wt"].includes(endpoint.transport)) {
 				issues.push({
 					path: `tunnel.endpoints.${index}.transport`,
-					message: "Transport must be tcp, udp, quic, websocket, or webtransport.",
+					message: m.nodeconfig_err_tunnel_transport(),
 				});
 			}
 		});
@@ -270,7 +270,7 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 		if (doc.tunnel?.client && !tunnel.client) {
 			issues.push({
 				path: "tunnel.client.server_addr",
-				message: "Tunnel client server address is required.",
+				message: m.nodeconfig_err_tunnel_server_addr(),
 			});
 		}
 
@@ -280,7 +280,7 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 		) {
 			issues.push({
 				path: "tunnel.client.transport",
-				message: "Client transport must be auto, tcp, udp, quic, websocket, or webtransport.",
+				message: m.nodeconfig_err_tunnel_client_transport(),
 			});
 		}
 
@@ -288,25 +288,25 @@ export function validateManagedConfig(doc: ManagedConfigDocument): ConfigIssue[]
 			if (!service.name) {
 				issues.push({
 					path: `tunnel.services.${index}.name`,
-					message: "Tunnel service name is required.",
+					message: m.nodeconfig_err_service_name(),
 				});
 			}
 			if (!service.local_addr) {
 				issues.push({
 					path: `tunnel.services.${index}.local_addr`,
-					message: "Tunnel service local address is required.",
+					message: m.nodeconfig_err_service_local_addr(),
 				});
 			}
 			if (!["tcp", "udp"].includes(service.proto)) {
 				issues.push({
 					path: `tunnel.services.${index}.proto`,
-					message: "Service protocol must be tcp or udp.",
+					message: m.nodeconfig_err_service_proto(),
 				});
 			}
 			if (service.route_only && service.remote_addr) {
 				issues.push({
 					path: `tunnel.services.${index}.remote_addr`,
-					message: "route_only services must not declare remote_addr.",
+					message: m.nodeconfig_err_route_only_remote(),
 				});
 			}
 		});
@@ -339,12 +339,12 @@ export function parseManagedConfigJson(
 	} catch (error) {
 		return {
 			ok: false,
-			error: error instanceof Error ? error.message : "Invalid JSON",
+			error: error instanceof Error ? error.message : m.nodeconfig_err_invalid_json(),
 		};
 	}
 
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		return { ok: false, error: "Config root must be a JSON object." };
+		return { ok: false, error: m.nodeconfig_err_root_object() };
 	}
 
 	const value = parsed as Partial<ManagedConfigDocument>;

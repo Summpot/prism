@@ -12,6 +12,7 @@ import {
 	updateMiddlewareConfig,
 } from "@/lib/managementApi";
 import type { PanelConnection } from "@/lib/panelConnection";
+import { m } from "@/paraglide/messages";
 
 interface MiddlewareConfigEditorProps {
 	connection: PanelConnection;
@@ -45,7 +46,9 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		} catch (err) {
 			setStatusMessage({
 				type: "error",
-				text: `Failed to load middlewares: ${err instanceof Error ? err.message : String(err)}`,
+				text: m.middleware_load_failed({
+					message: err instanceof Error ? err.message : String(err),
+				}),
 			});
 		} finally {
 			setLoading(false);
@@ -80,7 +83,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 			const res = await updateMiddlewareConfig(connection, selectedName, formValues);
 			setStatusMessage({
 				type: "success",
-				text: `Configuration for "${selectedName}" applied and hot-updated to running sessions!`,
+				text: m.middleware_applied({ name: selectedName }),
 			});
 			setFormValues(res.config);
 			// Refresh list state
@@ -89,7 +92,9 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		} catch (err) {
 			setStatusMessage({
 				type: "error",
-				text: `Failed to save configuration: ${err instanceof Error ? err.message : String(err)}`,
+				text: m.middleware_save_failed({
+					message: err instanceof Error ? err.message : String(err),
+				}),
 			});
 		} finally {
 			setSaving(false);
@@ -104,7 +109,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 			await resetMiddlewareConfig(connection, selectedName);
 			setStatusMessage({
 				type: "success",
-				text: `Configuration for "${selectedName}" reset to schema defaults.`,
+				text: m.middleware_reset_done({ name: selectedName }),
 			});
 			// Reload values
 			const updated = await listMiddlewares(connection);
@@ -116,7 +121,9 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		} catch (err) {
 			setStatusMessage({
 				type: "error",
-				text: `Failed to reset configuration: ${err instanceof Error ? err.message : String(err)}`,
+				text: m.middleware_reset_failed({
+					message: err instanceof Error ? err.message : String(err),
+				}),
 			});
 		} finally {
 			setResetting(false);
@@ -151,7 +158,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 							</label>
 							{!isDefault && (
 								<Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-									Modified
+									{m.middleware_modified()}
 								</Badge>
 							)}
 						</div>
@@ -168,7 +175,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 								className="font-mono text-sm max-w-[200px]"
 							/>
 							<span className="text-xs text-muted-foreground font-mono">
-								Default: {JSON.stringify(field.default_value)}
+								{m.middleware_default({ value: JSON.stringify(field.default_value) })}
 							</span>
 						</div>
 					</div>
@@ -187,7 +194,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 								<label className="text-sm font-medium text-foreground">{field.label}</label>
 								{!isDefault && (
 									<Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-										Modified
+										{m.middleware_modified()}
 									</Badge>
 								)}
 							</div>
@@ -224,7 +231,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 							</label>
 							{!isDefault && (
 								<Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-									Modified
+									{m.middleware_modified()}
 								</Badge>
 							)}
 						</div>
@@ -247,7 +254,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 							/>
 						)}
 						<p className="text-xs text-muted-foreground font-mono truncate">
-							Default: {JSON.stringify(field.default_value)}
+							{m.middleware_default({ value: JSON.stringify(field.default_value) })}
 						</p>
 					</div>
 				);
@@ -264,16 +271,16 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 					</div>
 					<div>
 						<h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-							WASM Middleware Dynamic Configuration
+							{m.middleware_title()}
 							<Badge
 								variant="outline"
 								className="text-[11px] font-mono gap-1 text-primary border-primary/30"
 							>
-								<Zap className="size-3" /> Component Model
+								<Zap className="size-3" /> {m.middleware_badge()}
 							</Badge>
 						</h3>
 						<p className="text-xs text-muted-foreground">
-							Reflected from WAT Component records. Values hot-update running sessions in real-time.
+							{m.middleware_description()}
 						</p>
 					</div>
 				</div>
@@ -287,14 +294,16 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 						className="gap-1.5 text-xs"
 					>
 						<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-						Refresh
+						{m.common_refresh()}
 					</Button>
 				</div>
 			</div>
 
 			{/* Middleware Selector Pills */}
 			<div className="flex items-center gap-2 flex-wrap">
-				<span className="text-xs font-medium text-muted-foreground mr-1">Middleware:</span>
+				<span className="text-xs font-medium text-muted-foreground mr-1">
+					{m.middleware_selector()}
+				</span>
 				{middlewares.map((mw) => {
 					const isSelected = mw.name === selectedName;
 					const fieldCount = mw.schema?.fields?.length ?? 0;
@@ -317,7 +326,9 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 										: "bg-muted text-muted-foreground"
 								}`}
 							>
-								{fieldCount} {fieldCount === 1 ? "field" : "fields"}
+								{fieldCount === 1
+									? m.middleware_field({ count: fieldCount })
+									: m.middleware_fields({ count: fieldCount })}
 							</span>
 						</button>
 					);
@@ -354,7 +365,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 							className="text-xs gap-1.5 text-muted-foreground hover:text-foreground"
 						>
 							<RotateCcw className={`size-3.5 ${resetting ? "animate-spin" : ""}`} />
-							Reset to Defaults
+							{m.middleware_reset_defaults()}
 						</Button>
 
 						<Button
@@ -369,13 +380,13 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 							) : (
 								<Check className="size-3.5" />
 							)}
-							Apply Changes (Hot-Reload)
+							{m.middleware_apply()}
 						</Button>
 					</div>
 				</div>
 			) : (
 				<div className="p-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-lg">
-					No declarative configuration schema exported for {selectedName || "this middleware"}.
+					{m.middleware_no_schema({ name: selectedName || m.middleware_this_middleware() })}
 				</div>
 			)}
 		</div>

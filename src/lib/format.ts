@@ -1,9 +1,12 @@
+import { m } from "@/paraglide/messages";
+import { getLocale } from "@/paraglide/runtime";
+
 export function formatTime(unixMs: number, style: "short" | "medium" = "medium") {
 	if (!unixMs) {
-		return "never";
+		return m.format_never();
 	}
 
-	return new Intl.DateTimeFormat("en-US", {
+	return new Intl.DateTimeFormat(getLocale() === "zh-CN" ? "zh-CN" : "en-US", {
 		dateStyle: style === "short" ? "medium" : "medium",
 		timeStyle: style === "short" ? "short" : "medium",
 	}).format(new Date(unixMs));
@@ -35,7 +38,7 @@ export function formatDuration(startUnixMs: number) {
 
 export function formatRelative(unixMs: number) {
 	if (!unixMs) {
-		return "never";
+		return m.format_never();
 	}
 
 	const delta = Date.now() - unixMs;
@@ -43,16 +46,16 @@ export function formatRelative(unixMs: number) {
 		return formatTime(unixMs, "short");
 	}
 	if (delta < 5_000) {
-		return "just now";
+		return m.format_just_now();
 	}
 	if (delta < 60_000) {
-		return `${Math.floor(delta / 1000)}s ago`;
+		return m.format_seconds_ago({ count: Math.floor(delta / 1000) });
 	}
 	if (delta < 3_600_000) {
-		return `${Math.floor(delta / 60_000)}m ago`;
+		return m.format_minutes_ago({ count: Math.floor(delta / 60_000) });
 	}
 	if (delta < 86_400_000) {
-		return `${Math.floor(delta / 3_600_000)}h ago`;
+		return m.format_hours_ago({ count: Math.floor(delta / 3_600_000) });
 	}
 	return formatTime(unixMs, "short");
 }

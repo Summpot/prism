@@ -44,6 +44,7 @@ import {
 	ToggleChip,
 	fieldClassName,
 } from "@/components/ui";
+import { m } from "@/paraglide/messages";
 
 type EditorMode = "form" | "json";
 
@@ -156,35 +157,35 @@ export function NodeConfigEditor({
 			<section className="rounded-3xl border border-white/8 bg-slate-950/75 p-5">
 				<div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
 					<div className="flex flex-wrap gap-2 text-sm">
-						<SummaryPill label="Listeners" value={summary.listeners} />
-						<SummaryPill label="Hostname routing" value={summary.hostnameRoutingListeners} />
-						<SummaryPill label="Routes" value={summary.routes} />
+						<SummaryPill label={m.nodecfg_listeners()} value={summary.listeners} />
+						<SummaryPill label={m.nodecfg_hostname_routing()} value={summary.hostnameRoutingListeners} />
+						<SummaryPill label={m.nodecfg_routes()} value={summary.routes} />
 						<SummaryPill
-							label="Tunnel"
+							label={m.nodecfg_tunnel()}
 							value={
 								summary.tunnelEnabled
-									? `${summary.tunnelEndpoints} ep / ${summary.tunnelServices} svc`
-									: "off"
+									? m.nodecfg_tunnel_summary({ endpoints: summary.tunnelEndpoints, services: summary.tunnelServices })
+									: m.admin_off()
 							}
 						/>
 						{dirty ? (
 							<span className="rounded-full bg-amber-400/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
-								Unsaved changes
+								{m.nodecfg_unsaved()}
 							</span>
 						) : (
 							<span className="rounded-full bg-emerald-400/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100">
-								Saved baseline
+								{m.nodecfg_saved_baseline()}
 							</span>
 						)}
 					</div>
 					<div className="flex flex-wrap gap-2">
 						<ToggleChip active={mode === "form"} onClick={() => switchMode("form")}>
 							<FormInput className="h-4 w-4" />
-							Form
+							{m.nodecfg_mode_form()}
 						</ToggleChip>
 						<ToggleChip active={mode === "json"} onClick={() => switchMode("json")}>
 							<Braces className="h-4 w-4" />
-							JSON
+							{m.nodecfg_mode_json()}
 						</ToggleChip>
 					</div>
 				</div>
@@ -197,10 +198,10 @@ export function NodeConfigEditor({
 
 			{mode === "json" ? (
 				<SectionCard
-					title="Raw managed document"
-					description="Edit the structured managed config as JSON. Switching back to Form validates and loads the document."
+					title={m.nodecfg_raw_title()}
+					description={m.nodecfg_raw_description()}
 					icon={<Braces className="h-5 w-5" />}
-					actions={<SecondaryButton onClick={applyRawToDraft}>Apply to form model</SecondaryButton>}
+					actions={<SecondaryButton onClick={applyRawToDraft}>{m.nodecfg_apply_to_form()}</SecondaryButton>}
 				>
 					<textarea
 						value={rawJson}
@@ -221,8 +222,8 @@ export function NodeConfigEditor({
 			) : (
 				<>
 					<SectionCard
-						title="Listeners"
-						description="Public entrypoints. Leave TCP upstream empty for hostname routing; UDP always needs a fixed upstream."
+						title={m.nodecfg_listeners()}
+						description={m.nodecfg_listeners_description()}
 						icon={<Cable className="h-5 w-5" />}
 					>
 						<div className="space-y-4">
@@ -233,8 +234,8 @@ export function NodeConfigEditor({
 								>
 									<div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr,1.6fr,auto]">
 										<Field
-											title="Listen address"
-											hint="Examples: :25565 or 127.0.0.1:8081"
+											title={m.nodecfg_listen_address()}
+											hint={m.nodecfg_listen_address_hint()}
 											error={issueMap[`listeners.${index}.listen_addr`]}
 										>
 											<input
@@ -251,8 +252,8 @@ export function NodeConfigEditor({
 											/>
 										</Field>
 										<Field
-											title="Protocol"
-											hint="TCP routing or UDP forwarding"
+											title={m.nodecfg_protocol()}
+											hint={m.nodecfg_protocol_hint()}
 											error={issueMap[`listeners.${index}.protocol`]}
 										>
 											<select
@@ -267,13 +268,13 @@ export function NodeConfigEditor({
 												}
 												className={fieldClassName}
 											>
-												<option value="tcp">tcp</option>
-												<option value="udp">udp</option>
+												<option value="tcp">{m.transport_tcp()}</option>
+												<option value="udp">{m.transport_udp()}</option>
 											</select>
 										</Field>
 										<Field
-											title="Upstream"
-											hint="Empty TCP upstream enables hostname routing"
+											title={m.nodecfg_upstream()}
+											hint={m.nodecfg_upstream_hint()}
 											error={issueMap[`listeners.${index}.upstream`]}
 										>
 											<input
@@ -303,7 +304,7 @@ export function NodeConfigEditor({
 												}
 											>
 												<CopyPlus className="h-4 w-4" />
-												Duplicate
+												{m.nodecfg_duplicate()}
 											</SecondaryButton>
 											<DangerButton
 												onClick={() =>
@@ -314,7 +315,7 @@ export function NodeConfigEditor({
 												}
 											>
 												<Trash2 className="h-4 w-4" />
-												Remove
+												{m.nodecfg_remove()}
 											</DangerButton>
 										</div>
 									</div>
@@ -332,14 +333,14 @@ export function NodeConfigEditor({
 								}
 							>
 								<Plus className="h-4 w-4" />
-								Add listener
+								{m.nodecfg_add_listener()}
 							</SecondaryButton>
 						</div>
 					</SectionCard>
 
 					<SectionCard
-						title="Routes"
-						description="Ordered hostname matches. Match order is top-to-bottom; use the arrows to reorder."
+						title={m.nodecfg_routes()}
+						description={m.nodecfg_routes_description()}
 						icon={<Router className="h-5 w-5" />}
 					>
 						<div className="space-y-4">
@@ -349,7 +350,7 @@ export function NodeConfigEditor({
 									className="rounded-3xl border border-white/8 bg-white/3 p-5"
 								>
 									<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-										<div className="text-sm font-medium text-white">Route #{index + 1}</div>
+										<div className="text-sm font-medium text-white">{m.nodecfg_route_number({ index: index + 1 })}</div>
 										<div className="flex flex-wrap gap-2">
 											<SecondaryButton
 												onClick={() =>
@@ -361,7 +362,7 @@ export function NodeConfigEditor({
 												disabled={index === 0}
 											>
 												<ArrowUp className="h-4 w-4" />
-												Up
+												{m.nodecfg_up()}
 											</SecondaryButton>
 											<SecondaryButton
 												onClick={() =>
@@ -373,7 +374,7 @@ export function NodeConfigEditor({
 												disabled={index === draft.routes.length - 1}
 											>
 												<ArrowDown className="h-4 w-4" />
-												Down
+												{m.nodecfg_down()}
 											</SecondaryButton>
 											<SecondaryButton
 												onClick={() =>
@@ -393,7 +394,7 @@ export function NodeConfigEditor({
 												}
 											>
 												<CopyPlus className="h-4 w-4" />
-												Duplicate
+												{m.nodecfg_duplicate()}
 											</SecondaryButton>
 											<DangerButton
 												onClick={() =>
@@ -404,14 +405,14 @@ export function NodeConfigEditor({
 												}
 											>
 												<Trash2 className="h-4 w-4" />
-												Remove
+												{m.nodecfg_remove()}
 											</DangerButton>
 										</div>
 									</div>
 									<div className="grid gap-4 xl:grid-cols-2">
 										<Field
-											title="Hosts"
-											hint="One hostname or pattern per line"
+											title={m.nodecfg_hosts()}
+											hint={m.nodecfg_hosts_hint()}
 											error={issueMap[`routes.${index}.hosts`]}
 										>
 											<textarea
@@ -437,8 +438,8 @@ export function NodeConfigEditor({
 											/>
 										</Field>
 										<Field
-											title="Upstreams"
-											hint="One upstream per line (host:port or tunnel:name)"
+											title={m.nodecfg_upstreams()}
+											hint={m.nodecfg_upstreams_hint()}
 											error={issueMap[`routes.${index}.upstreams`]}
 										>
 											<textarea
@@ -464,8 +465,8 @@ export function NodeConfigEditor({
 											/>
 										</Field>
 										<Field
-											title="Middlewares"
-											hint="One middleware name per line"
+											title={m.nodecfg_middlewares()}
+											hint={m.nodecfg_middlewares_hint()}
 											error={issueMap[`routes.${index}.middlewares`]}
 										>
 											<textarea
@@ -491,8 +492,8 @@ export function NodeConfigEditor({
 											/>
 										</Field>
 										<Field
-											title="Strategy"
-											hint="Load balancing when multiple upstreams are set"
+											title={m.nodecfg_strategy()}
+											hint={m.nodecfg_strategy_hint()}
 											error={issueMap[`routes.${index}.strategy`]}
 										>
 											<select
@@ -507,9 +508,9 @@ export function NodeConfigEditor({
 												}
 												className={fieldClassName}
 											>
-												<option value="sequential">sequential</option>
-												<option value="random">random</option>
-												<option value="round-robin">round-robin</option>
+												<option value="sequential">{m.strategy_sequential()}</option>
+												<option value="random">{m.strategy_random()}</option>
+												<option value="round-robin">{m.strategy_round_robin()}</option>
 											</select>
 										</Field>
 									</div>
@@ -524,7 +525,7 @@ export function NodeConfigEditor({
 								}
 							>
 								<Plus className="h-4 w-4" />
-								Add route
+								{m.nodecfg_add_route()}
 							</SecondaryButton>
 						</div>
 					</SectionCard>
@@ -546,9 +547,9 @@ export function NodeConfigEditor({
 									<FolderSync className="h-5 w-5" />
 								</div>
 								<div>
-									<div className="text-lg font-semibold text-white">Advanced runtime</div>
+									<div className="text-lg font-semibold text-white">{m.nodecfg_advanced_runtime()}</div>
 									<div className="mt-1 text-sm text-slate-400">
-										Buffer sizes, dial timeouts, PROXY protocol, handshake and idle limits.
+										{m.nodecfg_advanced_runtime_description()}
 									</div>
 								</div>
 							</div>
@@ -561,7 +562,7 @@ export function NodeConfigEditor({
 						{advancedOpen ? (
 							<div className="space-y-6 border-t border-white/8 px-6 py-6">
 								<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-									<Field title="Max header bytes" hint="TCP routing prelude cap">
+									<Field title={m.nodecfg_max_header_bytes()} hint={m.nodecfg_max_header_bytes_hint()}>
 										<input
 											type="number"
 											value={draft.max_header_bytes}
@@ -574,7 +575,7 @@ export function NodeConfigEditor({
 											className={fieldClassName}
 										/>
 									</Field>
-									<Field title="Buffer size" hint="Copy buffer hint (bytes)">
+									<Field title={m.nodecfg_buffer_size()} hint={m.nodecfg_buffer_size_hint()}>
 										<input
 											type="number"
 											value={draft.buffer_size}
@@ -587,7 +588,7 @@ export function NodeConfigEditor({
 											className={fieldClassName}
 										/>
 									</Field>
-									<Field title="Dial timeout" hint="Upstream timeout in ms">
+									<Field title={m.nodecfg_dial_timeout()} hint={m.nodecfg_dial_timeout_hint()}>
 										<input
 											type="number"
 											value={draft.upstream_dial_timeout_ms}
@@ -612,11 +613,11 @@ export function NodeConfigEditor({
 											}
 											className="h-4 w-4 accent-cyan-400"
 										/>
-										Inject PROXY protocol v2
+										{m.nodecfg_proxy_protocol()}
 									</label>
 								</div>
 								<div className="grid gap-4 md:grid-cols-2">
-									<Field title="Handshake timeout (ms)" hint="TCP prelude capture timeout">
+									<Field title={m.nodecfg_handshake_timeout()} hint={m.nodecfg_handshake_timeout_hint()}>
 										<input
 											type="number"
 											value={draft.timeouts?.handshake_timeout_ms ?? 0}
@@ -633,8 +634,8 @@ export function NodeConfigEditor({
 										/>
 									</Field>
 									<Field
-										title="Idle timeout (ms)"
-										hint="Bidirectional copy lifetime cap (0 = no limit)"
+										title={m.nodecfg_idle_timeout()}
+										hint={m.nodecfg_idle_timeout_hint()}
 									>
 										<input
 											type="number"
@@ -654,15 +655,15 @@ export function NodeConfigEditor({
 								</div>
 								<div className="flex items-center gap-2 text-sm text-slate-400">
 									<Clock className="h-4 w-4 text-cyan-300" />
-									These knobs are hot-reload safe for managed workers when the revision applies.
+									{m.nodecfg_hot_reload_note()}
 								</div>
 							</div>
 						) : null}
 					</section>
 
 					<SectionCard
-						title="Revision preview"
-						description="Normalized document that will be submitted on save."
+						title={m.nodecfg_revision_preview()}
+						description={m.nodecfg_revision_preview_description()}
 						icon={<CheckCircle2 className="h-5 w-5" />}
 					>
 						<pre className="max-h-[20rem] overflow-auto rounded-3xl border border-white/8 bg-slate-950 p-4 text-sm leading-6 whitespace-pre-wrap break-all text-cyan-100/85">
@@ -680,7 +681,7 @@ export function NodeConfigEditor({
 				) : null}
 				{mode === "form" && issues.length > 0 ? (
 					<div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-sm text-amber-100">
-						Fix {issues.length} validation issue{issues.length === 1 ? "" : "s"} before saving.
+						{issues.length === 1 ? m.nodecfg_fix_issue({ count: issues.length }) : m.nodecfg_fix_issues({ count: issues.length })}
 						<ul className="mt-2 list-disc space-y-1 pl-5">
 							{issues.slice(0, 8).map((issue) => (
 								<li key={`${issue.path}-${issue.message}`}>
@@ -693,7 +694,7 @@ export function NodeConfigEditor({
 				<div className="flex flex-wrap items-center gap-3">
 					<PrimaryButton onClick={save} disabled={!canSave}>
 						<Save className="h-4 w-4" />
-						{isSaving ? "Saving revision…" : dirty ? "Save managed revision" : "Save revision"}
+						{isSaving ? m.nodecfg_saving_revision() : dirty ? m.nodecfg_save_managed_revision() : m.nodecfg_save_revision()}
 					</PrimaryButton>
 					{dirty ? (
 						<SecondaryButton
@@ -705,7 +706,7 @@ export function NodeConfigEditor({
 							}}
 							disabled={isSaving}
 						>
-							Discard changes
+							{m.nodecfg_discard_changes()}
 						</SecondaryButton>
 					) : null}
 				</div>
@@ -741,16 +742,13 @@ function TunnelSection({
 							<div className="rounded-2xl border border-cyan-400/25 bg-cyan-400/10 p-2 text-cyan-300">
 								<Waypoints className="h-5 w-5" />
 							</div>
-							<h2 className="text-lg font-semibold">Tunnel</h2>
+							<h2 className="text-lg font-semibold">{m.nodecfg_tunnel()}</h2>
 						</div>
-						<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-							Enable reverse tunnel mode for endpoints, client connectivity, and service
-							registrations.
-						</p>
+						<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{m.nodecfg_tunnel_enable_hint()}</p>
 					</div>
 					<SecondaryButton onClick={() => onChange(createEmptyTunnel())}>
 						<Plus className="h-4 w-4" />
-						Enable tunnel
+						{m.nodecfg_tunnel_enable()}
 					</SecondaryButton>
 				</div>
 			</section>
@@ -763,19 +761,19 @@ function TunnelSection({
 
 	return (
 		<SectionCard
-			title="Tunnel"
-			description="Reverse tunnel endpoints, client dial settings, and registered services."
+			title={m.nodecfg_tunnel()}
+			description={m.nodecfg_tunnel_description()}
 			icon={<Waypoints className="h-5 w-5" />}
 			actions={
 				<DangerButton onClick={() => onChange(undefined)}>
 					<Trash2 className="h-4 w-4" />
-					Disable tunnel
+					{m.nodecfg_tunnel_disable()}
 				</DangerButton>
 			}
 		>
 			<div className="space-y-6">
 				<div className="grid gap-4 md:grid-cols-2">
-					<Field title="Auth token" hint="Shared secret for tunnel authentication">
+					<Field title={m.nodecfg_auth_token()} hint={m.nodecfg_auth_token_hint()}>
 						<input
 							type="password"
 							value={tunnel.auth_token}
@@ -794,14 +792,14 @@ function TunnelSection({
 							}
 							className="h-4 w-4 accent-cyan-400"
 						/>
-						Auto-listen services that set remote_addr
+						{m.nodecfg_auto_listen()}
 					</label>
 				</div>
 
 				<div className="space-y-3">
-					<div className="text-sm font-medium text-white">Endpoints</div>
+					<div className="text-sm font-medium text-white">{m.nodecfg_endpoints()}</div>
 					<div className="text-xs leading-5 text-slate-500">
-						Server-side tunnel listeners that accept client connections.
+						{m.nodecfg_endpoints_description()}
 					</div>
 					{tunnel.endpoints.map((endpoint, index) => (
 						<div
@@ -810,8 +808,8 @@ function TunnelSection({
 						>
 							<div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr,auto]">
 								<Field
-									title="Listen address"
-									hint="e.g. :7000"
+									title={m.nodecfg_listen_address()}
+									hint={m.nodecfg_listen_address_short_hint()}
 									error={issueMap[`tunnel.endpoints.${index}.listen_addr`]}
 								>
 									<input
@@ -828,8 +826,8 @@ function TunnelSection({
 									/>
 								</Field>
 								<Field
-									title="Transport"
-									hint="tcp, udp (KCP), or quic"
+									title={m.nodecfg_transport()}
+									hint={m.nodecfg_transport_hint()}
 									error={issueMap[`tunnel.endpoints.${index}.transport`]}
 								>
 									<select
@@ -844,11 +842,11 @@ function TunnelSection({
 										}}
 										className={fieldClassName}
 									>
-										<option value="tcp">tcp</option>
-										<option value="udp">udp (KCP)</option>
-										<option value="quic">quic</option>
-										<option value="websocket">websocket</option>
-										<option value="webtransport">webtransport (HTTP/3)</option>
+										<option value="tcp">{m.transport_tcp()}</option>
+										<option value="udp">{m.transport_udp_kcp()}</option>
+										<option value="quic">{m.transport_quic()}</option>
+										<option value="websocket">{m.transport_websocket()}</option>
+										<option value="webtransport">{m.transport_webtransport()}</option>
 									</select>
 								</Field>
 								<div className="flex items-end">
@@ -860,13 +858,13 @@ function TunnelSection({
 										}
 									>
 										<Trash2 className="h-4 w-4" />
-										Remove
+										{m.nodecfg_remove()}
 									</DangerButton>
 								</div>
 							</div>
 							{endpoint.transport === "quic" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
-									<Field title="QUIC cert file" hint="Empty = auto self-signed at startup">
+									<Field title={m.nodecfg_quic_cert_file()} hint={m.nodecfg_quic_cert_file_hint()}>
 										<input
 											value={endpoint.quic?.cert_file ?? ""}
 											onChange={(event) => {
@@ -883,7 +881,7 @@ function TunnelSection({
 											className={fieldClassName}
 										/>
 									</Field>
-									<Field title="QUIC key file" hint="TLS private key path">
+									<Field title={m.nodecfg_quic_key_file()} hint={m.nodecfg_tls_key_path_hint()}>
 										<input
 											value={endpoint.quic?.key_file ?? ""}
 											onChange={(event) => {
@@ -906,7 +904,7 @@ function TunnelSection({
 							endpoint.transport === "ws" ||
 							endpoint.transport === "wss" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-3">
-									<Field title="WebSocket cert file" hint="Empty = auto self-signed for WSS">
+									<Field title={m.nodecfg_ws_cert_file()} hint={m.nodecfg_ws_cert_file_hint()}>
 										<input
 											value={endpoint.websocket?.cert_file ?? ""}
 											onChange={(event) => {
@@ -924,7 +922,7 @@ function TunnelSection({
 											className={fieldClassName}
 										/>
 									</Field>
-									<Field title="WebSocket key file" hint="TLS private key path">
+									<Field title={m.nodecfg_ws_key_file()} hint={m.nodecfg_tls_key_path_hint()}>
 										<input
 											value={endpoint.websocket?.key_file ?? ""}
 											onChange={(event) => {
@@ -942,7 +940,7 @@ function TunnelSection({
 											className={fieldClassName}
 										/>
 									</Field>
-									<Field title="WebSocket URL path" hint="Optional endpoint path (e.g. /ws)">
+									<Field title={m.nodecfg_ws_path()} hint={m.nodecfg_ws_path_hint()}>
 										<input
 											value={endpoint.websocket?.url_path ?? ""}
 											onChange={(event) => {
@@ -965,7 +963,7 @@ function TunnelSection({
 							) : null}
 							{endpoint.transport === "webtransport" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
-									<Field title="WebTransport cert file" hint="Empty = auto ACME / self-signed">
+									<Field title={m.nodecfg_wt_cert_file()} hint={m.nodecfg_wt_cert_file_hint()}>
 										<input
 											value={endpoint.webtransport?.cert_file ?? ""}
 											onChange={(event) => {
@@ -982,7 +980,7 @@ function TunnelSection({
 											className={fieldClassName}
 										/>
 									</Field>
-									<Field title="WebTransport key file" hint="Empty = auto ACME / self-signed">
+									<Field title={m.nodecfg_wt_key_file()} hint={m.nodecfg_wt_cert_file_hint()}>
 										<input
 											value={endpoint.webtransport?.key_file ?? ""}
 											onChange={(event) => {
@@ -1011,21 +1009,21 @@ function TunnelSection({
 						}
 					>
 						<Plus className="h-4 w-4" />
-						Add endpoint
+						{m.nodecfg_add_endpoint()}
 					</SecondaryButton>
 				</div>
 
 				<div className="space-y-3">
-					<div className="text-sm font-medium text-white">Client</div>
+					<div className="text-sm font-medium text-white">{m.nodecfg_client()}</div>
 					<div className="text-xs leading-5 text-slate-500">
-						Outgoing tunnel connection to a Prism tunnel server.
+						{m.nodecfg_client_description()}
 					</div>
 					{tunnel.client ? (
 						<div className="rounded-3xl border border-white/8 bg-white/3 p-5">
 							<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 								<Field
-									title="Server address"
-									hint="e.g. server.example.com:7000"
+									title={m.nodecfg_server_address()}
+									hint={m.nodecfg_server_address_hint()}
 									error={issueMap["tunnel.client.server_addr"]}
 								>
 									<input
@@ -1043,8 +1041,8 @@ function TunnelSection({
 									/>
 								</Field>
 								<Field
-									title="Transport"
-									hint="tcp, udp (KCP), or quic"
+									title={m.nodecfg_transport()}
+									hint={m.nodecfg_transport_hint()}
 									error={issueMap["tunnel.client.transport"]}
 								>
 									<select
@@ -1060,15 +1058,15 @@ function TunnelSection({
 										}
 										className={fieldClassName}
 									>
-										<option value="auto">auto (SVCB/HTTPS 自动协商与回退)</option>
-										<option value="webtransport">webtransport (HTTP/3)</option>
-										<option value="quic">quic</option>
-										<option value="tcp">tcp</option>
-										<option value="udp">udp (KCP)</option>
-										<option value="websocket">websocket</option>
+										<option value="auto">{m.transport_auto()}</option>
+										<option value="webtransport">{m.transport_webtransport()}</option>
+										<option value="quic">{m.transport_quic()}</option>
+										<option value="tcp">{m.transport_tcp()}</option>
+										<option value="udp">{m.transport_udp_kcp()}</option>
+										<option value="websocket">{m.transport_websocket()}</option>
 									</select>
 								</Field>
-								<Field title="Dial timeout (ms)" hint="Connection timeout">
+								<Field title={m.nodecfg_dial_timeout_ms()} hint={m.nodecfg_dial_timeout_ms_hint()}>
 									<input
 										type="number"
 										value={tunnel.client.dial_timeout_ms ?? 5000}
@@ -1087,13 +1085,13 @@ function TunnelSection({
 								<div className="flex items-end">
 									<DangerButton onClick={() => updateTunnel({ client: null })}>
 										<Trash2 className="h-4 w-4" />
-										Remove client
+										{m.nodecfg_remove_client()}
 									</DangerButton>
 								</div>
 							</div>
 							{tunnel.client.transport === "quic" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
-									<Field title="QUIC server name" hint="TLS SNI">
+									<Field title={m.nodecfg_quic_server_name()} hint={m.nodecfg_tls_sni()}>
 										<input
 											value={tunnel.client.quic?.server_name ?? ""}
 											onChange={(event) =>
@@ -1130,7 +1128,7 @@ function TunnelSection({
 											}
 											className="h-4 w-4 accent-cyan-400"
 										/>
-										Skip TLS certificate verification
+										{m.nodecfg_skip_tls_verify()}
 									</label>
 								</div>
 							) : null}
@@ -1155,13 +1153,13 @@ function TunnelSection({
 											}
 											className="h-4 w-4 accent-cyan-400"
 										/>
-										Skip TLS certificate verification (WSS)
+										{m.nodecfg_skip_tls_verify_wss()}
 									</label>
 								</div>
 							) : null}
 							{tunnel.client.transport === "webtransport" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
-									<Field title="WebTransport server name" hint="TLS SNI">
+									<Field title={m.nodecfg_wt_server_name()} hint={m.nodecfg_tls_sni()}>
 										<input
 											value={tunnel.client.webtransport?.server_name ?? ""}
 											onChange={(event) =>
@@ -1198,7 +1196,7 @@ function TunnelSection({
 											}
 											className="h-4 w-4 accent-cyan-400"
 										/>
-										Skip TLS certificate verification
+										{m.nodecfg_skip_tls_verify()}
 									</label>
 								</div>
 							) : null}
@@ -1206,15 +1204,15 @@ function TunnelSection({
 					) : (
 						<SecondaryButton onClick={() => updateTunnel({ client: createEmptyTunnelClient() })}>
 							<Globe className="h-4 w-4" />
-							Add client connection
+							{m.nodecfg_add_client()}
 						</SecondaryButton>
 					)}
 				</div>
 
 				<div className="space-y-3">
-					<div className="text-sm font-medium text-white">Services</div>
+					<div className="text-sm font-medium text-white">{m.nodecfg_services()}</div>
 					<div className="text-xs leading-5 text-slate-500">
-						Services registered through the tunnel. Use route_only for tunnel:name upstreams only.
+						{m.nodecfg_services_description()}
 					</div>
 					{tunnel.services.map((service, index) => (
 						<div
@@ -1223,8 +1221,8 @@ function TunnelSection({
 						>
 							<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
 								<Field
-									title="Service name"
-									hint="Unique identifier"
+									title={m.nodecfg_service_name()}
+									hint={m.nodecfg_service_name_hint()}
 									error={issueMap[`tunnel.services.${index}.name`]}
 								>
 									<input
@@ -1238,8 +1236,8 @@ function TunnelSection({
 									/>
 								</Field>
 								<Field
-									title="Protocol"
-									hint="tcp or udp"
+									title={m.nodecfg_protocol()}
+									hint={m.nodecfg_service_protocol_hint()}
 									error={issueMap[`tunnel.services.${index}.proto`]}
 								>
 									<select
@@ -1251,13 +1249,13 @@ function TunnelSection({
 										}}
 										className={fieldClassName}
 									>
-										<option value="tcp">tcp</option>
-										<option value="udp">udp</option>
+										<option value="tcp">{m.transport_tcp()}</option>
+										<option value="udp">{m.transport_udp()}</option>
 									</select>
 								</Field>
 								<Field
-									title="Local address"
-									hint="Backend behind this tunnel"
+									title={m.nodecfg_local_address()}
+									hint={m.nodecfg_local_address_hint()}
 									error={issueMap[`tunnel.services.${index}.local_addr`]}
 								>
 									<input
@@ -1271,8 +1269,8 @@ function TunnelSection({
 									/>
 								</Field>
 								<Field
-									title="Remote address"
-									hint="Server-side bind for auto-listen"
+									title={m.nodecfg_remote_address()}
+									hint={m.nodecfg_remote_address_hint()}
 									error={issueMap[`tunnel.services.${index}.remote_addr`]}
 								>
 									<input
@@ -1285,7 +1283,7 @@ function TunnelSection({
 										className={fieldClassName}
 									/>
 								</Field>
-								<Field title="Masquerade host" hint="Optional rewrite label">
+								<Field title={m.nodecfg_masquerade_host()} hint={m.nodecfg_masquerade_host_hint()}>
 									<input
 										value={service.masquerade_host}
 										onChange={(event) => {
@@ -1314,7 +1312,7 @@ function TunnelSection({
 											}}
 											className="h-4 w-4 accent-cyan-400"
 										/>
-										Route only
+										{m.nodecfg_route_only()}
 									</label>
 									<DangerButton
 										onClick={() =>
@@ -1324,7 +1322,7 @@ function TunnelSection({
 										}
 									>
 										<Trash2 className="h-4 w-4" />
-										Remove
+										{m.nodecfg_remove()}
 									</DangerButton>
 								</div>
 							</div>
@@ -1339,7 +1337,7 @@ function TunnelSection({
 							}
 						>
 							<Plus className="h-4 w-4" />
-							Add service
+							{m.nodecfg_add_service()}
 						</SecondaryButton>
 					</div>
 				</div>

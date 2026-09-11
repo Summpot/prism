@@ -82,8 +82,15 @@ function formatCostMs(value: number): string {
 }
 
 function directionTooltip(label: string, dir?: DirectionStatsSnapshot): string {
-	if (!dir) return `${label} net: 0.0ms`;
-	return `${label} net: ${dir.net_gain_ms.toFixed(1)}ms · gain ${dir.transfer_gain_ms.toFixed(1)}ms · batching cost ${dir.batching_penalty_ms.toFixed(1)}ms · compression cost ${dir.compression_penalty_ms.toFixed(1)}ms · batch p99 ${dir.batching_delay.p99_us.toFixed(0)}µs`;
+	if (!dir) return m.client_dir_tooltip_none({ label });
+	return m.client_dir_tooltip({
+		label,
+		net: dir.net_gain_ms.toFixed(1),
+		gain: dir.transfer_gain_ms.toFixed(1),
+		batching: dir.batching_penalty_ms.toFixed(1),
+		compression: dir.compression_penalty_ms.toFixed(1),
+		p99: dir.batching_delay.p99_us.toFixed(0),
+	});
 }
 
 function ThroughputSparkline({ samples }: { samples: number[] }) {
@@ -175,8 +182,8 @@ export function ClientOverview() {
 	const compressionCostMs =
 		((status?.stats.compression_time_us ?? 0) + (status?.stats.decompression_time_us ?? 0)) / 1000;
 	const linkRateText = status?.stats.link_rate_measured
-		? `Measured link rate: ${((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1)} Mbps`
-		: `Estimated link rate: ${((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1)} Mbps (measuring)`;
+		? m.client_link_rate_measured({ rate: ((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1) })
+		: m.client_link_rate_estimated({ rate: ((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1) });
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
@@ -193,7 +200,7 @@ export function ClientOverview() {
 						{authSession.avatar_url ? (
 							<img
 								src={authSession.avatar_url}
-								alt={authSession.username || "User"}
+								alt={authSession.username || m.client_user_fallback()}
 								className="h-8 w-8 rounded-full object-cover ring-1 ring-border flex-none"
 							/>
 						) : (
@@ -528,7 +535,7 @@ export function ClientOverview() {
 						<div className="min-w-0 flex-1">
 							<div className="flex items-center gap-1.5">
 								<span className="font-bold text-xs sm:text-sm text-foreground truncate">
-									{profileName || "Default Profile"}
+									{profileName || m.client_default_profile()}
 								</span>
 								<Badge
 									variant="secondary"
@@ -544,7 +551,7 @@ export function ClientOverview() {
 								</Badge>
 							</div>
 							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">
-								<span className="truncate">{serverAddr || status?.server_addr || "No Server"}</span>
+								<span className="truncate">{serverAddr || status?.server_addr || m.client_no_server()}</span>
 								<span>&rarr;</span>
 								<span className="truncate">{listenAddr || status?.listen_addr}</span>
 							</div>
@@ -675,7 +682,7 @@ export function ClientOverview() {
 						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={directionTooltip("Uplink", status?.stats.uplink)}
+								title={directionTooltip(m.client_up(), status?.stats.uplink)}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
 									<span className="text-primary font-bold">↑</span> {m.client_up()}
@@ -689,7 +696,7 @@ export function ClientOverview() {
 							</div>
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={directionTooltip("Downlink", status?.stats.downlink)}
+								title={directionTooltip(m.client_down(), status?.stats.downlink)}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground flex items-center gap-0.5">
 									<span className="text-primary font-bold">↓</span> {m.client_down()}
@@ -703,7 +710,7 @@ export function ClientOverview() {
 							</div>
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={`${linkRateText} · floor across directions`}
+								title={m.client_link_rate_floor({ rate: linkRateText })}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground">
 									{m.client_net()}
@@ -738,7 +745,7 @@ export function ClientOverview() {
 							</div>
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={`Batching delay: ${batchingCostMs.toFixed(1)}ms (lifetime, both directions)`}
+								title={m.client_batching_tip({ ms: batchingCostMs.toFixed(1) })}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground">
 									{m.client_batching()}
@@ -754,7 +761,7 @@ export function ClientOverview() {
 							</div>
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={`Compression + decompression CPU: ${compressionCostMs.toFixed(1)}ms (lifetime, both directions)`}
+								title={m.client_compression_tip({ ms: compressionCostMs.toFixed(1) })}
 							>
 								<span className="text-[9px] font-sans font-medium text-muted-foreground">
 									{m.client_compression()}
@@ -811,13 +818,13 @@ export function ClientOverview() {
 											{m.client_history_stats()}
 							</span>
 							<span className="font-mono truncate">
-								{formatBytes(cumulativeStats.raw_bytes)} raw &bull;{" "}
-								{formatBytes(cumulativeStats.wire_bytes)} wire &bull;{" "}
+								{formatBytes(cumulativeStats.raw_bytes)} {m.client_raw()} &bull;{" "}
+								{formatBytes(cumulativeStats.wire_bytes)} {m.client_wire()} &bull;{" "}
 								<span className="text-emerald-500 font-bold">
-									{((cumulativeStats.saved_ratio || 0) * 100).toFixed(1)}% saved
+									{((cumulativeStats.saved_ratio || 0) * 100).toFixed(1)}% {m.client_saved()}
 								</span>
 								<span className="text-muted-foreground/70 ml-1">
-									({cumulativeStats.sessions_count} sessions)
+									({cumulativeStats.sessions_count} {m.client_sessions()})
 								</span>
 							</span>
 						</div>

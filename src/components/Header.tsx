@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AppSidebarContent } from "@/components/AppSidebar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isDesktopApp } from "@/lib/desktopWindow";
+import { m } from "@/paraglide/messages";
 
 export { AppSidebarContent };
 
@@ -36,7 +37,7 @@ export default function Header() {
 				<div className="fixed inset-0 z-50 md:hidden">
 					<button
 						type="button"
-						aria-label="Close mobile menu backdrop"
+						aria-label={m.header_close_backdrop()}
 						tabIndex={-1}
 						className="absolute inset-0 bg-background/80 backdrop-blur-xs cursor-default"
 						onClick={() => setMobileOpen(false)}

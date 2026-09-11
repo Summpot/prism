@@ -7,6 +7,7 @@ import {
 	extractProtocolAndAddress,
 	parsePrismLink,
 } from "@/lib/prismLink";
+import { m } from "@/paraglide/messages";
 
 interface UsePrismLinkProps {
 	serverAddr: string;
@@ -141,7 +142,7 @@ export function usePrismLink({
 		setImportError(null);
 		const parsed = parsePrismLink(importUrl);
 		if (!parsed || !parsed.server_addr) {
-			setImportError("Invalid Prism link or server address format.");
+			setImportError(m.client_invalid_link());
 			return;
 		}
 

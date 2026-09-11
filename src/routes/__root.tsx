@@ -116,7 +116,7 @@ function DesktopTitleBar() {
 					onClick={() => void minimizeWindow()}
 					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded cursor-pointer"
 					title={m.window_minimize()}
-					aria-label="Minimize window"
+					aria-label={m.window_minimize()}
 				>
 					<svg
 						className="h-3 w-3"
@@ -134,7 +134,7 @@ function DesktopTitleBar() {
 					onClick={() => void handleToggleMaximize()}
 					className="h-6 w-7 text-muted-foreground hover:bg-accent hover:text-foreground rounded cursor-pointer"
 					title={isMaximized ? m.window_restore() : m.window_maximize()}
-					aria-label={isMaximized ? "Restore window" : "Maximize window"}
+					aria-label={isMaximized ? m.window_restore() : m.window_maximize()}
 				>
 					{isMaximized ? (
 						<svg
@@ -165,7 +165,7 @@ function DesktopTitleBar() {
 					onClick={() => void closeWindow()}
 					className="h-6 w-7 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors rounded cursor-pointer"
 					title={m.window_close_tray()}
-					aria-label="Close window to tray"
+					aria-label={m.window_close_tray()}
 				>
 					<svg
 						className="h-3 w-3"

@@ -26,6 +26,7 @@ import {
 } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
+import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/users")({
 	component: AdminUsersPage,
@@ -118,7 +119,7 @@ function AdminUsersPage() {
 	};
 
 	const handleRevokeToken = async (tokenId: string) => {
-		if (!connection || !confirm("Are you sure you want to revoke this token?")) {
+		if (!connection || !confirm(m.users_revoke_confirm())) {
 			return;
 		}
 		try {
@@ -178,21 +179,21 @@ function AdminUsersPage() {
 	}, [query, tokens]);
 
 	if (!ready) {
-		return <StateCard label="Restoring session…" />;
+		return <StateCard label={m.common_restoring_session()} />;
 	}
 
 	if (!connection) {
 		return (
-			<StateCard label="Connect the panel to a management node before managing users and access." />
+			<StateCard label={m.users_connect_panel()} />
 		);
 	}
 
 	return (
 		<div className="space-y-6">
 			<PageHeader
-				eyebrow="Security & Access Control"
-				title="Users & Access Management"
-				description="Manage authenticated OAuth users, fine-grained ACL service rules, and scoped tokens."
+				eyebrow={m.users_eyebrow()}
+				title={m.users_title()}
+				description={m.users_description()}
 				actions={
 					<div className="flex items-center gap-3">
 						<RefreshButton onClick={fetchData} loading={loading} />
@@ -204,7 +205,7 @@ function AdminUsersPage() {
 								}}
 							>
 								<Plus className="h-4 w-4" />
-								Generate token
+								{m.users_generate_token()}
 							</PrimaryButton>
 						) : null}
 					</div>
@@ -220,7 +221,7 @@ function AdminUsersPage() {
 						{session.avatar_url ? (
 							<img
 								src={session.avatar_url}
-								alt={session.username ?? "Avatar"}
+								alt={session.username ?? m.users_avatar()}
 								className="h-10 w-10 rounded-full border border-white/20"
 							/>
 						) : (
@@ -231,19 +232,19 @@ function AdminUsersPage() {
 						<div>
 							<div className="flex items-center gap-2">
 								<span className="font-semibold text-white">
-									{session.display_name || session.username || "Authenticated Admin"}
+									{session.display_name || session.username || m.users_authenticated_admin()}
 								</span>
 								<Badge variant={session.is_admin ? "success" : "default"}>
 									{session.role ?? "admin"}
 								</Badge>
 							</div>
 							<span className="text-xs text-slate-400">
-								{session.username ? `@${session.username}` : "Connected via token"}
+								{session.username ? `@${session.username}` : m.users_connected_via_token()}
 							</span>
 						</div>
 					</div>
 					<div className="text-xs text-slate-400">
-						{session.is_admin ? "Full management privileges" : "Standard member"}
+						{session.is_admin ? m.users_full_privileges() : m.users_standard_member()}
 					</div>
 				</div>
 			) : null}
@@ -260,7 +261,7 @@ function AdminUsersPage() {
 					}`}
 				>
 					<Users className="h-4 w-4" />
-					Users ({users.length})
+					{m.users_tab_users({ count: users.length })}
 				</button>
 				<button
 					type="button"
@@ -272,7 +273,7 @@ function AdminUsersPage() {
 					}`}
 				>
 					<Key className="h-4 w-4" />
-					Tokens ({tokens.length})
+					{m.users_tab_tokens({ count: tokens.length })}
 				</button>
 			</div>
 
@@ -282,7 +283,7 @@ function AdminUsersPage() {
 					value={query}
 					onChange={setQuery}
 					placeholder={
-						activeTab === "users" ? "Search users by name or rule…" : "Search tokens by name or ID…"
+						activeTab === "users" ? m.users_search_users() : m.users_search_tokens()
 					}
 				/>
 			</div>
@@ -292,11 +293,11 @@ function AdminUsersPage() {
 				filteredUsers.length === 0 ? (
 					<EmptyState
 						icon={<Users className="h-8 w-8 text-slate-500" />}
-						title="No users found"
+						title={m.users_no_users_title()}
 						description={
 							query
-								? "No users match your filter."
-								: "Users will automatically appear here when they sign in with GitHub OAuth."
+								? m.users_no_users_match()
+								: m.users_no_users_hint()
 						}
 					/>
 				) : (
@@ -349,18 +350,18 @@ function AdminUsersPage() {
 										}}
 										className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5 cursor-pointer"
 									>
-										Edit
+										{m.common_edit()}
 									</button>
 								</div>
 
 								<div className="mt-4 border-t border-white/6 pt-3">
 									<span className="text-xs font-medium text-slate-400">
-										Allowed Service Rules (ACL):
+										{m.users_acl_label()}
 									</span>
 									<div className="mt-1.5 flex flex-wrap gap-1.5">
 										{user.service_rules.length === 0 ? (
 											<span className="text-xs text-slate-500 italic">
-												No rules (access blocked)
+												{m.users_no_rules()}
 											</span>
 										) : (
 											user.service_rules.map((rule) => (
@@ -385,8 +386,8 @@ function AdminUsersPage() {
 				filteredTokens.length === 0 ? (
 					<EmptyState
 						icon={<Key className="h-8 w-8 text-slate-500" />}
-						title="No tokens found"
-						description="Generate client, admin, or connector tokens to authenticate nodes and sidecars."
+						title={m.users_no_tokens_title()}
+						description={m.users_no_tokens_hint()}
 					/>
 				) : (
 					<div className="space-y-3">
@@ -412,10 +413,10 @@ function AdminUsersPage() {
 										<span className="font-mono text-xs text-slate-500">{token.id}</span>
 									</div>
 									<div className="text-xs text-slate-400">
-										Created: {new Date(token.created_at_unix_ms).toLocaleString()}
+										{m.users_created({ date: new Date(token.created_at_unix_ms).toLocaleString() })}
 										{token.last_used_unix_ms > 0
-											? ` · Last used: ${new Date(token.last_used_unix_ms).toLocaleString()}`
-											: " · Never used"}
+											? m.users_last_used({ date: new Date(token.last_used_unix_ms).toLocaleString() })
+											: m.users_never_used()}
 									</div>
 								</div>
 
@@ -425,7 +426,7 @@ function AdminUsersPage() {
 									className="flex items-center gap-1.5 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-1.5 text-xs text-red-200 transition hover:bg-red-400/20 cursor-pointer"
 								>
 									<Trash2 className="h-3.5 w-3.5" />
-									Revoke
+									{m.users_revoke()}
 								</button>
 							</div>
 						))}
@@ -437,19 +438,19 @@ function AdminUsersPage() {
 			{createTokenOpen ? (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
 					<div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900 p-6 shadow-2xl">
-						<h3 className="text-lg font-semibold text-white">Generate Scoped Token</h3>
+						<h3 className="text-lg font-semibold text-white">{m.users_token_modal_title()}</h3>
 						<p className="mt-1 text-sm text-slate-400">
-							Create an authentication token for Prism clients, admin API, or connector daemons.
+							{m.users_token_modal_description()}
 						</p>
 
 						{createdRawToken ? (
 							<div className="mt-5 space-y-4">
 								<div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-4">
 									<div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
-										<Check className="h-4 w-4" /> Token created successfully!
+										<Check className="h-4 w-4" /> {m.users_token_created()}
 									</div>
 									<p className="mt-2 text-xs text-emerald-200">
-										Please copy this token now. For security, it will not be shown again:
+										{m.users_token_copy_hint()}
 									</p>
 									<div className="mt-3 flex items-center justify-between rounded-lg border border-emerald-400/30 bg-black/40 p-2.5 font-mono text-xs text-emerald-100">
 										<span className="truncate">{createdRawToken}</span>
@@ -463,7 +464,7 @@ function AdminUsersPage() {
 											className="ml-2 flex items-center gap-1 rounded bg-emerald-400/20 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-400/30 cursor-pointer"
 										>
 											{copiedToken ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-											{copiedToken ? "Copied" : "Copy"}
+											{copiedToken ? m.common_copied() : m.common_copy()}
 										</button>
 									</div>
 								</div>
@@ -477,25 +478,25 @@ function AdminUsersPage() {
 										}}
 										className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-400 transition cursor-pointer"
 									>
-										Done
+										{m.common_done()}
 									</button>
 								</div>
 							</div>
 						) : (
 							<form onSubmit={handleCreateToken} className="mt-5 space-y-4">
 								<label className="block space-y-1.5">
-									<span className="text-xs font-medium text-slate-300">Token Name</span>
+									<span className="text-xs font-medium text-slate-300">{m.users_token_name()}</span>
 									<input
 										value={tokenName}
 										onChange={(e) => setTokenName(e.target.value)}
-										placeholder="e.g. My Laptop Client or Production Connector"
+										placeholder={m.users_token_name_placeholder()}
 										className={fieldClassName}
 										required
 									/>
 								</label>
 
 								<label className="block space-y-1.5">
-									<span className="text-xs font-medium text-slate-300">Token Type</span>
+									<span className="text-xs font-medium text-slate-300">{m.users_token_type()}</span>
 									<select
 										value={tokenType}
 										onChange={(e) =>
@@ -503,15 +504,15 @@ function AdminUsersPage() {
 										}
 										className={fieldClassName}
 									>
-										<option value="client">Client (Sidecar / Player)</option>
-										<option value="connector">Connector (Server Publisher)</option>
-										<option value="admin">Admin (Control Plane API)</option>
+										<option value="client">{m.users_token_type_client()}</option>
+										<option value="connector">{m.users_token_type_connector()}</option>
+										<option value="admin">{m.users_token_type_admin()}</option>
 									</select>
 								</label>
 
 								<label className="block space-y-1.5">
 									<span className="text-xs font-medium text-slate-300">
-										Expires In (days, optional)
+										{m.users_token_expiry()}
 									</span>
 									<input
 										type="number"
@@ -520,7 +521,7 @@ function AdminUsersPage() {
 										onChange={(e) =>
 											setTokenExpiryDays(e.target.value ? Number(e.target.value) : undefined)
 										}
-										placeholder="Leave empty for no expiry"
+										placeholder={m.users_token_expiry_placeholder()}
 										className={fieldClassName}
 									/>
 								</label>
@@ -531,10 +532,10 @@ function AdminUsersPage() {
 										onClick={() => setCreateTokenOpen(false)}
 										className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 transition cursor-pointer"
 									>
-										Cancel
+										{m.common_cancel()}
 									</button>
 									<PrimaryButton type="submit" disabled={tokenCreating || !tokenName.trim()}>
-										{tokenCreating ? "Generating…" : "Generate Token"}
+										{tokenCreating ? m.users_token_generating() : m.users_token_generate()}
 									</PrimaryButton>
 								</div>
 							</form>
@@ -547,28 +548,28 @@ function AdminUsersPage() {
 			{editingUser ? (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
 					<div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900 p-6 shadow-2xl">
-						<h3 className="text-lg font-semibold text-white">Edit User: @{editingUser.username}</h3>
+						<h3 className="text-lg font-semibold text-white">{m.users_edit_title({ username: editingUser.username })}</h3>
 						<p className="mt-1 text-sm text-slate-400">
-							Update authorization role and tunnel service ACL rules.
+							{m.users_edit_description()}
 						</p>
 
 						<form onSubmit={handleSaveUser} className="mt-5 space-y-4">
 							<label className="block space-y-1.5">
-								<span className="text-xs font-medium text-slate-300">Role</span>
+								<span className="text-xs font-medium text-slate-300">{m.users_role()}</span>
 								<select
 									value={editRole}
 									onChange={(e) => setEditRole(e.target.value as "admin" | "member" | "disabled")}
 									className={fieldClassName}
 								>
-									<option value="admin">Admin (Full privileges)</option>
-									<option value="member">Member (Service rules apply)</option>
-									<option value="disabled">Disabled (All access blocked)</option>
+									<option value="admin">{m.users_role_admin()}</option>
+									<option value="member">{m.users_role_member()}</option>
+									<option value="disabled">{m.users_role_disabled()}</option>
 								</select>
 							</label>
 
 							<label className="block space-y-1.5">
 								<span className="text-xs font-medium text-slate-300">
-									Allowed Service Rules (one per line or comma-separated)
+									{m.users_rules_label()}
 								</span>
 								<textarea
 									rows={4}
@@ -578,8 +579,11 @@ function AdminUsersPage() {
 									className={`${fieldClassName} font-mono text-xs`}
 								/>
 								<span className="text-[11px] text-slate-500">
-									Use wildcard patterns like <code className="text-cyan-300">mc-*</code> or{" "}
-									<code className="text-cyan-300">*</code> for all services.
+									{m.users_rules_hint_prefix()}
+									<code className="text-cyan-300">mc-*</code>
+									{m.users_rules_hint_mid()}
+									<code className="text-cyan-300">*</code>
+									{m.users_rules_hint_tail()}
 								</span>
 							</label>
 
@@ -589,10 +593,10 @@ function AdminUsersPage() {
 									onClick={() => setEditingUser(null)}
 									className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 transition cursor-pointer"
 								>
-									Cancel
+									{m.common_cancel()}
 								</button>
 								<PrimaryButton type="submit" disabled={userSaving}>
-									{userSaving ? "Saving…" : "Save Changes"}
+									{userSaving ? m.common_saving() : m.users_save_changes()}
 								</PrimaryButton>
 							</div>
 						</form>

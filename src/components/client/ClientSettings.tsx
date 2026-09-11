@@ -57,7 +57,7 @@ export function ClientSettings() {
 						size="xs"
 						onClick={() => {
 							const id = `profile-${Date.now()}`;
-							setProfileName("New Profile");
+							setProfileName(m.client_new_profile_name());
 							setServerAddr("relay.example.com");
 							setTransport("auto");
 							setListenAddr("127.0.0.1:25565");
@@ -215,12 +215,12 @@ export function ClientSettings() {
 									}}
 									className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
 								>
-									<option value="auto">Auto (SVCB/HTTPS)</option>
-									<option value="webtransport">WebTransport (HTTP/3 over QUIC)</option>
-									<option value="quic">QUIC</option>
-									<option value="tcp">TCP</option>
-									<option value="kcp">KCP</option>
-									<option value="websocket">WebSocket</option>
+									<option value="auto">{m.transport_auto()}</option>
+									<option value="webtransport">{m.transport_webtransport()}</option>
+									<option value="quic">{m.transport_quic()}</option>
+									<option value="tcp">{m.transport_tcp()}</option>
+									<option value="kcp">{m.transport_kcp()}</option>
+									<option value="websocket">{m.transport_websocket()}</option>
 								</select>
 							</div>
 

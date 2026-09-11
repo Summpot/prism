@@ -173,7 +173,9 @@ impl Client {
         let stats = self.optimizer_stats.snapshot();
         let active_proto = self.active_transport.read().await.clone();
         let display_transport = if connected {
-            active_proto.clone().unwrap_or_else(|| self.config.transport.clone())
+            active_proto
+                .clone()
+                .unwrap_or_else(|| self.config.transport.clone())
         } else {
             self.config.transport.clone()
         };
@@ -453,7 +455,11 @@ impl Client {
         };
 
         let doh_refs: Vec<&str> = self.config.doh_servers.iter().map(|s| s.as_str()).collect();
-        let custom_doh = if doh_refs.is_empty() { None } else { Some(doh_refs.as_slice()) };
+        let custom_doh = if doh_refs.is_empty() {
+            None
+        } else {
+            Some(doh_refs.as_slice())
+        };
         let candidates = crate::prism::tunnel::negotiator::resolve_candidates(
             &self.config.server_addr,
             Some(&self.config.transport),
@@ -867,10 +873,8 @@ async fn handle_player_connection(
             }
         }
         if opt_cfg.dictionary.is_none() {
-            opt_cfg.dictionary = crate::prism::tunnel::optimizer::resolve_dictionary(
-                None,
-                &target_service.name,
-            );
+            opt_cfg.dictionary =
+                crate::prism::tunnel::optimizer::resolve_dictionary(None, &target_service.name);
         }
         let mw_name = config
             .middleware
@@ -1286,6 +1290,12 @@ impl ClientController {
                 }
             }
         }
+        tracing::warn!(
+            err = %last_err,
+            method,
+            path,
+            "tunnel client: $admin HTTP request failed"
+        );
         Err(last_err)
     }
 }

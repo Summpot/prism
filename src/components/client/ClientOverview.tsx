@@ -162,6 +162,8 @@ export function ClientOverview() {
 		checkingProviders,
 		providersResult,
 		setProvidersResult,
+		providersError,
+		setProvidersError,
 		authServerUrl,
 		authError,
 		setAuthError,
@@ -175,6 +177,20 @@ export function ClientOverview() {
 		startGitHubAuthWithUrl,
 		loginAdminUnlocked,
 	} = useClient();
+
+	const loginRequired =
+		isConnected &&
+		(status?.known_services.length ?? 0) === 0 &&
+		!authSession?.authenticated;
+	const hasGithubProvider = Boolean(
+		providersResult &&
+			(providersResult.github_enabled ||
+				(providersResult.providers && providersResult.providers.length > 0)),
+	);
+	const showLoginMethods =
+		!oauthExchanging &&
+		!oauthWaitingCallback &&
+		(hasGithubProvider || Boolean(providersError) || loginRequired);
 
 	const transferGainMs = status?.stats.transfer_gain_ms ?? 0;
 	const netGainMs = status?.stats.net_gain_ms ?? 0;
@@ -194,7 +210,7 @@ export function ClientOverview() {
 			) : null}
 
 			{/* 极简连接远端卡片 (Connect to Remote Hero) */}
-			{authSession?.authenticated ? (
+			{authSession?.authenticated && !loginRequired ? (
 				<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs flex items-center justify-between gap-3">
 					<div className="flex items-center gap-2.5 min-w-0">
 						{authSession.avatar_url ? (
@@ -421,47 +437,48 @@ export function ClientOverview() {
 								</div>
 							</div>
 						</div>
-					) : providersResult &&
-					  (providersResult.github_enabled !== false ||
-							(providersResult.providers && providersResult.providers.length > 0)) ? (
+					) : showLoginMethods ? (
 						<div className="border-t border-border/60 pt-2.5 space-y-2 animate-in fade-in-0 slide-in-from-top-2 duration-300">
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-1.5">
 									<span className="text-xs font-semibold text-foreground">
-																{m.client_login_methods_detected()}
+										{m.client_login_methods_detected()}
 									</span>
 									<Badge
 										variant="outline"
 										className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary"
 									>
-																	{m.client_optional_login()}
+										{loginRequired ? m.client_waiting_for_login() : m.client_optional_login()}
 									</Badge>
 								</div>
-								<Button
-									variant="ghost"
-									size="icon-xs"
-									onClick={() => {
-										setProvidersResult(null);
-										setAuthError(null);
-									}}
-									className="h-5 w-5 text-muted-foreground hover:text-foreground cursor-pointer"
-									title={m.client_collapse()}
-								>
-									<X className="h-3.5 w-3.5" />
-								</Button>
+								{!loginRequired ? (
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										onClick={() => {
+											setProvidersResult(null);
+											setProvidersError(null);
+											setAuthError(null);
+										}}
+										className="h-5 w-5 text-muted-foreground hover:text-foreground cursor-pointer"
+										title={m.client_collapse()}
+									>
+										<X className="h-3.5 w-3.5" />
+									</Button>
+								) : null}
 							</div>
 
-							{authError ? (
+							{authError || providersError ? (
 								<div className="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
-									{authError}
+									{authError || providersError}
 								</div>
 							) : null}
 
 							<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
-								{providersResult.github_enabled !== false ? (
+								{hasGithubProvider || loginRequired ? (
 									<button
 										type="button"
-										disabled={oauthLoading}
+										disabled={oauthLoading || checkingProviders}
 										onClick={() => void startGitHubAuthWithUrl(authServerUrl, serverAddr)}
 										className="flex items-center gap-2.5 rounded-lg border border-border bg-card hover:border-primary/50 hover:bg-accent/40 p-2.5 text-left transition cursor-pointer group disabled:opacity-50"
 									>
@@ -471,41 +488,44 @@ export function ClientOverview() {
 										<div className="min-w-0 flex-1">
 											<div className="flex items-center gap-1.5">
 												<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-															{m.client_github_login()}
+													{m.client_github_login()}
 												</span>
 												<Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">
-															{m.client_recommended()}
+													{m.client_recommended()}
 												</Badge>
 											</div>
 											<p className="text-[10px] text-muted-foreground truncate">
-														{m.client_identity_hint()}
+												{m.client_identity_hint()}
 											</p>
 										</div>
 									</button>
 								) : null}
 
-								<button
-									type="button"
-									onClick={() => {
-										setProvidersResult(null);
-										setAuthError(null);
-									}}
-									className="flex items-center gap-2.5 rounded-lg border border-border bg-card hover:border-primary/50 hover:bg-accent/40 p-2.5 text-left transition cursor-pointer group"
-								>
-									<div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground shrink-0">
-										<Plug className="h-4 w-4" />
-									</div>
-									<div className="min-w-0 flex-1">
-										<div className="flex items-center gap-1.5">
-											<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-															{m.client_anonymous()}
-											</span>
+								{!loginRequired ? (
+									<button
+										type="button"
+										onClick={() => {
+											setProvidersResult(null);
+											setProvidersError(null);
+											setAuthError(null);
+										}}
+										className="flex items-center gap-2.5 rounded-lg border border-border bg-card hover:border-primary/50 hover:bg-accent/40 p-2.5 text-left transition cursor-pointer group"
+									>
+										<div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground shrink-0">
+											<Plug className="h-4 w-4" />
 										</div>
-										<p className="text-[10px] text-muted-foreground truncate">
-															{m.client_guest_hint()}
-										</p>
-									</div>
-								</button>
+										<div className="min-w-0 flex-1">
+											<div className="flex items-center gap-1.5">
+												<span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+													{m.client_anonymous()}
+												</span>
+											</div>
+											<p className="text-[10px] text-muted-foreground truncate">
+												{m.client_guest_hint()}
+											</p>
+										</div>
+									</button>
+								) : null}
 							</div>
 						</div>
 					) : null}

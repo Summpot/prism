@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { getAuthSession } from "@/lib/admin/adminApi";
 import {
 	clearPanelConnection,
+	isTunnelAdminConnection,
 	loadPanelConnection,
 	type PanelConnection,
 	persistPanelConnection,
@@ -33,7 +34,7 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 
 	const fetchSession = useCallback(
 		async (conn: PanelConnection | null): Promise<AuthSessionResponse | null> => {
-			if (!conn || !conn.baseUrl) {
+			if (!conn || (!conn.baseUrl && !isTunnelAdminConnection(conn))) {
 				setAuthSession(null);
 				setIsAdmin(false);
 				return null;

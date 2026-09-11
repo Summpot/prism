@@ -536,11 +536,28 @@ pub(crate) async fn do_admin_request(
             path = %path,
             "admin: proxying request over in-band $admin stream"
         );
-        let (status, body) = client
-            .admin_http_request(method, &path, &payload.headers, payload.body.as_deref())
-            .await
-            .map_err(|err| err.to_string())?;
-        return Ok(AdminHttpResponse { status, body });
+        let fut =
+            client.admin_http_request(method, &path, &payload.headers, payload.body.as_deref());
+        match tokio::time::timeout(Duration::from_secs(15), fut).await {
+            Ok(Ok((status, body))) => return Ok(AdminHttpResponse { status, body }),
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    err = %err,
+                    method,
+                    path = %path,
+                    "admin: in-band $admin request failed"
+                );
+                return Err(err.to_string());
+            }
+            Err(_) => {
+                tracing::warn!(
+                    method,
+                    path = %path,
+                    "admin: in-band $admin request timed out"
+                );
+                return Err("admin request timed out".into());
+            }
+        }
     }
 
     let base = normalize_http_base(&payload.base_url);

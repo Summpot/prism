@@ -236,7 +236,7 @@ pub async fn run(
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;
-        bound_admin_addr = Some(local_addr);
+        bound_admin_addr = Some(net::loopback_connect_addr(local_addr));
         let shutdown = shutdown_rx.clone();
         tasks.spawn(async move {
             admin::serve_listener_with_shutdown(listener, admin_state, shutdown).await
@@ -357,7 +357,8 @@ pub async fn run(
         let mut acme_mgr_opt = None;
         if let Some(ref acme_cfg) = cfg.acme {
             if acme_cfg.enabled {
-                let acme_mgr = crate::prism::acme::AcmeManager::new(acme_cfg.clone(), &paths.workdir);
+                let acme_mgr =
+                    crate::prism::acme::AcmeManager::new(acme_cfg.clone(), &paths.workdir);
                 match acme_mgr.ensure_certificate().await {
                     Ok(paths) => {
                         let renewal_mgr = acme_mgr.clone();
@@ -391,7 +392,10 @@ pub async fn run(
             {
                 (ap.cert_file.clone(), ap.key_file.clone())
             } else {
-                (ep.websocket.cert_file.clone(), ep.websocket.key_file.clone())
+                (
+                    ep.websocket.cert_file.clone(),
+                    ep.websocket.key_file.clone(),
+                )
             };
 
             let server = tunnel::server::Server::new(tunnel::server::ServerOptions {

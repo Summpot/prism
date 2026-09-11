@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
 
+use crate::prism::net;
 use crate::prism::tunnel::{
     manager::Manager,
     protocol,
@@ -195,12 +196,16 @@ async fn handle_session(
 
         let broadcast_task = tokio::spawn(async move {
             let mut sub = mgr_broadcast.subscribe();
+            let auth_enabled = match &auth_mgr_broadcast {
+                Some(am) => am.is_auth_enabled().await,
+                None => false,
+            };
             let initial = if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
                 let all = mgr_broadcast.active_services().await;
                 am.filter_services(id, &all)
-            } else if auth_mgr_broadcast.is_some() {
+            } else if auth_enabled {
                 // Auth is enabled on server, but client is not authenticated (pre-login):
-                // Send empty catalog!
+                // Send empty catalog so services stay hidden until login.
                 Vec::new()
             } else {
                 mgr_broadcast.active_services().await
@@ -212,14 +217,19 @@ async fn handle_session(
                 return;
             }
             while sub.changed().await.is_ok() {
-                let services = if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
-                    let all = mgr_broadcast.active_services().await;
-                    am.filter_services(id, &all)
-                } else if auth_mgr_broadcast.is_some() {
-                    Vec::new()
-                } else {
-                    mgr_broadcast.active_services().await
+                let auth_enabled = match &auth_mgr_broadcast {
+                    Some(am) => am.is_auth_enabled().await,
+                    None => false,
                 };
+                let services =
+                    if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
+                        let all = mgr_broadcast.active_services().await;
+                        am.filter_services(id, &all)
+                    } else if auth_enabled {
+                        Vec::new()
+                    } else {
+                        mgr_broadcast.active_services().await
+                    };
                 if protocol::write_service_catalog(&mut reg, &services)
                     .await
                     .is_err()
@@ -297,6 +307,7 @@ async fn handle_client_stream(
         }
 
         if let Some(addr) = admin_addr {
+            let addr = net::loopback_connect_addr(addr);
             match tokio::net::TcpStream::connect(addr).await {
                 Ok(mut admin_conn) => {
                     let _ =
@@ -314,7 +325,9 @@ async fn handle_client_stream(
         return Ok(());
     }
 
-    if let Some(ref am) = auth_mgr {
+    if let Some(ref am) = auth_mgr
+        && am.is_auth_enabled().await
+    {
         let Some(ref id) = identity else {
             tracing::warn!(
                 service = %service_name,
@@ -941,10 +954,173 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_unauthenticated_client_allowed_to_connect_but_blocked_from_services() {
+    async fn server_admin_stream_rewrites_unspecified_bind_to_loopback() {
+        let mgr = Arc::new(Manager::new());
+
+        let admin_listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let admin_addr = admin_listener.local_addr().unwrap();
+        assert!(admin_addr.ip().is_unspecified());
+
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = admin_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let n = stream.read(&mut buf).await.unwrap();
+                assert!(String::from_utf8_lossy(&buf[..n]).contains("GET /health"));
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}")
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let (client_accept_tx, client_accept_rx) = mpsc::channel(16);
+        let client_sess = Arc::new(MockSession::new(client_accept_rx, None));
+        let (mut client_reg_c, client_reg_s) = tokio::io::duplex(4096);
+        client_accept_tx.send(Box::new(client_reg_s)).await.unwrap();
+
+        let client_req = protocol::RegisterRequest {
+            client_type: "client".into(),
+            token: "".into(),
+            services: vec![],
+        };
+        tokio::spawn(async move {
+            protocol::write_register_request(&mut client_reg_c, &client_req)
+                .await
+                .unwrap();
+        });
+
+        let mgr_cs = mgr.clone();
+        let client_sess_clone = client_sess.clone();
+        tokio::spawn(async move {
+            let _ =
+                handle_session(mgr_cs, client_sess_clone, "".into(), None, Some(admin_addr)).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let (mut client_stream_c, client_stream_s) = tokio::io::duplex(4096);
+        client_accept_tx
+            .send(Box::new(client_stream_s))
+            .await
+            .unwrap();
+
+        protocol::write_proxy_stream_header(
+            &mut client_stream_c,
+            protocol::ProxyStreamKind::Tcp,
+            protocol::ADMIN_SERVICE_NAME,
+        )
+        .await
+        .unwrap();
+
+        client_stream_c
+            .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut resp = vec![0u8; 1024];
+        let n = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client_stream_c.read(&mut resp),
+        )
+        .await
+        .expect("admin response should arrive")
+        .unwrap();
+        let resp_str = String::from_utf8_lossy(&resp[..n]);
+        assert!(resp_str.contains("HTTP/1.1 200 OK"));
+        assert!(resp_str.contains("{\"ok\":true}"));
+
+        client_sess.close().await;
+    }
+
+    #[tokio::test]
+    async fn server_unauthenticated_client_sees_catalog_when_auth_not_enabled() {
         use crate::prism::auth::{AuthConfig, AuthManager};
 
         let auth = Arc::new(AuthManager::new(AuthConfig::default(), None));
+        let mgr = Arc::new(Manager::new());
+
+        let (conn_tx, conn_rx) = mpsc::channel(16);
+        let conn_sess = Arc::new(MockSession::new(conn_rx, None));
+        let (mut conn_reg_c, conn_reg_s) = tokio::io::duplex(4096);
+        conn_tx.send(Box::new(conn_reg_s)).await.unwrap();
+
+        let conn_req = protocol::RegisterRequest {
+            client_type: "connector".into(),
+            token: "".into(),
+            services: vec![protocol::RegisteredService {
+                name: "mc-server".into(),
+                proto: "tcp".into(),
+                local_addr: "127.0.0.1:25565".into(),
+                ..Default::default()
+            }],
+        };
+        tokio::spawn(async move {
+            protocol::write_register_request(&mut conn_reg_c, &conn_req)
+                .await
+                .unwrap();
+        });
+
+        let mgr_c = mgr.clone();
+        let conn_sess_c = conn_sess.clone();
+        let auth_c = auth.clone();
+        tokio::spawn(async move {
+            let _ = handle_session(mgr_c, conn_sess_c, "".into(), Some(auth_c), None).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(mgr.active_services().await.len(), 1);
+
+        let (client_tx, client_rx) = mpsc::channel(16);
+        let client_sess = Arc::new(MockSession::new(client_rx, None));
+        let (mut client_reg_c, client_reg_s) = tokio::io::duplex(4096);
+        client_tx.send(Box::new(client_reg_s)).await.unwrap();
+
+        let client_req = protocol::RegisterRequest {
+            client_type: "client".into(),
+            token: "".into(),
+            services: vec![],
+        };
+
+        let cat_handle = tokio::spawn(async move {
+            protocol::write_register_request(&mut client_reg_c, &client_req)
+                .await
+                .unwrap();
+            protocol::read_service_catalog(&mut client_reg_c)
+                .await
+                .unwrap()
+        });
+
+        let mgr_cs = mgr.clone();
+        let client_sess_c = client_sess.clone();
+        let auth_cs = auth.clone();
+        tokio::spawn(async move {
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None).await;
+        });
+
+        let catalog = cat_handle.await.unwrap();
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].name, "mc-server");
+
+        client_sess.close().await;
+        conn_sess.close().await;
+    }
+
+    #[tokio::test]
+    async fn server_unauthenticated_client_allowed_to_connect_but_blocked_from_services() {
+        use crate::prism::auth::{AuthConfig, AuthManager, GitHubOAuthConfig};
+
+        let auth = Arc::new(AuthManager::new(
+            AuthConfig {
+                github: Some(GitHubOAuthConfig {
+                    enabled: true,
+                    client_id: "test-id".into(),
+                    client_secret: "test-secret".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            None,
+        ));
         let mgr = Arc::new(Manager::new());
 
         // 1. Connector registers a game service

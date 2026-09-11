@@ -186,7 +186,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		autoConnect,
 		deviceId,
 		configLoaded,
-		managementUrl,
 		fetchClientConfigData,
 	} = clientProfiles;
 
@@ -303,12 +302,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		) => {
 			setAuthToken(token);
 			if (autoConnectPanel && token) {
-				const panelUrl = extra?.panelUrl || authServerUrl || managementUrl;
-				if (panelUrl) {
-					saveConnection({ baseUrl: normalizeBaseUrl(panelUrl), token });
-				} else {
-					saveConnection(tunnelAdminConnection(token));
-				}
+				saveConnection(tunnelAdminConnection(token));
 			}
 			await saveClientConfig({
 				active_profile_id: selectedProfileId || null,
@@ -329,12 +323,10 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			}).catch(() => {});
 		},
 		[
-			authServerUrl,
 			autoConnect,
 			autoConnectPanel,
 			fakeLanBroadcast,
 			listenAddr,
-			managementUrl,
 			profileName,
 			saveConnection,
 			selectedProfileId,
@@ -346,10 +338,10 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 	useEffect(() => {
 		if (!configLoaded) return;
-		if (autoConnectPanel && authToken && managementUrl) {
-			saveConnection({ baseUrl: normalizeBaseUrl(managementUrl), token: authToken });
+		if (autoConnectPanel && authToken) {
+			saveConnection(tunnelAdminConnection(authToken));
 		}
-	}, [authToken, autoConnectPanel, configLoaded, managementUrl, saveConnection]);
+	}, [authToken, autoConnectPanel, configLoaded, saveConnection]);
 
 	// Start GitHub OAuth with target management URL via browser + deep link
 	const startGitHubAuthWithUrl = useCallback(
@@ -418,6 +410,30 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		},
 		[],
 	);
+
+	// Auto-connect and reconnect: probe login methods once the tunnel is up
+	// without a session token (handleConnectFromLink already probes on manual connect).
+	useEffect(() => {
+		if (status?.state !== "connected") {
+			if (!status?.running) {
+				setProvidersResult(null);
+				setProvidersError(null);
+			}
+			return;
+		}
+		if (checkingProviders || oauthWaitingCallback || oauthExchanging) return;
+		if (providersResult || providersError) return;
+		void handleRedetectProviders();
+	}, [
+		checkingProviders,
+		handleRedetectProviders,
+		oauthExchanging,
+		oauthWaitingCallback,
+		providersError,
+		providersResult,
+		status?.running,
+		status?.state,
+	]);
 
 	// Manual OAuth callback exchange handler (supports prism://, http(s)://, code=..., or bare code)
 	const handleManualOAuthCallback = useCallback(
@@ -637,26 +653,35 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				fetchLogs();
 
 				let providers: AuthProvidersResponse | null = null;
+				let probeErr: string | null = null;
 				try {
 					providers = await getAuthProviders(TUNNEL_ADMIN_CONNECTION);
-				} catch {
+				} catch (err) {
+					probeErr = err instanceof Error ? err.message : m.client_probe_failed();
 					if (resolved.managementUrl) {
 						try {
-							providers = await getAuthProviders(normalizeBaseUrl(resolved.managementUrl));
+							providers = await getAuthProviders(
+								normalizeBaseUrl(resolved.managementUrl),
+							);
 							setAuthServerUrl(normalizeBaseUrl(resolved.managementUrl));
-						} catch {
-							// Remote node may not have management auth service; keep silent
+							probeErr = null;
+						} catch (fallbackErr) {
+							probeErr =
+								fallbackErr instanceof Error ? fallbackErr.message : probeErr;
 						}
 					}
 				}
 				const hasValidProviders = Boolean(
 					providers &&
-					(providers.github_enabled || (providers.providers && providers.providers.length > 0)),
+						(providers.github_enabled ||
+							(providers.providers && providers.providers.length > 0)),
 				);
 				if (hasValidProviders) {
 					setProvidersResult(providers);
+					setProvidersError(null);
 				} else {
-					setProvidersResult(null);
+					setProvidersResult(providers);
+					setProvidersError(probeErr);
 				}
 			} catch (err) {
 				setError(err instanceof Error ? err.message : m.client_connection_failed());
@@ -667,25 +692,19 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			}
 		},
 		[
-			authServerUrl,
 			authToken,
-			autoConnectPanel,
 			fakeLanBroadcast,
 			fetchLogs,
-			fetchStatus,
 			listenAddr,
 			prismLink,
 			profileName,
-			saveConnection,
 			selectedProfileId,
 			serverAddr,
 			setStatus,
-			setAuthToken,
 			setListenAddr,
 			setProfileName,
 			setServerAddr,
 			setTransport,
-			transport,
 		],
 	);
 

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
@@ -488,6 +488,82 @@ pub(crate) async fn do_client_clear_logs(
     if let Some(client) = client {
         client.clear_logs().await;
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdminHttpRequest {
+    #[serde(default)]
+    pub base_url: String,
+    pub path: String,
+    #[serde(default)]
+    pub method: String,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    /// When true, send the request over the connected tunnel's `$admin` stream.
+    #[serde(default)]
+    pub via_tunnel: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminHttpResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+fn normalize_http_base(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_string()
+}
+
+pub(crate) async fn do_admin_request(
+    client: &crate::prism::tunnel::client::ClientController,
+    payload: AdminHttpRequest,
+) -> Result<AdminHttpResponse, String> {
+    let method = payload.method.trim();
+    let method = if method.is_empty() { "GET" } else { method };
+    let path = if payload.path.starts_with('/') {
+        payload.path.clone()
+    } else if payload.path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", payload.path.trim())
+    };
+
+    if payload.via_tunnel {
+        tracing::debug!(
+            method,
+            path = %path,
+            "admin: proxying request over in-band $admin stream"
+        );
+        let (status, body) = client
+            .admin_http_request(method, &path, &payload.headers, payload.body.as_deref())
+            .await
+            .map_err(|err| err.to_string())?;
+        return Ok(AdminHttpResponse { status, body });
+    }
+
+    let base = normalize_http_base(&payload.base_url);
+    if base.is_empty() {
+        return Err("admin request: missing base_url".into());
+    }
+    let url = format!("{base}{path}");
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let parsed_method: reqwest::Method = method.parse().map_err(|err| format!("{err}"))?;
+    let mut builder = http.request(parsed_method, &url);
+    for (k, v) in &payload.headers {
+        builder = builder.header(k.as_str(), v.as_str());
+    }
+    if let Some(ref body) = payload.body {
+        builder = builder.body(body.clone());
+    }
+    let res = builder.send().await.map_err(|err| err.to_string())?;
+    let status = res.status().as_u16();
+    let body = res.text().await.map_err(|err| err.to_string())?;
+    Ok(AdminHttpResponse { status, body })
 }
 
 // ---------------------------------------------------------------------------

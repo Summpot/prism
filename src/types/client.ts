@@ -34,7 +34,6 @@ export interface ClientStatusResponse {
 	fake_lan_broadcast: boolean;
 	known_services: ClientRegisteredService[];
 	stats: ClientOptimizerStats;
-	admin_url?: string | null;
 	active_profile_id?: string | null;
 	cumulative_stats?: CumulativeStats | null;
 }

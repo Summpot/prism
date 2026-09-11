@@ -7,6 +7,7 @@
 //! - PRPX proxy stream bridging with stateful optimizer (`optimizer.rs`).
 //! - Exponential backoff reconnect loop on network interruption.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,7 +47,6 @@ pub struct Client {
     known_services: Arc<RwLock<Vec<RegisteredService>>>,
     broadcaster: Option<Arc<FakeLanBroadcaster>>,
     current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
-    admin_bridge: Arc<RwLock<Option<AdminTunnelBridge>>>,
     dial_timeout: Duration,
     optimizer_stats: SharedOptimizerStats,
     active_transport: Arc<RwLock<Option<String>>>,
@@ -74,7 +74,6 @@ impl Client {
             known_services: Arc::new(RwLock::new(Vec::new())),
             broadcaster,
             current_sess: Arc::new(RwLock::new(None)),
-            admin_bridge: Arc::new(RwLock::new(None)),
             dial_timeout: Duration::from_secs(5),
             optimizer_stats,
             active_transport: Arc::new(RwLock::new(None)),
@@ -148,6 +147,19 @@ impl Client {
         Ok(stream)
     }
 
+    /// Issues an HTTP request over an in-band `$admin` stream.
+    pub async fn admin_http_request(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &HashMap<String, String>,
+        body: Option<&str>,
+    ) -> anyhow::Result<(u16, String)> {
+        let mut stream = self.open_admin_stream().await?;
+        write_http_request(&mut stream, method, path, headers, body.unwrap_or("")).await?;
+        read_http_response(&mut stream).await
+    }
+
     /// Returns the active configuration.
     #[allow(dead_code)]
     pub fn config(&self) -> &TunnelClientConfig {
@@ -159,11 +171,6 @@ impl Client {
         let connected = self.is_connected().await;
         let services = self.known_services().await;
         let stats = self.optimizer_stats.snapshot();
-        let admin_url = if let Some(b) = self.admin_bridge.read().await.as_ref() {
-            Some(format!("http://{}", b.addr()))
-        } else {
-            None
-        };
         let active_proto = self.active_transport.read().await.clone();
         let display_transport = if connected {
             active_proto.clone().unwrap_or_else(|| self.config.transport.clone())
@@ -184,7 +191,6 @@ impl Client {
             fake_lan_broadcast: self.config.fake_lan_broadcast,
             known_services: services,
             stats,
-            admin_url,
         }
     }
 
@@ -385,9 +391,6 @@ impl Client {
             // Disconnected: clear active session, negotiated transport, and broadcaster list
             *self.current_sess.write().await = None;
             *self.active_transport.write().await = None;
-            if let Some(b) = self.admin_bridge.write().await.take() {
-                b.close();
-            }
             if let Some(broadcaster) = &self.broadcaster {
                 broadcaster.clear().await;
             }
@@ -409,9 +412,6 @@ impl Client {
         }
         *self.current_sess.write().await = None;
         *self.active_transport.write().await = None;
-        if let Some(b) = self.admin_bridge.write().await.take() {
-            b.close();
-        }
         if let Some(broadcaster) = &self.broadcaster {
             broadcaster.clear().await;
         }
@@ -508,19 +508,6 @@ impl Client {
         // Store active session and negotiated transport for player connections only after registration is accepted
         *self.current_sess.write().await = Some(sess.clone());
         *self.active_transport.write().await = Some(chosen.protocol.clone());
-
-        match AdminTunnelBridge::start(self.current_sess.clone()).await {
-            Ok(bridge) => {
-                tracing::info!(
-                    admin_url = %format!("http://{}", bridge.addr()),
-                    "Tunnel admin bridge listening locally"
-                );
-                *self.admin_bridge.write().await = Some(bridge);
-            }
-            Err(err) => {
-                tracing::warn!(err = %err, "Failed to start local admin bridge");
-            }
-        }
 
         tracing::info!(
             "Connected to server {} ({}), registered sidecar client",
@@ -1119,84 +1106,6 @@ async fn handle_player_connection(
     Ok(())
 }
 
-/// Local loopback TCP bridge that tunnels incoming HTTP connections to the server's admin service.
-pub struct AdminTunnelBridge {
-    listen_addr: std::net::SocketAddr,
-    shutdown_tx: tokio::sync::watch::Sender<bool>,
-}
-
-impl AdminTunnelBridge {
-    pub async fn start(
-        current_sess: Arc<RwLock<Option<Arc<dyn TransportSession>>>>,
-    ) -> anyhow::Result<Self> {
-        let listener = match tokio::net::TcpListener::bind("127.0.0.1:18080").await {
-            Ok(l) => l,
-            Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0").await?,
-        };
-        let listen_addr = listener.local_addr()?;
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-
-        let sess_holder = current_sess.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown_rx.changed() => {
-                        if *shutdown_rx.borrow() {
-                            break;
-                        }
-                    }
-                    res = listener.accept() => {
-                        match res {
-                            Ok((mut local_stream, _)) => {
-                                let sess_guard = sess_holder.read().await;
-                                let sess = match sess_guard.as_ref() {
-                                    Some(s) => s.clone(),
-                                    None => continue,
-                                };
-                                drop(sess_guard);
-
-                                tokio::spawn(async move {
-                                    match sess.open_stream().await {
-                                        Ok(mut admin_stream) => {
-                                            if let Err(err) = protocol::write_proxy_stream_header_with_flags(
-                                                &mut admin_stream,
-                                                protocol::ProxyStreamKind::Tcp,
-                                                protocol::ADMIN_SERVICE_NAME,
-                                                protocol::FLAG_RAW,
-                                            ).await {
-                                                tracing::warn!(err = %err, "admin bridge: failed to write header");
-                                                return;
-                                            }
-                                            let _ = tokio::io::copy_bidirectional(&mut local_stream, &mut admin_stream).await;
-                                        }
-                                        Err(err) => {
-                                            tracing::warn!(err = %err, "admin bridge: failed to open stream to server");
-                                        }
-                                    }
-                                });
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            listen_addr,
-            shutdown_tx,
-        })
-    }
-
-    pub fn addr(&self) -> std::net::SocketAddr {
-        self.listen_addr
-    }
-
-    pub fn close(&self) {
-        let _ = self.shutdown_tx.send(true);
-    }
-}
-
 /// Status snapshot for the terminal client sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClientStatusSnapshot {
@@ -1210,8 +1119,6 @@ pub struct ClientStatusSnapshot {
     pub fake_lan_broadcast: bool,
     pub known_services: Vec<RegisteredService>,
     pub stats: OptimizerStatsSnapshot,
-    #[serde(default)]
-    pub admin_url: Option<String>,
 }
 
 impl Default for ClientStatusSnapshot {
@@ -1226,7 +1133,6 @@ impl Default for ClientStatusSnapshot {
             fake_lan_broadcast: true,
             known_services: Vec::new(),
             stats: OptimizerStatsSnapshot::default(),
-            admin_url: None,
         }
     }
 }
@@ -1348,6 +1254,184 @@ impl ClientController {
         };
         client.open_admin_stream().await
     }
+
+    /// HTTP request to the connected server's `$admin` API over the tunnel.
+    pub async fn admin_http_request(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &HashMap<String, String>,
+        body: Option<&str>,
+    ) -> anyhow::Result<(u16, String)> {
+        let client = {
+            let guard = self.active.read().await;
+            match guard.as_ref() {
+                Some(inst) => inst.client.clone(),
+                None => anyhow::bail!("client sidecar is not running"),
+            }
+        };
+
+        let mut last_err = anyhow::anyhow!("tunnel client: not connected to server");
+        for attempt in 0..20 {
+            match client.admin_http_request(method, path, headers, body).await {
+                Ok(res) => return Ok(res),
+                Err(err) => {
+                    let msg = err.to_string();
+                    last_err = err;
+                    let retryable = msg.contains("not connected") || msg.contains("not running");
+                    if !retryable || attempt == 19 {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                }
+            }
+        }
+        Err(last_err)
+    }
+}
+
+async fn write_http_request<W: tokio::io::AsyncWrite + Unpin>(
+    w: &mut W,
+    method: &str,
+    path: &str,
+    headers: &HashMap<String, String>,
+    body: &str,
+) -> anyhow::Result<()> {
+    let method = method.trim();
+    let method = if method.is_empty() { "GET" } else { method };
+    let path = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    let body_bytes = body.as_bytes();
+
+    w.write_all(format!("{method} {path} HTTP/1.1\r\n").as_bytes())
+        .await?;
+
+    let mut has_host = false;
+    let mut has_connection = false;
+    let mut has_content_length = false;
+    let mut has_content_type = false;
+    for (k, v) in headers {
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let lower = key.to_ascii_lowercase();
+        match lower.as_str() {
+            "host" => has_host = true,
+            "connection" => has_connection = true,
+            "content-length" => has_content_length = true,
+            "content-type" => has_content_type = true,
+            "transfer-encoding" => continue,
+            _ => {}
+        }
+        w.write_all(format!("{key}: {v}\r\n").as_bytes()).await?;
+    }
+    if !has_host {
+        w.write_all(b"Host: 127.0.0.1\r\n").await?;
+    }
+    if !has_connection {
+        w.write_all(b"Connection: close\r\n").await?;
+    }
+    if !has_content_type
+        && !body_bytes.is_empty()
+        && matches!(
+            method.to_ascii_uppercase().as_str(),
+            "POST" | "PUT" | "PATCH"
+        )
+    {
+        w.write_all(b"Content-Type: application/json\r\n").await?;
+    }
+    if !has_content_length {
+        w.write_all(format!("Content-Length: {}\r\n", body_bytes.len()).as_bytes())
+            .await?;
+    }
+    w.write_all(b"\r\n").await?;
+    if !body_bytes.is_empty() {
+        w.write_all(body_bytes).await?;
+    }
+    w.flush().await?;
+    let _ = w.shutdown().await;
+    Ok(())
+}
+
+fn find_http_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|i| i + 4)
+        .or_else(|| buf.windows(2).position(|w| w == b"\n\n").map(|i| i + 2))
+}
+
+fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
+    let want = name.to_ascii_lowercase();
+    for line in headers.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some((k, v)) = line.split_once(':')
+            && k.trim().eq_ignore_ascii_case(&want)
+        {
+            return Some(v.trim());
+        }
+    }
+    None
+}
+
+async fn read_http_response<R: tokio::io::AsyncRead + Unpin>(
+    r: &mut R,
+) -> anyhow::Result<(u16, String)> {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 2048];
+    let header_end = loop {
+        let n = r.read(&mut tmp).await?;
+        if n == 0 {
+            anyhow::bail!("admin http: connection closed before response headers");
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(pos) = find_http_header_end(&buf) {
+            break pos;
+        }
+        if buf.len() > 64 * 1024 {
+            anyhow::bail!("admin http: response headers too large");
+        }
+    };
+
+    let header_bytes = buf[..header_end].to_vec();
+    let header_text = String::from_utf8_lossy(&header_bytes);
+    let status_line = header_text.lines().next().unwrap_or("");
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| anyhow::anyhow!("admin http: malformed status line: {status_line}"))?;
+
+    let mut body = buf[header_end..].to_vec();
+    if let Some(len_s) = header_value(&header_text, "content-length") {
+        let len: usize = len_s
+            .parse()
+            .map_err(|_| anyhow::anyhow!("admin http: invalid content-length"))?;
+        while body.len() < len {
+            let n = r.read(&mut tmp).await?;
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&tmp[..n]);
+        }
+        body.truncate(len);
+    } else {
+        loop {
+            let n = r.read(&mut tmp).await?;
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&tmp[..n]);
+            if body.len() > 8 * 1024 * 1024 {
+                anyhow::bail!("admin http: response body too large");
+            }
+        }
+    }
+
+    Ok((status, String::from_utf8_lossy(&body).into_owned()))
 }
 
 #[cfg(test)]
@@ -1941,12 +2025,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_e2e_in_band_admin_bridge() {
+    async fn admin_http_request_roundtrip_over_duplex() {
+        let (mut client_side, mut server_side) = tokio::io::duplex(4096);
+        let server = tokio::spawn(async move {
+            let mut buf = vec![0u8; 4096];
+            let n = server_side.read(&mut buf).await.unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]);
+            assert!(req.contains("POST /auth/github/exchange HTTP/1.1"));
+            assert!(req.contains("\"code\":\"abc\""));
+            server_side
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{\"token\":\"t1\"}",
+                )
+                .await
+                .unwrap();
+            server_side.flush().await.unwrap();
+        });
+
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".into(), "application/json".into());
+        write_http_request(
+            &mut client_side,
+            "POST",
+            "/auth/github/exchange",
+            &headers,
+            "{\"code\":\"abc\"}",
+        )
+        .await
+        .unwrap();
+        let (status, body) = read_http_response(&mut client_side).await.unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(body, "{\"token\":\"t1\"}");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_client_e2e_in_band_admin_http() {
         use crate::prism::tunnel::manager::Manager;
         use crate::prism::tunnel::server::{QuicServerOptions, Server, ServerOptions};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        // 1. Mock local admin server on the server side
         let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let admin_addr = admin_listener.local_addr().unwrap();
 
@@ -1965,7 +2083,6 @@ mod tests {
             }
         });
 
-        // 2. Start tunnel server (with admin_addr = Some(admin_addr))
         let server_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let server_addr = server_listener.local_addr().unwrap().to_string();
         drop(server_listener);
@@ -1990,7 +2107,6 @@ mod tests {
             let _ = server.listen_and_serve(srv_shutdown).await;
         });
 
-        // 3. Start client connecting to tunnel server
         let client_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client_listen_addr = client_listener.local_addr().unwrap().to_string();
         drop(client_listener);
@@ -2017,33 +2133,22 @@ mod tests {
             let _ = c_clone.run(client_shutdown).await;
         });
 
-        // Wait for client to connect and bridge to become available
-        let mut admin_url = None;
+        let mut connected = false;
         for _ in 0..160 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let st = client.status().await;
-            if st.state == "connected" && st.admin_url.is_some() {
-                admin_url = st.admin_url;
+            if client.status().await.state == "connected" {
+                connected = true;
                 break;
             }
         }
-        let admin_url = admin_url.expect("client should be connected with admin_url");
+        assert!(connected, "client should be connected");
 
-        // 4. Request /health on the client's local admin_url
-        let mut stream = tokio::net::TcpStream::connect(admin_url.strip_prefix("http://").unwrap())
+        let (status, body) = client
+            .admin_http_request("GET", "/health", &HashMap::new(), None)
             .await
-            .expect("should connect to local admin bridge");
-
-        stream
-            .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            .await
-            .unwrap();
-
-        let mut buf = vec![0u8; 1024];
-        let n = stream.read(&mut buf).await.unwrap();
-        let resp = String::from_utf8_lossy(&buf[..n]);
-        assert!(resp.contains("HTTP/1.1 200 OK"));
-        assert!(resp.contains("{\"ok\":true}"));
+            .expect("in-band $admin HTTP request");
+        assert_eq!(status, 200);
+        assert!(body.contains("{\"ok\":true}"));
 
         shutdown_tx.send(true).unwrap();
     }

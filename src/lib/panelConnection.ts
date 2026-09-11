@@ -1,7 +1,7 @@
 export interface PanelConnection {
 	baseUrl: string;
 	token: string;
-	kind?: "bearer" | "desktop-token" | "console-cookie";
+	kind?: "bearer" | "desktop-token" | "console-cookie" | "tunnel-admin";
 }
 
 export interface StorageLike {
@@ -11,6 +11,21 @@ export interface StorageLike {
 }
 
 export const PANEL_CONNECTION_STORAGE_KEY = "prism.panel.connection";
+
+/** Desktop client talks to the remote admin API over the in-band `$admin` stream. */
+export const TUNNEL_ADMIN_CONNECTION: PanelConnection = {
+	baseUrl: "",
+	token: "",
+	kind: "tunnel-admin",
+};
+
+export function isTunnelAdminConnection(value: PanelConnection): boolean {
+	return value.kind === "tunnel-admin" || !normalizeBaseUrl(value.baseUrl || "");
+}
+
+export function tunnelAdminConnection(token = ""): PanelConnection {
+	return { baseUrl: "", token, kind: "tunnel-admin" };
+}
 
 export function normalizeBaseUrl(value: string) {
 	return value.trim().replace(/\/+$/, "");
@@ -49,6 +64,9 @@ export function normalizePanelConnection(value: PanelConnection): PanelConnectio
 
 export function isValidPanelConnection(value: PanelConnection | null): value is PanelConnection {
 	if (!value) return false;
+	if (value.kind === "tunnel-admin") {
+		return Boolean(value.token);
+	}
 	return Boolean(value.baseUrl && (value.token || value.kind === "console-cookie"));
 }
 

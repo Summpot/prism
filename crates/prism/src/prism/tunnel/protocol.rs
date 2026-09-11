@@ -190,6 +190,9 @@ pub async fn write_proxy_stream_header_with_flags<W: AsyncWrite + Unpin>(
     w.write_u8(PROTOCOL_V1).await?;
     w.write_u8(flags).await?;
     write_mc_string(w, service).await?;
+    // QUIC/WebTransport buffer small writes until flush; FLAG_RAW $admin
+    // streams never send optimizer params, so this flush is the only push.
+    w.flush().await?;
     Ok(())
 }
 

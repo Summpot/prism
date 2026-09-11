@@ -221,6 +221,14 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         Ok(())
     }
 
+    #[tauri::command]
+    async fn admin_request(
+        state: tauri::State<'_, DesktopClientState>,
+        payload: crate::prism::admin::AdminHttpRequest,
+    ) -> Result<crate::prism::admin::AdminHttpResponse, String> {
+        crate::prism::admin::do_admin_request(&state.client, payload).await
+    }
+
     // 2. Run Tauri desktop application
     tauri::Builder::default()
         .manage(desktop_client_state)
@@ -255,6 +263,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             client_reset_stats,
             client_logs,
             client_clear_logs,
+            admin_request,
         ])
         .setup(move |app| {
             #[cfg(desktop)]

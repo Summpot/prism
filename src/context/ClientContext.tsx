@@ -16,7 +16,11 @@ import {
 	stopClient,
 } from "@/lib/managementApi";
 import { parseDeepLink } from "@/lib/deepLink";
-import { deriveManagementUrl, normalizeBaseUrl } from "@/lib/panelConnection";
+import {
+	TUNNEL_ADMIN_CONNECTION,
+	normalizeBaseUrl,
+	tunnelAdminConnection,
+} from "@/lib/panelConnection";
 import { useAdminSession } from "@/lib/admin/adminSession";
 import { SUPPORTED_LINK_PROTOCOLS, resolveRemoteConnection } from "@/lib/prismLink";
 import type {
@@ -298,9 +302,13 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			},
 		) => {
 			setAuthToken(token);
-			const panelUrl = extra?.panelUrl || authServerUrl || managementUrl;
-			if (autoConnectPanel && token && panelUrl) {
-				saveConnection({ baseUrl: normalizeBaseUrl(panelUrl), token });
+			if (autoConnectPanel && token) {
+				const panelUrl = extra?.panelUrl || authServerUrl || managementUrl;
+				if (panelUrl) {
+					saveConnection({ baseUrl: normalizeBaseUrl(panelUrl), token });
+				} else {
+					saveConnection(tunnelAdminConnection(token));
+				}
 			}
 			await saveClientConfig({
 				active_profile_id: selectedProfileId || null,
@@ -349,21 +357,37 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setAuthError(null);
 			setOauthLoading(true);
 			try {
-				const norm = normalizeBaseUrl(targetAuthUrl);
 				const nextServer = targetServerAddr || serverAddr;
 				if (targetServerAddr) {
 					setServerAddr(nextServer);
 				}
 				if (typeof window !== "undefined") {
-					window.localStorage.setItem("prism_pending_auth_url", norm);
-					window.sessionStorage.setItem("prism_pending_auth_url", norm);
+					window.localStorage.removeItem("prism_pending_auth_url");
+					window.sessionStorage.removeItem("prism_pending_auth_url");
 				}
-				const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
+				const res = await getGitHubLoginUrl(TUNNEL_ADMIN_CONNECTION);
 				if (res.url) {
 					setOauthWaitingCallback(true);
 					await openExternalUrl(res.url);
 				}
 			} catch (err) {
+				if (targetAuthUrl.trim()) {
+					try {
+						const norm = normalizeBaseUrl(targetAuthUrl);
+						const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
+						if (res.url) {
+							setOauthWaitingCallback(true);
+							await openExternalUrl(res.url);
+							return;
+						}
+					} catch (fallbackErr) {
+						setAuthError(
+							fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+						);
+						setOauthWaitingCallback(false);
+						return;
+					}
+				}
 				setAuthError(err instanceof Error ? err.message : String(err));
 				setOauthWaitingCallback(false);
 			} finally {
@@ -375,22 +399,24 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 	const handleRedetectProviders = useCallback(
 		async (overrideUrl?: string) => {
-			const target = (overrideUrl ?? authServerUrl).trim() || status?.admin_url;
-			if (!target) return;
 			setCheckingProviders(true);
 			setProvidersError(null);
 			try {
-				const norm = normalizeBaseUrl(target);
-				const providers = await getAuthProviders(norm);
+				const target = overrideUrl?.trim()
+					? { baseUrl: normalizeBaseUrl(overrideUrl), token: "" }
+					: TUNNEL_ADMIN_CONNECTION;
+				const providers = await getAuthProviders(target);
 				setProvidersResult(providers);
-				setAuthServerUrl(norm);
+				if (overrideUrl?.trim()) {
+					setAuthServerUrl(normalizeBaseUrl(overrideUrl));
+				}
 			} catch (err) {
 				setProvidersError(err instanceof Error ? err.message : m.client_probe_failed());
 			} finally {
 				setCheckingProviders(false);
 			}
 		},
-		[authServerUrl, status?.admin_url],
+		[],
 	);
 
 	// Manual OAuth callback exchange handler (supports prism://, http(s)://, code=..., or bare code)
@@ -453,49 +479,30 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setProvidersError(null);
 
 			try {
-				const candidateUrls: string[] = [];
-				if (customOrigin && !candidateUrls.includes(customOrigin)) {
-					candidateUrls.push(customOrigin);
-				}
-				if (typeof window !== "undefined") {
-					const fromLocal = window.localStorage.getItem("prism_pending_auth_url");
-					const fromSession = window.sessionStorage.getItem("prism_pending_auth_url");
-					if (fromLocal && !candidateUrls.includes(fromLocal)) candidateUrls.push(fromLocal);
-					if (fromSession && !candidateUrls.includes(fromSession)) candidateUrls.push(fromSession);
-				}
-				if (status?.admin_url && !candidateUrls.includes(status.admin_url)) {
-					candidateUrls.push(status.admin_url);
-				}
-				if (authServerUrl && !candidateUrls.includes(authServerUrl)) {
-					candidateUrls.push(authServerUrl);
-				}
-				if (serverAddr) {
-					const derived = deriveManagementUrl(serverAddr);
-					if (derived && !candidateUrls.includes(derived)) {
-						candidateUrls.push(derived);
-					}
-				}
-				if (!candidateUrls.includes("http://127.0.0.1:18080")) {
-					candidateUrls.push("http://127.0.0.1:18080");
-				}
-
 				let res: {
 					token: string;
 					user: UserRecord;
 					token_id: string;
 					expires_at_unix_ms?: number | null;
 				} | null = null;
-				let activeUrl = candidateUrls[0];
 				let lastErr: unknown = null;
-				for (const u of candidateUrls) {
+				try {
+					res = await exchangeGitHubCode(
+						TUNNEL_ADMIN_CONNECTION,
+						code,
+						deviceId || undefined,
+					);
+				} catch (err) {
+					lastErr = err;
+				}
+
+				if (!res && customOrigin) {
 					try {
 						res = await exchangeGitHubCode(
-							{ baseUrl: normalizeBaseUrl(u), token: "" },
+							{ baseUrl: normalizeBaseUrl(customOrigin), token: "" },
 							code,
 							deviceId || undefined,
 						);
-						activeUrl = u;
-						break;
 					} catch (err) {
 						lastErr = err;
 					}
@@ -514,7 +521,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					user_id: res.user?.id,
 					username: res.user?.username,
 					expires_at: res.expires_at_unix_ms,
-					panelUrl: activeUrl,
 				});
 				if (res.user?.role?.toLowerCase() === "admin") {
 					setLoginAdminUnlocked(true);
@@ -546,7 +552,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			}
 		},
 		[
-			authServerUrl,
 			deviceId,
 			fakeLanBroadcast,
 			fetchLogs,
@@ -557,7 +562,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			profileName,
 			selectedProfileId,
 			serverAddr,
-			status?.admin_url,
 			transport,
 		],
 	);
@@ -614,19 +618,12 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					console.warn("Tunnel client start attempt:", err);
 				});
 
-				let bridgeAdminUrl = status?.admin_url || null;
 				let latestStatus = null;
-				for (let i = 0; i < 15; i++) {
+				for (let i = 0; i < 20; i++) {
 					const st = await getClientStatus().catch(() => null);
 					if (st) {
 						latestStatus = st;
-						if (st.admin_url) {
-							bridgeAdminUrl = st.admin_url;
-							setStatus(st);
-							break;
-						}
-						if (st.state === "connected" && st.admin_url) {
-							bridgeAdminUrl = st.admin_url;
+						if (st.state === "connected") {
 							setStatus(st);
 							break;
 						}
@@ -639,48 +636,19 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				}
 				fetchLogs();
 
-				const candidateUrls: string[] = [];
-				if (bridgeAdminUrl) {
-					candidateUrls.push(normalizeBaseUrl(bridgeAdminUrl));
-				}
-				if (resolved.managementUrl) {
-					const normManagement = normalizeBaseUrl(resolved.managementUrl);
-					if (!candidateUrls.includes(normManagement)) {
-						candidateUrls.push(normManagement);
-					}
-				}
-
 				let providers: AuthProvidersResponse | null = null;
-				let successfulUrl = candidateUrls[0] || resolved.managementUrl;
-
-				for (const url of candidateUrls) {
-					try {
-						const res = await getAuthProviders(url);
-						if (res.providers && res.providers.length > 0) {
-							providers = res;
-							successfulUrl = url;
-							break;
+				try {
+					providers = await getAuthProviders(TUNNEL_ADMIN_CONNECTION);
+				} catch {
+					if (resolved.managementUrl) {
+						try {
+							providers = await getAuthProviders(normalizeBaseUrl(resolved.managementUrl));
+							setAuthServerUrl(normalizeBaseUrl(resolved.managementUrl));
+						} catch {
+							// Remote node may not have management auth service; keep silent
 						}
-						if (res.github_enabled) {
-							providers = res;
-							successfulUrl = url;
-							break;
-						}
-					} catch {
-						// try next candidate
 					}
 				}
-
-				if (!providers && candidateUrls.length > 0) {
-					try {
-						providers = await getAuthProviders(candidateUrls[0]);
-						successfulUrl = candidateUrls[0];
-					} catch {
-						// Remote node may not have management auth service; keep silent
-					}
-				}
-
-				setAuthServerUrl(successfulUrl);
 				const hasValidProviders = Boolean(
 					providers &&
 					(providers.github_enabled || (providers.providers && providers.providers.length > 0)),
@@ -717,7 +685,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setProfileName,
 			setServerAddr,
 			setTransport,
-			status?.admin_url,
 			transport,
 		],
 	);

@@ -13,10 +13,14 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
+		delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
+		delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 	});
 
 	it("sends Bearer token header for bearer connection", async () => {
@@ -73,5 +77,37 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(adminRequest(dummyConnection, "/admin")).rejects.toThrow(AdminApiError);
+	});
+
+	it("invokes the admin_request Tauri command for in-band $admin on desktop", async () => {
+		const invokeMock = vi.fn().mockResolvedValue({
+			status: 200,
+			body: JSON.stringify({ token: "prism_cl_x" }),
+		});
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await adminRequest<{ token: string }>(
+			{ baseUrl: "", token: "", kind: "tunnel-admin" },
+			"/auth/github/exchange",
+			{ method: "POST", body: JSON.stringify({ code: "abc" }) },
+		);
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(invokeMock).toHaveBeenCalledWith(
+			"admin_request",
+			expect.objectContaining({
+				payload: expect.objectContaining({
+					path: "/auth/github/exchange",
+					method: "POST",
+					via_tunnel: true,
+					body: JSON.stringify({ code: "abc" }),
+				}),
+			}),
+		);
+		expect(result).toEqual({ token: "prism_cl_x" });
 	});
 });

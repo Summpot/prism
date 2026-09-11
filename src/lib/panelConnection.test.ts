@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
 	clearPanelConnection,
 	deriveManagementUrl,
+	isTunnelAdminConnection,
+	isValidPanelConnection,
 	loadPanelConnection,
 	normalizeBaseUrl,
 	persistPanelConnection,
+	tunnelAdminConnection,
 	type StorageLike,
 } from "@/lib/panelConnection";
 
@@ -65,5 +68,24 @@ describe("panelConnection", () => {
 		);
 		expect(deriveManagementUrl("[::1]:7000")).toBe("http://[::1]:8080");
 		expect(deriveManagementUrl("1.2.3.4")).toBe("http://1.2.3.4:8080");
+	});
+
+	it("accepts in-band tunnel-admin connections without a base URL", () => {
+		const conn = tunnelAdminConnection("prism_cl_abc");
+		expect(isTunnelAdminConnection(conn)).toBe(true);
+		expect(isValidPanelConnection(conn)).toBe(true);
+		expect(isTunnelAdminConnection({ baseUrl: "http://127.0.0.1:8080", token: "x" })).toBe(
+			false,
+		);
+	});
+
+	it("persists tunnel-admin connections", () => {
+		const storage = createStorage();
+		persistPanelConnection(storage, tunnelAdminConnection(" prism_cl_abc "));
+		expect(loadPanelConnection(storage)).toEqual({
+			baseUrl: "",
+			token: "prism_cl_abc",
+			kind: "tunnel-admin",
+		});
 	});
 });

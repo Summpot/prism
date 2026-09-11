@@ -14,7 +14,7 @@ import { ClientModals } from "@/components/client/ClientModals";
 import { Button } from "@/components/ui/button";
 import { ClientProvider } from "@/context/ClientContext";
 import { setupDeepLinkListener } from "@/lib/deepLink";
-import { exchangeGitHubCode, getClientConfig, getClientStatus } from "@/lib/managementApi";
+import { exchangeGitHubCode, getClientConfig } from "@/lib/managementApi";
 import {
 	closeWindow,
 	isDesktopApp,
@@ -22,7 +22,7 @@ import {
 	minimizeWindow,
 	toggleMaximizeWindow,
 } from "@/lib/desktopWindow";
-import { normalizeBaseUrl } from "@/lib/panelConnection";
+import { TUNNEL_ADMIN_CONNECTION, tunnelAdminConnection } from "@/lib/panelConnection";
 import { PanelSessionProvider, usePanelSession } from "@/lib/panelSession";
 import { m } from "@/paraglide/messages";
 import { getLocale } from "@/paraglide/runtime";
@@ -221,36 +221,6 @@ function RootContent() {
 					}),
 				);
 				const doExchange = async () => {
-					const candidates: string[] = [];
-					if (typeof window !== "undefined") {
-						const fromLocal = window.localStorage.getItem("prism_pending_auth_url");
-						const fromSession = window.sessionStorage.getItem("prism_pending_auth_url");
-						if (fromLocal && !candidates.includes(fromLocal)) candidates.push(fromLocal);
-						if (fromSession && !candidates.includes(fromSession)) candidates.push(fromSession);
-					}
-
-					// Also check if local tunnel client is running with an active in-band admin bridge
-					try {
-						const clientSt = await getClientStatus();
-						if (clientSt?.admin_url && !candidates.includes(clientSt.admin_url)) {
-							candidates.push(clientSt.admin_url);
-						}
-					} catch {
-						// ignore
-					}
-
-					if (
-						connectionRef.current?.baseUrl &&
-						!candidates.includes(connectionRef.current.baseUrl)
-					) {
-						candidates.push(connectionRef.current.baseUrl);
-					}
-
-					// Fallback to default in-band tunnel admin bridge port
-					if (!candidates.includes("http://127.0.0.1:18080")) {
-						candidates.push("http://127.0.0.1:18080");
-					}
-
 					let lastErr: unknown = null;
 					let deviceId: string | undefined;
 					try {
@@ -259,41 +229,35 @@ function RootContent() {
 					} catch {
 						// local config is optional for exchange
 					}
-					for (const targetUrl of candidates) {
-						try {
-							const norm = normalizeBaseUrl(targetUrl);
-							const res = await exchangeGitHubCode(
-								{ baseUrl: norm, token: "" },
-								payload.code,
-								deviceId,
-							);
-							if (typeof window !== "undefined") {
-								window.localStorage.removeItem("prism_pending_auth_url");
-								window.sessionStorage.removeItem("prism_pending_auth_url");
-							}
-							saveConnectionRef.current({
-								baseUrl: norm,
-								token: res.token,
-							});
-							window.dispatchEvent(
-								new CustomEvent("prism:deep-link-auth", {
-									detail: {
-										token: res.token,
-										userId: res.user.id,
-										username: res.user.username,
-										role: res.user.role,
-										token_id: res.token_id,
-										expires_at_unix_ms: res.expires_at_unix_ms,
-									},
-								}),
-							);
-							if (locationRef.current.pathname === "/login") {
-								void navigateRef.current({ to: res.user.role === "admin" ? "/admin" : "/" });
-							}
-							return;
-						} catch (err) {
-							lastErr = err;
+					try {
+						const res = await exchangeGitHubCode(
+							TUNNEL_ADMIN_CONNECTION,
+							payload.code,
+							deviceId,
+						);
+						if (typeof window !== "undefined") {
+							window.localStorage.removeItem("prism_pending_auth_url");
+							window.sessionStorage.removeItem("prism_pending_auth_url");
 						}
+						saveConnectionRef.current(tunnelAdminConnection(res.token));
+						window.dispatchEvent(
+							new CustomEvent("prism:deep-link-auth", {
+								detail: {
+									token: res.token,
+									userId: res.user.id,
+									username: res.user.username,
+									role: res.user.role,
+									token_id: res.token_id,
+									expires_at_unix_ms: res.expires_at_unix_ms,
+								},
+							}),
+						);
+						if (locationRef.current.pathname === "/login") {
+							void navigateRef.current({ to: res.user.role === "admin" ? "/admin" : "/" });
+						}
+						return;
+					} catch (err) {
+						lastErr = err;
 					}
 					console.error("Failed to exchange GitHub OAuth code via deep link:", lastErr);
 					window.dispatchEvent(

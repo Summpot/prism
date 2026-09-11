@@ -1,5 +1,5 @@
 import { adminRequest } from "@/lib/admin/adminClient";
-import type { PanelConnection } from "@/lib/panelConnection";
+import { normalizeBaseUrl, type PanelConnection } from "@/lib/panelConnection";
 import type {
 	AuthProvidersResponse,
 	AuthSessionResponse,
@@ -87,37 +87,24 @@ export function getConfigPath(connection: PanelConnection) {
 	return adminRequest<ConfigPathResponse>(connection, "/config");
 }
 
-export function getAuthProviders(baseUrl: string): Promise<AuthProvidersResponse> {
-	return fetch(`${baseUrl}/auth/providers`)
-		.then(async (res) => {
-			if (!res.ok) {
-				return {
-					github_enabled: false,
-					github_client_id: null,
-					mode: "token",
-					providers: [],
-				};
-			}
-			const data = (await res.json()) as Record<string, unknown>;
-			const github_enabled = Boolean(data.github_enabled ?? data.github);
-			const mode = (data.mode as string) ?? "token";
-			let providers = Array.isArray(data.providers) ? (data.providers as string[]) : [];
-			if (providers.length === 0) {
-				if (github_enabled && mode !== "token") providers.push("github");
-			}
-			return {
-				github_enabled,
-				github_client_id: (data.github_client_id as string) ?? null,
-				mode,
-				providers,
-			};
-		})
-		.catch(() => ({
-			github_enabled: false,
-			github_client_id: null,
-			mode: "token",
-			providers: [],
-		}));
+export async function getAuthProviders(
+	target: PanelConnection | string,
+): Promise<AuthProvidersResponse> {
+	const connection: PanelConnection =
+		typeof target === "string" ? { baseUrl: normalizeBaseUrl(target), token: "" } : target;
+	const data = await adminRequest<Record<string, unknown>>(connection, "/auth/providers");
+	const github_enabled = Boolean(data.github_enabled ?? data.github);
+	const mode = (data.mode as string) ?? "token";
+	let providers = Array.isArray(data.providers) ? (data.providers as string[]) : [];
+	if (providers.length === 0) {
+		if (github_enabled && mode !== "token") providers.push("github");
+	}
+	return {
+		github_enabled,
+		github_client_id: (data.github_client_id as string) ?? null,
+		mode,
+		providers,
+	};
 }
 
 export function getGitHubLoginUrl(connection: PanelConnection) {

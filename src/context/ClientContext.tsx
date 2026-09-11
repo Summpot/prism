@@ -30,7 +30,6 @@ import type {
 	ClientContextValue,
 	ClientProfile,
 	ClientStatusResponse,
-	UserRecord,
 } from "@/types/client";
 import { m } from "@/paraglide/messages";
 
@@ -472,15 +471,14 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		}
 	}, [authToken, autoConnectPanel, configLoaded, saveConnection]);
 
-	// Start GitHub OAuth with target management URL via browser + deep link
+	// GitHub OAuth URL comes from the live `$admin` stream, not guessed :8080 HTTP.
 	const startGitHubAuthWithUrl = useCallback(
-		async (targetAuthUrl: string, targetServerAddr?: string) => {
+		async (_targetAuthUrl: string, targetServerAddr?: string) => {
 			setAuthError(null);
 			setOauthLoading(true);
 			try {
-				const nextServer = targetServerAddr || serverAddr;
 				if (targetServerAddr) {
-					setServerAddr(nextServer);
+					setServerAddr(targetServerAddr);
 				}
 				if (typeof window !== "undefined") {
 					window.localStorage.removeItem("prism_pending_auth_url");
@@ -492,28 +490,13 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					await openExternalUrl(res.url);
 				}
 			} catch (err) {
-				if (targetAuthUrl.trim()) {
-					try {
-						const norm = normalizeBaseUrl(targetAuthUrl);
-						const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
-						if (res.url) {
-							setOauthWaitingCallback(true);
-							await openExternalUrl(res.url);
-							return;
-						}
-					} catch (fallbackErr) {
-						setAuthError(fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr));
-						setOauthWaitingCallback(false);
-						return;
-					}
-				}
 				setAuthError(err instanceof Error ? err.message : String(err));
 				setOauthWaitingCallback(false);
 			} finally {
 				setOauthLoading(false);
 			}
 		},
-		[serverAddr, setServerAddr],
+		[setServerAddr],
 	);
 
 	const handleRedetectProviders = useCallback(async (overrideUrl?: string) => {
@@ -568,7 +551,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			if (!raw) return;
 
 			let code = "";
-			let customOrigin: string | null = null;
 
 			const deep = parseDeepLink(raw);
 			if (deep.kind === "auth-code") {
@@ -587,15 +569,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				code = raw;
 			}
 
-			if (raw.toLowerCase().startsWith("http://") || raw.toLowerCase().startsWith("https://")) {
-				try {
-					const u = new URL(raw);
-					customOrigin = u.origin;
-				} catch {
-					// ignore
-				}
-			}
-
 			if (!code) {
 				setAuthError(m.client_invalid_github_callback());
 				return;
@@ -608,36 +581,11 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setProvidersError(null);
 
 			try {
-				let res: {
-					token: string;
-					user: UserRecord;
-					token_id: string;
-					expires_at_unix_ms?: number | null;
-				} | null = null;
-				let lastErr: unknown = null;
-				try {
-					res = await exchangeGitHubCode(TUNNEL_ADMIN_CONNECTION, code, deviceId || undefined);
-				} catch (err) {
-					lastErr = err;
-				}
-
-				if (!res && customOrigin) {
-					try {
-						res = await exchangeGitHubCode(
-							{ baseUrl: normalizeBaseUrl(customOrigin), token: "" },
-							code,
-							deviceId || undefined,
-						);
-					} catch (err) {
-						lastErr = err;
-					}
-				}
-
-				if (!res) {
-					throw new Error(
-						lastErr instanceof Error ? lastErr.message : m.client_github_exchange_failed(),
-					);
-				}
+				const res = await exchangeGitHubCode(
+					TUNNEL_ADMIN_CONNECTION,
+					code,
+					deviceId || undefined,
+				);
 
 				await finalizeLogin(res.token, {
 					token_id: res.token_id,
@@ -729,15 +677,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					providers = await getAuthProviders(TUNNEL_ADMIN_CONNECTION);
 				} catch (err) {
 					probeErr = err instanceof Error ? err.message : m.client_probe_failed();
-					if (resolved.managementUrl) {
-						try {
-							providers = await getAuthProviders(normalizeBaseUrl(resolved.managementUrl));
-							setAuthServerUrl(normalizeBaseUrl(resolved.managementUrl));
-							probeErr = null;
-						} catch (fallbackErr) {
-							probeErr = fallbackErr instanceof Error ? fallbackErr.message : probeErr;
-						}
-					}
 				}
 				const hasValidProviders = Boolean(
 					providers &&

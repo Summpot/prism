@@ -110,8 +110,44 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 		expect(result).toEqual({ token: "prism_cl_x" });
 	});
 
+	it("fetches the GitHub login URL over $admin RPC instead of loopback HTTP", async () => {
+		const invokeMock = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			body: { url: "https://github.com/login/oauth/authorize?client_id=abc" },
+		});
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await adminRequest<{ url: string }>(
+			{ baseUrl: "", token: "", kind: "tunnel-admin" },
+			"/auth/github/login",
+		);
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(invokeMock).toHaveBeenCalledTimes(1);
+		expect(invokeMock).toHaveBeenCalledWith(
+			"admin_rpc",
+			expect.objectContaining({
+				payload: expect.objectContaining({
+					method: "auth.github.login",
+					payload: {},
+				}),
+			}),
+		);
+		expect(invokeMock.mock.calls[0]?.[0]).not.toBe("admin_request");
+		expect(result.url).toContain("github.com/login/oauth/authorize");
+	});
+
 	it("maps leftover HTTP paths onto $admin RPC methods", () => {
 		expect(httpToAdminRpc("/health", "GET")).toEqual({ method: "health", payload: {} });
+		expect(httpToAdminRpc("/auth/github/login", "GET")).toEqual({
+			method: "auth.github.login",
+			payload: {},
+		});
 		expect(httpToAdminRpc("/conns", "GET")).toEqual({
 			method: "connections",
 			payload: {},

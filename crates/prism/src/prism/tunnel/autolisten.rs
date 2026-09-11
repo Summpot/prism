@@ -260,6 +260,7 @@ async fn handle_tcp_conn(
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
     middleware_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    crate::prism::net::set_nodelay(&c);
     let (st, svc) = mgr
         .dial_service_tcp_from_client_with_meta(client_id, service)
         .await
@@ -582,6 +583,7 @@ mod tests {
                 flush_interval_ms: Some(20),
                 zstd_window_log: Some(23),
                 zstd_level: Some(3),
+                ..Default::default()
             }),
         };
 

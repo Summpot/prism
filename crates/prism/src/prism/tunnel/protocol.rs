@@ -14,6 +14,12 @@ const PROTOCOL_V1: u8 = 1;
 pub const FLAG_RAW: u8 = 0x00;
 pub const FLAG_OPTIMIZER: u8 = 0x01;
 
+/// Version byte of the optimizer stream-parameter block that follows FLAG_OPTIMIZER.
+pub const OPTIMIZER_PARAMS_VERSION: u8 = 1;
+/// Optimizer param flag: dictionary bytes follow the fixed header.
+pub const OPTIMIZER_PARAM_FLAG_DICT: u8 = 0x01;
+const MAX_OPTIMIZER_DICT_BYTES: u32 = 128 * 1024;
+
 pub const MAX_REGISTER_JSON_BYTES: u32 = 1 << 20; // 1 MiB
 pub const MAX_DATAGRAM_BYTES: u32 = 1 << 20; // 1 MiB
 
@@ -187,6 +193,123 @@ pub async fn write_proxy_stream_header_with_flags<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
+/// Negotiated optimizer settings exchanged immediately after a FLAG_OPTIMIZER header.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OptimizerStreamParams {
+    pub encode_window_log: u8,
+    pub decode_window_log: u8,
+    pub dict_id: u32,
+    pub dictionary: Option<Vec<u8>>,
+}
+
+impl OptimizerStreamParams {
+    pub fn agreed_decode_window(&self, peer_encode_window: u8) -> u32 {
+        (self.decode_window_log as u32).min(peer_encode_window as u32).max(10)
+    }
+}
+
+pub async fn write_optimizer_stream_params<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    params: &OptimizerStreamParams,
+) -> Result<(), ProtocolError> {
+    w.write_u8(OPTIMIZER_PARAMS_VERSION).await?;
+    w.write_u8(params.encode_window_log.max(10)).await?;
+    w.write_u8(params.decode_window_log.max(10)).await?;
+    let dict = params
+        .dictionary
+        .as_deref()
+        .filter(|d| !d.is_empty() && d.len() as u32 <= MAX_OPTIMIZER_DICT_BYTES);
+    let flags = if dict.is_some() {
+        OPTIMIZER_PARAM_FLAG_DICT
+    } else {
+        0
+    };
+    w.write_u8(flags).await?;
+    w.write_u32(params.dict_id).await?;
+    if let Some(dict) = dict {
+        w.write_u32(dict.len() as u32).await?;
+        w.write_all(dict).await?;
+    } else {
+        w.write_u32(0).await?;
+    }
+    w.flush().await?;
+    Ok(())
+}
+
+pub async fn read_optimizer_stream_params<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<OptimizerStreamParams, ProtocolError> {
+    let ver = r.read_u8().await?;
+    if ver != OPTIMIZER_PARAMS_VERSION {
+        return Err(ProtocolError::BadVersion);
+    }
+    let encode_window_log = r.read_u8().await?;
+    let decode_window_log = r.read_u8().await?;
+    let flags = r.read_u8().await?;
+    let dict_id = r.read_u32().await?;
+    let dict_len = r.read_u32().await?;
+    if dict_len > MAX_OPTIMIZER_DICT_BYTES {
+        return Err(ProtocolError::PayloadTooLarge(dict_len));
+    }
+    let dictionary = if dict_len > 0 && flags & OPTIMIZER_PARAM_FLAG_DICT != 0 {
+        let mut buf = vec![0u8; dict_len as usize];
+        r.read_exact(&mut buf).await?;
+        Some(buf)
+    } else {
+        if dict_len > 0 {
+            let mut drain = vec![0u8; dict_len as usize];
+            r.read_exact(&mut drain).await?;
+        }
+        None
+    };
+    Ok(OptimizerStreamParams {
+        encode_window_log,
+        decode_window_log,
+        dict_id,
+        dictionary,
+    })
+}
+
+/// Opens as the side that wrote the PRPX header: write local params, then read peer params.
+pub async fn exchange_optimizer_params_opener<RW: AsyncRead + AsyncWrite + Unpin>(
+    rw: &mut RW,
+    local: &OptimizerStreamParams,
+) -> Result<OptimizerStreamParams, ProtocolError> {
+    write_optimizer_stream_params(rw, local).await?;
+    read_optimizer_stream_params(rw).await
+}
+
+/// Opens as the side that read the PRPX header: read peer params, then write local params.
+pub async fn exchange_optimizer_params_acceptor<RW: AsyncRead + AsyncWrite + Unpin>(
+    rw: &mut RW,
+    local: &OptimizerStreamParams,
+) -> Result<OptimizerStreamParams, ProtocolError> {
+    let peer = read_optimizer_stream_params(rw).await?;
+    write_optimizer_stream_params(rw, local).await?;
+    Ok(peer)
+}
+
+/// Picks the dictionary both sides will use. Prefer a matching id; otherwise accept
+/// peer-supplied bytes; otherwise disable the dictionary.
+pub fn agree_dictionary(
+    local: Option<&[u8]>,
+    local_id: u32,
+    peer: &OptimizerStreamParams,
+) -> Option<Vec<u8>> {
+    if local_id != 0 && local_id == peer.dict_id {
+        return local.map(Vec::from);
+    }
+    if let Some(ref bytes) = peer.dictionary {
+        if !bytes.is_empty() {
+            return Some(bytes.clone());
+        }
+    }
+    if local_id != 0 && peer.dict_id == 0 {
+        return local.map(Vec::from);
+    }
+    None
+}
+
 pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(
     w: &mut W,
     kind: ProxyStreamKind,
@@ -356,6 +479,7 @@ mod tests {
                         flush_interval_ms: Some(20),
                         zstd_window_log: Some(23),
                         zstd_level: Some(3),
+                        ..Default::default()
                     }),
                 },
                 RegisteredService {
@@ -460,6 +584,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn optimizer_stream_params_roundtrip_and_dict_agreement() {
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        let dict = vec![7u8; 32];
+        let local = OptimizerStreamParams {
+            encode_window_log: 23,
+            decode_window_log: 22,
+            dict_id: 42,
+            dictionary: Some(dict.clone()),
+        };
+        tokio::spawn(async move {
+            write_optimizer_stream_params(&mut a, &local).await.unwrap();
+        });
+        let got = read_optimizer_stream_params(&mut b).await.unwrap();
+        assert_eq!(got.encode_window_log, 23);
+        assert_eq!(got.decode_window_log, 22);
+        assert_eq!(got.dict_id, 42);
+        assert_eq!(got.dictionary.as_deref(), Some(dict.as_slice()));
+
+        let agreed = agree_dictionary(Some(&dict), 42, &OptimizerStreamParams {
+            encode_window_log: 23,
+            decode_window_log: 23,
+            dict_id: 42,
+            dictionary: None,
+        });
+        assert_eq!(agreed.as_deref(), Some(dict.as_slice()));
+    }
+
+    #[tokio::test]
     async fn register_request_client_type_detection() {
         let req = RegisterRequest {
             client_type: "client".into(),
@@ -491,6 +643,7 @@ mod tests {
                 flush_interval_ms: Some(20),
                 zstd_window_log: Some(23),
                 zstd_level: Some(3),
+                ..Default::default()
             }),
         }];
 

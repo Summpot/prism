@@ -1021,6 +1021,7 @@ mod tests {
                 flush_interval_ms: Some(20),
                 zstd_window_log: Some(23),
                 zstd_level: Some(3),
+                ..Default::default()
             }),
         };
 

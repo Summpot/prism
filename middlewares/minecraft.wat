@@ -89,16 +89,23 @@
     )
   )
 
+  ;; Queue opaque bytes for the peer middleware (generic session-data side channel).
+  (import "prism" "announce_session_data"
+    (func $announce_session_data
+      (param $ptr i32) (param $len i32)
+      (result i32)
+    )
+  )
+
   ;; ---------------------------------------------------------------------------
-  ;; Memory (64 pages = 4 MiB)
+  ;; Memory (384 pages = 24 MiB)
   ;; ---------------------------------------------------------------------------
   ;; Layout:
-  ;;   Page 0 (0..65535): general buffer space / input
-  ;;   Page 1 (65536..131071): route match struct at 65536, stream frame struct at 65552
-  ;;   Page 2 (131072..196607): scratch / rewrite buffer
-  ;;   Page 3 (196608..262143): injected data (e.g. RSA private key) at 196608
-  ;;   Page 4+ (262144..): decompressed streaming payload buffer
-  (memory (export "memory") 64)
+  ;;   Page 0-3: structs / scratch / injected RSA key
+  ;;   0x100000+: host input (written by the runtime, not by this module)
+  ;;   0xA00000: decrypted assembly buffer (4 MiB)
+  ;;   0xE00000: deflate output (8 MiB)
+  (memory (export "memory") 384)
 
   ;; ---------------------------------------------------------------------------
   ;; Static Data Segments (Page 1: 65600..65800)
@@ -120,6 +127,38 @@
   (global $targets_len (mut i32) (i32.const 51))
   (global $template_ptr (mut i32) (i32.const 65660))
   (global $template_len (mut i32) (i32.const 42))
+
+  ;; Connection / crypto state (protocol driver internals, not host knowledge)
+  (global $proto_version (mut i32) (i32.const 0))
+  ;; 0 handshake, 1 status, 2 login, 3 config, 4 play
+  (global $conn_state (mut i32) (i32.const 0))
+  ;; 0 = from client (serverbound), 1 = from server (clientbound)
+  (global $direction (mut i32) (i32.const 0))
+  (global $compression_enabled (mut i32) (i32.const 0))
+  (global $compression_pending (mut i32) (i32.const 0))
+  (global $encryption_enabled (mut i32) (i32.const 0))
+  (global $encryption_pending (mut i32) (i32.const 0))
+  (global $has_aes_key (mut i32) (i32.const 0))
+  (global $waiting_key (mut i32) (i32.const 0))
+  (global $crypt_seen (mut i32) (i32.const 0))
+  (global $plain_len (mut i32) (i32.const 0))
+  (global $last_consumed (mut i32) (i32.const 0))
+
+  (global $PLAIN_BUF i32 (i32.const 10485760))  ;; 0xA00000
+  (global $PLAIN_MAX i32 (i32.const 4194304))
+  (global $DECOMP_BUF i32 (i32.const 14680064)) ;; 0xE00000
+  (global $DECOMP_MAX i32 (i32.const 8388608))
+  (global $AES_KEY i32 (i32.const 196480))
+  (global $DEC_IV i32 (i32.const 196496))
+  (global $ENC_IV i32 (i32.const 196512))
+
+  (func $set_direction (export "set_direction") (param $val i32)
+    (global.set $direction (local.get $val))
+  )
+
+  (func $set_conn_state (export "set_conn_state") (param $val i32)
+    (global.set $conn_state (local.get $val))
+  )
 
   (func $set_recompress_threshold (export "set_recompress_threshold") (param $val i32)
     (global.set $recompress_threshold (local.get $val))
@@ -263,6 +302,100 @@
     )
   )
 
+  (func $memmove_left (param $dst i32) (param $src i32) (param $n i32)
+    (local $i i32)
+    (local.set $i (i32.const 0))
+    (block $done
+      (loop $loop
+        (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+        (i32.store8
+          (i32.add (local.get $dst) (local.get $i))
+          (i32.load8_u (i32.add (local.get $src) (local.get $i)))
+        )
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+  )
+
+  (func $install_aes_key (param $ptr i32)
+    (call $memcpy (global.get $AES_KEY) (local.get $ptr) (i32.const 16))
+    (call $memcpy (global.get $DEC_IV) (local.get $ptr) (i32.const 16))
+    (call $memcpy (global.get $ENC_IV) (local.get $ptr) (i32.const 16))
+    (global.set $has_aes_key (i32.const 1))
+    (global.set $waiting_key (i32.const 0))
+  )
+
+  (func (export "set_session_data") (param $ptr i32) (param $len i32) (result i32)
+    (if (i32.lt_s (local.get $len) (i32.const 16))
+      (then (return (i32.const -1)))
+    )
+    (call $install_aes_key (local.get $ptr))
+    (global.set $encryption_enabled (i32.const 1))
+    (i32.const 0)
+  )
+
+  (func $drain_consumed
+    (local $n i32)
+    (local.set $n (global.get $last_consumed))
+    (if (i32.gt_u (local.get $n) (i32.const 0))
+      (then
+        (if (i32.ge_u (local.get $n) (global.get $plain_len))
+          (then
+            (global.set $plain_len (i32.const 0))
+          )
+          (else
+            (call $memmove_left
+              (global.get $PLAIN_BUF)
+              (i32.add (global.get $PLAIN_BUF) (local.get $n))
+              (i32.sub (global.get $plain_len) (local.get $n))
+            )
+            (global.set $plain_len (i32.sub (global.get $plain_len) (local.get $n)))
+          )
+        )
+        (if (i32.ge_u (local.get $n) (global.get $crypt_seen))
+          (then (global.set $crypt_seen (i32.const 0)))
+          (else (global.set $crypt_seen (i32.sub (global.get $crypt_seen) (local.get $n))))
+        )
+        (global.set $last_consumed (i32.const 0))
+      )
+    )
+  )
+
+  ;; Decrypt newly arrived ciphertext into the plaintext assembly buffer.
+  (func $sync_plaintext (param $buf_ptr i32) (param $buf_len i32)
+    (local $new_len i32)
+    (local $dst i32)
+    (call $drain_consumed)
+    (if (i32.eqz (global.get $encryption_enabled))
+      (then
+        (return)
+      )
+    )
+    (if (i32.le_s (local.get $buf_len) (global.get $crypt_seen))
+      (then (return))
+    )
+    (local.set $new_len (i32.sub (local.get $buf_len) (global.get $crypt_seen)))
+    (if (i32.gt_u (i32.add (global.get $plain_len) (local.get $new_len)) (global.get $PLAIN_MAX))
+      (then (return))
+    )
+    (local.set $dst (i32.add (global.get $PLAIN_BUF) (global.get $plain_len)))
+    (call $memcpy
+      (local.get $dst)
+      (i32.add (local.get $buf_ptr) (global.get $crypt_seen))
+      (local.get $new_len)
+    )
+    (drop (call $crypto_aes_cfb8
+      (global.get $AES_KEY)
+      (global.get $DEC_IV)
+      (local.get $dst)
+      (local.get $new_len)
+      (i32.const 0)
+    ))
+    (global.set $plain_len (i32.add (global.get $plain_len) (local.get $new_len)))
+    (global.set $crypt_seen (local.get $buf_len))
+  )
+
   ;; write_varint(buf_ptr, val) -> nbytes:i32
   (func $write_varint (param $buf_ptr i32) (param $val i32) (result i32)
     (local $p i32)
@@ -332,45 +465,184 @@
     (local.get $len)
   )
 
-  ;; Check whether packet ID represents an urgent packet (KeepAlive or Ping/Pong)
+  ;; Urgent only for keepalive / ping / pong of the *current* state and direction.
   (func $is_urgent_packet (param $pid i32) (result i32)
-    ;; Status Ping / Pong / Request: 0x01
-    (if (i32.eq (local.get $pid) (i32.const 0x01)) (then (return (i32.const 1))))
+    (local $st i32)
+    (local $from_server i32)
+    (local $ver i32)
+    (local.set $st (global.get $conn_state))
+    (local.set $from_server (global.get $direction))
+    (local.set $ver (global.get $proto_version))
 
-    ;; Serverbound KeepAlive across Minecraft versions:
-    ;; 0x0B (1.9-1.11.2), 0x0C (1.12-1.12.2), 0x0E (1.13-1.13.2),
-    ;; 0x0F (1.14-1.15.2, 1.17-1.18.2), 0x10 (1.16-1.16.5),
-    ;; 0x11 (1.19-1.19.3), 0x12 (1.19.4, 1.20-1.20.1),
-    ;; 0x14 (1.20.2), 0x15 (1.20.3+)
-    (if (i32.eq (local.get $pid) (i32.const 0x0B)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x0C)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x0E)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x0F)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x10)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x11)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x12)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x14)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x15)) (then (return (i32.const 1))))
+    ;; Status: ping/pong is packet id 1
+    (if (i32.eq (local.get $st) (i32.const 1))
+      (then (return (i32.eq (local.get $pid) (i32.const 1))))
+    )
 
-    ;; Clientbound KeepAlive across Minecraft versions:
-    ;; 0x1F (1.9-1.12, 1.16, 1.19.3), 0x20 (1.14, 1.19-1.19.2),
-    ;; 0x21 (1.13, 1.15, 1.17-1.18.2), 0x23 (1.19.4, 1.20-1.20.1),
-    ;; 0x24 (1.20.3-1.20.4), 0x26 (1.20.2, 1.20.5+)
-    (if (i32.eq (local.get $pid) (i32.const 0x1F)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x20)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x21)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x23)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x24)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 1))))
+    ;; Login: no keepalive
+    (if (i32.eq (local.get $st) (i32.const 2))
+      (then (return (i32.const 0)))
+    )
 
-    ;; Play Ping / Pong (1.17+): 0x1D, 0x1E, 0x30, 0x31, 0x32
-    (if (i32.eq (local.get $pid) (i32.const 0x1D)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x1E)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x30)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x31)) (then (return (i32.const 1))))
-    (if (i32.eq (local.get $pid) (i32.const 0x32)) (then (return (i32.const 1))))
+    ;; Configuration (1.20.2+): keepalive=4, ping/pong=5
+    (if (i32.eq (local.get $st) (i32.const 3))
+      (then
+        (if (i32.eq (local.get $pid) (i32.const 4)) (then (return (i32.const 1))))
+        (return (i32.eq (local.get $pid) (i32.const 5)))
+      )
+    )
+
+    ;; Play
+    (if (i32.eq (local.get $st) (i32.const 4))
+      (then
+        (if (local.get $from_server)
+          (then
+            ;; Clientbound keep_alive / ping. 1.21 / proto 767+: 0x26 / 0x35
+            (if (i32.ge_s (local.get $ver) (i32.const 767))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 1))))
+                (return (i32.eq (local.get $pid) (i32.const 0x35)))
+              )
+            )
+            (if (i32.ge_s (local.get $ver) (i32.const 765))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x24)) (then (return (i32.const 1))))
+                (return (i32.eq (local.get $pid) (i32.const 0x33)))
+              )
+            )
+            (if (i32.ge_s (local.get $ver) (i32.const 764))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 1))))
+                (return (i32.eq (local.get $pid) (i32.const 0x32)))
+              )
+            )
+            (if (i32.ge_s (local.get $ver) (i32.const 763))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x23)) (then (return (i32.const 1))))
+                (return (i32.eq (local.get $pid) (i32.const 0x30)))
+              )
+            )
+            ;; Older play: keep the historical clientbound keepalive ids only
+            (if (i32.eq (local.get $pid) (i32.const 0x1F)) (then (return (i32.const 1))))
+            (if (i32.eq (local.get $pid) (i32.const 0x20)) (then (return (i32.const 1))))
+            (if (i32.eq (local.get $pid) (i32.const 0x21)) (then (return (i32.const 1))))
+            (return (i32.const 0))
+          )
+          (else
+            ;; Serverbound keep_alive / pong. 1.21: 0x18 / 0x27
+            (if (i32.ge_s (local.get $ver) (i32.const 767))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x18)) (then (return (i32.const 1))))
+                (return (i32.eq (local.get $pid) (i32.const 0x27)))
+              )
+            )
+            (if (i32.ge_s (local.get $ver) (i32.const 764))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x14)) (then (return (i32.const 1))))
+                (return (i32.eq (local.get $pid) (i32.const 0x24)))
+              )
+            )
+            (if (i32.eq (local.get $pid) (i32.const 0x0F)) (then (return (i32.const 1))))
+            (if (i32.eq (local.get $pid) (i32.const 0x12)) (then (return (i32.const 1))))
+            (return (i32.const 0))
+          )
+        )
+      )
+    )
 
     (i32.const 0)
+  )
+
+  (func $finish_frame (param $action i32) (param $total_len i32) (result i64)
+    (global.set $last_consumed (local.get $total_len))
+    (if (global.get $encryption_enabled)
+      (then
+        (i32.store (i32.const 65552) (local.get $total_len))
+        (i32.store (i32.const 65556) (global.get $PLAIN_BUF))
+        (i32.store (i32.const 65560) (local.get $total_len))
+        (if (i32.eq (local.get $action) (i32.const 2))
+          (then (return (call $pack_result (i32.const 4) (i32.const 65552))))
+        )
+        (return (call $pack_result (i32.const 3) (i32.const 65552)))
+      )
+    )
+    (call $pack_result (local.get $action) (local.get $total_len))
+  )
+
+  ;; Inspect login/config packets for compression, encryption and state transitions.
+  (func $session_hooks (param $pid i32) (param $body_ptr i32) (param $body_end i32)
+    (local $tmp i64)
+    (local $arr_len i32)
+    (local $arr_n i32)
+    (local $secret_len i32)
+    (local $st i32)
+    (local.set $st (global.get $conn_state))
+
+    ;; Login
+    (if (i32.eq (local.get $st) (i32.const 2))
+      (then
+        ;; Clientbound Set Compression (id 3)
+        (if (i32.and (global.get $direction) (i32.eq (local.get $pid) (i32.const 3)))
+          (then (global.set $compression_pending (i32.const 1)))
+        )
+        ;; Clientbound Login Success (id 2): 1.20.2+ goes to config after client ack
+        (if (i32.and (global.get $direction) (i32.eq (local.get $pid) (i32.const 2)))
+          (then
+            (if (i32.ge_s (global.get $proto_version) (i32.const 764))
+              (then)
+              (else (global.set $conn_state (i32.const 4)))
+            )
+          )
+        )
+        ;; Serverbound Encryption Response (id 1)
+        (if (i32.and (i32.eqz (global.get $direction)) (i32.eq (local.get $pid) (i32.const 1)))
+          (then
+            (global.set $encryption_pending (i32.const 1))
+            (local.set $tmp (call $read_varint (local.get $body_ptr) (local.get $body_end)))
+            (local.set $arr_len (i32.wrap_i64 (local.get $tmp)))
+            (local.set $arr_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+            (if (i32.and (i32.gt_s (local.get $arr_n) (i32.const 0)) (i32.gt_s (local.get $arr_len) (i32.const 0)))
+              (then
+                (if (i32.gt_s (global.get $injected_len) (i32.const 0))
+                  (then
+                    (local.set $secret_len
+                      (call $crypto_rsa_decrypt
+                        (i32.const 196608)
+                        (global.get $injected_len)
+                        (i32.add (local.get $body_ptr) (local.get $arr_n))
+                        (local.get $arr_len)
+                        (i32.const 131200)
+                      )
+                    )
+                    (if (i32.eq (local.get $secret_len) (i32.const 16))
+                      (then
+                        (call $install_aes_key (i32.const 131200))
+                        (drop (call $announce_session_data (i32.const 131200) (i32.const 16)))
+                      )
+                    )
+                  )
+                  (else
+                    (global.set $waiting_key (i32.const 1))
+                  )
+                )
+              )
+            )
+          )
+        )
+        ;; Serverbound Login Acknowledged (id 3, proto >= 764)
+        (if (i32.and
+              (i32.eqz (global.get $direction))
+              (i32.and (i32.eq (local.get $pid) (i32.const 3)) (i32.ge_s (global.get $proto_version) (i32.const 764)))
+            )
+          (then (global.set $conn_state (i32.const 3)))
+        )
+      )
+    )
+
+    ;; Configuration finish (id 3 both directions)
+    (if (i32.and (i32.eq (local.get $st) (i32.const 3)) (i32.eq (local.get $pid) (i32.const 3)))
+      (then (global.set $conn_state (i32.const 4)))
+    )
   )
 
   ;; ---------------------------------------------------------------------------
@@ -393,6 +665,9 @@
     (local $host_len i32)
     (local $i i32)
     (local $b i32)
+    (local $proto i32)
+    (local $next_state i32)
+    (local $next_n i32)
 
     ;; Empty buffer: NEED_MORE_DATA (Action 0)
     (if (i32.le_s (local.get $buf_len) (i32.const 0))
@@ -439,10 +714,12 @@
 
     ;; 3. Read protocol version VarInt
     (local.set $tmp (call $read_varint (local.get $p) (local.get $pkt_end)))
+    (local.set $proto (i32.wrap_i64 (local.get $tmp)))
     (local.set $proto_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
     (if (i32.eq (local.get $proto_n) (i32.const 0))
       (then (return (call $pack_result (i32.const 2) (i32.const 0))))
     )
+    (global.set $proto_version (local.get $proto))
     (local.set $p (i32.add (local.get $p) (local.get $proto_n)))
 
     ;; 4. Read server address string length VarInt
@@ -490,6 +767,28 @@
       (then (return (call $pack_result (i32.const 2) (i32.const 0))))
     )
 
+    ;; Skip port (2 bytes) and read next_state
+    (local.set $p (i32.add (local.get $addr_ptr) (local.get $addr_len)))
+    (if (i32.le_u (i32.add (local.get $p) (i32.const 2)) (local.get $pkt_end))
+      (then
+        (local.set $p (i32.add (local.get $p) (i32.const 2)))
+        (local.set $tmp (call $read_varint (local.get $p) (local.get $pkt_end)))
+        (local.set $next_state (i32.wrap_i64 (local.get $tmp)))
+        (local.set $next_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+        (if (i32.gt_s (local.get $next_n) (i32.const 0))
+          (then
+            ;; handshake next_state 1=status, 2=login
+            (if (i32.eq (local.get $next_state) (i32.const 1))
+              (then (global.set $conn_state (i32.const 1)))
+            )
+            (if (i32.eq (local.get $next_state) (i32.const 2))
+              (then (global.set $conn_state (i32.const 2)))
+            )
+          )
+        )
+      )
+    )
+
     ;; 6. Store struct at fixed memory location 65536:
     ;;    { host_ptr: i32, host_len: i32, rewrite_ptr: i32, rewrite_len: i32 }
     (i32.store (i32.const 65536) (local.get $addr_ptr))
@@ -523,9 +822,33 @@
     (local $frame_ptr i32)
     (local $total_payload_len i32)
 
+    (if (global.get $encryption_pending)
+      (then
+        (global.set $encryption_enabled (i32.const 1))
+        (global.set $encryption_pending (i32.const 0))
+      )
+    )
+    (if (global.get $compression_pending)
+      (then
+        (global.set $compression_enabled (i32.const 1))
+        (global.set $compression_pending (i32.const 0))
+      )
+    )
+    (if (i32.and (global.get $waiting_key) (i32.eqz (global.get $has_aes_key)))
+      (then (return (call $pack_result (i32.const 6) (i32.const 0))))
+    )
+
     ;; Empty buffer: NEED_MORE_DATA (Action 0)
     (if (i32.le_s (local.get $buf_len) (i32.const 0))
       (then (return (call $pack_result (i32.const 0) (i32.const 0))))
+    )
+
+    (if (global.get $encryption_enabled)
+      (then
+        (call $sync_plaintext (local.get $buf_ptr) (local.get $buf_len))
+        (local.set $buf_ptr (global.get $PLAIN_BUF))
+        (local.set $buf_len (global.get $plain_len))
+      )
     )
 
     (local.set $buf_end (i32.add (local.get $buf_ptr) (local.get $buf_len)))
@@ -555,40 +878,33 @@
     ;; Full packet sliced! Total packet bytes = varint_len + packet_length
     ;; If packet payload is empty (pkt_len == 0): FRAME_DEFER
     (if (i32.eq (local.get $pkt_len) (i32.const 0))
-      (then (return (call $pack_result (i32.const 1) (local.get $total_len))))
+      (then (return (call $finish_frame (i32.const 1) (local.get $total_len))))
     )
 
     (local.set $p (i32.add (local.get $buf_ptr) (local.get $len_n)))
 
-    ;; Check for Minecraft Deflate compression (data_length VarInt at $p)
+    ;; Check for compressed framing only after Set Compression
     (local.set $tmp (call $read_varint (local.get $p) (i32.add (local.get $buf_ptr) (local.get $total_len))))
     (local.set $data_len (i32.wrap_i64 (local.get $tmp)))
     (local.set $data_len_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
 
-    ;; If data_length > 0 and data_len_n > 0: attempt Deflate decompression
+    ;; If data_length > 0: attempt Deflate. Success also latches compression_enabled.
     (if (i32.and (i32.gt_s (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
       (then
-        ;; Call $deflate_decompress:
-        ;; in_ptr = $p + $data_len_n
-        ;; in_len = $pkt_len - $data_len_n
-        ;; out_ptr = 262150 (Page 4 + 6 bytes headroom for [VarInt Length] + [0x00])
-        ;; out_max_len = 3145722 (3 MiB - 6)
         (local.set $decomp_len
           (call $deflate_decompress
             (i32.add (local.get $p) (local.get $data_len_n))
             (i32.sub (local.get $pkt_len) (local.get $data_len_n))
-            (i32.const 262150)
-            (i32.const 3145722)
+            (i32.add (global.get $DECOMP_BUF) (i32.const 16))
+            (i32.sub (global.get $DECOMP_MAX) (i32.const 16))
           )
         )
         (if (i32.gt_s (local.get $decomp_len) (i32.const 0))
           (then
             ;; Uncompressed packet framing: [VarInt(decomp_len + 1)] [0x00] [decompressed_payload]
-            ;; Calculate VarInt length for (decomp_len + 1) in scratch at Page 2 (131072)
             (local.set $tmp_n (call $write_varint (i32.const 131072) (i32.add (local.get $decomp_len) (i32.const 1))))
-            ;; Total header length = $tmp_n + 1 (for 0x00)
             (local.set $hdr_len (i32.add (local.get $tmp_n) (i32.const 1)))
-            (local.set $frame_ptr (i32.sub (i32.const 262150) (local.get $hdr_len)))
+            (local.set $frame_ptr (i32.sub (i32.add (global.get $DECOMP_BUF) (i32.const 16)) (local.get $hdr_len)))
             ;; Write VarInt at $frame_ptr
             (drop (call $write_varint (local.get $frame_ptr) (i32.add (local.get $decomp_len) (i32.const 1))))
             ;; Write 0x00 at ($frame_ptr + $tmp_n)
@@ -605,8 +921,9 @@
             (i32.store (i32.const 65556) (local.get $frame_ptr))
             (i32.store (i32.const 65560) (local.get $total_payload_len))
 
-            ;; Decompressed game payloads (chunks, lighting, entity data) must always defer
-            ;; to enable full 20ms aggregation batching into continuous Zstd streams.
+            (global.set $last_consumed (local.get $total_len))
+            (global.set $compression_enabled (i32.const 1))
+            ;; Decompressed game payloads must always defer so they batch into the zstd stream.
             (return (call $pack_result (i32.const 3) (i32.const 65552)))
           )
         )
@@ -626,22 +943,46 @@
     (local.set $pid_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
 
     (if (i32.eq (local.get $pid_n) (i32.const 0))
-      (then (return (call $pack_result (i32.const 1) (local.get $total_len))))
+      (then (return (call $finish_frame (i32.const 1) (local.get $total_len))))
+    )
+
+    (call $session_hooks
+      (local.get $pid)
+      (i32.add (local.get $p) (local.get $pid_n))
+      (i32.add (local.get $buf_ptr) (local.get $total_len))
     )
 
     (if (call $is_urgent_packet (local.get $pid))
       (then
-        (return (call $pack_result (i32.const 2) (local.get $total_len)))
+        (return (call $finish_frame (i32.const 2) (local.get $total_len)))
       )
     )
 
-    (call $pack_result (i32.const 1) (local.get $total_len))
+    (call $finish_frame (i32.const 1) (local.get $total_len))
   )
 
   ;; ---------------------------------------------------------------------------
   ;; State 2: Streaming Egress Logic (Tunnel -> Local Socket)
   ;; Recompresses packets when data_length == 0 and uncompressed payload >= 256
   ;; ---------------------------------------------------------------------------
+
+  (func $egress_emit (param $ptr i32) (param $len i32) (param $consumed i32) (result i64)
+    (if (global.get $encryption_enabled)
+      (then
+        (drop (call $crypto_aes_cfb8
+          (global.get $AES_KEY)
+          (global.get $ENC_IV)
+          (local.get $ptr)
+          (local.get $len)
+          (i32.const 1)
+        ))
+      )
+    )
+    (i32.store (i32.const 65552) (local.get $consumed))
+    (i32.store (i32.const 65556) (local.get $ptr))
+    (i32.store (i32.const 65560) (local.get $len))
+    (call $pack_result (i32.const 3) (i32.const 65552))
+  )
 
   (func $poll_egress (param $buf_ptr i32) (param $buf_len i32) (result i64)
     (local $tmp i64)
@@ -661,6 +1002,19 @@
     (local $hdr_len i32)
     (local $frame_ptr i32)
     (local $total_out_len i32)
+    (local $pid i32)
+    (local $pid_n i32)
+    (local $body_ptr i32)
+
+    (if (global.get $encryption_pending)
+      (then
+        (global.set $encryption_enabled (i32.const 1))
+        (global.set $encryption_pending (i32.const 0))
+      )
+    )
+    (if (i32.and (global.get $waiting_key) (i32.eqz (global.get $has_aes_key)))
+      (then (return (call $pack_result (i32.const 6) (i32.const 0))))
+    )
 
     ;; Empty buffer: NEED_MORE_DATA (Action 0)
     (if (i32.le_s (local.get $buf_len) (i32.const 0))
@@ -703,47 +1057,46 @@
         (local.set $raw_payload_ptr (i32.add (local.get $p) (local.get $data_len_n)))
         (local.set $raw_payload_len (i32.sub (local.get $pkt_len) (local.get $data_len_n)))
 
-        ;; Recompress threshold: dynamic threshold from global
-        (if (i32.ge_u (local.get $raw_payload_len) (global.get $recompress_threshold))
+        (local.set $body_ptr (local.get $raw_payload_ptr))
+        (local.set $tmp (call $read_varint (local.get $body_ptr) (i32.add (local.get $buf_ptr) (local.get $total_len))))
+        (local.set $pid (i32.wrap_i64 (local.get $tmp)))
+        (local.set $pid_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+        (if (i32.gt_s (local.get $pid_n) (i32.const 0))
           (then
-            ;; Compress into Page 4 + 16 (262160), leaving 16 bytes headroom for two VarInts
+            (call $session_hooks
+              (local.get $pid)
+              (i32.add (local.get $body_ptr) (local.get $pid_n))
+              (i32.add (local.get $buf_ptr) (local.get $total_len))
+            )
+          )
+        )
+
+        ;; Recompress when threshold > 0 and payload is large enough
+        (if (i32.and
+              (i32.gt_s (global.get $recompress_threshold) (i32.const 0))
+              (i32.ge_u (local.get $raw_payload_len) (global.get $recompress_threshold))
+            )
+          (then
             (local.set $comp_len
               (call $deflate_compress
                 (local.get $raw_payload_ptr)
                 (local.get $raw_payload_len)
-                (i32.const 262160)
-                (i32.const 3145712)
+                (i32.add (global.get $DECOMP_BUF) (i32.const 16))
+                (i32.sub (global.get $DECOMP_MAX) (i32.const 16))
                 (global.get $deflate_level)
               )
             )
             (if (i32.gt_s (local.get $comp_len) (i32.const 0))
               (then
-                ;; Form [Packet Length: VarInt] [Data Length: VarInt(raw_payload_len)] [compressed data]
-                ;; 1. Write Data Length VarInt in scratch (131072)
                 (local.set $dl_varint_n (call $write_varint (i32.const 131072) (local.get $raw_payload_len)))
                 (local.set $inner_pkt_len (i32.add (local.get $dl_varint_n) (local.get $comp_len)))
-                ;; 2. Write Packet Length VarInt in scratch (131080)
                 (local.set $pkt_varint_n (call $write_varint (i32.const 131080) (local.get $inner_pkt_len)))
-
                 (local.set $hdr_len (i32.add (local.get $pkt_varint_n) (local.get $dl_varint_n)))
-                (local.set $frame_ptr (i32.sub (i32.const 262160) (local.get $hdr_len)))
-
-                ;; Copy Packet Length VarInt
+                (local.set $frame_ptr (i32.sub (i32.add (global.get $DECOMP_BUF) (i32.const 16)) (local.get $hdr_len)))
                 (call $memcpy (local.get $frame_ptr) (i32.const 131080) (local.get $pkt_varint_n))
-                ;; Copy Data Length VarInt
                 (call $memcpy (i32.add (local.get $frame_ptr) (local.get $pkt_varint_n)) (i32.const 131072) (local.get $dl_varint_n))
-
                 (local.set $total_out_len (i32.add (local.get $hdr_len) (local.get $comp_len)))
-
-                ;; Write struct StreamFrame at 65552:
-                ;; offset 65552: consumed_len (i32) = $total_len
-                ;; offset 65556: payload_ptr (i32) = $frame_ptr
-                ;; offset 65560: payload_len (i32) = $total_out_len
-                (i32.store (i32.const 65552) (local.get $total_len))
-                (i32.store (i32.const 65556) (local.get $frame_ptr))
-                (i32.store (i32.const 65560) (local.get $total_out_len))
-
-                (return (call $pack_result (i32.const 3) (i32.const 65552)))
+                (return (call $egress_emit (local.get $frame_ptr) (local.get $total_out_len) (local.get $total_len)))
               )
             )
           )
@@ -751,7 +1104,13 @@
       )
     )
 
-    ;; Fallback / below threshold: passthrough frame as-is
+    ;; Passthrough. Encrypt in a scratch copy when a session key is active.
+    (if (global.get $encryption_enabled)
+      (then
+        (call $memcpy (global.get $DECOMP_BUF) (local.get $buf_ptr) (local.get $total_len))
+        (return (call $egress_emit (global.get $DECOMP_BUF) (local.get $total_len) (local.get $total_len)))
+      )
+    )
     (call $pack_result (i32.const 1) (local.get $total_len))
   )
 

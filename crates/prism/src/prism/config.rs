@@ -513,12 +513,15 @@ pub struct ManagedMinecraftLanDiscoveryDocument {
     pub motd_prefix: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedOptimizerClientDocument {
     #[serde(default)]
     pub enabled: bool,
     pub zstd_window_log: Option<u32>,
+    pub zstd_window_log_uplink: Option<u32>,
+    pub zstd_window_log_downlink: Option<u32>,
+    pub zstd_dictionary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -571,14 +574,22 @@ pub struct ManagedTunnelServiceDocument {
     pub optimizer: Option<ManagedOptimizerDocument>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedOptimizerDocument {
     #[serde(default)]
     pub enabled: bool,
     pub flush_interval_ms: Option<u64>,
+    pub flush_interval_min_ms: Option<u64>,
+    pub flush_interval_max_ms: Option<u64>,
+    pub adaptive_flush: Option<bool>,
+    pub buffer_threshold: Option<usize>,
+    pub buffer_threshold_uplink: Option<usize>,
     pub zstd_window_log: Option<u32>,
+    pub zstd_window_log_uplink: Option<u32>,
+    pub zstd_window_log_downlink: Option<u32>,
     pub zstd_level: Option<i32>,
+    pub zstd_dictionary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -701,6 +712,9 @@ pub struct TunnelClientConfig {
 pub struct OptimizerClientConfig {
     pub enabled: bool,
     pub zstd_window_log: Option<u32>,
+    pub zstd_window_log_uplink: Option<u32>,
+    pub zstd_window_log_downlink: Option<u32>,
+    pub zstd_dictionary: Option<String>,
 }
 
 impl Default for OptimizerClientConfig {
@@ -708,6 +722,9 @@ impl Default for OptimizerClientConfig {
         Self {
             enabled: false,
             zstd_window_log: Some(23),
+            zstd_window_log_uplink: Some(18),
+            zstd_window_log_downlink: Some(23),
+            zstd_dictionary: None,
         }
     }
 }
@@ -716,6 +733,18 @@ impl Default for OptimizerClientConfig {
 impl OptimizerClientConfig {
     pub fn zstd_window_log(&self) -> u32 {
         self.zstd_window_log.unwrap_or(23)
+    }
+
+    pub fn zstd_window_log_uplink(&self) -> u32 {
+        self.zstd_window_log_uplink
+            .or(self.zstd_window_log)
+            .unwrap_or(18)
+    }
+
+    pub fn zstd_window_log_downlink(&self) -> u32 {
+        self.zstd_window_log_downlink
+            .or(self.zstd_window_log)
+            .unwrap_or(23)
     }
 }
 
@@ -815,8 +844,16 @@ impl Default for AcmeConfig {
 pub struct OptimizerConfig {
     pub enabled: bool,
     pub flush_interval_ms: Option<u64>,
+    pub flush_interval_min_ms: Option<u64>,
+    pub flush_interval_max_ms: Option<u64>,
+    pub adaptive_flush: Option<bool>,
+    pub buffer_threshold: Option<usize>,
+    pub buffer_threshold_uplink: Option<usize>,
     pub zstd_window_log: Option<u32>,
+    pub zstd_window_log_uplink: Option<u32>,
+    pub zstd_window_log_downlink: Option<u32>,
     pub zstd_level: Option<i32>,
+    pub zstd_dictionary: Option<String>,
 }
 
 impl Default for OptimizerConfig {
@@ -824,8 +861,16 @@ impl Default for OptimizerConfig {
         Self {
             enabled: false,
             flush_interval_ms: Some(20),
+            flush_interval_min_ms: Some(8),
+            flush_interval_max_ms: Some(50),
+            adaptive_flush: Some(true),
+            buffer_threshold: Some(64 * 1024),
+            buffer_threshold_uplink: Some(16 * 1024),
             zstd_window_log: Some(23),
+            zstd_window_log_uplink: Some(18),
+            zstd_window_log_downlink: Some(23),
             zstd_level: Some(3),
+            zstd_dictionary: None,
         }
     }
 }
@@ -836,8 +881,40 @@ impl OptimizerConfig {
         self.flush_interval_ms.unwrap_or(20)
     }
 
+    pub fn flush_interval_min_ms(&self) -> u64 {
+        self.flush_interval_min_ms.unwrap_or(8)
+    }
+
+    pub fn flush_interval_max_ms(&self) -> u64 {
+        self.flush_interval_max_ms.unwrap_or(50)
+    }
+
+    pub fn adaptive_flush(&self) -> bool {
+        self.adaptive_flush.unwrap_or(true)
+    }
+
+    pub fn buffer_threshold(&self) -> usize {
+        self.buffer_threshold.unwrap_or(64 * 1024)
+    }
+
+    pub fn buffer_threshold_uplink(&self) -> usize {
+        self.buffer_threshold_uplink.unwrap_or(16 * 1024)
+    }
+
     pub fn zstd_window_log(&self) -> u32 {
         self.zstd_window_log.unwrap_or(23)
+    }
+
+    pub fn zstd_window_log_uplink(&self) -> u32 {
+        self.zstd_window_log_uplink
+            .or(self.zstd_window_log)
+            .unwrap_or(18)
+    }
+
+    pub fn zstd_window_log_downlink(&self) -> u32 {
+        self.zstd_window_log_downlink
+            .or(self.zstd_window_log)
+            .unwrap_or(23)
     }
 
     pub fn zstd_level(&self) -> i32 {
@@ -1089,6 +1166,9 @@ struct FileOptimizerClient {
     #[serde(default)]
     enabled: bool,
     zstd_window_log: Option<u32>,
+    zstd_window_log_uplink: Option<u32>,
+    zstd_window_log_downlink: Option<u32>,
+    zstd_dictionary: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1137,8 +1217,16 @@ struct FileOptimizer {
     #[serde(default)]
     enabled: bool,
     flush_interval_ms: Option<u64>,
+    flush_interval_min_ms: Option<u64>,
+    flush_interval_max_ms: Option<u64>,
+    adaptive_flush: Option<bool>,
+    buffer_threshold: Option<usize>,
+    buffer_threshold_uplink: Option<usize>,
     zstd_window_log: Option<u32>,
+    zstd_window_log_uplink: Option<u32>,
+    zstd_window_log_downlink: Option<u32>,
     zstd_level: Option<i32>,
+    zstd_dictionary: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1476,6 +1564,9 @@ impl Config {
                 let optimizer = c.optimizer.as_ref().map(|to| OptimizerClientConfig {
                     enabled: to.enabled,
                     zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
+                    zstd_window_log_uplink: to.zstd_window_log_uplink,
+                    zstd_window_log_downlink: to.zstd_window_log_downlink,
+                    zstd_dictionary: to.zstd_dictionary.clone(),
                 });
 
                 let (fake_lan_broadcast, motd_prefix) = if let Some(ref d) = c.discovery {
@@ -1536,8 +1627,16 @@ impl Config {
                     let optimizer = s.optimizer.as_ref().map(|to| OptimizerConfig {
                         enabled: to.enabled,
                         flush_interval_ms: Some(to.flush_interval_ms.unwrap_or(20)),
+                        flush_interval_min_ms: to.flush_interval_min_ms,
+                        flush_interval_max_ms: to.flush_interval_max_ms,
+                        adaptive_flush: to.adaptive_flush,
+                        buffer_threshold: to.buffer_threshold,
+                        buffer_threshold_uplink: to.buffer_threshold_uplink,
                         zstd_window_log: Some(to.zstd_window_log.unwrap_or(23)),
+                        zstd_window_log_uplink: to.zstd_window_log_uplink,
+                        zstd_window_log_downlink: to.zstd_window_log_downlink,
                         zstd_level: Some(to.zstd_level.unwrap_or(3)),
+                        zstd_dictionary: to.zstd_dictionary.clone(),
                     });
 
                     cfg.tunnel.services.push(TunnelServiceConfig {
@@ -1984,6 +2083,9 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                 optimizer: client.optimizer.as_ref().map(|to| FileOptimizerClient {
                     enabled: to.enabled,
                     zstd_window_log: to.zstd_window_log,
+                    zstd_window_log_uplink: to.zstd_window_log_uplink,
+                    zstd_window_log_downlink: to.zstd_window_log_downlink,
+                    zstd_dictionary: to.zstd_dictionary.clone(),
                 }),
                 discovery: client.discovery.as_ref().map(|d| FileClientDiscovery {
                     minecraft_lan: d
@@ -2033,8 +2135,16 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                         optimizer: service.optimizer.as_ref().map(|to| FileOptimizer {
                             enabled: to.enabled,
                             flush_interval_ms: to.flush_interval_ms,
+                            flush_interval_min_ms: to.flush_interval_min_ms,
+                            flush_interval_max_ms: to.flush_interval_max_ms,
+                            adaptive_flush: to.adaptive_flush,
+                            buffer_threshold: to.buffer_threshold,
+                            buffer_threshold_uplink: to.buffer_threshold_uplink,
                             zstd_window_log: to.zstd_window_log,
+                            zstd_window_log_uplink: to.zstd_window_log_uplink,
+                            zstd_window_log_downlink: to.zstd_window_log_downlink,
                             zstd_level: to.zstd_level,
+                            zstd_dictionary: to.zstd_dictionary.clone(),
                         }),
                     })
                     .collect(),

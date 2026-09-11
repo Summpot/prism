@@ -20,11 +20,37 @@ use crate::prism::config::{
 };
 use crate::prism::middleware::FramePriority;
 
+mod dict;
+pub mod pipeline;
+mod stats;
+pub use dict::*;
+pub use stats::*;
+
 pub const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(20);
+pub const DEFAULT_FLUSH_INTERVAL_MIN: Duration = Duration::from_millis(8);
+pub const DEFAULT_FLUSH_INTERVAL_MAX: Duration = Duration::from_millis(50);
 pub const DEFAULT_BUFFER_THRESHOLD: usize = 64 * 1024; // 64 KB
+pub const DEFAULT_BUFFER_THRESHOLD_UPLINK: usize = 16 * 1024;
 pub const DEFAULT_ZSTD_LEVEL: i32 = 3;
 pub const DEFAULT_ZSTD_WINDOW_LOG: u32 = 23; // 8 MB sliding window
+pub const DEFAULT_ZSTD_WINDOW_LOG_UPLINK: u32 = 18; // 256 KB
 pub const MAX_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32 MB guard limit
+
+/// Bits 0-29 of the 4-byte frame header are the payload length.
+pub const FRAME_LEN_MASK: u32 = 0x3FFF_FFFF;
+/// Payload is stored uncompressed (compressor would have expanded it).
+pub const FRAME_FLAG_RAW: u32 = 1 << 31;
+/// Payload is opaque session data for the peer middleware, not game bytes.
+pub const FRAME_FLAG_CONTROL: u32 = 1 << 30;
+
+fn pack_frame_header(len: usize, flags: u32) -> [u8; 4] {
+    (((len as u32) & FRAME_LEN_MASK) | flags).to_be_bytes()
+}
+
+fn unpack_frame_header(header: [u8; 4]) -> (usize, u32) {
+    let raw = u32::from_be_bytes(header);
+    ((raw & FRAME_LEN_MASK) as usize, raw & !FRAME_LEN_MASK)
+}
 
 // ============================================================================
 // Configuration
@@ -35,9 +61,16 @@ pub const MAX_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32 MB guard limit
 pub struct OptimizerConfig {
     pub enabled: bool,
     pub flush_interval: Duration,
+    pub flush_interval_min: Duration,
+    pub flush_interval_max: Duration,
+    pub adaptive_flush: bool,
     pub buffer_threshold: usize,
+    pub buffer_threshold_uplink: usize,
     pub zstd_level: i32,
     pub zstd_window_log: u32,
+    pub zstd_window_log_uplink: u32,
+    pub zstd_window_log_downlink: u32,
+    pub dictionary: Option<Vec<u8>>,
 }
 
 impl Default for OptimizerConfig {
@@ -45,67 +78,155 @@ impl Default for OptimizerConfig {
         Self {
             enabled: false,
             flush_interval: DEFAULT_FLUSH_INTERVAL,
+            flush_interval_min: DEFAULT_FLUSH_INTERVAL_MIN,
+            flush_interval_max: DEFAULT_FLUSH_INTERVAL_MAX,
+            adaptive_flush: true,
             buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
+            buffer_threshold_uplink: DEFAULT_BUFFER_THRESHOLD_UPLINK,
             zstd_level: DEFAULT_ZSTD_LEVEL,
             zstd_window_log: DEFAULT_ZSTD_WINDOW_LOG,
+            zstd_window_log_uplink: DEFAULT_ZSTD_WINDOW_LOG_UPLINK,
+            zstd_window_log_downlink: DEFAULT_ZSTD_WINDOW_LOG,
+            dictionary: None,
         }
     }
 }
 
+impl OptimizerConfig {
+    pub fn window_log_for(&self, direction: TrafficDirection) -> u32 {
+        match direction {
+            TrafficDirection::Uplink => self.zstd_window_log_uplink,
+            TrafficDirection::Downlink => self.zstd_window_log_downlink,
+        }
+    }
+
+    pub fn buffer_threshold_for(&self, direction: TrafficDirection) -> usize {
+        match direction {
+            TrafficDirection::Uplink => self.buffer_threshold_uplink,
+            TrafficDirection::Downlink => self.buffer_threshold,
+        }
+    }
+
+    pub fn dictionary_id(&self) -> u32 {
+        self.dictionary
+            .as_deref()
+            .map(dictionary_id)
+            .unwrap_or(0)
+    }
+}
+
+fn opt_ms(v: Option<u64>, default: u64) -> Duration {
+    Duration::from_millis(v.unwrap_or(default))
+}
+
 impl From<&ManagedOptimizerDocument> for OptimizerConfig {
     fn from(doc: &ManagedOptimizerDocument) -> Self {
+        let window = doc.zstd_window_log.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG);
         Self {
             enabled: doc.enabled,
-            flush_interval: Duration::from_millis(doc.flush_interval_ms.unwrap_or(20)),
-            buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
+            flush_interval: opt_ms(doc.flush_interval_ms, 20),
+            flush_interval_min: opt_ms(doc.flush_interval_min_ms, 8),
+            flush_interval_max: opt_ms(doc.flush_interval_max_ms, 50),
+            adaptive_flush: doc.adaptive_flush.unwrap_or(true),
+            buffer_threshold: doc.buffer_threshold.unwrap_or(DEFAULT_BUFFER_THRESHOLD),
+            buffer_threshold_uplink: doc
+                .buffer_threshold_uplink
+                .unwrap_or(DEFAULT_BUFFER_THRESHOLD_UPLINK),
             zstd_level: doc.zstd_level.unwrap_or(DEFAULT_ZSTD_LEVEL),
-            zstd_window_log: doc.zstd_window_log.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG),
+            zstd_window_log: window,
+            zstd_window_log_uplink: doc.zstd_window_log_uplink.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG_UPLINK),
+            zstd_window_log_downlink: doc.zstd_window_log_downlink.unwrap_or(window),
+            dictionary: resolve_dictionary(doc.zstd_dictionary.as_deref(), ""),
         }
     }
 }
 
 impl From<&ManagedOptimizerClientDocument> for OptimizerConfig {
     fn from(doc: &ManagedOptimizerClientDocument) -> Self {
+        let window = doc.zstd_window_log.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG);
         Self {
             enabled: doc.enabled,
-            flush_interval: DEFAULT_FLUSH_INTERVAL,
-            buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
-            zstd_level: DEFAULT_ZSTD_LEVEL,
-            zstd_window_log: doc.zstd_window_log.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG),
+            zstd_window_log: window,
+            zstd_window_log_uplink: doc
+                .zstd_window_log_uplink
+                .unwrap_or(DEFAULT_ZSTD_WINDOW_LOG_UPLINK),
+            zstd_window_log_downlink: doc.zstd_window_log_downlink.unwrap_or(window),
+            dictionary: resolve_dictionary(doc.zstd_dictionary.as_deref(), ""),
+            ..Self::default()
         }
     }
 }
 
 impl From<&PrismOptimizerConfig> for OptimizerConfig {
     fn from(cfg: &PrismOptimizerConfig) -> Self {
+        let window = cfg.zstd_window_log();
         Self {
             enabled: cfg.enabled,
             flush_interval: Duration::from_millis(cfg.flush_interval_ms()),
-            buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
+            flush_interval_min: Duration::from_millis(cfg.flush_interval_min_ms()),
+            flush_interval_max: Duration::from_millis(cfg.flush_interval_max_ms()),
+            adaptive_flush: cfg.adaptive_flush(),
+            buffer_threshold: cfg.buffer_threshold(),
+            buffer_threshold_uplink: cfg.buffer_threshold_uplink(),
             zstd_level: cfg.zstd_level(),
-            zstd_window_log: cfg.zstd_window_log(),
+            zstd_window_log: window,
+            zstd_window_log_uplink: cfg.zstd_window_log_uplink(),
+            zstd_window_log_downlink: cfg.zstd_window_log_downlink(),
+            dictionary: resolve_dictionary(cfg.zstd_dictionary.as_deref(), ""),
         }
     }
 }
 
 impl From<&OptimizerClientConfig> for OptimizerConfig {
     fn from(cfg: &OptimizerClientConfig) -> Self {
+        let window = cfg.zstd_window_log();
         Self {
             enabled: cfg.enabled,
-            flush_interval: DEFAULT_FLUSH_INTERVAL,
-            buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
-            zstd_level: DEFAULT_ZSTD_LEVEL,
-            zstd_window_log: cfg.zstd_window_log(),
+            zstd_window_log: window,
+            zstd_window_log_uplink: cfg.zstd_window_log_uplink(),
+            zstd_window_log_downlink: cfg.zstd_window_log_downlink(),
+            dictionary: resolve_dictionary(cfg.zstd_dictionary.as_deref(), ""),
+            ..Self::default()
         }
     }
 }
 
-// ============================================================================
-// Traffic Observability & Statistics
-// ============================================================================
+/// Picks a flush interval between `min` and `max` from observed link rate and savings.
+pub fn adaptive_flush_interval(
+    base: Duration,
+    min: Duration,
+    max: Duration,
+    stats: Option<&OptimizerStats>,
+) -> Duration {
+    let Some(stats) = stats else {
+        return base;
+    };
+    let snap = stats.snapshot();
+    let min_ms = min.as_millis() as f64;
+    let max_ms = max.as_millis() as f64;
+    let base_ms = base.as_millis() as f64;
+    if max_ms <= min_ms {
+        return base;
+    }
 
-mod stats;
-pub use stats::*;
+    let mut ms = base_ms;
+    if snap.link_rate_measured {
+        // Fast links: cut queuing delay. Slow links: wait for more compressible data.
+        let rate = snap.link_rate_bps;
+        if rate >= 100_000_000.0 {
+            ms = min_ms;
+        } else if rate <= 10_000_000.0 {
+            ms = max_ms;
+        } else {
+            let t = (rate - 10_000_000.0) / 90_000_000.0;
+            ms = max_ms + (min_ms - max_ms) * t;
+        }
+    }
+    if snap.window.saved_ratio >= 0.50 {
+        ms = ms.max(base_ms);
+    }
+    Duration::from_millis(ms.round().clamp(min_ms, max_ms) as u64)
+}
 
 // ============================================================================
 // Component 1: Batcher (Time-slice aggregator)
@@ -142,6 +263,11 @@ pub struct Batcher {
 }
 
 impl Batcher {
+    /// Updates the time-slice interval (used by adaptive flush).
+    pub fn set_flush_interval(&mut self, interval: Duration) {
+        self.config.flush_interval = interval.max(Duration::from_millis(1));
+    }
+
     /// Creates a new `Batcher` with the specified configuration.
     pub fn new(config: BatcherConfig) -> Self {
         let capacity = config.buffer_threshold;
@@ -277,6 +403,7 @@ impl Batcher {
 pub struct CompressorConfig {
     pub compression_level: i32,
     pub window_log: u32,
+    pub dictionary: Option<Vec<u8>>,
 }
 
 impl Default for CompressorConfig {
@@ -284,6 +411,7 @@ impl Default for CompressorConfig {
         Self {
             compression_level: DEFAULT_ZSTD_LEVEL,
             window_log: DEFAULT_ZSTD_WINDOW_LOG,
+            dictionary: None,
         }
     }
 }
@@ -299,10 +427,20 @@ pub struct ZstdStreamCompressor {
 }
 
 impl ZstdStreamCompressor {
+    fn build_encoder(config: &CompressorConfig) -> io::Result<Encoder<'static>> {
+        let mut encoder = if let Some(ref dict) = config.dictionary {
+            Encoder::with_dictionary(config.compression_level, dict)?
+        } else {
+            Encoder::new(config.compression_level)?
+        };
+        encoder.set_parameter(CParameter::WindowLog(config.window_log))?;
+        encoder.set_parameter(CParameter::ChecksumFlag(false))?;
+        Ok(encoder)
+    }
+
     /// Creates a new continuous stream compressor with the specified configuration.
     pub fn new(config: CompressorConfig) -> io::Result<Self> {
-        let mut encoder = Encoder::new(config.compression_level)?;
-        encoder.set_parameter(CParameter::WindowLog(config.window_log))?;
+        let encoder = Self::build_encoder(&config)?;
         Ok(Self { encoder, config })
     }
 
@@ -350,9 +488,7 @@ impl ZstdStreamCompressor {
 
     /// Resets the encoder state and dictionary history.
     pub fn reset(&mut self) -> io::Result<()> {
-        self.encoder = Encoder::new(self.config.compression_level)?;
-        self.encoder
-            .set_parameter(CParameter::WindowLog(self.config.window_log))?;
+        self.encoder = Self::build_encoder(&self.config)?;
         Ok(())
     }
 }
@@ -365,12 +501,14 @@ impl ZstdStreamCompressor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecompressorConfig {
     pub window_log: u32,
+    pub dictionary: Option<Vec<u8>>,
 }
 
 impl Default for DecompressorConfig {
     fn default() -> Self {
         Self {
             window_log: DEFAULT_ZSTD_WINDOW_LOG,
+            dictionary: None,
         }
     }
 }
@@ -385,10 +523,19 @@ pub struct ZstdStreamDecompressor {
 }
 
 impl ZstdStreamDecompressor {
+    fn build_decoder(config: &DecompressorConfig) -> io::Result<Decoder<'static>> {
+        let mut decoder = if let Some(ref dict) = config.dictionary {
+            Decoder::with_dictionary(dict)?
+        } else {
+            Decoder::new()?
+        };
+        decoder.set_parameter(DParameter::WindowLogMax(config.window_log))?;
+        Ok(decoder)
+    }
+
     /// Creates a new continuous stream decompressor with the specified configuration.
     pub fn new(config: DecompressorConfig) -> io::Result<Self> {
-        let mut decoder = Decoder::new()?;
-        decoder.set_parameter(DParameter::WindowLogMax(config.window_log))?;
+        let decoder = Self::build_decoder(&config)?;
         Ok(Self { decoder, config })
     }
 
@@ -440,9 +587,7 @@ impl ZstdStreamDecompressor {
 
     /// Resets the decoder state and dictionary history.
     pub fn reset(&mut self) -> io::Result<()> {
-        self.decoder = Decoder::new()?;
-        self.decoder
-            .set_parameter(DParameter::WindowLogMax(self.config.window_log))?;
+        self.decoder = Self::build_decoder(&self.config)?;
         Ok(())
     }
 }
@@ -462,7 +607,10 @@ pub fn encode_batch(
     Ok(out)
 }
 
-/// Encodes a raw batch into an existing buffer as `[chunk_len: u32 BE][compressed_bytes]`.
+/// Encodes a raw batch into an existing buffer as `[header: u32 BE][payload]`.
+///
+/// The header stores the payload length in the low 30 bits. [`FRAME_FLAG_RAW`] is set
+/// when zstd would not shrink the batch, so the payload is the original bytes.
 pub fn encode_batch_into(
     compressor: &mut ZstdStreamCompressor,
     raw_batch: &[u8],
@@ -476,14 +624,36 @@ pub fn encode_batch_into(
     let payload_start = output.len();
 
     compressor.compress_batch_into(raw_batch, output)?;
+    // Always emit a zstd block. Sending a parallel uncompressed payload would
+    // desynchronize the decoder's sliding window, which is built from decoded
+    // zstd output. zstd already stores incompressible input as raw blocks.
     let payload_len = output.len() - payload_start;
-    let len_be = (payload_len as u32).to_be_bytes();
-    output[header_start..header_start + 4].copy_from_slice(&len_be);
+    let header = pack_frame_header(payload_len, 0);
+    output[header_start..header_start + 4].copy_from_slice(&header);
 
     Ok(payload_len + 4)
 }
 
+/// Encodes an opaque control payload (never compressed, never delivered as stream data).
+pub fn encode_control_frame(payload: &[u8], output: &mut Vec<u8>) -> io::Result<usize> {
+    if payload.is_empty() {
+        return Ok(0);
+    }
+    if payload.len() > MAX_CHUNK_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("control frame {} exceeds max {MAX_CHUNK_SIZE}", payload.len()),
+        ));
+    }
+    output.extend_from_slice(&pack_frame_header(payload.len(), FRAME_FLAG_CONTROL));
+    output.extend_from_slice(payload);
+    Ok(payload.len() + 4)
+}
+
 /// Decodes a sequence of length-prefixed chunks (`[u32 BE][payload]`) from a byte slice.
+///
+/// Control frames are skipped (they are not stream data). Use [`OptimizedReader`] to
+/// surface control payloads to middleware.
 pub fn decode_stream(
     decompressor: &mut ZstdStreamDecompressor,
     mut framed_bytes: &[u8],
@@ -496,7 +666,8 @@ pub fn decode_stream(
                 "incomplete chunk length prefix in stream",
             ));
         }
-        let chunk_len = u32::from_be_bytes(framed_bytes[..4].try_into().unwrap()) as usize;
+        let header: [u8; 4] = framed_bytes[..4].try_into().unwrap();
+        let (chunk_len, flags) = unpack_frame_header(header);
         framed_bytes = &framed_bytes[4..];
 
         if chunk_len > MAX_CHUNK_SIZE {
@@ -515,7 +686,14 @@ pub fn decode_stream(
 
         let payload = &framed_bytes[..chunk_len];
         framed_bytes = &framed_bytes[chunk_len..];
-        decompressor.decompress_chunk_into(payload, &mut decompressed)?;
+        if flags & FRAME_FLAG_CONTROL != 0 {
+            continue;
+        }
+        if flags & FRAME_FLAG_RAW != 0 {
+            decompressed.extend_from_slice(payload);
+        } else {
+            decompressor.decompress_chunk_into(payload, &mut decompressed)?;
+        }
     }
     Ok(decompressed)
 }
@@ -535,6 +713,10 @@ pin_project! {
         write_pos: usize,
         stats: Vec<SharedOptimizerStats>,
         direction: TrafficDirection,
+        flush_interval: Duration,
+        flush_interval_min: Duration,
+        flush_interval_max: Duration,
+        adaptive_flush: bool,
     }
 }
 
@@ -545,6 +727,7 @@ impl<W> OptimizedWriter<W> {
         batcher_config: BatcherConfig,
         compressor_config: CompressorConfig,
     ) -> io::Result<Self> {
+        let flush_interval = batcher_config.flush_interval;
         Ok(Self {
             inner,
             batcher: Batcher::new(batcher_config),
@@ -553,6 +736,10 @@ impl<W> OptimizedWriter<W> {
             write_pos: 0,
             stats: Vec::new(),
             direction: TrafficDirection::Uplink,
+            flush_interval,
+            flush_interval_min: DEFAULT_FLUSH_INTERVAL_MIN,
+            flush_interval_max: DEFAULT_FLUSH_INTERVAL_MAX,
+            adaptive_flush: true,
         })
     }
 
@@ -642,6 +829,12 @@ impl<W> OptimizedWriter<W> {
         }
     }
 
+    fn record_explicit(&self) {
+        for s in &self.stats {
+            s.inc_explicit();
+        }
+    }
+
     /// Returns a reference to the inner writer.
     pub fn get_ref(&self) -> &W {
         &self.inner
@@ -655,6 +848,36 @@ impl<W> OptimizedWriter<W> {
     /// Unwraps the inner writer, discarding any unwritten buffered data.
     pub fn into_inner(self) -> W {
         self.inner
+    }
+
+    /// Configures adaptive flush bounds. `base` is the configured interval.
+    pub fn with_adaptive_flush(
+        mut self,
+        enabled: bool,
+        base: Duration,
+        min: Duration,
+        max: Duration,
+    ) -> Self {
+        self.adaptive_flush = enabled;
+        self.flush_interval = base;
+        self.flush_interval_min = min;
+        self.flush_interval_max = max;
+        self.batcher.set_flush_interval(base);
+        self
+    }
+
+    fn apply_adaptive_flush(&mut self) {
+        if !self.adaptive_flush {
+            return;
+        }
+        let stats = self.stats.first().map(|s| s.as_ref());
+        let next = adaptive_flush_interval(
+            self.flush_interval,
+            self.flush_interval_min,
+            self.flush_interval_max,
+            stats,
+        );
+        self.batcher.set_flush_interval(next);
     }
 
     /// Returns the remaining duration until a time-based batch flush is due.
@@ -679,6 +902,7 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
     ) -> io::Result<()> {
         // Flush any pending write_buf
         self.flush_pending_write_buf().await?;
+        self.apply_adaptive_flush();
 
         self.record_raw(metric_raw_len);
 
@@ -722,7 +946,7 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
                 .map(|t| t.elapsed().as_micros() as u64)
                 .unwrap_or(0);
             let batch = self.batcher.flush();
-            self.record_threshold();
+            self.record_explicit();
             let start = Instant::now();
             let framed = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
             let comp_us = start.elapsed().as_micros() as u64;
@@ -737,6 +961,7 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
     /// Checks if a time-slice flush is due and writes the flushed batch to `inner`.
     /// Returns `true` if a batch was flushed.
     pub async fn flush_if_due(&mut self) -> io::Result<bool> {
+        self.apply_adaptive_flush();
         let queue_delay = self
             .batcher
             .first_frame_at()
@@ -754,6 +979,14 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         } else {
             Ok(false)
         }
+    }
+
+    /// Writes an opaque control payload immediately (not batched, not compressed).
+    pub async fn write_control(&mut self, payload: &[u8]) -> io::Result<()> {
+        self.flush_pending_write_buf().await?;
+        encode_control_frame(payload, &mut self.write_buf)?;
+        self.flush_pending_write_buf().await?;
+        Ok(())
     }
 
     async fn flush_pending_write_buf(&mut self) -> io::Result<()> {
@@ -865,15 +1098,18 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
     ) -> Poll<io::Result<usize>> {
         let mut this = self.project();
 
-        // 1. Flush any pending write buffer
-        if let Poll::Ready(Err(e)) = poll_drain_pinned(
+        // 1. Flush any pending write buffer. Stay pending while the link is
+        //    back-pressured so the batcher cannot grow without bound.
+        match poll_drain_pinned(
             this.inner.as_mut(),
             this.write_buf,
             this.write_pos,
             this.stats,
             cx,
         ) {
-            return Poll::Ready(Err(e));
+            Poll::Ready(Ok(())) => {}
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => return Poll::Pending,
         }
 
         let now_ms = unix_ms();
@@ -938,7 +1174,7 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
                 .unwrap_or(0);
             let batch = this.batcher.flush();
             for s in this.stats.iter() {
-                s.inc_threshold();
+                s.inc_explicit();
             }
             let start = Instant::now();
             let framed = match encode_batch_into(this.compressor, &batch, this.write_buf) {
@@ -989,6 +1225,8 @@ pin_project! {
         stats: Vec<SharedOptimizerStats>,
         record_raw_metrics: bool,
         direction: TrafficDirection,
+        pending_control: Vec<Vec<u8>>,
+        control_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
     }
 }
 
@@ -1008,6 +1246,8 @@ impl<R> OptimizedReader<R> {
             stats: Vec::new(),
             record_raw_metrics: true,
             direction: TrafficDirection::Downlink,
+            pending_control: Vec::new(),
+            control_tx: None,
         })
     }
 
@@ -1076,6 +1316,21 @@ impl<R> OptimizedReader<R> {
     pub fn into_inner(self) -> R {
         self.inner
     }
+
+    /// Drains control-frame payloads received since the last call.
+    pub fn take_control_frames(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.pending_control)
+    }
+
+    /// Sends each incoming control payload on `tx` as soon as the frame is parsed,
+    /// even if `poll_read` stays pending waiting for the next stream chunk.
+    pub fn with_control_tx(
+        mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    ) -> Self {
+        self.control_tx = Some(tx);
+        self
+    }
 }
 
 impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
@@ -1127,7 +1382,7 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
 
             // Parse chunk length if not already set
             if *this.chunk_len == 0 {
-                let len = u32::from_be_bytes(*this.header_buf) as usize;
+                let (len, _flags) = unpack_frame_header(*this.header_buf);
                 if len > MAX_CHUNK_SIZE {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1164,11 +1419,28 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
                 }
             }
 
-            // Decompress payload
+            let (_len, flags) = unpack_frame_header(*this.header_buf);
+
+            // Control frames are not stream data.
+            if flags & FRAME_FLAG_CONTROL != 0 {
+                let payload = this.payload_buf[..len].to_vec();
+                this.pending_control.push(payload.clone());
+                if let Some(tx) = this.control_tx.as_ref() {
+                    let _ = tx.send(payload);
+                }
+                *this.header_pos = 0;
+                *this.chunk_len = 0;
+                *this.payload_pos = 0;
+                continue;
+            }
+
             this.decompressed_buf.clear();
             *this.decompressed_pos = 0;
             let start = Instant::now();
-            if let Err(e) = this
+            if flags & FRAME_FLAG_RAW != 0 {
+                this.decompressed_buf
+                    .extend_from_slice(&this.payload_buf[..len]);
+            } else if let Err(e) = this
                 .decompressor
                 .decompress_chunk_into(&this.payload_buf[..len], this.decompressed_buf)
             {
@@ -1189,6 +1461,10 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
             *this.header_pos = 0;
             *this.chunk_len = 0;
             *this.payload_pos = 0;
+
+            if this.decompressed_buf.is_empty() {
+                continue;
+            }
 
             // Output decompressed bytes
             let avail = &this.decompressed_buf[*this.decompressed_pos..];
@@ -1498,6 +1774,7 @@ mod tests {
             flush_interval_ms: Some(15),
             zstd_window_log: Some(22),
             zstd_level: Some(5),
+            ..Default::default()
         };
         let cfg = OptimizerConfig::from(&doc);
         assert!(cfg.enabled);
@@ -1508,6 +1785,7 @@ mod tests {
         let client_doc = ManagedOptimizerClientDocument {
             enabled: true,
             zstd_window_log: Some(21),
+            ..Default::default()
         };
         let client_cfg = OptimizerConfig::from(&client_doc);
         assert!(client_cfg.enabled);
@@ -1548,7 +1826,7 @@ mod tests {
         writer.flush_batch().await.unwrap();
         let snap2 = stats.snapshot();
         assert_eq!(snap2.raw_bytes, (urgent_msg.len() + defer_msg.len()) as u64);
-        assert_eq!(snap2.threshold_batches, 1);
+        assert_eq!(snap2.explicit_batches, 1);
         assert!(snap2.saved_bytes > 0);
         assert!(snap2.saved_ratio > 0.0);
     }
@@ -1756,5 +2034,62 @@ mod tests {
         );
         assert!(snap.link_rate_bytes > 0 && snap.link_rate_busy_us > 0);
         assert!(snap.link_rate_bps > 0.0 && snap.link_rate_bps <= MAX_LINK_RATE_BPS);
+    }
+
+    #[test]
+    fn test_raw_frame_when_compression_would_expand() {
+        let mut compressor = ZstdStreamCompressor::with_defaults().unwrap();
+        let mut decompressor = ZstdStreamDecompressor::with_defaults().unwrap();
+        let mut incompressible = Vec::with_capacity(256);
+        let mut state = 0x9e37_79b9u32;
+        for _ in 0..256 {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            incompressible.push((state >> 16) as u8);
+        }
+        let framed = encode_batch(&mut compressor, &incompressible).unwrap();
+        let decoded = decode_stream(&mut decompressor, &framed).unwrap();
+        assert_eq!(decoded, incompressible);
+        let framed2 = encode_batch(&mut compressor, &incompressible).unwrap();
+        let decoded2 = decode_stream(&mut decompressor, &framed2).unwrap();
+        assert_eq!(decoded2, incompressible);
+    }
+
+    #[tokio::test]
+    async fn test_control_frame_is_not_stream_data() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let mut writer = OptimizedWriter::with_defaults(client_io).unwrap();
+        let mut reader = OptimizedReader::with_defaults(server_io).unwrap();
+
+        writer.write_control(b"session-secret-16").await.unwrap();
+        writer
+            .write_frame(b"game-bytes", FramePriority::Urgent)
+            .await
+            .unwrap();
+
+        let mut received = vec![0u8; 10];
+        reader.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"game-bytes");
+        let ctrl = reader.take_control_frames();
+        assert_eq!(ctrl, vec![b"session-secret-16".to_vec()]);
+    }
+
+    #[test]
+    fn test_dictionary_roundtrip() {
+        let sample = b"block:stone;block:dirt;entity:zombie;block:stone;".to_vec();
+        let samples: Vec<Vec<u8>> = (0..40).map(|_| sample.clone()).collect();
+        let dict = train_dictionary(&samples, 2048).unwrap();
+        let cfg = CompressorConfig {
+            dictionary: Some(dict.clone()),
+            ..Default::default()
+        };
+        let dcfg = DecompressorConfig {
+            dictionary: Some(dict),
+            ..Default::default()
+        };
+        let mut c = ZstdStreamCompressor::new(cfg).unwrap();
+        let mut d = ZstdStreamDecompressor::new(dcfg).unwrap();
+        let framed = encode_batch(&mut c, &sample).unwrap();
+        let out = decode_stream(&mut d, &framed).unwrap();
+        assert_eq!(out, sample);
     }
 }

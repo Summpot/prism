@@ -293,7 +293,7 @@ synthetic latency number:
    while `link_rate_measured` is `false` the 20 Mbps fallback is still an assumption,
    so consumers should label such a value as an estimate.
 2. **Batching penalty** (`batching_penalty_ms`) — time the time-slice aggregator queued
-   a flow before compressing it. The default window is one 20 ms tick.
+   a flow before compressing it. The default window is 20 ms (adaptive between 8–50 ms).
 3. **Compression penalty** (`compression_penalty_ms`) — host-local CPU spent compressing
    (writer side) or decompressing (reader side) that direction.
 

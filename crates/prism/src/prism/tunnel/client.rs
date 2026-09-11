@@ -741,6 +741,7 @@ async fn handle_player_connection(
     config: TunnelClientConfig,
     optimizer_stats: SharedOptimizerStats,
 ) -> anyhow::Result<()> {
+    crate::prism::net::set_nodelay(&player_socket);
     tracing::info!(peer = %peer_addr, "Incoming player connection from {peer_addr}");
 
     // 1. Determine target service from handshake Packet 0 or default
@@ -850,6 +851,59 @@ async fn handle_player_connection(
 
     // 4. Bridge player socket <-> PRPX stream
     if use_optimizer {
+        crate::prism::net::set_nodelay(&player_socket);
+        let mut opt_cfg = target_service
+            .optimizer
+            .as_ref()
+            .map(crate::prism::tunnel::optimizer::OptimizerConfig::from)
+            .unwrap_or_else(|| {
+                config
+                    .optimizer
+                    .as_ref()
+                    .map(crate::prism::tunnel::optimizer::OptimizerConfig::from)
+                    .unwrap_or(crate::prism::tunnel::optimizer::OptimizerConfig {
+                        enabled: true,
+                        ..Default::default()
+                    })
+            });
+        opt_cfg.enabled = true;
+        if let Some(client_opt) = config.optimizer.as_ref() {
+            if let Some(w) = client_opt.zstd_window_log {
+                opt_cfg.zstd_window_log = w;
+                opt_cfg.zstd_window_log_downlink = w;
+            }
+            if let Some(ref path) = client_opt.zstd_dictionary {
+                opt_cfg.dictionary = crate::prism::tunnel::optimizer::resolve_dictionary(
+                    Some(path),
+                    &target_service.name,
+                );
+            }
+        }
+        if opt_cfg.dictionary.is_none() {
+            opt_cfg.dictionary = crate::prism::tunnel::optimizer::resolve_dictionary(
+                None,
+                &target_service.name,
+            );
+        }
+        let mw_name = config
+            .middleware
+            .clone()
+            .or_else(|| target_service.middleware.clone());
+        return crate::prism::tunnel::optimizer::pipeline::run_player_facing(
+            prpx_stream,
+            player_socket,
+            opt_cfg,
+            mw_name,
+            None,
+            vec![optimizer_stats.clone()],
+            initial_bytes,
+            Duration::ZERO,
+            target_service.name.clone(),
+            crate::prism::tunnel::optimizer::pipeline::ParamsRole::Opener,
+        )
+        .await;
+
+        #[allow(unreachable_code, unused_variables, unused_mut, unused_assignments)]
         let zstd_window_log = config
             .optimizer
             .as_ref()
@@ -878,9 +932,11 @@ async fn handle_player_connection(
         let compressor_config = CompressorConfig {
             compression_level: zstd_level,
             window_log: zstd_window_log,
+            dictionary: None,
         };
         let decompressor_config = DecompressorConfig {
             window_log: zstd_window_log,
+            dictionary: None,
         };
         let batcher_config = BatcherConfig {
             flush_interval,
@@ -1008,7 +1064,8 @@ async fn handle_player_connection(
                                         }
                                         offset += len;
                                     }
-                                    Ok(PollResult::Stream(StreamResult::NeedMoreData)) => {
+                                    Ok(PollResult::Stream(StreamResult::NeedMoreData))
+                                    | Ok(PollResult::Stream(StreamResult::Blocked)) => {
                                         break;
                                     }
                                     Ok(PollResult::Handshake(_)) => {
@@ -1552,6 +1609,7 @@ mod tests {
             optimizer: Some(OptimizerClientConfig {
                 enabled: true,
                 zstd_window_log: Some(23),
+                ..Default::default()
             }),
             websocket: None,
             doh_servers: Vec::new(),
@@ -1720,6 +1778,7 @@ mod tests {
                         flush_interval_ms: Some(20),
                         zstd_window_log: Some(23),
                         zstd_level: Some(3),
+                        ..Default::default()
                     }),
                 }],
                 dial_timeout: Duration::from_secs(2),

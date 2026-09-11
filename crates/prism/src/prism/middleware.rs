@@ -336,6 +336,9 @@ pub enum FramePriority {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamResult {
     NeedMoreData,
+    /// Middleware is waiting for peer session data (e.g. a shared secret).
+    /// The host must not consume the buffer and should retry after `set_session_data`.
+    Blocked,
     Frame {
         len: usize,
         priority: FramePriority,
@@ -663,9 +666,14 @@ impl Default for DynamicSymbolTable {
     }
 }
 
+/// Offset at which [`WasmProtocolSession::poll`] writes the input buffer so it
+/// cannot clobber driver structs, scratch, or injected key material in pages 0-15.
+pub const WASM_INPUT_OFFSET: usize = 0x100000;
+
 #[derive(Clone, Debug, Default)]
 pub struct HostEnv {
     pub sym_table: Arc<Mutex<DynamicSymbolTable>>,
+    pub announced: Vec<Vec<u8>>,
 }
 
 /// Standalone RSA PKCS#1 v1.5 decryption helper.
@@ -721,10 +729,10 @@ pub fn deflate_compress(input: &[u8], level: i32) -> Result<Vec<u8>, i32> {
 }
 
 #[cfg(test)]
-pub mod legacy_minecraft_reference {
+pub mod legacy_varint_framing {
     use super::*;
 
-    /// Encodes an unsigned integer as a Minecraft VarInt into `buf`.
+    /// Encodes an unsigned integer as a 7-bit continuation VarInt into `buf`.
     pub fn write_varint(buf: &mut Vec<u8>, mut val: u32) {
         loop {
             let mut b = (val & 0x7F) as u8;
@@ -739,7 +747,7 @@ pub mod legacy_minecraft_reference {
         }
     }
 
-    /// Reads a Minecraft VarInt from the start of `buf`.
+    /// Reads a 7-bit continuation VarInt from the start of `buf`.
     /// Returns `Some((value, bytes_read))` or `None` if incomplete or invalid.
     pub fn read_varint(buf: &[u8]) -> Option<(u32, usize)> {
         let mut val = 0u32;
@@ -754,8 +762,7 @@ pub mod legacy_minecraft_reference {
         None
     }
 
-    /// Frames an uncompressed packet payload into Minecraft's uncompressed framing:
-    /// `[Packet Length: VarInt] [0x00: Data Length = 0] [raw_payload]`.
+    /// Frames an uncompressed packet payload as `[VarInt length][0x00][raw_payload]`.
     pub fn frame_uncompressed_packet(raw_payload: &[u8]) -> Vec<u8> {
         let packet_len = 1 + raw_payload.len();
         let mut out = Vec::with_capacity(5 + packet_len);
@@ -765,8 +772,7 @@ pub mod legacy_minecraft_reference {
         out
     }
 
-    /// Re-compresses an uncompressed packet payload into Minecraft compressed framing:
-    /// `[Packet Length: VarInt] [Data Length: VarInt] [Payload]`.
+    /// Re-compresses an uncompressed packet payload as `[VarInt length][VarInt data_len][deflate]`.
     pub fn deflate_recompress_packet(raw_payload: &[u8], threshold: usize) -> Vec<u8> {
         if raw_payload.len() >= threshold {
             if let Ok(compressed) = deflate_compress(raw_payload, 1) {
@@ -980,11 +986,12 @@ pub fn host_deflate_decompress(
         Err(code) => return code,
     };
 
-    if decompressed.len() > out_max_len as usize {
+    if decompressed.len() > out_max_len as usize && out_max_len > 0 {
         return -3;
     }
 
     let out_end = (out_ptr as usize).saturating_add(decompressed.len());
+    let mem_size = memory.data_size(&caller);
     if out_end > mem_size {
         let delta = out_end - mem_size;
         let pages = delta.div_ceil(65536);
@@ -1128,6 +1135,31 @@ pub fn host_sym_resolve(
     sym_bytes.len() as i32
 }
 
+pub fn host_announce_session_data(
+    mut caller: Caller<'_, HostEnv>,
+    ptr: i32,
+    len: i32,
+) -> i32 {
+    if ptr < 0 || len <= 0 {
+        return -1;
+    }
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return -1,
+    };
+    let mem_size = memory.data_size(&caller);
+    let end = (ptr as usize).saturating_add(len as usize);
+    if end > mem_size {
+        return -1;
+    }
+    let mut buf = vec![0u8; len as usize];
+    if memory.read(&caller, ptr as usize, &mut buf).is_err() {
+        return -1;
+    }
+    caller.data_mut().announced.push(buf);
+    0
+}
+
 pub fn create_prism_linker(engine: &Engine) -> anyhow::Result<Linker<HostEnv>> {
     let mut linker = Linker::new(engine);
     linker.func_wrap("prism", "crypto_rsa_decrypt", host_crypto_rsa_decrypt)?;
@@ -1136,6 +1168,7 @@ pub fn create_prism_linker(engine: &Engine) -> anyhow::Result<Linker<HostEnv>> {
     linker.func_wrap("prism", "deflate_compress", host_deflate_compress)?;
     linker.func_wrap("prism", "sym_intern", host_sym_intern)?;
     linker.func_wrap("prism", "sym_resolve", host_sym_resolve)?;
+    linker.func_wrap("prism", "announce_session_data", host_announce_session_data)?;
     Ok(linker)
 }
 
@@ -1251,6 +1284,65 @@ impl WasmProtocolSession {
         self.memory
             .write(&mut self.store, offset, data)
             .map_err(|e| MiddlewareError::Fatal(format!("wasm write memory failed: {e}")))
+    }
+
+    pub fn take_announced(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.store.data_mut().announced)
+    }
+
+    pub fn set_conn_state(&mut self, state: i32) {
+        if let Ok(func) = self
+            .instance
+            .get_typed_func::<(i32,), ()>(&mut self.store, "set_conn_state")
+        {
+            let _ = func.call(&mut self.store, (state,));
+        }
+    }
+
+    /// `from_server = true` means the buffer is origin→client (clientbound).
+    pub fn set_flow_direction(&mut self, from_server: bool) {
+        let dir = if from_server { 1i32 } else { 0i32 };
+        if let Ok(func) = self
+            .instance
+            .get_typed_func::<(i32,), ()>(&mut self.store, "set_direction")
+        {
+            let _ = func.call(&mut self.store, (dir,));
+        } else if let Ok(func) = self
+            .instance
+            .get_typed_func::<(i32,), i32>(&mut self.store, "set_direction")
+        {
+            let _ = func.call(&mut self.store, (dir,));
+        }
+    }
+
+    pub fn set_session_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
+        let func = match self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&mut self.store, "set_session_data")
+        {
+            Ok(f) => f,
+            Err(_) => return Ok(-1),
+        };
+        let needed = WASM_INPUT_OFFSET + data.len() + 64;
+        let mem_size = self.memory.data_size(&self.store);
+        if needed > mem_size {
+            let pages = (needed - mem_size).div_ceil(65536);
+            self.memory
+                .grow(&mut self.store, pages as u64)
+                .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
+        }
+        if !data.is_empty() {
+            self.memory
+                .write(&mut self.store, WASM_INPUT_OFFSET, data)
+                .map_err(|e| {
+                    MiddlewareError::Fatal(format!("wasm write set_session_data failed: {e}"))
+                })?;
+        }
+        func.call(
+            &mut self.store,
+            (WASM_INPUT_OFFSET as i32, data.len() as i32),
+        )
+        .map_err(|e| MiddlewareError::Fatal(format!("wasm set_session_data call failed: {e}")))
     }
 
     pub fn set_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
@@ -1391,7 +1483,7 @@ impl WasmProtocolSession {
             }
         };
 
-        let needed = ((buf.len() as usize) + 65536).max(65536 * 4);
+        let needed = WASM_INPUT_OFFSET + buf.len() + 65536;
         let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
             let delta = needed - mem_size;
@@ -1403,12 +1495,19 @@ impl WasmProtocolSession {
 
         if !buf.is_empty() {
             self.memory
-                .write(&mut self.store, 0, buf)
+                .write(&mut self.store, WASM_INPUT_OFFSET, buf)
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
         }
 
         let res = poll_fn
-            .call(&mut self.store, (0, buf.len() as i32, self.state as i32))
+            .call(
+                &mut self.store,
+                (
+                    WASM_INPUT_OFFSET as i32,
+                    buf.len() as i32,
+                    self.state as i32,
+                ),
+            )
             .map_err(|e| MiddlewareError::Fatal(format!("wasm poll call failed: {e}")))?;
 
         let action = ((res as u64) >> 32) as u32;
@@ -1484,6 +1583,7 @@ impl WasmProtocolSession {
             },
             SessionState::Streaming | SessionState::StreamingEgress => match action {
                 0 => Ok(PollResult::Stream(StreamResult::NeedMoreData)),
+                6 => Ok(PollResult::Stream(StreamResult::Blocked)),
                 1 => Ok(PollResult::Stream(StreamResult::Frame {
                     len: value as usize,
                     priority: FramePriority::Defer,
@@ -1584,6 +1684,7 @@ impl WasmProtocolSession {
                     offset += len;
                 }
                 Ok(PollResult::Stream(StreamResult::NeedMoreData)) => break,
+                Ok(PollResult::Stream(StreamResult::Blocked)) => break,
                 _ => {
                     tokio::io::AsyncWriteExt::write_all(writer, slice).await?;
                     written += slice.len();
@@ -1936,7 +2037,7 @@ impl Middleware for WasmMiddleware {
 
 #[cfg(test)]
 mod tests {
-    use super::legacy_minecraft_reference::*;
+    use super::legacy_varint_framing::*;
     use super::*;
     use std::fs;
 
@@ -2775,7 +2876,7 @@ mod tests {
         session.set_state(SessionState::Streaming);
 
         // Partial streaming packet -> Action 0 (NEED_MORE_DATA)
-        let ping_pkt = mc_ping_packet(12345); // Ping packet ID is 0x01 (urgent)
+        let ping_pkt = mc_ping_packet(12345); // Status ping packet ID is 0x01 (urgent)
         let partial_ping = &ping_pkt[..ping_pkt.len() - 2];
         match session.poll(partial_ping).unwrap() {
             PollResult::Stream(StreamResult::NeedMoreData) => {}
@@ -2791,11 +2892,13 @@ mod tests {
             other => panic!("expected FrameUrgent for Ping packet, got {other:?}"),
         }
 
-        // KeepAlive packets: 0x21, 0x1F, 0x23, 0x0F, 0x10, 0x15
-        for keepalive_id in [0x1F, 0x21, 0x23, 0x0F, 0x10, 0x15] {
+        // Play-state keepalives: only the current state+direction ids are urgent.
+        session.set_conn_state(4);
+        session.set_flow_direction(true);
+        for keepalive_id in [0x1F, 0x21] {
             let mut kp = Vec::new();
             push_varint(keepalive_id, &mut kp);
-            kp.extend_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd]); // payload
+            kp.extend_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd]);
             let mut pkt = Vec::new();
             push_varint(kp.len() as u32, &mut pkt);
             pkt.extend_from_slice(&kp);
@@ -2813,6 +2916,22 @@ mod tests {
                 other => panic!("expected FrameUrgent, got {other:?}"),
             }
         }
+        session.set_flow_direction(false);
+        for keepalive_id in [0x0F] {
+            let mut kp = Vec::new();
+            push_varint(keepalive_id, &mut kp);
+            kp.extend_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd]);
+            let mut pkt = Vec::new();
+            push_varint(kp.len() as u32, &mut pkt);
+            pkt.extend_from_slice(&kp);
+            match session.poll(&pkt).unwrap() {
+                PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                    assert_eq!(priority, FramePriority::Urgent);
+                }
+                other => panic!("expected FrameUrgent, got {other:?}"),
+            }
+        }
+        session.set_flow_direction(true);
 
         // Normal game packet: ID 0x27 (e.g. entity movement/block update) -> Action 1 (FRAME_DEFER)
         let mut normal = Vec::new();

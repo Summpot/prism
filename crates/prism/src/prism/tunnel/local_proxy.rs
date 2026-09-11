@@ -115,6 +115,7 @@ async fn handle_conn(
     middleware: &dyn MiddlewareChain,
 ) -> anyhow::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    crate::prism::net::set_nodelay(&conn);
 
     // Buffer initial bytes for hostname extraction.
     let mut prelude = Vec::with_capacity(config.max_header_bytes.min(4096));
@@ -180,6 +181,7 @@ async fn handle_conn(
     let mut upstream = TcpStream::connect(&local_addr)
         .await
         .with_context(|| format!("mdns: connect to local service {local_addr}"))?;
+    crate::prism::net::set_nodelay(&upstream);
 
     // Send the prelude (possibly rewritten) to the upstream.
     let to_send = prelude_override.as_deref().unwrap_or(&prelude);

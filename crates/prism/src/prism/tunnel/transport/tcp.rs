@@ -40,6 +40,7 @@ impl Transport for TcpTransport {
         _opts: TransportDialOptions,
     ) -> anyhow::Result<Arc<dyn TransportSession>> {
         let c = TcpStream::connect(addr).await?;
+        crate::prism::net::set_nodelay(&c);
         Ok(Arc::new(YamuxSession::client(c)))
     }
 }
@@ -52,6 +53,7 @@ pub struct TcpTransportListener {
 impl TransportListener for TcpTransportListener {
     async fn accept(&self) -> anyhow::Result<Arc<dyn TransportSession>> {
         let (c, _) = self.ln.accept().await?;
+        crate::prism::net::set_nodelay(&c);
         Ok(Arc::new(YamuxSession::server(c)))
     }
 

@@ -1,5 +1,15 @@
 use std::borrow::Cow;
 
+use tokio::net::TcpStream;
+
+/// Disable Nagle on `sock`. Application-level batching already coalesces writes;
+/// kernel coalescing would add extra delay on top.
+pub fn set_nodelay(sock: &TcpStream) {
+    if let Err(err) = sock.set_nodelay(true) {
+        tracing::debug!(err = %err, "tcp nodelay failed");
+    }
+}
+
 /// Normalize a bind/listen address.
 ///
 /// Prism's config and docs commonly use the shorthand `":PORT"` to mean

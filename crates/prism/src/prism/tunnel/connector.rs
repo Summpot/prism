@@ -226,6 +226,7 @@ pub async fn handle_stream(
                 || meta.optimizer.as_ref().is_some_and(|to| to.enabled);
 
             if optimizer_enabled {
+                crate::prism::net::set_nodelay(&local_sock);
                 run_optimized_tcp_pipeline(
                     st,
                     local_sock,
@@ -255,7 +256,38 @@ pub async fn run_optimized_tcp_pipeline(
     middleware_dir: Option<&Path>,
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
 ) -> anyhow::Result<()> {
+    crate::prism::net::set_nodelay(&local_sock);
+    let mut opt_cfg = meta
+        .optimizer
+        .as_ref()
+        .map(optimizer::OptimizerConfig::from)
+        .unwrap_or(optimizer::OptimizerConfig {
+            enabled: true,
+            ..Default::default()
+        });
+    opt_cfg.enabled = true;
+    if opt_cfg.dictionary.is_none() {
+        opt_cfg.dictionary = optimizer::resolve_dictionary(None, &meta.name);
+    }
+    let mut stats = Vec::new();
+    if let Some(ref registry) = optimizer {
+        stats.push(registry.service(&meta.name));
+        stats.push(registry.global());
+    }
+    return optimizer::pipeline::run_upstream_facing(
+        st,
+        local_sock,
+        opt_cfg,
+        meta.middleware,
+        middleware_dir.map(Path::to_path_buf),
+        stats,
+        meta.name,
+    )
+    .await;
+
+    #[allow(unreachable_code)]
     let (st_read, st_write) = tokio::io::split(st);
+    #[allow(unused_variables, unused_mut)]
     let (mut local_read, mut local_write) = local_sock.into_split();
 
     let (flush_interval, window_log, zstd_level) = if let Some(ref to) = meta.optimizer {
@@ -273,7 +305,10 @@ pub async fn run_optimized_tcp_pipeline(
     };
 
     // Inbound: PRPX stream -> OptimizedReader -> local_write
-    let decompressor_config = DecompressorConfig { window_log };
+    let decompressor_config = DecompressorConfig {
+        window_log,
+        dictionary: None,
+    };
     let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?
         .with_direction(TrafficDirection::Uplink);
     if let Some(ref optimizer) = optimizer {
@@ -301,6 +336,7 @@ pub async fn run_optimized_tcp_pipeline(
     let compressor_config = CompressorConfig {
         compression_level: zstd_level,
         window_log,
+        dictionary: None,
     };
     let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
         .with_direction(TrafficDirection::Downlink);
@@ -358,7 +394,8 @@ pub async fn run_optimized_tcp_pipeline(
                                     }
                                     offset += len;
                                 }
-                                Ok(PollResult::Stream(StreamResult::NeedMoreData)) => {
+                                Ok(PollResult::Stream(StreamResult::NeedMoreData))
+                                | Ok(PollResult::Stream(StreamResult::Blocked)) => {
                                     break;
                                 }
                                 Ok(PollResult::Handshake(_)) => {
@@ -432,6 +469,39 @@ pub async fn run_server_optimized_tcp_pipeline(
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
     idle_timeout: Duration,
 ) -> anyhow::Result<()> {
+    crate::prism::net::set_nodelay(&client_sock);
+    let mut opt_cfg = meta
+        .optimizer
+        .as_ref()
+        .map(optimizer::OptimizerConfig::from)
+        .unwrap_or(optimizer::OptimizerConfig {
+            enabled: true,
+            ..Default::default()
+        });
+    opt_cfg.enabled = true;
+    if opt_cfg.dictionary.is_none() {
+        opt_cfg.dictionary = optimizer::resolve_dictionary(None, &meta.name);
+    }
+    let mut stats = Vec::new();
+    if let Some(ref registry) = optimizer {
+        stats.push(registry.service(&meta.name));
+        stats.push(registry.global());
+    }
+    return optimizer::pipeline::run_player_facing(
+        st,
+        client_sock,
+        opt_cfg,
+        meta.middleware,
+        middleware_dir.map(Path::to_path_buf),
+        stats,
+        initial_bytes.to_vec(),
+        idle_timeout,
+        meta.name,
+        optimizer::pipeline::ParamsRole::Opener,
+    )
+    .await;
+
+    #[allow(unreachable_code, unused_variables, unused_mut, unused_assignments)]
     let (st_read, st_write) = tokio::io::split(st);
     let (mut client_read, mut client_write) = client_sock.into_split();
 
@@ -450,7 +520,10 @@ pub async fn run_server_optimized_tcp_pipeline(
     };
 
     // Inbound: PRPX stream (Connector) -> OptimizedReader (Downlink) -> client_write (Player)
-    let decompressor_config = DecompressorConfig { window_log };
+    let decompressor_config = DecompressorConfig {
+        window_log,
+        dictionary: None,
+    };
     let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?
         .with_direction(TrafficDirection::Downlink);
     if let Some(ref optimizer) = optimizer {
@@ -478,6 +551,7 @@ pub async fn run_server_optimized_tcp_pipeline(
     let compressor_config = CompressorConfig {
         compression_level: zstd_level,
         window_log,
+        dictionary: None,
     };
     let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
         .with_direction(TrafficDirection::Uplink);
@@ -540,7 +614,8 @@ pub async fn run_server_optimized_tcp_pipeline(
                                     }
                                     offset += len;
                                 }
-                                Ok(PollResult::Stream(StreamResult::NeedMoreData)) => {
+                                Ok(PollResult::Stream(StreamResult::NeedMoreData))
+                                | Ok(PollResult::Stream(StreamResult::Blocked)) => {
                                     break;
                                 }
                                 Ok(PollResult::Handshake(_)) => {
@@ -836,12 +911,13 @@ mod tests {
                 route_only: false,
                 remote_addr: "".into(),
                 masquerade_host: "".into(),
-                middleware: Some("minecraft.wat".into()),
+                middleware: None,
                 optimizer: Some(crate::prism::config::OptimizerConfig {
                     enabled: true,
                     flush_interval_ms: Some(20),
                     zstd_window_log: Some(23),
                     zstd_level: Some(3),
+                    ..Default::default()
                 }),
             },
         );
@@ -864,6 +940,19 @@ mod tests {
         )
         .await
         .unwrap();
+
+        let local_params = protocol::OptimizerStreamParams {
+            encode_window_log: 23,
+            decode_window_log: 23,
+            dict_id: 0,
+            dictionary: None,
+        };
+        protocol::write_optimizer_stream_params(&mut client_write, &local_params)
+            .await
+            .unwrap();
+        let _peer = protocol::read_optimizer_stream_params(&mut client_read)
+            .await
+            .unwrap();
 
         // Write compressed data using OptimizedWriter
         let mut client_opt_writer = OptimizedWriter::with_defaults(&mut client_write).unwrap();
@@ -925,6 +1014,7 @@ mod tests {
                 flush_interval_ms: Some(20),
                 zstd_window_log: Some(23),
                 zstd_level: Some(3),
+                ..Default::default()
             }),
         };
         let mut map = HashMap::new();

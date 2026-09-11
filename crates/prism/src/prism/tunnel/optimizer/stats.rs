@@ -615,6 +615,7 @@ pub struct OptimizerStatsSnapshot {
     pub urgent_batches: u64,
     pub timer_batches: u64,
     pub threshold_batches: u64,
+    pub explicit_batches: u64,
 
     pub link_rate_bps: f64,
     pub link_rate_measured: bool,
@@ -740,6 +741,7 @@ pub struct OptimizerStats {
     pub urgent_batches: AtomicU64,
     pub timer_batches: AtomicU64,
     pub threshold_batches: AtomicU64,
+    pub explicit_batches: AtomicU64,
 
     pub uplink: DirectionStats,
     pub downlink: DirectionStats,
@@ -876,6 +878,10 @@ impl OptimizerStats {
         self.threshold_batches.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_explicit(&self) {
+        self.explicit_batches.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn snapshot(&self) -> OptimizerStatsSnapshot {
         self.snapshot_at(unix_ms())
     }
@@ -908,6 +914,7 @@ impl OptimizerStats {
             urgent_batches: self.urgent_batches.load(Ordering::Relaxed),
             timer_batches: self.timer_batches.load(Ordering::Relaxed),
             threshold_batches: self.threshold_batches.load(Ordering::Relaxed),
+            explicit_batches: self.explicit_batches.load(Ordering::Relaxed),
             link_rate_bps: link.rate_bps,
             link_rate_measured: link.measured,
             link_rate_bytes: link.bytes,

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AdminApiError, adminRequest } from "./adminClient";
+import { AdminApiError, adminRequest, httpToAdminRpc } from "./adminClient";
 import type { PanelConnection } from "@/lib/panelConnection";
 
 describe("adminClient (adminRequest & AdminApiError)", () => {
@@ -79,10 +79,11 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 		await expect(adminRequest(dummyConnection, "/admin")).rejects.toThrow(AdminApiError);
 	});
 
-	it("invokes the admin_request Tauri command for in-band $admin on desktop", async () => {
+	it("invokes the admin_rpc Tauri command for in-band $admin on desktop", async () => {
 		const invokeMock = vi.fn().mockResolvedValue({
+			ok: true,
 			status: 200,
-			body: JSON.stringify({ token: "prism_cl_x" }),
+			body: { token: "prism_cl_x" },
 		});
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -98,16 +99,36 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(invokeMock).toHaveBeenCalledWith(
-			"admin_request",
+			"admin_rpc",
 			expect.objectContaining({
 				payload: expect.objectContaining({
-					path: "/auth/github/exchange",
-					method: "POST",
-					via_tunnel: true,
-					body: JSON.stringify({ code: "abc" }),
+					method: "auth.github.exchange",
+					payload: { code: "abc" },
 				}),
 			}),
 		);
 		expect(result).toEqual({ token: "prism_cl_x" });
+	});
+
+	it("maps leftover HTTP paths onto $admin RPC methods", () => {
+		expect(httpToAdminRpc("/health", "GET")).toEqual({ method: "health", payload: {} });
+		expect(httpToAdminRpc("/conns", "GET")).toEqual({
+			method: "connections",
+			payload: {},
+		});
+		expect(httpToAdminRpc("/auth/tokens/tok-1", "DELETE")).toEqual({
+			method: "auth.tokens.revoke",
+			payload: { token_id: "tok-1" },
+		});
+		expect(
+			httpToAdminRpc(
+				"/managed/nodes/n1/config",
+				"PUT",
+				JSON.stringify({ desired_config: { listeners: [] } }),
+			),
+		).toEqual({
+			method: "managed.node.config.put",
+			payload: { node_id: "n1", desired_config: { listeners: [] } },
+		});
 	});
 });

@@ -2,6 +2,7 @@ pub mod acme;
 pub mod admin;
 pub mod app;
 pub mod auth;
+pub mod control;
 pub mod config;
 pub mod logging;
 pub mod managed;

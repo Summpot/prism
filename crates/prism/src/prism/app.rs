@@ -4,6 +4,7 @@ use anyhow::Context;
 use tokio::task::JoinSet;
 
 use crate::prism::middleware::MiddlewareProvider;
+use crate::prism::control::AdminControl;
 use crate::prism::{
     admin, config, logging, managed, middleware, net, proxy, router, runtime_paths, telemetry,
     tunnel,
@@ -200,93 +201,59 @@ pub async fn run(
         }
     };
 
-    // Admin server (either external public/private or loopback ephemeral for internal stream).
-    let mut bound_admin_addr: Option<SocketAddr> = None;
+    // HTTP admin is only bound when `admin_addr` is set (management / worker / LAN).
+    // In-band `$admin` uses AdminState directly and does not dial loopback HTTP.
+    let need_admin_state = !cfg.admin_addr.trim().is_empty()
+        || tunnel_server_enabled
+        || matches!(
+            cfg.role,
+            config::PrismRole::Management | config::PrismRole::Worker
+        );
+    let admin_state = if need_admin_state {
+        Some(Arc::new(admin::AdminState {
+            sessions: sessions.clone(),
+            optimizer: optimizer.clone(),
+            config_path: resolved.path.clone(),
+            reload_tx: reload_tx.clone(),
+            tunnel: Some(tunnel_manager.clone()),
+            auth: admin::AdminAuth {
+                panel_token: management_plane
+                    .as_ref()
+                    .map(|plane| plane.panel_token().to_string()),
+                worker_token: if let Some(plane) = &management_plane {
+                    Some(plane.worker_token().to_string())
+                } else {
+                    worker_agent
+                        .as_ref()
+                        .map(|agent| agent.auth_token().to_string())
+                },
+                ..Default::default()
+            },
+            management: management_plane.clone(),
+            worker: worker_agent.clone(),
+            client: Some(client_controller.clone()),
+            auth_manager: Some(auth_manager.clone()),
+            storage: storage.clone(),
+        }))
+    } else {
+        None
+    };
+
     if !cfg.admin_addr.trim().is_empty() {
         let admin_addr = net::normalize_bind_addr(&cfg.admin_addr);
         let addr: SocketAddr = admin_addr
             .parse()
             .with_context(|| format!("invalid admin_addr: {}", cfg.admin_addr))?;
 
-        let admin_state = admin::AdminState {
-            sessions: sessions.clone(),
-            optimizer: optimizer.clone(),
-            config_path: resolved.path.clone(),
-            reload_tx: reload_tx.clone(),
-            tunnel: Some(tunnel_manager.clone()),
-            auth: admin::AdminAuth {
-                panel_token: management_plane
-                    .as_ref()
-                    .map(|plane| plane.panel_token().to_string()),
-                worker_token: if let Some(plane) = &management_plane {
-                    Some(plane.worker_token().to_string())
-                } else {
-                    worker_agent
-                        .as_ref()
-                        .map(|agent| agent.auth_token().to_string())
-                },
-                ..Default::default()
-            },
-            management: management_plane.clone(),
-            worker: worker_agent.clone(),
-            client: Some(client_controller.clone()),
-            auth_manager: Some(auth_manager.clone()),
-            storage: storage.clone(),
-        };
-
         let listener = tokio::net::TcpListener::bind(addr).await?;
-        let local_addr = listener.local_addr()?;
-        bound_admin_addr = Some(net::loopback_connect_addr(local_addr));
+        let state = admin_state
+            .as_ref()
+            .expect("admin_addr set implies AdminState")
+            .as_ref()
+            .clone();
         let shutdown = shutdown_rx.clone();
         tasks.spawn(async move {
-            admin::serve_listener_with_shutdown(listener, admin_state, shutdown).await
-        });
-    } else if tunnel_server_enabled
-        || proxy_enabled
-        || matches!(
-            cfg.role,
-            config::PrismRole::Management | config::PrismRole::Worker
-        )
-    {
-        // No explicit admin_addr configured (e.g. to avoid public web exposure / compliance).
-        // Bind an internal loopback ephemeral listener for in-band tunnel management streams.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let local_addr = listener.local_addr()?;
-        bound_admin_addr = Some(local_addr);
-        tracing::info!(
-            internal_admin = %local_addr,
-            "admin: internal loopback listener started for in-band tunnel streams"
-        );
-
-        let admin_state = admin::AdminState {
-            sessions: sessions.clone(),
-            optimizer: optimizer.clone(),
-            config_path: resolved.path.clone(),
-            reload_tx: reload_tx.clone(),
-            tunnel: Some(tunnel_manager.clone()),
-            auth: admin::AdminAuth {
-                panel_token: management_plane
-                    .as_ref()
-                    .map(|plane| plane.panel_token().to_string()),
-                worker_token: if let Some(plane) = &management_plane {
-                    Some(plane.worker_token().to_string())
-                } else {
-                    worker_agent
-                        .as_ref()
-                        .map(|agent| agent.auth_token().to_string())
-                },
-                ..Default::default()
-            },
-            management: management_plane.clone(),
-            worker: worker_agent.clone(),
-            client: Some(client_controller.clone()),
-            auth_manager: Some(auth_manager.clone()),
-            storage: storage.clone(),
-        };
-
-        let shutdown = shutdown_rx.clone();
-        tasks.spawn(async move {
-            admin::serve_listener_with_shutdown(listener, admin_state, shutdown).await
+            admin::serve_listener_with_shutdown(listener, state, shutdown).await
         });
     }
 
@@ -416,7 +383,9 @@ pub async fn run(
                 },
                 manager: tunnel_manager.clone(),
                 auth_manager: Some(auth_manager.clone()),
-                admin_addr: bound_admin_addr,
+                admin: admin_state
+                    .clone()
+                    .map(|s| s as Arc<dyn AdminControl>),
             })?;
 
             let shutdown = shutdown_rx.clone();

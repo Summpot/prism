@@ -20,7 +20,7 @@ pub enum ManagerError {
     ServiceNotFound,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ServiceSnapshot {
     pub service: RegisteredService,
     pub client_id: String,

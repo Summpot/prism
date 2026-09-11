@@ -28,8 +28,8 @@ pub fn normalize_bind_addr(addr: &str) -> Cow<'_, str> {
 /// Rewrite an unspecified bind address (`0.0.0.0` / `::`) to loopback for outbound connect.
 ///
 /// `TcpListener::local_addr()` after binding `:8080` returns `0.0.0.0:8080`. Connecting to
-/// that unspecified address fails on Windows (and is unreliable elsewhere). Same-process
-/// in-band `$admin` proxying must dial loopback instead.
+/// that unspecified address fails on Windows (and is unreliable elsewhere).
+#[allow(dead_code)]
 pub fn loopback_connect_addr(addr: SocketAddr) -> SocketAddr {
     if !addr.ip().is_unspecified() {
         return addr;

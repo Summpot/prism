@@ -229,7 +229,16 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         crate::prism::admin::do_admin_request(&state.client, payload).await
     }
 
+    #[tauri::command]
+    async fn admin_rpc(
+        state: tauri::State<'_, DesktopClientState>,
+        payload: crate::prism::admin::AdminRpcRequest,
+    ) -> Result<crate::prism::admin::AdminRpcResponse, String> {
+        crate::prism::admin::do_admin_rpc(&state.client, payload).await
+    }
+
     // 2. Run Tauri desktop application
+    let event_client = desktop_client_state.client.clone();
     tauri::Builder::default()
         .manage(desktop_client_state)
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -264,6 +273,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             client_logs,
             client_clear_logs,
             admin_request,
+            admin_rpc,
         ])
         .setup(move |app| {
             #[cfg(desktop)]
@@ -277,6 +287,31 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             let main_window = app.get_webview_window("main").expect("main window exists");
             let _ = main_window.center();
             let _ = main_window.show();
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use crate::prism::control::AdminEvent;
+                use tauri::Emitter;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    let Some(mut rx) = event_client.admin_events().await else {
+                        continue;
+                    };
+                    while let Ok(ev) = rx.recv().await {
+                        let topic = match &ev {
+                            AdminEvent::Connections(_) => "connections",
+                            AdminEvent::TunnelServices(_) => "services",
+                            AdminEvent::Optimizer { .. } => "optimizer",
+                            AdminEvent::Reload { .. } => "reload",
+                        };
+                        let payload = serde_json::to_value(&ev).unwrap_or_default();
+                        let _ = handle.emit(
+                            "admin://event",
+                            serde_json::json!({ "topic": topic, "payload": payload }),
+                        );
+                    }
+                }
+            });
 
             // Build Tray Menu
             let title_i = MenuItem::with_id(app, "title", "Prism Client", false, None::<&str>)?;

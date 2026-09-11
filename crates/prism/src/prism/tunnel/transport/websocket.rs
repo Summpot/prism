@@ -656,7 +656,7 @@ mod tests {
             webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
-            admin_addr: None,
+            admin: None,
         })?;
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);

@@ -35,7 +35,7 @@ pub enum TokenType {
 }
 
 /// User profile record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserRecord {
     pub id: String,
     pub username: String,
@@ -55,7 +55,7 @@ fn default_rules() -> Vec<String> {
 }
 
 /// Token metadata stored in state (raw token is never persisted).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenRecord {
     pub id: String,
     pub token_hash: String,

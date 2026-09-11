@@ -16,13 +16,13 @@ use crate::prism::{app, config, proxy, router, telemetry};
 const MANAGEMENT_STATE_SCHEMA_VERSION: u32 = 1;
 const WORKER_STATE_FILE: &str = "managed-worker-state.json";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagementStatusResponse {
     pub state_path: String,
     pub node_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedNodeSnapshot {
     pub node_id: String,
     pub connection_mode: Option<config::ManagedConnectionMode>,
@@ -37,7 +37,7 @@ pub struct ManagedNodeSnapshot {
     pub last_apply_success_unix_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManagedNodeConfigResponse {
     pub node: ManagedNodeSnapshot,
     pub desired_config: Option<config::ManagedConfigDocument>,

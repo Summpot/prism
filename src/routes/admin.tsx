@@ -10,10 +10,10 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminLayout() {
-	const { isAdmin, ready } = usePanelSession();
+	const { isAdmin, ready, isLoadingSession } = usePanelSession();
 	const navigate = useNavigate();
 
-	if (!ready) {
+	if (!ready || (isLoadingSession && !isAdmin)) {
 		return (
 			<div className="flex flex-1 h-full w-full items-center justify-center bg-slate-950 text-slate-400">
 				<RotateCcw className="h-6 w-6 animate-spin text-primary" />

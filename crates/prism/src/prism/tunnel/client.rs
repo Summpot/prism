@@ -1177,6 +1177,7 @@ impl Default for ClientStatusSnapshot {
 struct ActiveClientInstance {
     client: Arc<Client>,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    join: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Dynamic lifecycle controller for terminal client sidecar.
@@ -1200,6 +1201,7 @@ impl ClientController {
         *self.active.write().await = Some(ActiveClientInstance {
             client,
             shutdown_tx,
+            join: None,
         });
     }
 
@@ -1220,7 +1222,7 @@ impl ClientController {
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
         let c = client.clone();
-        tokio::spawn(async move {
+        let join = tokio::spawn(async move {
             if let Err(err) = c.run(shutdown_rx).await {
                 tracing::warn!(err = %err, "tunnel client: run exited with error");
             }
@@ -1229,6 +1231,7 @@ impl ClientController {
         *self.active.write().await = Some(ActiveClientInstance {
             client,
             shutdown_tx,
+            join: Some(join),
         });
 
         Ok(())
@@ -1236,9 +1239,20 @@ impl ClientController {
 
     /// Stops the currently running client sidecar, if any.
     pub async fn stop(&self) {
-        let mut guard = self.active.write().await;
-        if let Some(instance) = guard.take() {
+        let instance = {
+            let mut guard = self.active.write().await;
+            guard.take()
+        };
+        if let Some(instance) = instance {
             let _ = instance.shutdown_tx.send(true);
+            if let Some(join) = instance.join {
+                if tokio::time::timeout(Duration::from_secs(3), join)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("tunnel client: stop timed out waiting for sidecar exit");
+                }
+            }
             tracing::info!("Client sidecar stopped");
         }
     }
@@ -1298,18 +1312,22 @@ impl ClientController {
         method: AdminMethod,
         token: Option<&str>,
     ) -> Result<AdminPayload, AdminError> {
-        let client = {
-            let guard = self.active.read().await;
-            match guard.as_ref() {
-                Some(inst) => inst.client.clone(),
-                None => {
-                    return Err(AdminError::unavailable("client sidecar is not running"));
-                }
-            }
-        };
-
-        let mut last_err = AdminError::unavailable("tunnel client: not connected to server");
+        let mut last_err = AdminError::unavailable("client sidecar is not running");
         for attempt in 0..20 {
+            let client = {
+                let guard = self.active.read().await;
+                match guard.as_ref() {
+                    Some(inst) => inst.client.clone(),
+                    None => {
+                        last_err = AdminError::unavailable("client sidecar is not running");
+                        if attempt == 19 {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                        continue;
+                    }
+                }
+            };
             match Self::call_with_optional_auth(&client, method.clone(), token).await {
                 Ok(res) => return Ok(res),
                 Err(err) => {
@@ -1340,13 +1358,20 @@ impl ClientController {
         token: Option<&str>,
     ) -> Result<AdminPayload, AdminError> {
         if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
-            let auth = client
+            match client
                 .admin_rpc(AdminMethod::Authenticate {
                     token: token.to_string(),
                 })
-                .await;
-            if method.requires_session() {
-                auth?;
+                .await
+            {
+                Ok(_) => {}
+                Err(err)
+                    if matches!(err.code, crate::prism::control::AdminErrorCode::Unavailable) =>
+                {
+                    return Err(err);
+                }
+                Err(err) if method.requires_session() => return Err(err),
+                Err(_) => {}
             }
         }
         client.admin_rpc(method).await
@@ -1698,7 +1723,7 @@ mod tests {
             doh_servers: Vec::new(),
         };
 
-        controller.start(cfg).await.unwrap();
+        controller.start(cfg.clone()).await.unwrap();
         assert!(controller.is_running().await);
 
         let status = controller.status().await;
@@ -1706,6 +1731,11 @@ mod tests {
         assert_eq!(status.server_addr, "127.0.0.1:9999");
         assert_eq!(status.transport, "tcp");
 
+        controller.stop().await;
+        assert!(!controller.is_running().await);
+
+        controller.start(cfg).await.unwrap();
+        assert!(controller.is_running().await);
         controller.stop().await;
         assert!(!controller.is_running().await);
 

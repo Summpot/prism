@@ -18,7 +18,13 @@ export interface AdminSessionContextValue {
 	isLoadingSession: boolean;
 	refreshSession: () => Promise<AuthSessionResponse | null>;
 	saveConnection: (value: PanelConnection) => void;
+	applySessionSnapshot: (session: AuthSessionResponse) => void;
+	suspendSession: () => void;
 	clearConnection: () => void;
+}
+
+function sessionIsAdmin(res: AuthSessionResponse | null): boolean {
+	return Boolean(res?.is_admin || res?.role?.toLowerCase() === "admin");
 }
 
 export type PanelSessionContextValue = AdminSessionContextValue;
@@ -44,8 +50,7 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 			try {
 				const res = await getAuthSession(conn);
 				setAuthSession(res);
-				const admin = Boolean(res.is_admin || res.role === "admin");
-				setIsAdmin(admin);
+				setIsAdmin(sessionIsAdmin(res) && Boolean(res.authenticated));
 				return res;
 			} catch (err) {
 				console.debug("Failed to get auth session:", err);
@@ -68,7 +73,9 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 		const initialConn = loadPanelConnection(window.localStorage);
 		setConnection(initialConn);
 		setReady(true);
-		if (initialConn) {
+		// Tunnel `$admin` is only reachable while the sidecar is connected.
+		// ClientContext refreshes the session when the tunnel comes up.
+		if (initialConn && !isTunnelAdminConnection(initialConn)) {
 			void fetchSession(initialConn);
 		}
 	}, [fetchSession]);
@@ -78,11 +85,23 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 			if (typeof window !== "undefined") {
 				const saved = persistPanelConnection(window.localStorage, next);
 				setConnection(saved);
-				void fetchSession(saved);
+				if (!isTunnelAdminConnection(saved)) {
+					void fetchSession(saved);
+				}
 			}
 		},
 		[fetchSession],
 	);
+
+	const applySessionSnapshot = useCallback((session: AuthSessionResponse) => {
+		setAuthSession(session);
+		setIsAdmin(sessionIsAdmin(session) && Boolean(session.authenticated));
+	}, []);
+
+	const suspendSession = useCallback(() => {
+		setAuthSession(null);
+		setIsAdmin(false);
+	}, []);
 
 	const clearConnection = useCallback(() => {
 		if (typeof window !== "undefined") {
@@ -106,6 +125,8 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 			isLoadingSession,
 			refreshSession,
 			saveConnection,
+			applySessionSnapshot,
+			suspendSession,
 			clearConnection,
 		}),
 		[
@@ -116,6 +137,8 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 			isLoadingSession,
 			refreshSession,
 			saveConnection,
+			applySessionSnapshot,
+			suspendSession,
 			clearConnection,
 		],
 	);

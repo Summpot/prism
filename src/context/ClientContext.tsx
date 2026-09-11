@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useClientLogs } from "@/hooks/useClientLogs";
 import { useClientProfiles } from "@/hooks/useClientProfiles";
@@ -18,6 +19,7 @@ import {
 import { parseDeepLink } from "@/lib/deepLink";
 import {
 	TUNNEL_ADMIN_CONNECTION,
+	isTunnelAdminConnection,
 	normalizeBaseUrl,
 	tunnelAdminConnection,
 } from "@/lib/panelConnection";
@@ -27,9 +29,21 @@ import type {
 	AuthProvidersResponse,
 	ClientContextValue,
 	ClientProfile,
+	ClientStatusResponse,
 	UserRecord,
 } from "@/types/client";
 import { m } from "@/paraglide/messages";
+
+type LoginSessionExtra = {
+	token_id?: string;
+	user_id?: string;
+	username?: string;
+	display_name?: string | null;
+	avatar_url?: string | null;
+	role?: string;
+	expires_at?: number | null;
+	panelUrl?: string;
+};
 
 export type { ClientContextValue };
 
@@ -151,7 +165,10 @@ if (typeof globalThis !== "undefined") {
 }
 
 export function ClientProvider({ children }: { children: React.ReactNode }) {
-	const { saveConnection } = useAdminSession();
+	const navigate = useNavigate();
+	const location = useLocation();
+	const { connection, saveConnection, refreshSession, applySessionSnapshot, suspendSession } =
+		useAdminSession();
 
 	const [actionLoading, setActionLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -223,6 +240,23 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 	const [oauthExchanging, setOauthExchanging] = useState(false);
 	const [manualCallbackInput, setManualCallbackInput] = useState("");
 
+	const waitForClientConnected = useCallback(async (): Promise<ClientStatusResponse | null> => {
+		let latest: ClientStatusResponse | null = null;
+		for (let i = 0; i < 25; i++) {
+			const st = await getClientStatus().catch(() => null);
+			if (st) {
+				latest = st;
+				if (st.state === "connected") {
+					setStatus(st);
+					return st;
+				}
+			}
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		if (latest) setStatus(latest);
+		return latest;
+	}, [setStatus]);
+
 	// Connect / Disconnect Handlers
 	const handleConnect = useCallback(async () => {
 		setActionLoading(true);
@@ -237,9 +271,12 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				profile_id: selectedProfileId || undefined,
 				profile_name: profileName || undefined,
 			});
-			fetchStatus();
+			await waitForClientConnected();
 			fetchLogs();
 			fetchClientConfigData();
+			if (authToken) {
+				await refreshSession();
+			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -250,12 +287,13 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		fakeLanBroadcast,
 		fetchClientConfigData,
 		fetchLogs,
-		fetchStatus,
 		listenAddr,
 		profileName,
+		refreshSession,
 		selectedProfileId,
 		serverAddr,
 		transport,
+		waitForClientConnected,
 	]);
 
 	const handleDisconnect = useCallback(async () => {
@@ -263,14 +301,15 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		setError(null);
 		try {
 			await stopClient();
-			fetchStatus();
+			const st = await getClientStatus().catch(() => null);
+			if (st) setStatus(st);
 			fetchLogs();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setActionLoading(false);
 		}
-	}, [fetchLogs, fetchStatus]);
+	}, [fetchLogs, setStatus]);
 
 	const handleResetStats = useCallback(async () => {
 		try {
@@ -290,19 +329,22 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 	}, [handleConnect, handleDisconnect, status?.running]);
 
 	const persistTunnelAuth = useCallback(
-		async (
-			token: string,
-			extra?: {
-				token_id?: string;
-				user_id?: string;
-				username?: string;
-				expires_at?: number | null;
-				panelUrl?: string;
-			},
-		) => {
+		async (token: string, extra?: LoginSessionExtra) => {
 			setAuthToken(token);
 			if (autoConnectPanel && token) {
 				saveConnection(tunnelAdminConnection(token));
+			}
+			if (extra?.user_id || extra?.username || extra?.role) {
+				const role = extra.role?.toLowerCase() ?? "";
+				applySessionSnapshot({
+					authenticated: true,
+					user_id: extra.user_id ?? null,
+					username: extra.username ?? null,
+					display_name: extra.display_name ?? extra.username ?? null,
+					avatar_url: extra.avatar_url ?? null,
+					role: extra.role ?? null,
+					is_admin: role === "admin",
+				});
 			}
 			await saveClientConfig({
 				active_profile_id: selectedProfileId || null,
@@ -323,6 +365,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			}).catch(() => {});
 		},
 		[
+			applySessionSnapshot,
 			autoConnect,
 			autoConnectPanel,
 			fakeLanBroadcast,
@@ -335,6 +378,92 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			transport,
 		],
 	);
+
+	const finalizeLogin = useCallback(
+		async (token: string, extra?: LoginSessionExtra) => {
+			if (extra?.role?.toLowerCase() === "admin") {
+				setLoginAdminUnlocked(true);
+			}
+			setLoginModalOpen(false);
+			setProvidersResult(null);
+			setProvidersError(null);
+			setAuthError(null);
+			setOauthWaitingCallback(false);
+			setOauthExchanging(false);
+			setOauthLoading(false);
+			setActionLoading(true);
+			try {
+				await persistTunnelAuth(token, extra);
+				try {
+					await startClient({
+						server_addr: serverAddr,
+						transport,
+						auth_token: token,
+						listen_addr: listenAddr,
+						fake_lan_broadcast: fakeLanBroadcast,
+						profile_id: selectedProfileId || undefined,
+						profile_name: profileName || undefined,
+					});
+				} catch (err) {
+					setError(err instanceof Error ? err.message : String(err));
+				}
+				const st = await waitForClientConnected();
+				fetchLogs();
+				if (st?.state === "connected") {
+					const session = await refreshSession();
+					if (
+						session?.authenticated &&
+						(session.is_admin || session.role?.toLowerCase() === "admin")
+					) {
+						void navigate({ to: "/admin" });
+					}
+				}
+				prismLink.setRemoteLinkInput("");
+				setManualCallbackInput("");
+			} finally {
+				setActionLoading(false);
+			}
+		},
+		[
+			fakeLanBroadcast,
+			fetchLogs,
+			listenAddr,
+			navigate,
+			persistTunnelAuth,
+			prismLink,
+			profileName,
+			refreshSession,
+			selectedProfileId,
+			serverAddr,
+			transport,
+			waitForClientConnected,
+		],
+	);
+
+	useEffect(() => {
+		if (!connection || !isTunnelAdminConnection(connection)) return;
+		if (status?.state === "connected") {
+			void refreshSession();
+			return;
+		}
+		if (status && !status.running && !actionLoading) {
+			suspendSession();
+			setLoginAdminUnlocked(false);
+			if (location.pathname === "/admin" || location.pathname.startsWith("/admin/")) {
+				void navigate({ to: "/" });
+			}
+		}
+	}, [
+		actionLoading,
+		authToken,
+		connection,
+		location.pathname,
+		navigate,
+		refreshSession,
+		status?.running,
+		status?.state,
+		suspendSession,
+	]);
 
 	useEffect(() => {
 		if (!configLoaded) return;
@@ -373,9 +502,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 							return;
 						}
 					} catch (fallbackErr) {
-						setAuthError(
-							fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
-						);
+						setAuthError(fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr));
 						setOauthWaitingCallback(false);
 						return;
 					}
@@ -389,27 +516,24 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		[serverAddr, setServerAddr],
 	);
 
-	const handleRedetectProviders = useCallback(
-		async (overrideUrl?: string) => {
-			setCheckingProviders(true);
-			setProvidersError(null);
-			try {
-				const target = overrideUrl?.trim()
-					? { baseUrl: normalizeBaseUrl(overrideUrl), token: "" }
-					: TUNNEL_ADMIN_CONNECTION;
-				const providers = await getAuthProviders(target);
-				setProvidersResult(providers);
-				if (overrideUrl?.trim()) {
-					setAuthServerUrl(normalizeBaseUrl(overrideUrl));
-				}
-			} catch (err) {
-				setProvidersError(err instanceof Error ? err.message : m.client_probe_failed());
-			} finally {
-				setCheckingProviders(false);
+	const handleRedetectProviders = useCallback(async (overrideUrl?: string) => {
+		setCheckingProviders(true);
+		setProvidersError(null);
+		try {
+			const target = overrideUrl?.trim()
+				? { baseUrl: normalizeBaseUrl(overrideUrl), token: "" }
+				: TUNNEL_ADMIN_CONNECTION;
+			const providers = await getAuthProviders(target);
+			setProvidersResult(providers);
+			if (overrideUrl?.trim()) {
+				setAuthServerUrl(normalizeBaseUrl(overrideUrl));
 			}
-		},
-		[],
-	);
+		} catch (err) {
+			setProvidersError(err instanceof Error ? err.message : m.client_probe_failed());
+		} finally {
+			setCheckingProviders(false);
+		}
+	}, []);
 
 	// Auto-connect and reconnect: probe login methods once the tunnel is up
 	// without a session token (handleConnectFromLink already probes on manual connect).
@@ -421,10 +545,12 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			}
 			return;
 		}
+		if (authToken) return;
 		if (checkingProviders || oauthWaitingCallback || oauthExchanging) return;
 		if (providersResult || providersError) return;
 		void handleRedetectProviders();
 	}, [
+		authToken,
 		checkingProviders,
 		handleRedetectProviders,
 		oauthExchanging,
@@ -448,23 +574,10 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			if (deep.kind === "auth-code") {
 				code = deep.code;
 			} else if (deep.kind === "auth") {
-				await persistTunnelAuth(deep.token);
-				if (deep.role?.toLowerCase() === "admin") {
-					setLoginAdminUnlocked(true);
-				}
-				setOauthWaitingCallback(false);
-				setManualCallbackInput("");
-				void startClient({
-					server_addr: serverAddr,
-					transport,
-					auth_token: deep.token,
-					listen_addr: listenAddr,
-					fake_lan_broadcast: fakeLanBroadcast,
-					profile_id: selectedProfileId || undefined,
-					profile_name: profileName || undefined,
-				}).then(() => {
-					fetchStatus();
-					fetchLogs();
+				await finalizeLogin(deep.token, {
+					user_id: deep.userId,
+					username: deep.username,
+					role: deep.role,
 				});
 				return;
 			} else if (raw.includes("code=")) {
@@ -503,11 +616,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				} | null = null;
 				let lastErr: unknown = null;
 				try {
-					res = await exchangeGitHubCode(
-						TUNNEL_ADMIN_CONNECTION,
-						code,
-						deviceId || undefined,
-					);
+					res = await exchangeGitHubCode(TUNNEL_ADMIN_CONNECTION, code, deviceId || undefined);
 				} catch (err) {
 					lastErr = err;
 				}
@@ -526,39 +635,19 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 
 				if (!res) {
 					throw new Error(
-						lastErr instanceof Error
-							? lastErr.message
-							: m.client_github_exchange_failed(),
+						lastErr instanceof Error ? lastErr.message : m.client_github_exchange_failed(),
 					);
 				}
 
-				await persistTunnelAuth(res.token, {
+				await finalizeLogin(res.token, {
 					token_id: res.token_id,
 					user_id: res.user?.id,
 					username: res.user?.username,
+					display_name: res.user?.display_name,
+					avatar_url: res.user?.avatar_url,
+					role: res.user?.role,
 					expires_at: res.expires_at_unix_ms,
 				});
-				if (res.user?.role?.toLowerCase() === "admin") {
-					setLoginAdminUnlocked(true);
-				}
-				setLoginModalOpen(false);
-				setOauthWaitingCallback(false);
-				setOauthExchanging(false);
-				setAuthError(null);
-				void startClient({
-					server_addr: serverAddr,
-					transport,
-					auth_token: res.token,
-					listen_addr: listenAddr,
-					fake_lan_broadcast: fakeLanBroadcast,
-					profile_id: selectedProfileId || undefined,
-					profile_name: profileName || undefined,
-				}).then(() => {
-					fetchStatus();
-					fetchLogs();
-				});
-				prismLink.setRemoteLinkInput("");
-				setManualCallbackInput("");
 			} catch (err) {
 				setAuthError(err instanceof Error ? err.message : String(err));
 			} finally {
@@ -567,19 +656,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				setOauthExchanging(false);
 			}
 		},
-		[
-			deviceId,
-			fakeLanBroadcast,
-			fetchLogs,
-			fetchStatus,
-			listenAddr,
-			persistTunnelAuth,
-			prismLink,
-			profileName,
-			selectedProfileId,
-			serverAddr,
-			transport,
-		],
+		[deviceId, finalizeLogin],
 	);
 
 	// Connect from remote link: initiate tunnel client connection
@@ -634,23 +711,17 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					console.warn("Tunnel client start attempt:", err);
 				});
 
-				let latestStatus = null;
-				for (let i = 0; i < 20; i++) {
-					const st = await getClientStatus().catch(() => null);
-					if (st) {
-						latestStatus = st;
-						if (st.state === "connected") {
-							setStatus(st);
-							break;
-						}
-					}
-					await new Promise((resolve) => setTimeout(resolve, 200));
-				}
-
-				if (latestStatus) {
-					setStatus(latestStatus);
-				}
+				const latestStatus = await waitForClientConnected();
 				fetchLogs();
+
+				if (authToken && latestStatus?.state === "connected") {
+					const session = await refreshSession();
+					if (session?.authenticated) {
+						setProvidersResult(null);
+						setProvidersError(null);
+						return;
+					}
+				}
 
 				let providers: AuthProvidersResponse | null = null;
 				let probeErr: string | null = null;
@@ -660,21 +731,17 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					probeErr = err instanceof Error ? err.message : m.client_probe_failed();
 					if (resolved.managementUrl) {
 						try {
-							providers = await getAuthProviders(
-								normalizeBaseUrl(resolved.managementUrl),
-							);
+							providers = await getAuthProviders(normalizeBaseUrl(resolved.managementUrl));
 							setAuthServerUrl(normalizeBaseUrl(resolved.managementUrl));
 							probeErr = null;
 						} catch (fallbackErr) {
-							probeErr =
-								fallbackErr instanceof Error ? fallbackErr.message : probeErr;
+							probeErr = fallbackErr instanceof Error ? fallbackErr.message : probeErr;
 						}
 					}
 				}
 				const hasValidProviders = Boolean(
 					providers &&
-						(providers.github_enabled ||
-							(providers.providers && providers.providers.length > 0)),
+					(providers.github_enabled || (providers.providers && providers.providers.length > 0)),
 				);
 				if (hasValidProviders) {
 					setProvidersResult(providers);
@@ -698,13 +765,14 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			listenAddr,
 			prismLink,
 			profileName,
+			refreshSession,
 			selectedProfileId,
 			serverAddr,
-			setStatus,
 			setListenAddr,
 			setProfileName,
 			setServerAddr,
 			setTransport,
+			waitForClientConnected,
 		],
 	);
 
@@ -733,38 +801,15 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				token_id?: string;
 				expires_at_unix_ms?: number | null;
 			}>;
-			const { token, role, token_id, userId, username, expires_at_unix_ms } =
-				customEvent.detail;
-			setOauthWaitingCallback(false);
-			setOauthExchanging(false);
-			setOauthLoading(false);
+			const { token, role, token_id, userId, username, expires_at_unix_ms } = customEvent.detail;
 			if (token) {
-				if (role?.toLowerCase() === "admin") {
-					setLoginAdminUnlocked(true);
-				}
-				setLoginModalOpen(false);
-				setAuthError(null);
-				void persistTunnelAuth(token, {
+				void finalizeLogin(token, {
 					token_id,
 					user_id: userId,
 					username,
+					role,
 					expires_at: expires_at_unix_ms,
-				}).then(() =>
-					startClient({
-						server_addr: serverAddr,
-						transport,
-						auth_token: token,
-						listen_addr: listenAddr,
-						fake_lan_broadcast: fakeLanBroadcast,
-						profile_id: selectedProfileId || undefined,
-						profile_name: profileName || undefined,
-					}),
-				).then(() => {
-					fetchStatus();
-					fetchLogs();
 				});
-				prismLink.setRemoteLinkInput("");
-				setManualCallbackInput("");
 			}
 		};
 
@@ -795,21 +840,13 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			window.removeEventListener("prism:deep-link-profile", handleDeepLinkProfile);
 		};
 	}, [
-		fakeLanBroadcast,
-		fetchLogs,
-		fetchStatus,
-		listenAddr,
-		persistTunnelAuth,
+		finalizeLogin,
 		prismLink,
-		profileName,
-		selectedProfileId,
-		serverAddr,
 		setFakeLanBroadcast,
 		setListenAddr,
 		setProfileName,
 		setServerAddr,
 		setTransport,
-		transport,
 	]);
 
 	const value = useMemo<ClientContextValue>(

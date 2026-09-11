@@ -25,6 +25,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { selectClientAuthView } from "@/lib/client/clientAuthView";
 import { formatBytes } from "@/lib/format";
 import { usePanelSession } from "@/lib/panelSession";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
@@ -121,7 +122,7 @@ function ThroughputSparkline({ samples }: { samples: number[] }) {
 }
 
 export function ClientOverview() {
-	const { authSession, isAdmin, clearConnection } = usePanelSession();
+	const { authSession, isAdmin, isLoadingSession, clearConnection } = usePanelSession();
 	const [copiedLink, setCopiedLink] = useState(false);
 
 	const {
@@ -148,6 +149,7 @@ export function ClientOverview() {
 		profileName,
 		serverAddr,
 		transport,
+		authToken,
 		setAuthToken,
 		listenAddr,
 		fakeLanBroadcast,
@@ -178,19 +180,26 @@ export function ClientOverview() {
 		loginAdminUnlocked,
 	} = useClient();
 
-	const loginRequired =
-		isConnected &&
-		(status?.known_services.length ?? 0) === 0 &&
-		!authSession?.authenticated;
 	const hasGithubProvider = Boolean(
 		providersResult &&
-			(providersResult.github_enabled ||
-				(providersResult.providers && providersResult.providers.length > 0)),
+		(providersResult.github_enabled ||
+			(providersResult.providers && providersResult.providers.length > 0)),
 	);
-	const showLoginMethods =
-		!oauthExchanging &&
-		!oauthWaitingCallback &&
-		(hasGithubProvider || Boolean(providersError) || loginRequired);
+	const { showLoggedInCard, loginRequired, showLoginMethods, showAdminConsole, tunnelAction } =
+		selectClientAuthView({
+			isConnected,
+			isRunning,
+			authenticated: Boolean(authSession?.authenticated),
+			isAdmin,
+			loginAdminUnlocked,
+			authToken,
+			isLoadingSession,
+			knownServiceCount: status?.known_services.length ?? 0,
+			hasGithubProvider,
+			providersError: Boolean(providersError),
+			oauthExchanging,
+			oauthWaitingCallback,
+		});
 
 	const transferGainMs = status?.stats.transfer_gain_ms ?? 0;
 	const netGainMs = status?.stats.net_gain_ms ?? 0;
@@ -210,7 +219,7 @@ export function ClientOverview() {
 			) : null}
 
 			{/* 极简连接远端卡片 (Connect to Remote Hero) */}
-			{authSession?.authenticated && !loginRequired ? (
+			{showLoggedInCard && authSession ? (
 				<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs flex items-center justify-between gap-3">
 					<div className="flex items-center gap-2.5 min-w-0">
 						{authSession.avatar_url ? (
@@ -246,7 +255,7 @@ export function ClientOverview() {
 					</div>
 
 					<div className="flex items-center gap-2 flex-none">
-						{isAdmin || loginAdminUnlocked ? (
+						{showAdminConsole ? (
 							<Link to="/admin" className="text-[11px] font-bold text-primary hover:underline">
 								{m.client_admin_console()}
 							</Link>
@@ -274,11 +283,11 @@ export function ClientOverview() {
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-1.5">
 							<Radio className="h-4 w-4 text-primary" />
-							<span className="text-xs font-bold text-foreground">{m.client_connect_and_login()}</span>
+							<span className="text-xs font-bold text-foreground">
+								{m.client_connect_and_login()}
+							</span>
 						</div>
-						<span className="text-[11px] text-muted-foreground">
-							{m.client_anonymous_hint()}
-						</span>
+						<span className="text-[11px] text-muted-foreground">{m.client_anonymous_hint()}</span>
 					</div>
 
 					<div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -380,7 +389,9 @@ export function ClientOverview() {
 								<div className="flex items-center justify-between">
 									<div className="flex items-center gap-2">
 										<RotateCcw className="h-4 w-4 animate-spin text-primary" />
-										<span className="text-xs font-bold text-foreground">{m.client_wait_github()}</span>
+										<span className="text-xs font-bold text-foreground">
+											{m.client_wait_github()}
+										</span>
 									</div>
 									<Button
 										variant="ghost"
@@ -571,14 +582,16 @@ export function ClientOverview() {
 								</Badge>
 							</div>
 							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">
-								<span className="truncate">{serverAddr || status?.server_addr || m.client_no_server()}</span>
+								<span className="truncate">
+									{serverAddr || status?.server_addr || m.client_no_server()}
+								</span>
 								<span>&rarr;</span>
 								<span className="truncate">{listenAddr || status?.listen_addr}</span>
 							</div>
 						</div>
 					</div>
 
-					{isRunning ? (
+					{tunnelAction === "disconnect" ? (
 						<Button
 							size="sm"
 							variant="outline"
@@ -593,7 +606,7 @@ export function ClientOverview() {
 							)}
 							<span>{m.client_disconnect_tunnel()}</span>
 						</Button>
-					) : authSession?.authenticated ? (
+					) : tunnelAction === "start" ? (
 						<Button
 							size="sm"
 							variant="default"
@@ -621,7 +634,9 @@ export function ClientOverview() {
 						{/* Mode Switcher */}
 						<div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
 							<span className="font-semibold uppercase tracking-wider text-[9px]">
-								{statsViewMode === "session" ? m.client_current_session() : m.client_cumulative_lifetime()}
+								{statsViewMode === "session"
+									? m.client_current_session()
+									: m.client_cumulative_lifetime()}
 							</span>
 							<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
 								<button
@@ -835,7 +850,7 @@ export function ClientOverview() {
 					<div className="border-t border-border/60 pt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
 						<div className="flex items-center gap-1.5 truncate">
 							<span className="font-semibold uppercase tracking-wider text-[9px] text-primary">
-											{m.client_history_stats()}
+								{m.client_history_stats()}
 							</span>
 							<span className="font-mono truncate">
 								{formatBytes(cumulativeStats.raw_bytes)} {m.client_raw()} &bull;{" "}
@@ -864,7 +879,9 @@ export function ClientOverview() {
 			{/* 已发现远端服务卡片 (Discovered Remote Services) */}
 			<div className="flex-1 min-h-0 flex flex-col rounded-lg border border-border bg-card p-3 shadow-xs">
 				<div className="flex items-center justify-between pb-2 border-b border-border/50 flex-none">
-					<span className="text-xs font-semibold text-foreground">{m.client_discovered_services()}</span>
+					<span className="text-xs font-semibold text-foreground">
+						{m.client_discovered_services()}
+					</span>
 					<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
 						{status?.known_services.length || 0} {m.client_active()}
 					</Badge>
@@ -874,7 +891,9 @@ export function ClientOverview() {
 					{!authSession?.authenticated && !status?.server_addr ? (
 						<div className="flex h-full flex-col items-center justify-center py-8 text-center text-muted-foreground">
 							<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
-							<p className="text-xs font-medium text-foreground">{m.client_not_connected_service()}</p>
+							<p className="text-xs font-medium text-foreground">
+								{m.client_not_connected_service()}
+							</p>
 							<p className="text-[11px] text-muted-foreground max-w-sm mt-1">
 								{m.client_service_hint()}
 							</p>
@@ -932,9 +951,7 @@ export function ClientOverview() {
 						<div className="flex h-full flex-col items-center justify-center py-8 text-center text-muted-foreground">
 							<WifiOff className="mb-2 h-7 w-7 text-muted-foreground/50" />
 							<p className="text-xs">
-								{isConnected
-									? m.client_waiting_services()
-									: m.client_connect_server_services()}
+								{isConnected ? m.client_waiting_services() : m.client_connect_server_services()}
 							</p>
 						</div>
 					)}

@@ -26,6 +26,9 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 	// Explicit `string` keeps the setter plain: the default name is stored data, not a localized string.
 	const [profileName, setProfileName] = useState<string>(m.client_default_realm());
 	const [autoConnectPanel, setAutoConnectPanel] = useState(true);
+	const [autoConnect, setAutoConnect] = useState(true);
+	const [deviceId, setDeviceId] = useState("");
+	const [configLoaded, setConfigLoaded] = useState(false);
 
 	const configLoadedRef = useRef(false);
 	const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +51,9 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 					optionsRef.current.onCumulativeStatsLoaded(resp.cumulative_stats);
 				}
 
+				if (resp.device_id) {
+					setDeviceId(resp.device_id);
+				}
 				if (!configLoadedRef.current) {
 					configLoadedRef.current = true;
 					if (resp.active_config) {
@@ -62,12 +68,14 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 						setListenAddr(resp.active_config.listen_addr || "127.0.0.1:25565");
 						setFakeLanBroadcast(resp.active_config.fake_lan_broadcast ?? true);
 						setAutoConnectPanel(resp.active_config.auto_connect_panel ?? true);
+						setAutoConnect(resp.active_config.auto_connect ?? true);
 					}
 					if (resp.active_profile_id) {
 						setSelectedProfileId(resp.active_profile_id);
 					} else if (resp.profiles.length > 0) {
 						setSelectedProfileId(resp.profiles[0].id);
 					}
+					setConfigLoaded(true);
 				}
 			})
 			.catch(() => {
@@ -84,9 +92,14 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 							setAuthToken(first.auth_token);
 							setListenAddr(first.listen_addr);
 							setFakeLanBroadcast(first.fake_lan_broadcast);
+							setConfigLoaded(true);
+						} else {
+							setConfigLoaded(true);
 						}
 					})
-					.catch(() => {});
+					.catch(() => {
+						setConfigLoaded(true);
+					});
 			});
 	}, []);
 
@@ -104,12 +117,14 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 			saveClientConfig({
 				active_profile_id: selectedProfileId || null,
 				active_config: {
+					profile_name: profileName,
 					server_addr: serverAddr,
 					transport,
 					auth_token: authToken,
 					listen_addr: listenAddr,
 					fake_lan_broadcast: fakeLanBroadcast,
 					auto_connect_panel: autoConnectPanel,
+					auto_connect: autoConnect,
 				},
 			}).catch(() => {});
 		}, 500);
@@ -121,12 +136,14 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 		};
 	}, [
 		selectedProfileId,
+		profileName,
 		serverAddr,
 		transport,
 		authToken,
 		listenAddr,
 		fakeLanBroadcast,
 		autoConnectPanel,
+		autoConnect,
 	]);
 
 	const handleSelectProfile = useCallback(
@@ -143,17 +160,19 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 				saveClientConfig({
 					active_profile_id: id,
 					active_config: {
+						profile_name: p.name,
 						server_addr: p.server_addr,
 						transport: p.transport,
 						auth_token: p.auth_token,
 						listen_addr: p.listen_addr,
 						fake_lan_broadcast: p.fake_lan_broadcast,
 						auto_connect_panel: autoConnectPanel,
+						auto_connect: autoConnect,
 					},
 				}).catch(() => {});
 			}
 		},
-		[autoConnectPanel, profiles],
+		[autoConnect, autoConnectPanel, profiles],
 	);
 
 	const handleSaveProfile = useCallback(async () => {
@@ -185,16 +204,19 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 		await saveClientConfig({
 			active_profile_id: id,
 			active_config: {
+				profile_name: profileName || serverAddr,
 				server_addr: serverAddr,
 				transport,
 				auth_token: authToken,
 				listen_addr: listenAddr,
 				fake_lan_broadcast: fakeLanBroadcast,
 				auto_connect_panel: autoConnectPanel,
+				auto_connect: autoConnect,
 			},
 		}).catch(() => {});
 	}, [
 		authToken,
+		autoConnect,
 		autoConnectPanel,
 		fakeLanBroadcast,
 		listenAddr,
@@ -249,6 +271,10 @@ export function useClientProfiles(options?: UseClientProfilesOptions) {
 		setFakeLanBroadcast,
 		autoConnectPanel,
 		setAutoConnectPanel,
+		autoConnect,
+		setAutoConnect,
+		deviceId,
+		configLoaded,
 		managementUrl,
 		handleSelectProfile,
 		handleSaveProfile,

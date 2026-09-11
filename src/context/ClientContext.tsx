@@ -71,6 +71,8 @@ export const DEFAULT_CLIENT_CONTEXT: ClientContextValue = {
 	setFakeLanBroadcast: () => {},
 	autoConnectPanel: true,
 	setAutoConnectPanel: () => {},
+	autoConnect: true,
+	setAutoConnect: () => {},
 	managementUrl: "http://127.0.0.1:8080",
 	handleSelectProfile: () => {},
 	handleSaveProfile: async () => {},
@@ -177,6 +179,10 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		fakeLanBroadcast,
 		setFakeLanBroadcast,
 		autoConnectPanel,
+		autoConnect,
+		deviceId,
+		configLoaded,
+		managementUrl,
 		fetchClientConfigData,
 	} = clientProfiles;
 
@@ -280,6 +286,63 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		}
 	}, [handleConnect, handleDisconnect, status?.running]);
 
+	const persistTunnelAuth = useCallback(
+		async (
+			token: string,
+			extra?: {
+				token_id?: string;
+				user_id?: string;
+				username?: string;
+				expires_at?: number | null;
+				panelUrl?: string;
+			},
+		) => {
+			setAuthToken(token);
+			const panelUrl = extra?.panelUrl || authServerUrl || managementUrl;
+			if (autoConnectPanel && token && panelUrl) {
+				saveConnection({ baseUrl: normalizeBaseUrl(panelUrl), token });
+			}
+			await saveClientConfig({
+				active_profile_id: selectedProfileId || null,
+				active_config: {
+					profile_name: profileName,
+					server_addr: serverAddr,
+					transport,
+					auth_token: token,
+					listen_addr: listenAddr,
+					fake_lan_broadcast: fakeLanBroadcast,
+					auto_connect_panel: autoConnectPanel,
+					auto_connect: autoConnect,
+					token_id: extra?.token_id,
+					user_id: extra?.user_id,
+					username: extra?.username,
+					expires_at: extra?.expires_at ?? undefined,
+				},
+			}).catch(() => {});
+		},
+		[
+			authServerUrl,
+			autoConnect,
+			autoConnectPanel,
+			fakeLanBroadcast,
+			listenAddr,
+			managementUrl,
+			profileName,
+			saveConnection,
+			selectedProfileId,
+			serverAddr,
+			setAuthToken,
+			transport,
+		],
+	);
+
+	useEffect(() => {
+		if (!configLoaded) return;
+		if (autoConnectPanel && authToken && managementUrl) {
+			saveConnection({ baseUrl: normalizeBaseUrl(managementUrl), token: authToken });
+		}
+	}, [authToken, autoConnectPanel, configLoaded, managementUrl, saveConnection]);
+
 	// Start GitHub OAuth with target management URL via browser + deep link
 	const startGitHubAuthWithUrl = useCallback(
 		async (targetAuthUrl: string, targetServerAddr?: string) => {
@@ -343,21 +406,10 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			if (deep.kind === "auth-code") {
 				code = deep.code;
 			} else if (deep.kind === "auth") {
-				setAuthToken(deep.token);
+				await persistTunnelAuth(deep.token);
 				if (deep.role?.toLowerCase() === "admin") {
 					setLoginAdminUnlocked(true);
 				}
-				saveClientConfig({
-					active_profile_id: selectedProfileId || null,
-					active_config: {
-						server_addr: serverAddr,
-						transport,
-						auth_token: deep.token,
-						listen_addr: listenAddr,
-						fake_lan_broadcast: fakeLanBroadcast,
-						auto_connect_panel: autoConnectPanel,
-					},
-				}).catch(() => {});
 				setOauthWaitingCallback(false);
 				setManualCallbackInput("");
 				void startClient({
@@ -427,12 +479,21 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					candidateUrls.push("http://127.0.0.1:18080");
 				}
 
-				let res: { token: string; user: UserRecord; token_id: string } | null = null;
+				let res: {
+					token: string;
+					user: UserRecord;
+					token_id: string;
+					expires_at_unix_ms?: number | null;
+				} | null = null;
 				let activeUrl = candidateUrls[0];
 				let lastErr: unknown = null;
 				for (const u of candidateUrls) {
 					try {
-						res = await exchangeGitHubCode({ baseUrl: normalizeBaseUrl(u), token: "" }, code);
+						res = await exchangeGitHubCode(
+							{ baseUrl: normalizeBaseUrl(u), token: "" },
+							code,
+							deviceId || undefined,
+						);
 						activeUrl = u;
 						break;
 					} catch (err) {
@@ -448,23 +509,15 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 					);
 				}
 
-				setAuthToken(res.token);
+				await persistTunnelAuth(res.token, {
+					token_id: res.token_id,
+					user_id: res.user?.id,
+					username: res.user?.username,
+					expires_at: res.expires_at_unix_ms,
+					panelUrl: activeUrl,
+				});
 				if (res.user?.role?.toLowerCase() === "admin") {
 					setLoginAdminUnlocked(true);
-				}
-				saveClientConfig({
-					active_profile_id: selectedProfileId || null,
-					active_config: {
-						server_addr: serverAddr,
-						transport,
-						auth_token: res.token,
-						listen_addr: listenAddr,
-						fake_lan_broadcast: fakeLanBroadcast,
-						auto_connect_panel: autoConnectPanel,
-					},
-				}).catch(() => {});
-				if (autoConnectPanel && activeUrl) {
-					saveConnection({ baseUrl: normalizeBaseUrl(activeUrl), token: res.token });
 				}
 				setLoginModalOpen(false);
 				setOauthWaitingCallback(false);
@@ -494,17 +547,16 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		},
 		[
 			authServerUrl,
-			autoConnectPanel,
+			deviceId,
 			fakeLanBroadcast,
 			fetchLogs,
 			fetchStatus,
 			listenAddr,
+			persistTunnelAuth,
 			prismLink,
 			profileName,
-			saveConnection,
 			selectedProfileId,
 			serverAddr,
-			setAuthToken,
 			status?.admin_url,
 			transport,
 		],
@@ -692,41 +744,36 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 				userId?: string;
 				username?: string;
 				role?: string;
+				token_id?: string;
+				expires_at_unix_ms?: number | null;
 			}>;
-			const { token, role } = customEvent.detail;
+			const { token, role, token_id, userId, username, expires_at_unix_ms } =
+				customEvent.detail;
 			setOauthWaitingCallback(false);
 			setOauthExchanging(false);
 			setOauthLoading(false);
 			if (token) {
-				setAuthToken(token);
 				if (role?.toLowerCase() === "admin") {
 					setLoginAdminUnlocked(true);
 				}
-				saveClientConfig({
-					active_profile_id: selectedProfileId || null,
-					active_config: {
+				setLoginModalOpen(false);
+				setAuthError(null);
+				void persistTunnelAuth(token, {
+					token_id,
+					user_id: userId,
+					username,
+					expires_at: expires_at_unix_ms,
+				}).then(() =>
+					startClient({
 						server_addr: serverAddr,
 						transport,
 						auth_token: token,
 						listen_addr: listenAddr,
 						fake_lan_broadcast: fakeLanBroadcast,
-						auto_connect_panel: autoConnectPanel,
-					},
-				}).catch(() => {});
-				if (autoConnectPanel && authServerUrl) {
-					saveConnection({ baseUrl: normalizeBaseUrl(authServerUrl), token });
-				}
-				setLoginModalOpen(false);
-				setAuthError(null);
-				void startClient({
-					server_addr: serverAddr,
-					transport,
-					auth_token: token,
-					listen_addr: listenAddr,
-					fake_lan_broadcast: fakeLanBroadcast,
-					profile_id: selectedProfileId || undefined,
-					profile_name: profileName || undefined,
-				}).then(() => {
+						profile_id: selectedProfileId || undefined,
+						profile_name: profileName || undefined,
+					}),
+				).then(() => {
 					fetchStatus();
 					fetchLogs();
 				});
@@ -762,18 +809,15 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			window.removeEventListener("prism:deep-link-profile", handleDeepLinkProfile);
 		};
 	}, [
-		authServerUrl,
-		autoConnectPanel,
 		fakeLanBroadcast,
 		fetchLogs,
 		fetchStatus,
 		listenAddr,
+		persistTunnelAuth,
 		prismLink,
 		profileName,
-		saveConnection,
 		selectedProfileId,
 		serverAddr,
-		setAuthToken,
 		setFakeLanBroadcast,
 		setListenAddr,
 		setProfileName,
@@ -828,6 +872,8 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setFakeLanBroadcast: clientProfiles.setFakeLanBroadcast,
 			autoConnectPanel: clientProfiles.autoConnectPanel,
 			setAutoConnectPanel: clientProfiles.setAutoConnectPanel,
+			autoConnect: clientProfiles.autoConnect,
+			setAutoConnect: clientProfiles.setAutoConnect,
 			managementUrl: clientProfiles.managementUrl,
 			handleSelectProfile: clientProfiles.handleSelectProfile,
 			handleSaveProfile: clientProfiles.handleSaveProfile,

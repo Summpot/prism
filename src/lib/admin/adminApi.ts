@@ -124,15 +124,23 @@ export function getGitHubLoginUrl(connection: PanelConnection) {
 	return adminRequest<GitHubLoginUrlResponse>(connection, "/auth/github/login");
 }
 
-export function exchangeGitHubCode(connection: PanelConnection, code: string) {
-	return adminRequest<{ token: string; user: UserRecord; token_id: string }>(
-		connection,
-		"/auth/github/exchange",
-		{
-			method: "POST",
-			body: JSON.stringify({ code }),
-		},
-	);
+export function exchangeGitHubCode(
+	connection: PanelConnection,
+	code: string,
+	deviceId?: string | null,
+) {
+	return adminRequest<{
+		token: string;
+		user: UserRecord;
+		token_id: string;
+		expires_at_unix_ms?: number | null;
+	}>(connection, "/auth/github/exchange", {
+		method: "POST",
+		body: JSON.stringify({
+			code,
+			...(deviceId ? { device_id: deviceId } : {}),
+		}),
+	});
 }
 
 export function getAuthSession(connection: PanelConnection) {

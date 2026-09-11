@@ -27,6 +27,8 @@ export function ClientSettings() {
 		setFakeLanBroadcast,
 		autoConnectPanel,
 		setAutoConnectPanel,
+		autoConnect,
+		setAutoConnect,
 		managementUrl,
 		handleSaveProfile,
 		handleDeleteProfile,
@@ -249,6 +251,18 @@ export function ClientSettings() {
 									</div>
 								</div>
 								<Switch checked={fakeLanBroadcast} onCheckedChange={setFakeLanBroadcast} />
+							</div>
+
+							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">
+								<div>
+									<div className="font-medium text-xs text-foreground">
+										{m.client_auto_connect()}
+									</div>
+									<div className="text-[10px] text-muted-foreground">
+										{m.client_auto_connect_hint()}
+									</div>
+								</div>
+								<Switch checked={autoConnect} onCheckedChange={setAutoConnect} />
 							</div>
 
 							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2 text-xs">

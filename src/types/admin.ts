@@ -149,6 +149,7 @@ export interface TokenRecord {
 	user_id: string;
 	token_type: "client" | "admin" | "connector";
 	name: string;
+	device_id?: string | null;
 	service_rules?: string[] | null;
 	created_at_unix_ms: number;
 	expires_at_unix_ms?: number | null;

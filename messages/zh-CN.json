@@ -163,6 +163,8 @@
 	"client_listen_address": "本地监听地址 / Ingress",
 	"client_lan_broadcast": "Minecraft 局域网广播",
 	"client_lan_broadcast_hint": "在局域网内自动广播游戏服务，便于客户端发现",
+	"client_auto_connect": "启动时自动连接隧道",
+	"client_auto_connect_hint": "使用已保存的凭证，在 Prism 启动时自动连回上次的服务器",
 	"client_auto_connect_panel": "控制面板自动连接",
 	"client_auto_connect_panel_hint": "自动同步管理面板与鉴权状态（{url}）",
 	"client_delete_this_profile": "删除此配置",

@@ -4,12 +4,17 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::Context;
 use rand::{RngExt, rng};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 use crate::prism::tunnel::protocol::RegisteredService;
+
+/// Default lifetime for GitHub-issued desktop session tokens.
+pub const DEFAULT_OAUTH_TOKEN_TTL_DAYS: u64 = 90;
 
 /// User role for RBAC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +62,8 @@ pub struct TokenRecord {
     pub user_id: String,
     pub token_type: TokenType,
     pub name: String,
+    #[serde(default)]
+    pub device_id: Option<String>,
     #[serde(default)]
     pub service_rules: Option<Vec<String>>,
     pub created_at_unix_ms: u64,
@@ -196,6 +203,111 @@ fn default_schema_version() -> u32 {
     1
 }
 
+struct LoadedAuthDb {
+    state: PersistedAuthState,
+    initialized: bool,
+}
+
+fn open_auth_db(path: &Path) -> anyhow::Result<Connection> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(path)
+        .with_context(|| format!("failed to open auth sqlite at {}", path.display()))?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
+         PRAGMA synchronous = NORMAL;
+         CREATE TABLE IF NOT EXISTS auth_users (
+            id TEXT PRIMARY KEY,
+            record_json TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS auth_tokens (
+            token_hash TEXT PRIMARY KEY,
+            record_json TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS auth_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+         );",
+    )?;
+    Ok(conn)
+}
+
+fn load_auth_state_from_db(path: &Path) -> anyhow::Result<LoadedAuthDb> {
+    let conn = open_auth_db(path)?;
+    let initialized: bool = conn
+        .query_row(
+            "SELECT value FROM auth_meta WHERE key = 'initialized'",
+            [],
+            |row| {
+                let v: String = row.get(0)?;
+                Ok(v == "1")
+            },
+        )
+        .unwrap_or(false);
+
+    let mut state = PersistedAuthState::default();
+    {
+        let mut stmt = conn.prepare("SELECT id, record_json FROM auth_users")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for r in rows {
+            let (id, json) = r?;
+            if let Ok(user) = serde_json::from_str::<UserRecord>(&json) {
+                state.users.insert(id, user);
+            }
+        }
+    }
+    {
+        let mut stmt = conn.prepare("SELECT token_hash, record_json FROM auth_tokens")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for r in rows {
+            let (hash, json) = r?;
+            if let Ok(token) = serde_json::from_str::<TokenRecord>(&json) {
+                state.tokens.insert(hash, token);
+            }
+        }
+    }
+    if !initialized && (!state.users.is_empty() || !state.tokens.is_empty()) {
+        return Ok(LoadedAuthDb {
+            state,
+            initialized: true,
+        });
+    }
+    Ok(LoadedAuthDb { state, initialized })
+}
+
+fn save_auth_state_to_db(path: &Path, state: &PersistedAuthState) -> anyhow::Result<()> {
+    let mut conn = open_auth_db(path)?;
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM auth_users", [])?;
+    tx.execute("DELETE FROM auth_tokens", [])?;
+    {
+        let mut stmt = tx.prepare("INSERT INTO auth_users (id, record_json) VALUES (?1, ?2)")?;
+        for (id, user) in &state.users {
+            stmt.execute(params![id, serde_json::to_string(user)?])?;
+        }
+    }
+    {
+        let mut stmt =
+            tx.prepare("INSERT INTO auth_tokens (token_hash, record_json) VALUES (?1, ?2)")?;
+        for (hash, token) in &state.tokens {
+            stmt.execute(params![hash, serde_json::to_string(token)?])?;
+        }
+    }
+    tx.execute(
+        "INSERT INTO auth_meta (key, value) VALUES ('initialized', '1')
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// GitHub user profile returned by API.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitHubUser {
@@ -214,7 +326,8 @@ pub struct GitHubOrg {
 /// Central authentication and user management plane.
 pub struct AuthManager {
     config: AuthConfig,
-    state_path: Option<PathBuf>,
+    json_path: Option<PathBuf>,
+    db_path: Option<PathBuf>,
     state: RwLock<PersistedAuthState>,
     http_client: reqwest::Client,
 }
@@ -222,7 +335,8 @@ pub struct AuthManager {
 impl std::fmt::Debug for AuthManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthManager")
-            .field("state_path", &self.state_path)
+            .field("db_path", &self.db_path)
+            .field("json_path", &self.json_path)
             .finish_non_exhaustive()
     }
 }
@@ -230,21 +344,40 @@ impl std::fmt::Debug for AuthManager {
 impl AuthManager {
     /// Creates a new AuthManager with persistence and optional GitHub integration.
     pub fn new(config: AuthConfig, workdir: Option<&Path>) -> Self {
-        let state_path = workdir.map(|p| p.join("auth-state.json"));
-        let state = if let Some(ref path) = state_path {
-            if path.is_file() {
-                match std::fs::read_to_string(path) {
-                    Ok(content) => {
-                        serde_json::from_str::<PersistedAuthState>(&content).unwrap_or_default()
+        let json_path = workdir.map(|p| p.join("auth-state.json"));
+        let db_path = workdir.map(|p| p.join("prism.db"));
+
+        let mut state = PersistedAuthState::default();
+        let mut loaded_from_db = false;
+        if let Some(ref db) = db_path {
+            match load_auth_state_from_db(db) {
+                Ok(db_state) => {
+                    loaded_from_db = db_state.initialized;
+                    if loaded_from_db {
+                        state = db_state.state;
                     }
-                    Err(_) => PersistedAuthState::default(),
                 }
-            } else {
-                PersistedAuthState::default()
+                Err(err) => {
+                    tracing::warn!(err = %err, path = %db.display(), "auth: failed to load sqlite state");
+                }
             }
-        } else {
-            PersistedAuthState::default()
-        };
+        }
+        if !loaded_from_db {
+            if let Some(ref path) = json_path {
+                if path.is_file() {
+                    match std::fs::read_to_string(path) {
+                        Ok(content) => {
+                            state = serde_json::from_str::<PersistedAuthState>(&content)
+                                .unwrap_or_default();
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+            if let Some(ref db) = db_path {
+                let _ = save_auth_state_to_db(db, &state);
+            }
+        }
 
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
@@ -253,25 +386,38 @@ impl AuthManager {
 
         Self {
             config,
-            state_path,
+            json_path,
+            db_path,
             state: RwLock::new(state),
             http_client,
         }
     }
 
-    /// Saves state to disk if path is configured.
+    /// Saves state to sqlite (preferred) or the legacy JSON file.
     async fn save_state(&self) -> anyhow::Result<()> {
-        let Some(ref path) = self.state_path else {
+        let guard = self.state.read().await;
+        if let Some(ref db) = self.db_path {
+            save_auth_state_to_db(db, &*guard)?;
+            return Ok(());
+        }
+        let Some(ref path) = self.json_path else {
             return Ok(());
         };
-        let guard = self.state.read().await;
         let data = serde_json::to_string_pretty(&*guard)?;
         drop(guard);
 
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        std::fs::write(path, data)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, data)?;
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+        if std::fs::rename(&tmp, path).is_err() {
+            std::fs::copy(&tmp, path)?;
+            let _ = std::fs::remove_file(&tmp);
+        }
         Ok(())
     }
 
@@ -369,24 +515,56 @@ impl AuthManager {
         name: &str,
         expires_in_days: Option<u64>,
     ) -> anyhow::Result<(String, TokenRecord)> {
-        let (raw, hash) = generate_token("prism_cl_");
+        self.issue_session_token(user_id, TokenType::Client, name, None, expires_in_days)
+            .await
+    }
+
+    /// Issues a session token, rotating any previous token for the same user+device.
+    pub async fn issue_session_token(
+        &self,
+        user_id: &str,
+        token_type: TokenType,
+        name: &str,
+        device_id: Option<&str>,
+        expires_in_days: Option<u64>,
+    ) -> anyhow::Result<(String, TokenRecord)> {
+        let prefix = match token_type {
+            TokenType::Admin => "prism_adm_",
+            TokenType::Connector => "prism_cn_",
+            TokenType::Client => "prism_cl_",
+        };
+        let (raw, hash) = generate_token(prefix);
         let now = now_unix_ms();
         let expires_at_unix_ms = expires_in_days.map(|days| now + days * 86_400_000);
+        let device_id = device_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
 
         let record = TokenRecord {
             id: format!("tok_{}", &hash[..12]),
             token_hash: hash.clone(),
             user_id: user_id.to_string(),
-            token_type: TokenType::Client,
+            token_type,
             name: name.to_string(),
-            service_rules: None,
+            device_id: device_id.clone(),
+            service_rules: if token_type == TokenType::Admin {
+                Some(vec!["*".to_string()])
+            } else {
+                None
+            },
             created_at_unix_ms: now,
             expires_at_unix_ms,
-            last_used_unix_ms: 0,
+            last_used_unix_ms: now,
         };
 
         {
             let mut guard = self.state.write().await;
+            if let Some(ref dev) = device_id {
+                guard.tokens.retain(|_, t| {
+                    !(t.user_id == user_id && t.device_id.as_deref() == Some(dev.as_str()))
+                });
+            }
             guard.tokens.insert(hash, record.clone());
         }
         let _ = self.save_state().await;
@@ -423,6 +601,7 @@ impl AuthManager {
             user_id: user_id.to_string(),
             token_type: TokenType::Admin,
             name: name.to_string(),
+            device_id: None,
             service_rules: Some(vec!["*".to_string()]),
             created_at_unix_ms: now,
             expires_at_unix_ms: None,
@@ -496,6 +675,7 @@ impl AuthManager {
     pub async fn exchange_code(
         &self,
         code: &str,
+        device_id: Option<&str>,
     ) -> anyhow::Result<(UserRecord, String, TokenRecord)> {
         let Some(gh) = self.github_config() else {
             anyhow::bail!("GitHub OAuth is not configured or enabled");
@@ -534,7 +714,7 @@ impl AuthManager {
         };
 
         let (gh_user, orgs) = self.fetch_github_profile(&token).await?;
-        self.on_oauth_success(gh_user, &orgs, "GitHub Deep Link Login")
+        self.on_oauth_success(gh_user, &orgs, "GitHub Deep Link Login", device_id)
             .await
     }
 
@@ -582,6 +762,7 @@ impl AuthManager {
         gh_user: GitHubUser,
         orgs: &[String],
         token_name: &str,
+        device_id: Option<&str>,
     ) -> anyhow::Result<(UserRecord, String, TokenRecord)> {
         let gh_cfg = self
             .config
@@ -663,36 +844,22 @@ impl AuthManager {
 
         guard.users.insert(user_id.clone(), user_record.clone());
         drop(guard);
-
-        // 3. Generate token
-        let token_prefix = if role == UserRole::Admin {
-            "prism_adm_"
-        } else {
-            "prism_cl_"
-        };
-        let (raw, hash) = generate_token(token_prefix);
-        let token_record = TokenRecord {
-            id: format!("tok_{}", &hash[..12]),
-            token_hash: hash.clone(),
-            user_id,
-            token_type: if role == UserRole::Admin {
-                TokenType::Admin
-            } else {
-                TokenType::Client
-            },
-            name: token_name.to_string(),
-            service_rules: None,
-            created_at_unix_ms: now,
-            expires_at_unix_ms: None,
-            last_used_unix_ms: now,
-        };
-
-        {
-            let mut guard = self.state.write().await;
-            guard.tokens.insert(hash, token_record.clone());
-        }
-
         let _ = self.save_state().await;
+
+        let token_type = if role == UserRole::Admin {
+            TokenType::Admin
+        } else {
+            TokenType::Client
+        };
+        let (raw, token_record) = self
+            .issue_session_token(
+                &user_id,
+                token_type,
+                token_name,
+                device_id,
+                Some(DEFAULT_OAUTH_TOKEN_TTL_DAYS),
+            )
+            .await?;
         Ok((user_record, raw, token_record))
     }
 }
@@ -768,5 +935,74 @@ mod tests {
         assert!(!match_service_rule("minecraft-*", "web-server"));
         assert!(match_service_rule("web", "WEB"));
         assert!(!match_service_rule("web", "website"));
+    }
+
+    #[tokio::test]
+    async fn test_device_token_rotation_and_sqlite_persist() {
+        let dir = std::env::temp_dir().join(format!("prism_auth_test_{}", rand::random::<u64>()));
+        let _ = std::fs::create_dir_all(&dir);
+
+        let auth = AuthManager::new(AuthConfig::default(), Some(&dir));
+        let user = UserRecord {
+            id: "user_1".into(),
+            username: "alice".into(),
+            display_name: None,
+            avatar_url: None,
+            role: UserRole::Member,
+            service_rules: vec!["*".into()],
+            created_at_unix_ms: now_unix_ms(),
+            last_login_unix_ms: now_unix_ms(),
+        };
+        auth.upsert_user(user).await.unwrap();
+
+        let (tok1, rec1) = auth
+            .issue_session_token(
+                "user_1",
+                TokenType::Client,
+                "Alice PC",
+                Some("prism_dev_aaa"),
+                Some(90),
+            )
+            .await
+            .unwrap();
+        assert!(rec1.expires_at_unix_ms.is_some());
+        assert_eq!(rec1.device_id.as_deref(), Some("prism_dev_aaa"));
+
+        let (tok2, rec2) = auth
+            .issue_session_token(
+                "user_1",
+                TokenType::Client,
+                "Alice PC",
+                Some("prism_dev_aaa"),
+                Some(90),
+            )
+            .await
+            .unwrap();
+        assert_ne!(tok1, tok2);
+        assert!(auth.verify_token(&tok1).await.is_none());
+        assert!(auth.verify_token(&tok2).await.is_some());
+
+        let (tok_b, _) = auth
+            .issue_session_token(
+                "user_1",
+                TokenType::Client,
+                "Alice Laptop",
+                Some("prism_dev_bbb"),
+                Some(90),
+            )
+            .await
+            .unwrap();
+        assert!(auth.verify_token(&tok2).await.is_some());
+        assert!(auth.verify_token(&tok_b).await.is_some());
+
+        drop(auth);
+        let reloaded = AuthManager::new(AuthConfig::default(), Some(&dir));
+        assert!(reloaded.verify_token(&tok2).await.is_some());
+        assert!(reloaded.verify_token(&tok_b).await.is_some());
+        assert!(reloaded.get_user("user_1").await.is_some());
+        assert_eq!(reloaded.list_tokens(Some("user_1")).await.len(), 2);
+        assert_eq!(rec2.user_id, "user_1");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

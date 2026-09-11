@@ -14,7 +14,7 @@ import { ClientModals } from "@/components/client/ClientModals";
 import { Button } from "@/components/ui/button";
 import { ClientProvider } from "@/context/ClientContext";
 import { setupDeepLinkListener } from "@/lib/deepLink";
-import { exchangeGitHubCode, getClientStatus } from "@/lib/managementApi";
+import { exchangeGitHubCode, getClientConfig, getClientStatus } from "@/lib/managementApi";
 import {
 	closeWindow,
 	isDesktopApp,
@@ -252,10 +252,21 @@ function RootContent() {
 					}
 
 					let lastErr: unknown = null;
+					let deviceId: string | undefined;
+					try {
+						const cfg = await getClientConfig();
+						deviceId = cfg.device_id || undefined;
+					} catch {
+						// local config is optional for exchange
+					}
 					for (const targetUrl of candidates) {
 						try {
 							const norm = normalizeBaseUrl(targetUrl);
-							const res = await exchangeGitHubCode({ baseUrl: norm, token: "" }, payload.code);
+							const res = await exchangeGitHubCode(
+								{ baseUrl: norm, token: "" },
+								payload.code,
+								deviceId,
+							);
 							if (typeof window !== "undefined") {
 								window.localStorage.removeItem("prism_pending_auth_url");
 								window.sessionStorage.removeItem("prism_pending_auth_url");
@@ -271,6 +282,8 @@ function RootContent() {
 										userId: res.user.id,
 										username: res.user.username,
 										role: res.user.role,
+										token_id: res.token_id,
+										expires_at_unix_ms: res.expires_at_unix_ms,
 									},
 								}),
 							);

@@ -72,6 +72,47 @@ fn resolve_middleware_dir(
     Ok(p)
 }
 
+/// Desktop data directory (same qualifier as the server workdir), with a one-time
+/// copy from the legacy `com.prism.prism` location when present.
+pub fn resolve_desktop_data_dir() -> PathBuf {
+    let current = default_workdir().unwrap_or_else(|_| PathBuf::from("."));
+    migrate_legacy_desktop_data(&current);
+    current
+}
+
+fn migrate_legacy_desktop_data(current: &Path) {
+    if current.join("prism.db").is_file() {
+        return;
+    }
+    let mut candidates = Vec::new();
+    if let Some(proj) = ProjectDirs::from("com", "prism", "prism") {
+        candidates.push(proj.data_dir().to_path_buf());
+        candidates.push(proj.data_local_dir().to_path_buf());
+    }
+    for legacy in candidates {
+        if legacy == current {
+            continue;
+        }
+        if !legacy.join("prism.db").is_file() {
+            continue;
+        }
+        let _ = std::fs::create_dir_all(current);
+        let _ = std::fs::copy(legacy.join("prism.db"), current.join("prism.db"));
+        for extra in ["prism.db-wal", "prism.db-shm", "auth-state.json"] {
+            let src = legacy.join(extra);
+            if src.is_file() {
+                let _ = std::fs::copy(&src, current.join(extra));
+            }
+        }
+        tracing::info!(
+            from = %legacy.display(),
+            to = %current.display(),
+            "workdir: migrated legacy desktop data"
+        );
+        return;
+    }
+}
+
 fn default_workdir() -> anyhow::Result<PathBuf> {
     // Linux: system-wide state dir.
     #[cfg(target_os = "linux")]

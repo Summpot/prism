@@ -163,6 +163,8 @@
 	"client_listen_address": "Local listen address / ingress",
 	"client_lan_broadcast": "Minecraft LAN broadcast",
 	"client_lan_broadcast_hint": "Automatically broadcast the game service on the local network for discovery",
+	"client_auto_connect": "Auto-connect tunnel",
+	"client_auto_connect_hint": "Reconnect to the last server with the saved credential when Prism starts",
 	"client_auto_connect_panel": "Auto-connect panel",
 	"client_auto_connect_panel_hint": "Synchronize the management panel and authentication state ({url})",
 	"client_delete_this_profile": "Delete this profile",

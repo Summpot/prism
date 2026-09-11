@@ -47,6 +47,13 @@ export interface ClientConfigState {
 	listen_addr: string;
 	fake_lan_broadcast: boolean;
 	auto_connect_panel: boolean;
+	auto_connect?: boolean;
+	management_url?: string;
+	token_id?: string;
+	token_type?: string;
+	user_id?: string;
+	username?: string;
+	expires_at?: number | null;
 }
 
 export interface ClientConfigResponse {
@@ -54,6 +61,7 @@ export interface ClientConfigResponse {
 	active_config: ClientConfigState;
 	profiles: ClientProfile[];
 	cumulative_stats: CumulativeStats;
+	device_id?: string;
 }
 
 export interface StartClientPayload {
@@ -129,6 +137,8 @@ export interface ClientContextValue {
 	setFakeLanBroadcast: (val: boolean) => void;
 	autoConnectPanel: boolean;
 	setAutoConnectPanel: (val: boolean) => void;
+	autoConnect: boolean;
+	setAutoConnect: (val: boolean) => void;
 	managementUrl: string;
 	handleSelectProfile: (id: string) => void;
 	handleSaveProfile: () => Promise<void>;

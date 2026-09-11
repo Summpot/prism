@@ -37,9 +37,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         ),
     };
 
-    let workdir = directories::ProjectDirs::from("com", "prism", "prism")
-        .map(|p| p.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let workdir = crate::prism::runtime_paths::resolve_desktop_data_dir();
 
     let auth_manager = Arc::new(crate::prism::auth::AuthManager::new(
         auth_cfg,
@@ -54,6 +52,34 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             None
         }
     };
+
+    if let Some(ref storage_engine) = storage {
+        let snap = storage_engine.get_client_config_snapshot();
+        if snap.active_config.auto_connect && !snap.active_config.server_addr.trim().is_empty() {
+            let payload = crate::prism::admin::StartClientRequest {
+                server_addr: snap.active_config.server_addr.clone(),
+                transport: snap.active_config.transport.clone(),
+                auth_token: snap.active_config.auth_token.clone(),
+                listen_addr: snap.active_config.listen_addr.clone(),
+                middleware: None,
+                fake_lan_broadcast: snap.active_config.fake_lan_broadcast,
+                motd_prefix: "[Prism] ".into(),
+                optimizer: None,
+                profile_id: snap.active_profile_id.clone(),
+                profile_name: Some(snap.active_config.profile_name.clone()),
+            };
+            let client = client_controller.clone();
+            let storage_clone = storage.clone();
+            tokio::spawn(async move {
+                if let Err(err) =
+                    crate::prism::admin::do_client_start(&client, storage_clone.as_deref(), payload)
+                        .await
+                {
+                    tracing::warn!(err = %err, "desktop: auto-connect failed");
+                }
+            });
+        }
+    }
 
     let admin_state = crate::prism::admin::AdminState {
         sessions: Arc::new(crate::prism::telemetry::SessionRegistry::new()),
@@ -122,11 +148,10 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     async fn client_status(
         state: tauri::State<'_, DesktopClientState>,
     ) -> Result<serde_json::Value, String> {
-        Ok(crate::prism::admin::do_client_status(
-            Some(&state.client),
-            state.storage.as_deref(),
+        Ok(
+            crate::prism::admin::do_client_status(Some(&state.client), state.storage.as_deref())
+                .await,
         )
-        .await)
     }
 
     #[tauri::command]
@@ -297,7 +322,11 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                         let ctrl = ctrl_clone.clone();
                         let storage_clone = storage_for_tray_clone.clone();
                         tokio::spawn(async move {
-                            let _ = crate::prism::admin::do_client_stop(&ctrl, storage_clone.as_deref()).await;
+                            let _ = crate::prism::admin::do_client_stop(
+                                &ctrl,
+                                storage_clone.as_deref(),
+                            )
+                            .await;
                         });
                     }
                     "quit" => {

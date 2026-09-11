@@ -40,6 +40,7 @@ dashmap = "6.2"
 directories = "6.0"
 futures-util = "0.3"
 humantime = "2.4"
+keyring = "3"
 instant-acme = { version = "0.8.5", default-features = false, features = [
 	"hyper-rustls",
 	"ring",

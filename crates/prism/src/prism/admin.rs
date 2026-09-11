@@ -252,7 +252,11 @@ pub struct ClientProfile {
 }
 
 fn profiles_path() -> PathBuf {
-    if let Some(proj) = directories::ProjectDirs::from("com", "prism", "prism") {
+    if let Some(proj) = directories::ProjectDirs::from("com", "summpot", "prism") {
+        let dir = proj.config_dir();
+        let _ = std::fs::create_dir_all(dir);
+        dir.join("profiles.json")
+    } else if let Some(proj) = directories::ProjectDirs::from("com", "prism", "prism") {
         let dir = proj.config_dir();
         let _ = std::fs::create_dir_all(dir);
         dir.join("profiles.json")
@@ -302,50 +306,8 @@ pub(crate) async fn do_client_start(
     storage: Option<&crate::prism::storage::StorageEngine>,
     payload: StartClientRequest,
 ) -> Result<(), String> {
-    // Automatically persist active config and profile when starting client
     if let Some(storage) = storage {
-        let profile_name = payload
-            .profile_name
-            .clone()
-            .unwrap_or_else(|| "Default Realm".to_string());
-        let form_state = crate::prism::storage::ClientConfigState {
-            profile_name: profile_name.clone(),
-            server_addr: payload.server_addr.clone(),
-            transport: payload.transport.clone(),
-            auth_token: payload.auth_token.clone(),
-            listen_addr: payload.listen_addr.clone(),
-            fake_lan_broadcast: payload.fake_lan_broadcast,
-            auto_connect_panel: true,
-        };
-        let _ = storage.save_active_config(&form_state);
-
-        let profile_id = payload
-            .profile_id
-            .clone()
-            .unwrap_or_else(|| format!("profile-{}", crate::prism::telemetry::now_unix_ms()));
-        let _ = storage.save_active_profile_id(&profile_id);
-
-        if let Ok(mut profiles) = storage.load_profiles() {
-            if let Some(p) = profiles.iter_mut().find(|item| item.id == profile_id) {
-                p.name = profile_name;
-                p.server_addr = payload.server_addr.clone();
-                p.transport = payload.transport.clone();
-                p.auth_token = payload.auth_token.clone();
-                p.listen_addr = payload.listen_addr.clone();
-                p.fake_lan_broadcast = payload.fake_lan_broadcast;
-            } else if profiles.is_empty() {
-                profiles.push(ClientProfile {
-                    id: profile_id,
-                    name: profile_name,
-                    server_addr: payload.server_addr.clone(),
-                    transport: payload.transport.clone(),
-                    auth_token: payload.auth_token.clone(),
-                    listen_addr: payload.listen_addr.clone(),
-                    fake_lan_broadcast: payload.fake_lan_broadcast,
-                });
-            }
-            let _ = storage.save_profiles(&profiles);
-        }
+        persist_started_client(storage, &payload);
     }
 
     let cfg = crate::prism::config::TunnelClientConfig {
@@ -362,6 +324,59 @@ pub(crate) async fn do_client_start(
     };
 
     client.start(cfg).await.map_err(|err| err.to_string())
+}
+
+fn persist_started_client(
+    storage: &crate::prism::storage::StorageEngine,
+    payload: &StartClientRequest,
+) {
+    let existing = storage.load_active_config().unwrap_or_default();
+    let profile_name = payload
+        .profile_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            if existing.profile_name.trim().is_empty() {
+                "Default Realm".to_string()
+            } else {
+                existing.profile_name.clone()
+            }
+        });
+    let profile_id = payload
+        .profile_id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| storage.load_active_profile_id().ok().flatten())
+        .unwrap_or_else(|| format!("profile-{}", crate::prism::telemetry::now_unix_ms()));
+
+    let form_state = crate::prism::storage::ClientConfigState {
+        profile_name: profile_name.clone(),
+        server_addr: payload.server_addr.clone(),
+        transport: payload.transport.clone(),
+        auth_token: payload.auth_token.clone(),
+        listen_addr: payload.listen_addr.clone(),
+        fake_lan_broadcast: payload.fake_lan_broadcast,
+        auto_connect_panel: existing.auto_connect_panel,
+        auto_connect: existing.auto_connect,
+        management_url: existing.management_url.clone(),
+        token_id: existing.token_id.clone(),
+        token_type: existing.token_type.clone(),
+        user_id: existing.user_id.clone(),
+        username: existing.username.clone(),
+        expires_at: existing.expires_at,
+    };
+
+    let _ = storage.save_active_profile_id(&profile_id);
+    let _ = storage.upsert_profile(&ClientProfile {
+        id: profile_id,
+        name: profile_name,
+        server_addr: payload.server_addr.clone(),
+        transport: payload.transport.clone(),
+        auth_token: payload.auth_token.clone(),
+        listen_addr: payload.listen_addr.clone(),
+        fake_lan_broadcast: payload.fake_lan_broadcast,
+    });
+    let _ = storage.save_active_config(&form_state);
 }
 
 pub(crate) async fn do_client_stop(
@@ -417,6 +432,7 @@ pub(crate) fn do_client_get_config(
         active_config: crate::prism::storage::ClientConfigState::default(),
         profiles: Vec::new(),
         cumulative_stats: tunnel::optimizer::OptimizerStatsSnapshot::default(),
+        device_id: String::new(),
     }
 }
 
@@ -425,7 +441,7 @@ pub struct SaveConfigRequest {
     #[serde(default)]
     pub active_profile_id: Option<String>,
     #[serde(default)]
-    pub active_config: Option<crate::prism::storage::ClientConfigState>,
+    pub active_config: Option<crate::prism::storage::ClientConfigPatch>,
 }
 
 pub(crate) fn do_client_save_config(
@@ -433,12 +449,10 @@ pub(crate) fn do_client_save_config(
     payload: SaveConfigRequest,
 ) -> Result<(), String> {
     if let Some(storage) = storage {
-        if let Some(ref id) = payload.active_profile_id {
-            let _ = storage.save_active_profile_id(id);
-        }
-        if let Some(ref cfg) = payload.active_config {
-            let _ = storage.save_active_config(cfg);
-        }
+        let patch = payload.active_config.unwrap_or_default();
+        storage
+            .apply_config_patch(payload.active_profile_id.as_deref(), &patch)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -1127,9 +1141,7 @@ pub struct GitHubCallbackQuery {
     pub error_description: Option<String>,
 }
 
-async fn auth_github_callback(
-    Query(query): Query<GitHubCallbackQuery>,
-) -> impl IntoResponse {
+async fn auth_github_callback(Query(query): Query<GitHubCallbackQuery>) -> impl IntoResponse {
     let content = if let Some(code) = query.code.as_deref() {
         let clean_code = code.trim();
         let state_param = query
@@ -1285,6 +1297,8 @@ async fn auth_github_callback(
 #[derive(Debug, Deserialize)]
 pub struct GitHubExchangeRequest {
     pub code: String,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1292,6 +1306,7 @@ pub struct GitHubExchangeResponse {
     pub token: String,
     pub user: crate::prism::auth::UserRecord,
     pub token_id: String,
+    pub expires_at_unix_ms: Option<u64>,
 }
 
 async fn auth_github_exchange(
@@ -1304,7 +1319,7 @@ async fn auth_github_exchange(
         .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
 
     let (user, raw_token, token_record) = am
-        .exchange_code(&payload.code)
+        .exchange_code(&payload.code, payload.device_id.as_deref())
         .await
         .map_err(ApiError::bad_request)?;
 
@@ -1314,6 +1329,7 @@ async fn auth_github_exchange(
             token: raw_token,
             user,
             token_id: token_record.id,
+            expires_at_unix_ms: token_record.expires_at_unix_ms,
         }),
     ))
 }
@@ -1913,6 +1929,61 @@ mod tests {
         let profiles = cfg_resp2["profiles"].as_array().unwrap();
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0]["id"], "prof-custom-1");
+        assert_eq!(profiles[0]["auth_token"], "token123");
+        assert!(!cfg_resp2["device_id"].as_str().unwrap_or("").is_empty());
+
+        // Starting a second profile must insert rather than skip when others already exist.
+        let start2 = http
+            .post(format!("http://{addr}/client/start"))
+            .json(&serde_json::json!({
+                "server_addr": "relay-two.example:7000",
+                "transport": "tcp",
+                "auth_token": "token-two",
+                "listen_addr": "127.0.0.1:25566",
+                "profile_id": "prof-custom-2",
+                "profile_name": "Second Realm"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(start2.status(), reqwest::StatusCode::OK);
+        let cfg_resp3: serde_json::Value = http
+            .get(format!("http://{addr}/client/config"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(cfg_resp3["profiles"].as_array().unwrap().len(), 2);
+        assert_eq!(cfg_resp3["active_profile_id"], "prof-custom-2");
+        assert_eq!(cfg_resp3["active_config"]["auth_token"], "token-two");
+
+        // Partial config save (no profile_name) must not fail and must keep the token.
+        let patch_resp = http
+            .post(format!("http://{addr}/client/config"))
+            .json(&serde_json::json!({
+                "active_profile_id": "prof-custom-2",
+                "active_config": {
+                    "auth_token": "token-rotated",
+                    "transport": "quic"
+                }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(patch_resp.status(), reqwest::StatusCode::OK);
+        let cfg_resp4: serde_json::Value = http
+            .get(format!("http://{addr}/client/config"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(cfg_resp4["active_config"]["auth_token"], "token-rotated");
+        assert_eq!(cfg_resp4["active_config"]["profile_name"], "Second Realm");
+        assert_eq!(cfg_resp4["active_config"]["transport"], "quic");
 
         // 4. Check status includes active_profile_id and cumulative_stats
         let status_resp = http
@@ -1921,7 +1992,7 @@ mod tests {
             .await
             .unwrap();
         let status_json: serde_json::Value = status_resp.json().await.unwrap();
-        assert_eq!(status_json["active_profile_id"], "prof-custom-1");
+        assert_eq!(status_json["active_profile_id"], "prof-custom-2");
         assert!(status_json.get("cumulative_stats").is_some());
 
         // 5. Stop client and test /client/stats reset
@@ -2114,7 +2185,9 @@ mod tests {
 
         let http = reqwest::Client::new();
         let resp = http
-            .get(format!("http://{addr}/auth/github/callback?code=mock_code_123&state=test_state"))
+            .get(format!(
+                "http://{addr}/auth/github/callback?code=mock_code_123&state=test_state"
+            ))
             .send()
             .await
             .unwrap();

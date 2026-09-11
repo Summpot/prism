@@ -305,6 +305,8 @@ pub async fn run(
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
                             runtime: tcp_runtime.clone(),
+                            optimizer: Some(optimizer.clone()),
+                            middleware_dir: Some(paths.middleware_dir.clone()),
                         })
                     } else {
                         proxy::TcpHandler::forward(proxy::TcpForwardHandlerOptions {
@@ -312,6 +314,8 @@ pub async fn run(
                             sessions: sessions.clone(),
                             tunnel_manager: Some(tunnel_manager.clone()),
                             runtime: tcp_runtime.clone(),
+                            optimizer: Some(optimizer.clone()),
+                            middleware_dir: Some(paths.middleware_dir.clone()),
                         })
                     };
 
@@ -456,7 +460,11 @@ pub async fn run(
         if cfg.tunnel.auto_listen_services {
             let al = tunnel::autolisten::AutoListener::new(
                 tunnel_manager.clone(),
-                tunnel::autolisten::AutoListenOptions::default(),
+                tunnel::autolisten::AutoListenOptions {
+                    udp_flow_idle_timeout: std::time::Duration::from_secs(60),
+                    optimizer: Some(optimizer.clone()),
+                    middleware_dir: Some(paths.middleware_dir.clone()),
+                },
             );
             let shutdown = shutdown_rx.clone();
             tasks.spawn(async move { al.run(shutdown).await });

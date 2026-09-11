@@ -413,6 +413,200 @@ pub async fn run_optimized_tcp_pipeline(
     Ok(())
 }
 
+/// Runs the Server-side Native Traffic Optimizer pipeline.
+///
+/// Bridges an external raw TCP client (e.g. Minecraft player) with a tunnel
+/// PRPX stream connected to a Connector.
+///
+/// - Inbound (Connector -> Server -> Player): `OptimizedReader` (direction Downlink)
+///   reads compressed PRPX chunks and writes decompressed bytes to `client_sock`.
+/// - Outbound (Player -> Server -> Connector): `OptimizedWriter` (direction Uplink)
+///   batches and compresses player bytes (after optional WASM priority sniffing)
+///   into compressed PRPX chunks sent to `st`.
+pub async fn run_server_optimized_tcp_pipeline(
+    st: BoxedStream,
+    client_sock: tokio::net::TcpStream,
+    initial_bytes: &[u8],
+    meta: RegisteredService,
+    middleware_dir: Option<&Path>,
+    optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    idle_timeout: Duration,
+) -> anyhow::Result<()> {
+    let (st_read, st_write) = tokio::io::split(st);
+    let (mut client_read, mut client_write) = client_sock.into_split();
+
+    let (flush_interval, window_log, zstd_level) = if let Some(ref to) = meta.optimizer {
+        (
+            Duration::from_millis(to.flush_interval_ms()),
+            to.zstd_window_log(),
+            to.zstd_level(),
+        )
+    } else {
+        (
+            optimizer::DEFAULT_FLUSH_INTERVAL,
+            optimizer::DEFAULT_ZSTD_WINDOW_LOG,
+            optimizer::DEFAULT_ZSTD_LEVEL,
+        )
+    };
+
+    // Inbound: PRPX stream (Connector) -> OptimizedReader (Downlink) -> client_write (Player)
+    let decompressor_config = DecompressorConfig { window_log };
+    let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?
+        .with_direction(TrafficDirection::Downlink);
+    if let Some(ref optimizer) = optimizer {
+        opt_reader.add_stats(optimizer.service(&meta.name));
+        opt_reader.add_stats(optimizer.global());
+    }
+    let inbound_task = tokio::spawn(async move {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let n = opt_reader.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            client_write.write_all(&buf[..n]).await?;
+        }
+        client_write.shutdown().await?;
+        Ok::<(), anyhow::Error>(())
+    });
+
+    // Outbound: client_read (Player) -> WasmProtocolSession (sniff keepalive) -> OptimizedWriter (Uplink) -> st_write (Connector)
+    let batcher_config = BatcherConfig {
+        flush_interval,
+        buffer_threshold: optimizer::DEFAULT_BUFFER_THRESHOLD,
+    };
+    let compressor_config = CompressorConfig {
+        compression_level: zstd_level,
+        window_log,
+    };
+    let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
+        .with_direction(TrafficDirection::Uplink);
+    if let Some(ref optimizer) = optimizer {
+        opt_writer.add_stats(optimizer.service(&meta.name));
+        opt_writer.add_stats(optimizer.global());
+    }
+
+    if !initial_bytes.is_empty() {
+        opt_writer.write_frame(initial_bytes, FramePriority::Defer).await?;
+        opt_writer.flush_batch().await?;
+    }
+
+    let wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
+
+    let outbound_task = tokio::spawn(async move {
+        let mut read_buf = Vec::with_capacity(64 * 1024);
+        let mut tmp = [0u8; 8192];
+
+        loop {
+            let flush_dur = opt_writer.time_until_flush();
+            tokio::select! {
+                res = client_read.read(&mut tmp) => {
+                    let n = res?;
+                    if n == 0 {
+                        // EOF on client socket: flush remaining bytes
+                        if !read_buf.is_empty() {
+                            opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
+                            read_buf.clear();
+                        }
+                        opt_writer.flush_batch().await?;
+                        opt_writer.shutdown().await?;
+                        break;
+                    }
+                    read_buf.extend_from_slice(&tmp[..n]);
+
+                    if let Some(ref sess_handle) = wasm_session {
+                        let mut offset = 0;
+                        while offset < read_buf.len() {
+                            let slice = &read_buf[offset..];
+                            let poll_res = {
+                                let mut sess = sess_handle.lock().unwrap();
+                                sess.poll(slice)
+                            };
+                            match poll_res {
+                                Ok(PollResult::Stream(StreamResult::Frame {
+                                    len,
+                                    priority,
+                                    payload,
+                                })) => {
+                                    if len == 0 || len > slice.len() {
+                                        break;
+                                    }
+                                    if let Some(ref payload) = payload {
+                                        opt_writer
+                                            .write_frame_with_metric(len, payload, priority)
+                                            .await?;
+                                    } else {
+                                        opt_writer.write_frame(&slice[..len], priority).await?;
+                                    }
+                                    offset += len;
+                                }
+                                Ok(PollResult::Stream(StreamResult::NeedMoreData)) => {
+                                    break;
+                                }
+                                Ok(PollResult::Handshake(_)) => {
+                                    opt_writer.write_frame(slice, FramePriority::Defer).await?;
+                                    offset += slice.len();
+                                    break;
+                                }
+                                Err(err) => {
+                                    tracing::warn!(err=%err, "middleware poll failed; writing defer");
+                                    opt_writer.write_frame(slice, FramePriority::Defer).await?;
+                                    offset += slice.len();
+                                    break;
+                                }
+                            }
+                        }
+                        if offset > 0 {
+                            read_buf.drain(..offset);
+                        }
+                    } else {
+                        opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
+                        read_buf.clear();
+                    }
+                }
+                _ = async {
+                    if let Some(dur) = flush_dur {
+                        tokio::time::sleep(dur).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    opt_writer.flush_if_due().await?;
+                }
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let copy_fut = async {
+        let mut in_task = inbound_task;
+        let mut out_task = outbound_task;
+        tokio::select! {
+            res = &mut in_task => {
+                out_task.abort();
+                let _ = out_task.await;
+                res??;
+            }
+            res = &mut out_task => {
+                in_task.abort();
+                let _ = in_task.await;
+                res??;
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+
+    if idle_timeout > Duration::from_millis(0) {
+        tokio::time::timeout(idle_timeout, copy_fut)
+            .await
+            .map_err(|_| anyhow::anyhow!("idle timeout"))??;
+    } else {
+        copy_fut.await?;
+    }
+
+    Ok(())
+}
+
 pub fn load_wasm_session(
     mw_name: Option<&str>,
     middleware_dir: Option<&Path>,
@@ -692,5 +886,117 @@ mod tests {
         drop(client_write);
         drop(client_read);
         let _ = tokio::time::timeout(Duration::from_secs(2), h).await;
+    }
+
+    #[tokio::test]
+    async fn test_server_to_connector_optimized_pipeline() {
+        // 1. Backend echo TCP server representing local Minecraft server
+        let backend_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap().to_string();
+
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = backend_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                while let Ok(n) = sock.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut reply = b"ECHO: ".to_vec();
+                    reply.extend_from_slice(&buf[..n]);
+                    if sock.write_all(&reply).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // 2. Connector configuration
+        let svc_name = "mc-opt-pipeline";
+        let meta = RegisteredService {
+            name: svc_name.into(),
+            proto: "tcp".into(),
+            local_addr: backend_addr,
+            route_only: false,
+            remote_addr: "".into(),
+            masquerade_host: "".into(),
+            middleware: None,
+            optimizer: Some(crate::prism::config::OptimizerConfig {
+                enabled: true,
+                flush_interval_ms: Some(20),
+                zstd_window_log: Some(23),
+                zstd_level: Some(3),
+            }),
+        };
+        let mut map = HashMap::new();
+        map.insert(svc_name.to_string(), meta.clone());
+        let local_map = Arc::new(map);
+
+        // 3. Duplex stream representing the tunnel PRPX stream between Server and Connector
+        let (server_tunnel_st, connector_tunnel_st) = tokio::io::duplex(64 * 1024);
+
+        // Spawn connector stream handler
+        let connector_handle = tokio::spawn(async move {
+            handle_stream(local_map, None, None, Box::new(connector_tunnel_st)).await
+        });
+
+        // Server writes PRPX header with FLAG_OPTIMIZER
+        let mut server_tunnel_st = server_tunnel_st;
+        protocol::write_proxy_stream_header_with_flags(
+            &mut server_tunnel_st,
+            ProxyStreamKind::Tcp,
+            svc_name,
+            protocol::FLAG_OPTIMIZER,
+        )
+        .await
+        .unwrap();
+
+        // 4. Mock Player raw TCP connection to the Server
+        let player_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let player_addr = player_listener.local_addr().unwrap();
+
+        let player_sock = tokio::net::TcpStream::connect(player_addr).await.unwrap();
+        let (server_client_sock, _) = player_listener.accept().await.unwrap();
+
+        // 5. Server runs run_server_optimized_tcp_pipeline
+        let opt_registry = Arc::new(crate::prism::telemetry::OptimizerStatsRegistry::new());
+        let prelude = b"MINECRAFT_PRELUDE_";
+
+        let opt_clone = opt_registry.clone();
+        let server_handle = tokio::spawn(async move {
+            run_server_optimized_tcp_pipeline(
+                Box::new(server_tunnel_st),
+                server_client_sock,
+                prelude,
+                meta,
+                None,
+                Some(opt_clone),
+                Duration::ZERO,
+            )
+            .await
+        });
+
+        let mut player_sock = player_sock;
+
+        // 6. Player receives echo of prelude
+        let mut prelude_reply = vec![0u8; b"ECHO: MINECRAFT_PRELUDE_".len()];
+        player_sock.read_exact(&mut prelude_reply).await.unwrap();
+        assert_eq!(&prelude_reply, b"ECHO: MINECRAFT_PRELUDE_");
+
+        // 7. Player sends game payload
+        player_sock.write_all(b"PLAYER_DATA").await.unwrap();
+
+        // 8. Player receives echo of player data
+        let mut payload_reply = vec![0u8; b"ECHO: PLAYER_DATA".len()];
+        player_sock.read_exact(&mut payload_reply).await.unwrap();
+        assert_eq!(&payload_reply, b"ECHO: PLAYER_DATA");
+
+        // 9. Verify stats were recorded in the registry
+        let (global_stats, service_stats) = opt_registry.snapshot();
+        assert!(global_stats.raw_bytes > 0);
+        assert!(service_stats.contains_key(svc_name));
+
+        drop(player_sock);
+        let _ = tokio::time::timeout(Duration::from_secs(2), server_handle).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), connector_handle).await;
     }
 }

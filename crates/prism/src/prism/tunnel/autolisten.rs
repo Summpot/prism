@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -19,12 +20,16 @@ use crate::prism::tunnel::{manager::Manager, protocol};
 pub struct AutoListenOptions {
     /// How long to keep per-peer UDP flows alive without activity.
     pub udp_flow_idle_timeout: Duration,
+    pub optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    pub middleware_dir: Option<PathBuf>,
 }
 
 impl Default for AutoListenOptions {
     fn default() -> Self {
         Self {
             udp_flow_idle_timeout: Duration::from_secs(60),
+            optimizer: None,
+            middleware_dir: None,
         }
     }
 }
@@ -177,7 +182,7 @@ impl AutoListener {
             let task = tokio::spawn(async move {
                 match svc2.proto.as_str() {
                     "tcp" => {
-                        if let Err(err) = run_tcp_listener(mgr, svc2, stop_rx).await {
+                        if let Err(err) = run_tcp_listener(mgr, svc2, opts, stop_rx).await {
                             tracing::warn!(err=%err, "tunnel: auto-listen tcp stopped");
                         }
                     }
@@ -211,6 +216,7 @@ impl AutoListener {
 async fn run_tcp_listener(
     mgr: Arc<Manager>,
     svc: DesiredSvc,
+    opts: AutoListenOptions,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let bind_addr = net::normalize_bind_addr(&svc.addr);
@@ -228,12 +234,14 @@ async fn run_tcp_listener(
                 }
             }
             res = ln.accept() => {
-                let (mut c, peer) = res?;
+                let (c, peer) = res?;
                 let mgr = mgr.clone();
                 let cid = svc.client_id.clone();
                 let name = svc.name.clone();
+                let optimizer = opts.optimizer.clone();
+                let middleware_dir = opts.middleware_dir.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_tcp_conn(mgr, &cid, &name, &mut c).await {
+                    if let Err(err) = handle_tcp_conn(mgr, &cid, &name, c, optimizer, middleware_dir).await {
                         tracing::debug!(service=%name, cid=%cid, peer=%peer, err=%err, "tunnel: auto-listen tcp conn ended");
                     }
                 });
@@ -248,16 +256,34 @@ async fn handle_tcp_conn(
     mgr: Arc<Manager>,
     client_id: &str,
     service: &str,
-    c: &mut TcpStream,
+    mut c: TcpStream,
+    optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    middleware_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let mut st = mgr
-        .dial_service_tcp_from_client(client_id, service)
+    let (st, svc) = mgr
+        .dial_service_tcp_from_client_with_meta(client_id, service)
         .await
         .map_err(|_| anyhow::anyhow!("tunnel: service not found"))?;
 
-    let _ = tokio::io::copy_bidirectional(c, &mut *st).await;
-    let _ = c.shutdown().await;
-    let _ = (*st).shutdown().await;
+    let optimizer_enabled = svc.optimizer.as_ref().is_some_and(|to| to.enabled);
+
+    if optimizer_enabled {
+        crate::prism::tunnel::connector::run_server_optimized_tcp_pipeline(
+            st,
+            c,
+            &[],
+            svc,
+            middleware_dir.as_deref(),
+            optimizer,
+            Duration::ZERO,
+        )
+        .await?;
+    } else {
+        let mut st = st;
+        let _ = tokio::io::copy_bidirectional(&mut c, &mut *st).await;
+        let _ = c.shutdown().await;
+        let _ = (*st).shutdown().await;
+    }
     Ok(())
 }
 
@@ -475,5 +501,142 @@ mod tests {
         assert_eq!(a.running_len().await, 1);
         a.shutdown_all().await;
         assert_eq!(a.running_len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn autolisten_tcp_optimized_pipeline() {
+        // Backend server
+        let backend_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap().to_string();
+
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = backend_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                while let Ok(n) = sock.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut reply = b"AL_ECHO: ".to_vec();
+                    reply.extend_from_slice(&buf[..n]);
+                    if sock.write_all(&reply).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Find a free port for auto-listen
+        let free_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listen_addr = free_listener.local_addr().unwrap().to_string();
+        drop(free_listener);
+
+        let (open_tx, mut open_rx) = tokio::sync::mpsc::channel(1);
+        struct MockAutolistenSession {
+            open_tx: tokio::sync::Mutex<
+                tokio::sync::mpsc::Sender<crate::prism::tunnel::transport::BoxedStream>,
+            >,
+        }
+        #[async_trait::async_trait]
+        impl crate::prism::tunnel::transport::TransportSession for MockAutolistenSession {
+            async fn open_stream(
+                &self,
+            ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+                let (c, s) = tokio::io::duplex(64 * 1024);
+                self.open_tx
+                    .lock()
+                    .await
+                    .send(Box::new(s))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(Box::new(c))
+            }
+            async fn accept_stream(
+                &self,
+            ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
+                anyhow::bail!("not implemented")
+            }
+            async fn close(&self) {}
+            fn remote_addr(&self) -> Option<SocketAddr> {
+                None
+            }
+            fn local_addr(&self) -> Option<SocketAddr> {
+                None
+            }
+        }
+
+        let mock_sess = Arc::new(MockAutolistenSession {
+            open_tx: tokio::sync::Mutex::new(open_tx),
+        });
+
+        let mgr = Arc::new(Manager::new());
+        let meta = protocol::RegisteredService {
+            name: "mc-autolisten".into(),
+            proto: "tcp".into(),
+            local_addr: backend_addr.clone(),
+            route_only: false,
+            remote_addr: listen_addr.clone(),
+            masquerade_host: "".into(),
+            middleware: None,
+            optimizer: Some(crate::prism::config::OptimizerConfig {
+                enabled: true,
+                flush_interval_ms: Some(20),
+                zstd_window_log: Some(23),
+                zstd_level: Some(3),
+            }),
+        };
+
+        let mut local_map = std::collections::HashMap::new();
+        local_map.insert("mc-autolisten".to_string(), meta.clone());
+        let local_map = Arc::new(local_map);
+
+        mgr.register_client("c-1".into(), mock_sess, vec![meta])
+            .await
+            .unwrap();
+
+        let conn_task = tokio::spawn(async move {
+            if let Some(conn_st) = open_rx.recv().await {
+                let _ =
+                    crate::prism::tunnel::connector::handle_stream(local_map, None, None, conn_st)
+                        .await;
+            }
+        });
+
+        let opt_registry = Arc::new(crate::prism::telemetry::OptimizerStatsRegistry::new());
+        let a = AutoListener::new(
+            mgr,
+            AutoListenOptions {
+                udp_flow_idle_timeout: Duration::from_secs(60),
+                optimizer: Some(opt_registry.clone()),
+                middleware_dir: None,
+            },
+        );
+        a.reconcile().await;
+
+        // Connect player to the auto-listened address
+        let mut player_sock = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(sock) = TcpStream::connect(&listen_addr).await {
+                player_sock = Some(sock);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let mut player_sock = player_sock.expect("failed to connect to auto-listened port");
+        player_sock.write_all(b"HELLO_AUTOLISTEN").await.unwrap();
+
+        let mut reply = vec![0u8; b"AL_ECHO: HELLO_AUTOLISTEN".len()];
+        player_sock.read_exact(&mut reply).await.unwrap();
+        assert_eq!(&reply, b"AL_ECHO: HELLO_AUTOLISTEN");
+
+        // Verify optimizer metrics recorded
+        let (global_stats, service_stats) = opt_registry.snapshot();
+        assert!(global_stats.raw_bytes > 0);
+        assert!(service_stats.contains_key("mc-autolisten"));
+
+        drop(player_sock);
+        a.shutdown_all().await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), conn_task).await;
     }
 }

@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use tokio::{
@@ -41,6 +41,8 @@ pub struct TcpRoutingHandlerOptions {
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
 
     pub runtime: Arc<tokio::sync::RwLock<TcpRuntimeConfig>>,
+    pub optimizer: Option<telemetry::SharedOptimizerRegistry>,
+    pub middleware_dir: Option<PathBuf>,
 }
 
 pub struct TcpForwardHandlerOptions {
@@ -50,6 +52,8 @@ pub struct TcpForwardHandlerOptions {
     pub tunnel_manager: Option<Arc<tunnel::manager::Manager>>,
 
     pub runtime: Arc<tokio::sync::RwLock<TcpRuntimeConfig>>,
+    pub optimizer: Option<telemetry::SharedOptimizerRegistry>,
+    pub middleware_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -395,7 +399,7 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
 
     let rt = { opts.runtime.read().await.clone() };
 
-    let (up, upstream_used, _tunnel_masquerade_host) = match dial_upstream(
+    let (up, upstream_used, _tunnel_masquerade_host, matched_svc) = match dial_upstream(
         &upstream,
         None,
         rt.upstream_dial_timeout,
@@ -418,17 +422,50 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         upstream_used.clone(),
     ));
 
-    let mut up = up;
-    if rt.proxy_protocol_v2
-        && let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await
-    {
-        tracing::warn!(sid = %sid, client = %client, upstream = %upstream_used, err = %err, "proxy: proxy_protocol_v2 write failed");
-        let _ = conn.shutdown().await;
-        opts.sessions.remove(&sid);
-        return;
-    }
+    let optimizer_enabled = matched_svc
+        .as_ref()
+        .and_then(|s| s.optimizer.as_ref())
+        .is_some_and(|to| to.enabled);
 
-    let res = proxy_bidirectional(&mut conn, up, rt.buffer_size, rt.idle_timeout).await;
+    let res = if optimizer_enabled {
+        let mut initial_bytes = Vec::new();
+        if rt.proxy_protocol_v2 {
+            match encode_proxy_proto_v2(&conn) {
+                Ok(pp2) => initial_bytes.extend_from_slice(&pp2),
+                Err(err) => {
+                    tracing::warn!(sid = %sid, client = %client, upstream = %upstream_used, err = %err, "proxy: proxy_protocol_v2 encode failed");
+                    let _ = conn.shutdown().await;
+                    opts.sessions.remove(&sid);
+                    return;
+                }
+            }
+        }
+
+        tunnel::connector::run_server_optimized_tcp_pipeline(
+            up,
+            conn,
+            &initial_bytes,
+            matched_svc.unwrap(),
+            opts.middleware_dir.as_deref(),
+            opts.optimizer.clone(),
+            rt.idle_timeout,
+        )
+        .await
+    } else {
+        let mut up = up;
+        if rt.proxy_protocol_v2
+            && let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await
+        {
+            tracing::warn!(sid = %sid, client = %client, upstream = %upstream_used, err = %err, "proxy: proxy_protocol_v2 write failed");
+            let _ = conn.shutdown().await;
+            opts.sessions.remove(&sid);
+            return;
+        }
+
+        proxy_bidirectional(&mut conn, up, rt.buffer_size, rt.idle_timeout)
+            .await
+            .map(|_| ())
+    };
 
     opts.sessions.remove(&sid);
 
@@ -555,6 +592,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
     let mut upstream_used = String::new();
     let mut up_conn: Option<tunnel::transport::BoxedStream> = None;
     let mut tunnel_masquerade_host: Option<String> = None;
+    let mut matched_svc: Option<tunnel::protocol::RegisteredService> = None;
 
     tracing::debug!(
         sid = %sid,
@@ -576,7 +614,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         )
         .await
         {
-            Ok((c, label, masq)) => {
+            Ok((c, label, masq, svc_meta)) => {
                 tracing::info!(
                     sid = %sid,
                     client = %client,
@@ -589,6 +627,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
                 upstream_used = label;
                 up_conn = Some(c);
                 tunnel_masquerade_host = masq;
+                matched_svc = svc_meta;
                 break;
             }
             Err(err) => {
@@ -670,24 +709,57 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         );
     }
 
-    // Forward captured prelude upstream.
-    if rt.proxy_protocol_v2
-        && let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await
-    {
-        tracing::warn!(sid=%sid, err=%err, "proxy: proxy_protocol_v2 write failed");
-        let _ = conn.shutdown().await;
-        opts.sessions.remove(&sid);
-        return;
-    }
+    let optimizer_enabled = matched_svc
+        .as_ref()
+        .and_then(|s| s.optimizer.as_ref())
+        .is_some_and(|to| to.enabled);
 
-    if let Err(err) = (*up).write_all(&prelude).await {
-        tracing::debug!(sid=%sid, err=%err, "proxy: failed writing prelude to upstream");
-        let _ = conn.shutdown().await;
-        opts.sessions.remove(&sid);
-        return;
-    }
+    let res = if optimizer_enabled {
+        let mut initial_bytes = Vec::new();
+        if rt.proxy_protocol_v2 {
+            match encode_proxy_proto_v2(&conn) {
+                Ok(pp2) => initial_bytes.extend_from_slice(&pp2),
+                Err(err) => {
+                    tracing::warn!(sid=%sid, err=%err, "proxy: proxy_protocol_v2 encode failed");
+                    let _ = conn.shutdown().await;
+                    opts.sessions.remove(&sid);
+                    return;
+                }
+            }
+        }
+        initial_bytes.extend_from_slice(&prelude);
 
-    let res = proxy_bidirectional(&mut conn, up, rt.buffer_size, rt.idle_timeout).await;
+        tunnel::connector::run_server_optimized_tcp_pipeline(
+            up,
+            conn,
+            &initial_bytes,
+            matched_svc.unwrap(),
+            opts.middleware_dir.as_deref(),
+            opts.optimizer.clone(),
+            rt.idle_timeout,
+        )
+        .await
+    } else {
+        if rt.proxy_protocol_v2
+            && let Err(err) = write_proxy_proto_v2(&mut *up, &conn).await
+        {
+            tracing::warn!(sid=%sid, err=%err, "proxy: proxy_protocol_v2 write failed");
+            let _ = conn.shutdown().await;
+            opts.sessions.remove(&sid);
+            return;
+        }
+
+        if let Err(err) = (*up).write_all(&prelude).await {
+            tracing::debug!(sid=%sid, err=%err, "proxy: failed writing prelude to upstream");
+            let _ = conn.shutdown().await;
+            opts.sessions.remove(&sid);
+            return;
+        }
+
+        proxy_bidirectional(&mut conn, up, rt.buffer_size, rt.idle_timeout)
+            .await
+            .map(|_| ())
+    };
 
     opts.sessions.remove(&sid);
 
@@ -723,7 +795,12 @@ async fn dial_upstream(
     default_port: Option<u16>,
     timeout: Duration,
     tunnel_manager: Option<&Arc<tunnel::manager::Manager>>,
-) -> anyhow::Result<(tunnel::transport::BoxedStream, String, Option<String>)> {
+) -> anyhow::Result<(
+    tunnel::transport::BoxedStream,
+    String,
+    Option<String>,
+    Option<tunnel::protocol::RegisteredService>,
+)> {
     let mut addr = upstream.trim().to_string();
     if addr.is_empty() {
         anyhow::bail!("empty upstream");
@@ -744,7 +821,7 @@ async fn dial_upstream(
         let masq = svc.masquerade_host.trim().to_string();
         let masq = if masq.is_empty() { None } else { Some(masq) };
 
-        return Ok((st, format!("tunnel:{service}"), masq));
+        return Ok((st, format!("tunnel:{service}"), masq, Some(svc)));
     }
 
     if let Some(p) = default_port
@@ -753,7 +830,7 @@ async fn dial_upstream(
         addr = format!("{addr}:{p}");
     }
 
-    Ok((dial_tcp_stream(&addr, timeout).await?, addr, None))
+    Ok((dial_tcp_stream(&addr, timeout).await?, addr, None, None))
 }
 
 async fn proxy_bidirectional(
@@ -784,10 +861,7 @@ async fn proxy_bidirectional(
     Ok((ingress, egress))
 }
 
-async fn write_proxy_proto_v2(
-    upstream: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
-    client: &TcpStream,
-) -> anyhow::Result<()> {
+fn encode_proxy_proto_v2(client: &TcpStream) -> anyhow::Result<Vec<u8>> {
     use std::net::{IpAddr, SocketAddr};
 
     let src: SocketAddr = client.peer_addr().context("proxy: peer_addr")?;
@@ -828,6 +902,14 @@ async fn write_proxy_proto_v2(
         }
     }
 
+    Ok(out)
+}
+
+async fn write_proxy_proto_v2(
+    upstream: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+    client: &TcpStream,
+) -> anyhow::Result<()> {
+    let out = encode_proxy_proto_v2(client)?;
     upstream.write_all(&out).await.context("proxy: write pp2")?;
     upstream.flush().await.ok();
     Ok(())
@@ -857,5 +939,238 @@ mod tests {
         assert!(!should_rewrite_prelude("  TUNNEL:monifactory  "));
         assert!(!should_rewrite_prelude(""));
         assert!(should_rewrite_prelude("backend.local:25566"));
+    }
+
+    struct MockTunnelSession {
+        open_tx: tokio::sync::Mutex<tokio::sync::mpsc::Sender<tunnel::transport::BoxedStream>>,
+    }
+
+    #[async_trait::async_trait]
+    impl tunnel::transport::TransportSession for MockTunnelSession {
+        async fn open_stream(&self) -> anyhow::Result<tunnel::transport::BoxedStream> {
+            let (c, s) = tokio::io::duplex(64 * 1024);
+            self.open_tx
+                .lock()
+                .await
+                .send(Box::new(s))
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(Box::new(c))
+        }
+
+        async fn accept_stream(&self) -> anyhow::Result<tunnel::transport::BoxedStream> {
+            anyhow::bail!("not implemented")
+        }
+
+        async fn close(&self) {}
+        fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+            None
+        }
+        fn local_addr(&self) -> Option<std::net::SocketAddr> {
+            None
+        }
+    }
+
+    async fn tcp_pair() -> (tokio::net::TcpStream, tokio::net::TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn test_forward_tunnel_with_optimizer() {
+        // 1. Backend server
+        let backend_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap().to_string();
+
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = backend_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                while let Ok(n) = sock.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut reply = b"ECHO: ".to_vec();
+                    reply.extend_from_slice(&buf[..n]);
+                    if sock.write_all(&reply).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // 2. Tunnel manager + session
+        let (open_tx, mut open_rx) = tokio::sync::mpsc::channel(1);
+        let mock_sess = Arc::new(MockTunnelSession {
+            open_tx: tokio::sync::Mutex::new(open_tx),
+        });
+
+        let mgr = Arc::new(tunnel::manager::Manager::new());
+        let meta = tunnel::protocol::RegisteredService {
+            name: "opt-forward-svc".into(),
+            proto: "tcp".into(),
+            local_addr: backend_addr.clone(),
+            route_only: false,
+            remote_addr: "".into(),
+            masquerade_host: "".into(),
+            middleware: None,
+            optimizer: Some(crate::prism::config::OptimizerConfig {
+                enabled: true,
+                flush_interval_ms: Some(20),
+                zstd_window_log: Some(23),
+                zstd_level: Some(3),
+            }),
+        };
+
+        let mut local_map = std::collections::HashMap::new();
+        local_map.insert("opt-forward-svc".to_string(), meta.clone());
+        let local_map = Arc::new(local_map);
+
+        mgr.register_client("c-1".into(), mock_sess, vec![meta])
+            .await
+            .unwrap();
+
+        let conn_task = tokio::spawn(async move {
+            if let Some(conn_st) = open_rx.recv().await {
+                let _ = tunnel::connector::handle_stream(local_map, None, None, conn_st).await;
+            }
+        });
+
+        // 3. TcpForwardHandlerOptions setup
+        let sessions = Arc::new(telemetry::SessionRegistry::new());
+        let opt_registry = Arc::new(telemetry::OptimizerStatsRegistry::new());
+        let runtime = Arc::new(tokio::sync::RwLock::new(TcpRuntimeConfig {
+            max_header_bytes: 8192,
+            handshake_timeout: Duration::from_secs(2),
+            idle_timeout: Duration::ZERO,
+            upstream_dial_timeout: Duration::from_secs(2),
+            buffer_size: 4096,
+            proxy_protocol_v2: false,
+        }));
+
+        let opts = Arc::new(TcpForwardHandlerOptions {
+            upstream: "tunnel:opt-forward-svc".into(),
+            sessions,
+            tunnel_manager: Some(mgr),
+            runtime,
+            optimizer: Some(opt_registry.clone()),
+            middleware_dir: None,
+        });
+
+        // 4. Mock client connects to server
+        let (client_sock, server_sock) = tcp_pair().await;
+
+        let forward_task = tokio::spawn(async move {
+            handle_forward(server_sock, opts).await;
+        });
+
+        // 5. Client sends request
+        let mut client_sock = client_sock;
+        client_sock.write_all(b"HELLO_TUNNEL").await.unwrap();
+
+        // 6. Client reads echo reply
+        let mut reply = vec![0u8; b"ECHO: HELLO_TUNNEL".len()];
+        client_sock.read_exact(&mut reply).await.unwrap();
+        assert_eq!(&reply, b"ECHO: HELLO_TUNNEL");
+
+        // 7. Verify telemetry recorded
+        let (global_stats, service_stats) = opt_registry.snapshot();
+        assert!(global_stats.raw_bytes > 0);
+        assert!(service_stats.contains_key("opt-forward-svc"));
+
+        drop(client_sock);
+        let _ = tokio::time::timeout(Duration::from_secs(2), forward_task).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), conn_task).await;
+    }
+
+    #[tokio::test]
+    async fn test_forward_tunnel_raw_fallback() {
+        // Backend server
+        let backend_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let backend_addr = backend_listener.local_addr().unwrap().to_string();
+
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = backend_listener.accept().await {
+                let mut buf = [0u8; 1024];
+                while let Ok(n) = sock.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut reply = b"RAW: ".to_vec();
+                    reply.extend_from_slice(&buf[..n]);
+                    if sock.write_all(&reply).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let (open_tx, mut open_rx) = tokio::sync::mpsc::channel(1);
+        let mock_sess = Arc::new(MockTunnelSession {
+            open_tx: tokio::sync::Mutex::new(open_tx),
+        });
+
+        let mgr = Arc::new(tunnel::manager::Manager::new());
+        let meta = tunnel::protocol::RegisteredService {
+            name: "raw-forward-svc".into(),
+            proto: "tcp".into(),
+            local_addr: backend_addr.clone(),
+            route_only: false,
+            remote_addr: "".into(),
+            masquerade_host: "".into(),
+            middleware: None,
+            optimizer: None, // No optimizer!
+        };
+
+        let mut local_map = std::collections::HashMap::new();
+        local_map.insert("raw-forward-svc".to_string(), meta.clone());
+        let local_map = Arc::new(local_map);
+
+        mgr.register_client("c-1".into(), mock_sess, vec![meta])
+            .await
+            .unwrap();
+
+        let conn_task = tokio::spawn(async move {
+            if let Some(conn_st) = open_rx.recv().await {
+                let _ = tunnel::connector::handle_stream(local_map, None, None, conn_st).await;
+            }
+        });
+
+        let sessions = Arc::new(telemetry::SessionRegistry::new());
+        let runtime = Arc::new(tokio::sync::RwLock::new(TcpRuntimeConfig {
+            max_header_bytes: 8192,
+            handshake_timeout: Duration::from_secs(2),
+            idle_timeout: Duration::ZERO,
+            upstream_dial_timeout: Duration::from_secs(2),
+            buffer_size: 4096,
+            proxy_protocol_v2: false,
+        }));
+
+        let opts = Arc::new(TcpForwardHandlerOptions {
+            upstream: "tunnel:raw-forward-svc".into(),
+            sessions,
+            tunnel_manager: Some(mgr),
+            runtime,
+            optimizer: None,
+            middleware_dir: None,
+        });
+
+        let (client_sock, server_sock) = tcp_pair().await;
+        let forward_task = tokio::spawn(async move {
+            handle_forward(server_sock, opts).await;
+        });
+
+        let mut client_sock = client_sock;
+        client_sock.write_all(b"HELLO_RAW").await.unwrap();
+
+        let mut reply = vec![0u8; b"RAW: HELLO_RAW".len()];
+        client_sock.read_exact(&mut reply).await.unwrap();
+        assert_eq!(&reply, b"RAW: HELLO_RAW");
+
+        drop(client_sock);
+        let _ = tokio::time::timeout(Duration::from_secs(2), forward_task).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), conn_task).await;
     }
 }

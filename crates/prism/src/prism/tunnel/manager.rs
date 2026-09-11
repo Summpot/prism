@@ -248,6 +248,7 @@ impl Manager {
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn dial_service_tcp_from_client(
         &self,
         client_id: &str,

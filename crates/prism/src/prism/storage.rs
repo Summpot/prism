@@ -428,12 +428,12 @@ impl StorageEngine {
         }
 
         let mut keyring_ok = false;
-        let mut token_blob = String::new();
         if self.use_keyring && secrets::store_tunnel_token(&cred.profile_id, token) {
             keyring_ok = true;
-        } else {
-            token_blob = token.to_string();
         }
+        // Keep a sqlite blob even when the keyring accepts the token so a
+        // failed keyring read on the next launch can still restore the session.
+        let token_blob = token.to_string();
 
         let conn = self
             .conn
@@ -539,7 +539,7 @@ impl StorageEngine {
 
     fn hydrate_profile_token(&self, profile: &mut ClientProfile) {
         match self.load_credential(&profile.id) {
-            Ok(Some(cred)) if cred.server_addr == profile.server_addr => {
+            Ok(Some(cred)) if !cred.token.trim().is_empty() => {
                 profile.auth_token = cred.token;
             }
             _ => {}
@@ -846,10 +846,7 @@ impl StorageEngine {
         let mut cfg = self.load_active_config_raw()?;
         if let Some(id) = self.load_active_profile_id()? {
             if let Ok(Some(cred)) = self.load_credential(&id) {
-                if cred.server_addr == cfg.server_addr
-                    || cfg.server_addr.trim().is_empty()
-                    || cfg.server_addr == ClientConfigState::default().server_addr
-                {
+                if !cred.token.trim().is_empty() {
                     cfg.auth_token = cred.token;
                     if cfg.token_id.is_empty() {
                         cfg.token_id = cred.token_id;
@@ -1473,6 +1470,39 @@ mod tests {
             })
             .unwrap();
         assert!(storage.load_credential("p-exp").unwrap().is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_restart_hydrates_token_even_if_server_addr_differs() {
+        let path = temp_db_path();
+        let storage = StorageEngine::open(&path).expect("open sqlite");
+        storage.save_active_profile_id("p-login").unwrap();
+        storage
+            .upsert_credential(&TunnelCredential {
+                profile_id: "p-login".into(),
+                server_addr: "play.example:7000".into(),
+                token_id: "tok_1".into(),
+                token_type: "oauth_pat".into(),
+                user_id: "gh_1".into(),
+                username: "alice".into(),
+                issued_at: 1,
+                expires_at: None,
+                token: "prism_cl_saved".into(),
+            })
+            .unwrap();
+        storage
+            .write_active_config_json(&ClientConfigState {
+                server_addr: "play.example".into(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let cfg = storage.load_active_config().unwrap();
+        assert_eq!(cfg.auth_token, "prism_cl_saved");
+        let snap = storage.get_client_config_snapshot();
+        assert_eq!(snap.active_config.auth_token, "prism_cl_saved");
+
         let _ = std::fs::remove_file(path);
     }
 }

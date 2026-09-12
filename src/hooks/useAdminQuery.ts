@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { useAdminSession } from "@/lib/admin/adminSession";
 import type { PanelConnection } from "@/lib/panelConnection";
+import { shouldFetchAdminSession } from "@/lib/state/session";
 
 export function queryErrorMessage(error: unknown): string | null {
 	if (!error) {
@@ -22,8 +23,13 @@ export function useAdminQuery<T>(
 		staleTime?: number;
 	},
 ): UseQueryResult<T> & { errorMessage: string | null } {
-	const { connection, ready } = useAdminSession();
-	const enabled = Boolean(ready && connection && (options?.enabled ?? true));
+	const { connection, ready, tunnelState } = useAdminSession();
+	const enabled = Boolean(
+		ready &&
+		connection &&
+		shouldFetchAdminSession(connection, tunnelState) &&
+		(options?.enabled ?? true),
+	);
 	const query = useQuery({
 		queryKey,
 		queryFn: () => fetcher(connection!),

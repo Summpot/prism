@@ -1730,10 +1730,7 @@ impl AdminControl for AdminState {
         if let Some(ref am) = self.auth_manager
             && let Some(ident) = am.verify_token(token).await
         {
-            if ident.is_admin {
-                return Ok(ident);
-            }
-            return Err(AdminError::forbidden("admin role required"));
+            return Ok(ident);
         }
         if let Some(expected) = self.auth.panel_token.as_ref()
             && token == expected.trim()

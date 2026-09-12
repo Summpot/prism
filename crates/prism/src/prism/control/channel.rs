@@ -193,7 +193,26 @@ pub async fn connect(
 pub async fn serve(
     stream: BoxedStream,
     handler: Arc<dyn AdminControl>,
-    mut identity: Option<AuthIdentity>,
+    identity: Option<AuthIdentity>,
+) -> Result<(), ControlError> {
+    serve_with_shared_identity(
+        stream,
+        handler,
+        Arc::new(Mutex::new(identity)),
+        None,
+    )
+    .await
+}
+
+/// Same as [`serve`], but identity is shared with the tunnel session.
+///
+/// `$admin` Authenticate writes through to `identity` and bumps
+/// `on_identity_change` so the sidecar catalog can be re-filtered.
+pub async fn serve_with_shared_identity(
+    stream: BoxedStream,
+    handler: Arc<dyn AdminControl>,
+    identity: Arc<Mutex<Option<AuthIdentity>>>,
+    on_identity_change: Option<watch::Sender<u64>>,
 ) -> Result<(), ControlError> {
     let mut framed = Framed::new(stream, length_codec());
     let first = tokio::time::timeout(HELLO_TIMEOUT, framed.next())
@@ -300,7 +319,8 @@ pub async fn serve(
                         }
                         let result = handle_request(
                             handler.as_ref(),
-                            &mut identity,
+                            &identity,
+                            on_identity_change.as_ref(),
                             agreed,
                             topics.as_ref(),
                             method,
@@ -341,7 +361,8 @@ fn decode_frame_or_reject(buf: &[u8]) -> Result<AdminMsg, ControlError> {
 
 async fn handle_request(
     handler: &dyn AdminControl,
-    identity: &mut Option<AuthIdentity>,
+    identity: &Mutex<Option<AuthIdentity>>,
+    on_identity_change: Option<&watch::Sender<u64>>,
     features: u64,
     topics: &Mutex<u64>,
     method: AdminMethod,
@@ -352,16 +373,21 @@ async fn handle_request(
 
     if let AdminMethod::Authenticate { token } = &method {
         let ident = handler.authenticate(token).await?;
-        *identity = Some(ident.clone());
+        *identity.lock().await = Some(ident.clone());
+        if let Some(tx) = on_identity_change {
+            let next = tx.borrow().saturating_add(1);
+            let _ = tx.send(next);
+        }
         return Ok(AdminPayload::AuthSession(session_from_identity(&ident)));
     }
 
+    let current = identity.lock().await.clone();
     if let AdminMethod::Subscribe { topics: want } = method {
         if features & FEATURE_EVENTS == 0 {
             return Err(AdminError::unavailable("events not negotiated"));
         }
-        if method_needs_auth(handler, identity, true) {
-            return Err(session_error(identity));
+        if method_needs_auth(handler, &current, true) {
+            return Err(session_error(&current));
         }
         let agreed_topics = want
             & (TOPIC_CONNECTIONS | TOPIC_SERVICES | TOPIC_OPTIMIZER | TOPIC_RELOAD);
@@ -371,13 +397,13 @@ async fn handle_request(
         });
     }
 
-    if method.requires_session() && method_needs_auth(handler, identity, method.requires_session())
+    if method.requires_session() && method_needs_auth(handler, &current, method.requires_session())
     {
-        return Err(session_error(identity));
+        return Err(session_error(&current));
     }
 
     let ctx = AdminCallContext {
-        identity: identity.clone(),
+        identity: current,
         features,
     };
     handler.dispatch(method, &ctx).await

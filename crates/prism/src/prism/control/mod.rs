@@ -9,6 +9,6 @@ mod types;
 
 pub use channel::{
     AdminCallContext, AdminControl, AdminEventWatches, ControlChannel, client_features, connect,
-    serve,
+    serve, serve_with_shared_identity,
 };
 pub use types::*;

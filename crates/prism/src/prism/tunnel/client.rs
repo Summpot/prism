@@ -544,6 +544,7 @@ impl Client {
         // Store active session and negotiated transport for player connections only after registration is accepted
         *self.current_sess.write().await = Some(sess.clone());
         *self.active_transport.write().await = Some(chosen.protocol.clone());
+        *self.known_services.write().await = initial_services.clone();
         self.establish_control().await;
 
         tracing::info!(
@@ -562,9 +563,6 @@ impl Client {
             initial_services.len(),
             if names.is_empty() { "none" } else { &names }
         );
-
-        // Update known services
-        *self.known_services.write().await = initial_services.clone();
 
         // Update Fake LAN broadcaster
         if let Some(broadcaster) = &self.broadcaster {

@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
+use tokio::sync::{Mutex, watch};
 
+use crate::prism::auth::{AuthIdentity, AuthManager};
 use crate::prism::control::{self, AdminControl};
 use crate::prism::tunnel::{
     manager::Manager,
@@ -115,6 +117,25 @@ impl Server {
     }
 }
 
+async fn catalog_for_identity(
+    mgr: &Manager,
+    auth_mgr: &Option<Arc<AuthManager>>,
+    identity: &Option<AuthIdentity>,
+) -> Vec<protocol::RegisteredService> {
+    let auth_enabled = match auth_mgr {
+        Some(am) => am.is_auth_enabled().await,
+        None => false,
+    };
+    if let (Some(am), Some(id)) = (auth_mgr, identity) {
+        let all = mgr.active_services().await;
+        am.filter_services(id, &all)
+    } else if auth_enabled {
+        Vec::new()
+    } else {
+        mgr.active_services().await
+    }
+}
+
 async fn handle_session(
     mgr: Arc<Manager>,
     sess: Arc<dyn crate::prism::tunnel::transport::TransportSession>,
@@ -189,47 +210,42 @@ async fn handle_session(
             "tunnel: client sidecar connected"
         );
 
-        // Broadcast loop on reg stream sending active services whenever services change.
+        let session_identity = Arc::new(Mutex::new(identity));
+        let (ident_tx, _) = watch::channel(0u64);
+
+        // Broadcast loop on reg stream sending active services whenever
+        // services change or the sidecar authenticates on `$admin`.
         let mgr_broadcast = mgr.clone();
         let auth_mgr_broadcast = auth_mgr.clone();
-        let identity_broadcast = identity.clone();
+        let identity_broadcast = session_identity.clone();
+        let mut ident_rx = ident_tx.subscribe();
 
         let broadcast_task = tokio::spawn(async move {
             let mut sub = mgr_broadcast.subscribe();
-            let auth_enabled = match &auth_mgr_broadcast {
-                Some(am) => am.is_auth_enabled().await,
-                None => false,
-            };
-            let initial = if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
-                let all = mgr_broadcast.active_services().await;
-                am.filter_services(id, &all)
-            } else if auth_enabled {
-                // Auth is enabled on server, but client is not authenticated (pre-login):
-                // Send empty catalog so services stay hidden until login.
-                Vec::new()
-            } else {
-                mgr_broadcast.active_services().await
-            };
+            let ident = identity_broadcast.lock().await.clone();
+            let initial = catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident).await;
             if protocol::write_service_catalog(&mut reg, &initial)
                 .await
                 .is_err()
             {
                 return;
             }
-            while sub.changed().await.is_ok() {
-                let auth_enabled = match &auth_mgr_broadcast {
-                    Some(am) => am.is_auth_enabled().await,
-                    None => false,
-                };
+            loop {
+                tokio::select! {
+                    changed = sub.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
+                    changed = ident_rx.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
+                }
+                let ident = identity_broadcast.lock().await.clone();
                 let services =
-                    if let (Some(am), Some(id)) = (&auth_mgr_broadcast, &identity_broadcast) {
-                        let all = mgr_broadcast.active_services().await;
-                        am.filter_services(id, &all)
-                    } else if auth_enabled {
-                        Vec::new()
-                    } else {
-                        mgr_broadcast.active_services().await
-                    };
+                    catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident).await;
                 if protocol::write_service_catalog(&mut reg, &services)
                     .await
                     .is_err()
@@ -243,11 +259,19 @@ async fn handle_session(
         while let Ok(client_stream) = sess.accept_stream().await {
             let mgr = mgr.clone();
             let auth_mgr = auth_mgr.clone();
-            let identity = identity.clone();
+            let identity = session_identity.clone();
+            let ident_tx = ident_tx.clone();
             let admin = admin.clone();
             tokio::spawn(async move {
-                if let Err(err) =
-                    handle_client_stream(mgr, client_stream, auth_mgr, identity, admin).await
+                if let Err(err) = handle_client_stream(
+                    mgr,
+                    client_stream,
+                    auth_mgr,
+                    identity,
+                    ident_tx,
+                    admin,
+                )
+                .await
                 {
                     tracing::debug!(err=%err, "tunnel: client stream relay ended");
                 }
@@ -279,33 +303,25 @@ async fn handle_client_stream(
     mgr: Arc<Manager>,
     mut client_stream: crate::prism::tunnel::transport::BoxedStream,
     auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
-    identity: Option<crate::prism::auth::AuthIdentity>,
+    identity: Arc<Mutex<Option<AuthIdentity>>>,
+    ident_tx: watch::Sender<u64>,
     admin: Option<Arc<dyn AdminControl>>,
 ) -> anyhow::Result<()> {
     let (kind, service_name, flags) =
         protocol::read_proxy_stream_header_with_flags(&mut client_stream).await?;
 
     if service_name == protocol::ADMIN_SERVICE_NAME {
-        let is_admin = if let Some(id) = &identity {
-            id.is_admin
-        } else {
-            // Pre-login unauthenticated stream or no identity:
-            // allowed through so the client can reach public auth methods
-            // (AuthGithubLogin, AuthGithubExchange, Health). Session methods
-            // still require Authenticate on the control channel.
-            true
-        };
-
-        if !is_admin {
-            tracing::warn!(
-                user = ?identity.as_ref().map(|i| &i.username),
-                "tunnel: unauthorized client stream blocked from accessing $admin"
-            );
-            return Ok(());
-        }
-
+        // Any sidecar may open `$admin`. Public auth methods work without a
+        // session; panel methods still require an admin identity on the channel.
         if let Some(handler) = admin {
-            if let Err(err) = control::serve(client_stream, handler, identity).await {
+            if let Err(err) = control::serve_with_shared_identity(
+                client_stream,
+                handler,
+                identity,
+                Some(ident_tx),
+            )
+            .await
+            {
                 tracing::debug!(err = %err, "tunnel: $admin control channel ended");
             }
         } else {
@@ -317,7 +333,8 @@ async fn handle_client_stream(
     if let Some(ref am) = auth_mgr
         && am.is_auth_enabled().await
     {
-        let Some(ref id) = identity else {
+        let ident = identity.lock().await.clone();
+        let Some(ref id) = ident else {
             tracing::warn!(
                 service = %service_name,
                 "tunnel: unauthenticated client stream blocked (login required)"
@@ -879,7 +896,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_admin_stream_blocked_for_non_admin() {
+    async fn server_admin_stream_allows_member_session() {
         use crate::prism::auth::{AuthConfig, AuthManager, UserRecord, UserRole};
 
         let auth = Arc::new(AuthManager::new(AuthConfig::default(), None));
@@ -888,7 +905,7 @@ mod tests {
             username: "bob".into(),
             display_name: None,
             avatar_url: None,
-            role: UserRole::Member, // NOT admin!
+            role: UserRole::Member,
             service_rules: vec!["*".into()],
             created_at_unix_ms: 100,
             last_login_unix_ms: 100,
@@ -934,7 +951,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        let (mut client_stream_c, client_stream_s) = tokio::io::duplex(4096);
+        let (mut client_stream_c, client_stream_s) = tokio::io::duplex(64 * 1024);
         client_accept_tx
             .send(Box::new(client_stream_s))
             .await
@@ -948,16 +965,197 @@ mod tests {
         .await
         .unwrap();
 
-        // Bob tries to send bytes, but stream is closed by server ACL
-        client_stream_c
-            .write_all(b"unused")
+        let ch = crate::prism::control::connect(
+            Box::new(client_stream_c),
+            crate::prism::control::FEATURE_RPC,
+        )
+        .await
+        .expect("members may open $admin");
+        let payload = ch
+            .call(crate::prism::control::AdminMethod::Health)
+            .await
+            .expect("health");
+        assert_eq!(
+            payload,
+            crate::prism::control::AdminPayload::Health { ok: true }
+        );
+        ch.close();
+        client_sess.close().await;
+    }
+
+    struct TokenControl {
+        auth: Arc<crate::prism::auth::AuthManager>,
+    }
+
+    #[async_trait::async_trait]
+    impl AdminControl for TokenControl {
+        fn features(&self) -> u64 {
+            crate::prism::control::FEATURE_RPC | crate::prism::control::FEATURE_AUTH
+        }
+        fn auth_enabled(&self) -> bool {
+            true
+        }
+        fn event_watches(&self) -> crate::prism::control::AdminEventWatches {
+            crate::prism::control::AdminEventWatches::default()
+        }
+        async fn authenticate(
+            &self,
+            token: &str,
+        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::AdminError> {
+            self.auth.verify_token(token).await.ok_or_else(|| {
+                crate::prism::control::AdminError::unauthorized("invalid bearer token")
+            })
+        }
+        async fn dispatch(
+            &self,
+            method: crate::prism::control::AdminMethod,
+            _ctx: &crate::prism::control::AdminCallContext,
+        ) -> Result<crate::prism::control::AdminPayload, crate::prism::control::AdminError> {
+            match method {
+                crate::prism::control::AdminMethod::Health => {
+                    Ok(crate::prism::control::AdminPayload::Health { ok: true })
+                }
+                crate::prism::control::AdminMethod::AuthSession => {
+                    Ok(crate::prism::control::AdminPayload::AuthSession(
+                        crate::prism::control::AuthSessionSnapshot::unauthenticated(),
+                    ))
+                }
+                _ => Err(crate::prism::control::AdminError::not_found("unhandled")),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn server_catalog_updates_after_admin_authenticate() {
+        use crate::prism::auth::{AuthConfig, AuthManager, UserRecord, UserRole};
+
+        let auth = Arc::new(AuthManager::new(AuthConfig::default(), None));
+        let user = UserRecord {
+            id: "u_alice".into(),
+            username: "alice".into(),
+            display_name: None,
+            avatar_url: None,
+            role: UserRole::Member,
+            service_rules: vec!["mc-*".into()],
+            created_at_unix_ms: 100,
+            last_login_unix_ms: 100,
+        };
+        auth.upsert_user(user).await.unwrap();
+        let (alice_token, _) = auth
+            .create_client_token("u_alice", "Alice PC", None)
             .await
             .unwrap();
-        let mut resp = [0u8; 128];
-        let n = client_stream_c.read(&mut resp).await.unwrap();
-        assert_eq!(n, 0); // Stream EOF because closed!
 
+        let mgr = Arc::new(Manager::new());
+
+        let (conn_tx, conn_rx) = mpsc::channel(16);
+        let conn_sess = Arc::new(MockSession::new(conn_rx, None));
+        let (mut conn_reg_c, conn_reg_s) = tokio::io::duplex(4096);
+        conn_tx.send(Box::new(conn_reg_s)).await.unwrap();
+        let conn_req = protocol::RegisterRequest {
+            client_type: "connector".into(),
+            token: "conn_secret".into(),
+            services: vec![protocol::RegisteredService {
+                name: "mc-survival".into(),
+                proto: "tcp".into(),
+                local_addr: "127.0.0.1:25565".into(),
+                ..Default::default()
+            }],
+        };
+        tokio::spawn(async move {
+            protocol::write_register_request(&mut conn_reg_c, &conn_req)
+                .await
+                .unwrap();
+        });
+        let mgr_c = mgr.clone();
+        let conn_sess_c = conn_sess.clone();
+        let auth_c = auth.clone();
+        tokio::spawn(async move {
+            let _ =
+                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(mgr.active_services().await.len(), 1);
+
+        let (client_tx, client_rx) = mpsc::channel(16);
+        let client_sess = Arc::new(MockSession::new(client_rx, None));
+        let (mut client_reg_c, client_reg_s) = tokio::io::duplex(4096);
+        client_tx.send(Box::new(client_reg_s)).await.unwrap();
+
+        let (first_tx, first_rx) = tokio::sync::oneshot::channel();
+        let cat_handle = tokio::spawn(async move {
+            let client_req = protocol::RegisterRequest {
+                client_type: "client".into(),
+                token: "".into(),
+                services: vec![],
+            };
+            protocol::write_register_request(&mut client_reg_c, &client_req)
+                .await
+                .unwrap();
+            let first = protocol::read_service_catalog(&mut client_reg_c)
+                .await
+                .unwrap();
+            first_tx.send(first).unwrap();
+            protocol::read_service_catalog(&mut client_reg_c)
+                .await
+                .unwrap()
+        });
+
+        let mgr_cs = mgr.clone();
+        let client_sess_c = client_sess.clone();
+        let auth_cs = auth.clone();
+        let admin: Arc<dyn AdminControl> = Arc::new(TokenControl { auth: auth.clone() });
+        tokio::spawn(async move {
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), Some(admin))
+                .await;
+        });
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), first_rx)
+            .await
+            .expect("initial catalog")
+            .unwrap();
+        assert_eq!(first.len(), 0);
+
+        let (mut client_stream_c, client_stream_s) = tokio::io::duplex(64 * 1024);
+        client_tx.send(Box::new(client_stream_s)).await.unwrap();
+        protocol::write_proxy_stream_header(
+            &mut client_stream_c,
+            protocol::ProxyStreamKind::Tcp,
+            protocol::ADMIN_SERVICE_NAME,
+        )
+        .await
+        .unwrap();
+
+        let ch = crate::prism::control::connect(
+            Box::new(client_stream_c),
+            crate::prism::control::FEATURE_RPC | crate::prism::control::FEATURE_AUTH,
+        )
+        .await
+        .expect("control handshake");
+        let session = ch
+            .call(crate::prism::control::AdminMethod::Authenticate {
+                token: alice_token,
+            })
+            .await
+            .expect("authenticate");
+        match session {
+            crate::prism::control::AdminPayload::AuthSession(s) => {
+                assert!(s.authenticated);
+                assert_eq!(s.username.as_deref(), Some("alice"));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), cat_handle)
+            .await
+            .expect("updated catalog")
+            .unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].name, "mc-survival");
+
+        ch.close();
         client_sess.close().await;
+        conn_sess.close().await;
     }
 
     #[tokio::test]

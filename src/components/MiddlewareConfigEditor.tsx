@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	type ConfigFieldSchema,
 	type MiddlewareItem,
@@ -202,11 +204,9 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 								<p className="text-xs text-muted-foreground">{field.description}</p>
 							)}
 						</div>
-						<input
-							type="checkbox"
+						<Switch
 							checked={boolVal}
-							onChange={(e) => handleFieldChange(field.key, e.target.checked)}
-							className="size-4 rounded border-border text-primary focus:ring-primary/40"
+							onCheckedChange={(checked) => handleFieldChange(field.key, checked)}
 						/>
 					</div>
 				);
@@ -239,11 +239,11 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 							<p className="text-xs text-muted-foreground">{field.description}</p>
 						)}
 						{isMultiline ? (
-							<textarea
+							<Textarea
 								rows={2}
 								value={strVal}
 								onChange={(e) => handleFieldChange(field.key, e.target.value)}
-								className="w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm font-mono transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+								className="font-mono"
 							/>
 						) : (
 							<Input
@@ -308,29 +308,24 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 					const isSelected = mw.name === selectedName;
 					const fieldCount = mw.schema?.fields?.length ?? 0;
 					return (
-						<button
+						<Button
 							key={mw.name}
 							type="button"
+							variant={isSelected ? "default" : "outline"}
+							size="xs"
 							onClick={() => handleSelect(mw)}
-							className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-								isSelected
-									? "bg-primary text-primary-foreground border-primary"
-									: "bg-muted/40 hover:bg-muted text-foreground border-border"
-							}`}
+							className="gap-1.5"
 						>
 							<span>{mw.name}.wat</span>
-							<span
-								className={`text-[10px] px-1 py-0.2 rounded-full ${
-									isSelected
-										? "bg-primary-foreground/20 text-primary-foreground"
-										: "bg-muted text-muted-foreground"
-								}`}
+							<Badge
+								variant={isSelected ? "secondary" : "outline"}
+								className="h-4 px-1 text-[10px]"
 							>
 								{fieldCount === 1
 									? m.middleware_field({ count: fieldCount })
 									: m.middleware_fields({ count: fieldCount })}
-							</span>
-						</button>
+							</Badge>
+						</Button>
 					);
 				})}
 			</div>

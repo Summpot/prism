@@ -1,7 +1,15 @@
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
-import { RotateCcw, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+	Card,
+	CardDescription,
+	CardFooter,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import { usePanelSession } from "@/lib/panelSession";
 import { m } from "@/paraglide/messages";
 
@@ -15,51 +23,38 @@ function AdminLayout() {
 
 	if (!ready || (isLoadingSession && !isAdmin)) {
 		return (
-			<div className="flex flex-1 h-full w-full items-center justify-center bg-slate-950 text-slate-400">
-				<RotateCcw className="h-6 w-6 animate-spin text-primary" />
+			<div className="flex h-full w-full flex-1 items-center justify-center">
+				<Spinner className="size-6 text-muted-foreground" />
 			</div>
 		);
 	}
 
 	if (!isAdmin) {
 		return (
-			<div className="flex-1 min-h-0 overflow-y-auto bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8 flex items-center justify-center">
-				<div className="max-w-md w-full rounded-2xl border border-white/10 bg-slate-900/90 p-8 text-center shadow-2xl space-y-4">
-					<div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/15 text-destructive border border-destructive/30">
-						<ShieldAlert className="h-7 w-7" />
-					</div>
-					<div className="space-y-1.5">
-						<h2 className="text-xl font-bold text-white tracking-tight">
-							{m.admin_access_denied_title()}
-						</h2>
-						<p className="text-xs text-slate-400 leading-relaxed">
-							{m.admin_access_denied_description()}
-						</p>
-					</div>
-					<div className="flex items-center justify-center gap-3 pt-3">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => void navigate({ to: "/" })}
-							className="text-xs border-white/10 text-slate-200 hover:bg-white/10"
-						>
+			<div className="flex flex-1 min-h-0 items-center justify-center overflow-y-auto p-4 sm:p-6 lg:p-8">
+				<Card className="w-full max-w-md text-center shadow-xs">
+					<CardHeader className="items-center">
+						<div className="mx-auto flex size-14 items-center justify-center rounded-xl bg-destructive/15 text-destructive">
+							<ShieldAlert className="size-7" />
+						</div>
+						<CardTitle className="text-xl">{m.admin_access_denied_title()}</CardTitle>
+						<CardDescription>{m.admin_access_denied_description()}</CardDescription>
+					</CardHeader>
+					<CardFooter className="justify-center gap-3">
+						<Button variant="outline" size="sm" onClick={() => void navigate({ to: "/" })}>
 							{m.admin_back_client()}
 						</Button>
-						<Button
-							size="sm"
-							onClick={() => void navigate({ to: "/login" })}
-							className="text-xs bg-primary text-primary-foreground hover:bg-primary/90"
-						>
+						<Button size="sm" onClick={() => void navigate({ to: "/login" })}>
 							{m.admin_go_login()}
 						</Button>
-					</div>
-				</div>
+					</CardFooter>
+				</Card>
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex-1 min-h-0 overflow-y-auto bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8">
+		<div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 lg:p-8">
 			<div className="mx-auto max-w-7xl">
 				<Outlet />
 			</div>

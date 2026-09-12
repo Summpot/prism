@@ -7,6 +7,7 @@ import {
 	MetricCard,
 	PageHeader,
 	RefreshButton,
+	ResultBanner,
 	SecondaryButton,
 	StateCard,
 	ToggleChip,
@@ -110,17 +111,7 @@ function AdminRuntimePage() {
 				}
 			/>
 
-			{reloadResult ? (
-				<div
-					className={`rounded-3xl border px-5 py-4 text-sm ${
-						reloadResult.ok
-							? "border-emerald-400/20 bg-emerald-400/8 text-emerald-100"
-							: "border-red-400/20 bg-red-400/8 text-red-100"
-					}`}
-				>
-					{reloadResult.text}
-				</div>
-			) : null}
+			{reloadResult ? <ResultBanner ok={reloadResult.ok}>{reloadResult.text}</ResultBanner> : null}
 
 			{error ? <ErrorBanner message={error} onRetry={fetchData} /> : null}
 

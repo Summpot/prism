@@ -3,8 +3,19 @@ import { ArrowRight, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Github } from "@/components/icons/Github";
-
-import { fieldClassName, PrimaryButton } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { ErrorBanner } from "@/components/ui";
 import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
 import {
 	getAuthProviders,
@@ -116,98 +127,97 @@ function LoginPage() {
 	};
 
 	return (
-		<section className="mx-auto flex min-h-[70vh] w-full max-w-3xl items-center justify-center">
-			<div className="w-full rounded-[2rem] border border-white/8 bg-slate-950/75 p-8 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:p-10">
-				<div className="flex items-center gap-4">
-					<div className="rounded-3xl border border-cyan-400/30 bg-cyan-400/10 p-4 text-cyan-300">
-						<ShieldCheck className="h-7 w-7" />
-					</div>
-					<div>
-						<div className="text-[11px] uppercase tracking-[0.35em] text-cyan-300/70">
-							{m.login_eyebrow()}
+		<section className="mx-auto flex min-h-[70vh] w-full max-w-lg items-center justify-center p-4">
+			<Card className="w-full shadow-xs">
+				<CardHeader>
+					<div className="flex items-center gap-3">
+						<div className="rounded-xl bg-primary/10 p-3 text-primary ring-1 ring-primary/20">
+							<ShieldCheck className="size-6" />
 						</div>
-						<h1 className="mt-2 text-3xl font-semibold text-white">{m.login_title()}</h1>
+						<div>
+							<div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+								{m.login_eyebrow()}
+							</div>
+							<CardTitle className="mt-1 text-2xl">{m.login_title()}</CardTitle>
+						</div>
 					</div>
-				</div>
-
-				<p className="mt-6 text-base leading-7 text-slate-400">{m.login_description()}</p>
-
-				<div className="mt-8 space-y-6">
-					<label className="block space-y-2">
-						<span className="text-sm font-medium text-white">{m.login_api_url()}</span>
-						<input
+					<CardDescription className="mt-2">{m.login_description()}</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-6">
+					<div className="space-y-2">
+						<Label htmlFor="login-api-url">{m.login_api_url()}</Label>
+						<Input
+							id="login-api-url"
 							value={baseUrl}
 							onChange={(event) => setBaseUrl(event.target.value)}
 							placeholder="http://127.0.0.1:8080"
-							className={fieldClassName}
 						/>
-					</label>
+					</div>
 
-					{/* GitHub Sign In Section */}
-					<div className="rounded-2xl border border-white/10 bg-white/3 p-5 space-y-4">
-						<div className="flex items-center justify-between">
+					<div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+						<div className="flex items-center justify-between gap-3">
 							<div className="flex items-center gap-2">
-								<Github className="h-5 w-5 text-white" />
-								<span className="text-sm font-semibold text-white">{m.login_github()}</span>
+								<Github className="size-4" />
+								<span className="text-sm font-semibold">{m.login_github()}</span>
 							</div>
 							{githubEnabled ? (
-								<span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
+								<Badge
+									variant="secondary"
+									className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+								>
 									{m.login_oauth_enabled()}
-								</span>
+								</Badge>
 							) : (
-								<span className="text-xs text-slate-500">{m.login_oauth_detected()}</span>
+								<span className="text-xs text-muted-foreground">{m.login_oauth_detected()}</span>
 							)}
 						</div>
-						<div className="pt-1 space-y-2">
-							<button
-								type="button"
-								onClick={loginWithGitHub}
-								disabled={oauthLoading}
-								className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/15 cursor-pointer disabled:opacity-50"
-							>
-								<Github className="h-4 w-4" />
-								<span>{oauthLoading ? m.login_requesting() : m.login_sign_in()}</span>
-							</button>
-							{isDesktopApp() ? (
-								<p className="text-xs text-slate-400 text-center">{m.login_desktop_hint()}</p>
-							) : null}
-						</div>
+						<Button
+							type="button"
+							variant="outline"
+							className="w-full"
+							onClick={loginWithGitHub}
+							disabled={oauthLoading}
+						>
+							<Github className="size-4" />
+							{oauthLoading ? m.login_requesting() : m.login_sign_in()}
+						</Button>
+						{isDesktopApp() ? (
+							<p className="text-center text-xs text-muted-foreground">{m.login_desktop_hint()}</p>
+						) : null}
 					</div>
 
-					<div className="relative my-6">
-						<div className="absolute inset-0 flex items-center">
-							<div className="w-full border-t border-white/10" />
-						</div>
-						<div className="relative flex justify-center text-xs uppercase">
-							<span className="bg-slate-950 px-3 text-slate-400">{m.login_or_token()}</span>
-						</div>
+					<div className="relative">
+						<Separator />
+						<span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs uppercase text-muted-foreground">
+							{m.login_or_token()}
+						</span>
 					</div>
 
-					<form onSubmit={connect} className="space-y-5">
-						<label className="block space-y-2">
-							<span className="text-sm font-medium text-white">{m.login_token()}</span>
-							<input
+					<form onSubmit={connect} className="space-y-4">
+						<div className="space-y-2">
+							<Label htmlFor="login-token">{m.login_token()}</Label>
+							<Input
+								id="login-token"
 								value={token}
 								onChange={(event) => setToken(event.target.value)}
 								type="password"
 								placeholder="prism_adm_... or panel-secret"
-								className={fieldClassName}
 							/>
-						</label>
+						</div>
 
-						{error ? (
-							<div className="rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm text-red-100">
-								{error}
-							</div>
-						) : null}
+						{error ? <ErrorBanner message={error} /> : null}
 
-						<PrimaryButton type="submit" disabled={submitting || !baseUrl.trim() || !token.trim()}>
+						<Button
+							type="submit"
+							className="w-full"
+							disabled={submitting || !baseUrl.trim() || !token.trim()}
+						>
 							{submitting ? m.login_verifying() : m.login_connect()}
-							<ArrowRight className="h-4 w-4" />
-						</PrimaryButton>
+							<ArrowRight className="size-4" />
+						</Button>
 					</form>
-				</div>
-			</div>
+				</CardContent>
+			</Card>
 		</section>
 	);
 }

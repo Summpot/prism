@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
 	Badge,
+	CountChip,
 	EmptyState,
 	ErrorBanner,
 	InfoValue,
@@ -13,6 +14,7 @@ import {
 	StateCard,
 	ToggleChip,
 } from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTunnelServices, type ServiceSnapshot } from "@/lib/managementApi";
 import { usePanelSession } from "@/lib/panelSession";
 import { usePolling } from "@/lib/usePolling";
@@ -101,42 +103,37 @@ function AdminTunnelServicesPage() {
 							{m.services_primary_only()}
 						</ToggleChip>
 						<RefreshButton onClick={fetchServices} loading={loading} />
-						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-							<Unplug className="h-4 w-4 text-cyan-300" />
+						<CountChip icon={<Unplug className="h-4 w-4" />}>
 							{loading
 								? m.common_loading()
 								: services.length === 1
 									? m.services_count_one({ shown: filtered.length, total: services.length })
 									: m.services_count({ shown: filtered.length, total: services.length })}
-						</div>
+						</CountChip>
 					</>
 				}
 			/>
 
-			<SearchInput
-				value={query}
-				onChange={setQuery}
-				placeholder={m.services_filter()}
-			/>
+			<SearchInput value={query} onChange={setQuery} placeholder={m.services_filter()} />
 
 			{error ? <ErrorBanner message={error} onRetry={fetchServices} /> : null}
 
 			{filtered.length > 0 ? (
 				<div className="grid gap-4 xl:grid-cols-2">
 					{filtered.map((snapshot, index) => (
-						<div
+						<Card
 							key={`${snapshot.service.name}-${snapshot.client_id}-${index}`}
-							className="rounded-3xl border border-white/8 bg-slate-950/70 p-5"
+							className="shadow-xs"
 						>
-							<div className="flex items-start justify-between gap-4">
+							<CardHeader className="flex flex-row items-start justify-between gap-4">
 								<div>
-									<div className="flex items-center gap-2">
-										<Unplug className="h-5 w-5 text-cyan-300" />
-										<div className="text-xl font-semibold text-white">{snapshot.service.name}</div>
-									</div>
-									<div className="mt-2 text-sm text-slate-400">
+									<CardTitle className="flex items-center gap-2">
+										<Unplug className="h-4 w-4 text-muted-foreground" />
+										{snapshot.service.name}
+									</CardTitle>
+									<div className="mt-1.5 text-sm text-muted-foreground">
 										{m.services_client()}{" "}
-										<span className="font-mono text-cyan-200/85">{snapshot.client_id}</span>
+										<span className="font-mono text-foreground">{snapshot.client_id}</span>
 									</div>
 								</div>
 								<div className="flex flex-wrap items-center justify-end gap-2">
@@ -147,24 +144,28 @@ function AdminTunnelServicesPage() {
 										<Badge tone="info">{m.services_route_only()}</Badge>
 									) : null}
 								</div>
-							</div>
-
-							<div className="mt-5 grid gap-3 sm:grid-cols-2">
-								<InfoValue label={m.services_protocol()} value={snapshot.service.proto} />
-								<InfoValue label={m.services_local_addr()} value={snapshot.service.local_addr || "—"} />
-								<InfoValue
-									label={m.services_remote_addr()}
-									value={snapshot.service.remote_addr || "—"}
-								/>
-								<InfoValue label={m.services_remote_peer()} value={snapshot.remote} />
-								{snapshot.service.masquerade_host ? (
+							</CardHeader>
+							<CardContent>
+								<div className="grid gap-3 sm:grid-cols-2">
+									<InfoValue label={m.services_protocol()} value={snapshot.service.proto} />
 									<InfoValue
-										label={m.services_masquerade_host()}
-										value={snapshot.service.masquerade_host}
+										label={m.services_local_addr()}
+										value={snapshot.service.local_addr || "—"}
 									/>
-								) : null}
-							</div>
-						</div>
+									<InfoValue
+										label={m.services_remote_addr()}
+										value={snapshot.service.remote_addr || "—"}
+									/>
+									<InfoValue label={m.services_remote_peer()} value={snapshot.remote} />
+									{snapshot.service.masquerade_host ? (
+										<InfoValue
+											label={m.services_masquerade_host()}
+											value={snapshot.service.masquerade_host}
+										/>
+									) : null}
+								</div>
+							</CardContent>
+						</Card>
 					))}
 				</div>
 			) : !loading ? (

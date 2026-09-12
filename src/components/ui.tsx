@@ -1,10 +1,19 @@
 import { AlertTriangle, RefreshCw, Search } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Empty,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
 
@@ -59,32 +68,109 @@ export function EmptyState({
 	description?: string;
 }) {
 	return (
-		<div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">
-			{icon ? <div className="mb-3 text-muted-foreground/60">{icon}</div> : null}
-			{title ? <div className="font-semibold text-foreground">{title}</div> : null}
-			{label ? <div>{label}</div> : null}
-			{description ? <div className="mt-1 text-xs">{description}</div> : null}
-		</div>
+		<Empty className="border border-dashed border-border bg-muted/20">
+			<EmptyHeader>
+				{icon ? <EmptyMedia variant="icon">{icon}</EmptyMedia> : null}
+				{title ? <EmptyTitle>{title}</EmptyTitle> : null}
+				{label || description ? (
+					<EmptyDescription>{label ?? description}</EmptyDescription>
+				) : null}
+				{label && description ? (
+					<EmptyDescription className="text-xs">{description}</EmptyDescription>
+				) : null}
+			</EmptyHeader>
+		</Empty>
 	);
 }
 
 export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
 	return (
-		<div className="flex items-center justify-between gap-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-			<div className="flex items-start gap-2.5">
-				<AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+		<Alert variant="destructive" className="border-destructive/30 bg-destructive/10">
+			<AlertTriangle />
+			<AlertDescription className="flex items-center justify-between gap-4">
 				<span className="break-all font-medium">{message}</span>
-			</div>
-			{onRetry ? (
-				<Button
-					variant="outline"
-					size="xs"
-					onClick={onRetry}
-					className="border-destructive/30 hover:bg-destructive/20"
-				>
-					{m.common_retry()}
-				</Button>
-			) : null}
+				{onRetry ? (
+					<Button
+						variant="outline"
+						size="xs"
+						onClick={onRetry}
+						className="border-destructive/30 hover:bg-destructive/20"
+					>
+						{m.common_retry()}
+					</Button>
+				) : null}
+			</AlertDescription>
+		</Alert>
+	);
+}
+
+export function ResultBanner({ ok, children }: { ok: boolean; children: ReactNode }) {
+	return (
+		<Alert
+			variant={ok ? "default" : "destructive"}
+			className={
+				ok
+					? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+					: "border-destructive/30 bg-destructive/10"
+			}
+		>
+			<AlertDescription>{children}</AlertDescription>
+		</Alert>
+	);
+}
+
+export function WarningBanner({
+	title,
+	children,
+}: {
+	title?: string;
+	children: ReactNode;
+}) {
+	return (
+		<Alert className="border-amber-500/20 bg-amber-500/10 text-amber-800 dark:text-amber-200">
+			<AlertTriangle />
+			{title ? <AlertTitle>{title}</AlertTitle> : null}
+			<AlertDescription>{children}</AlertDescription>
+		</Alert>
+	);
+}
+
+export function NestedPanel({
+	children,
+	className,
+}: {
+	children: ReactNode;
+	className?: string;
+}) {
+	return (
+		<div className={cn("rounded-xl border border-border bg-muted/20 p-4", className)}>
+			{children}
+		</div>
+	);
+}
+
+export function SwitchRow({
+	checked,
+	onCheckedChange,
+	children,
+}: {
+	checked: boolean;
+	onCheckedChange: (checked: boolean) => void;
+	children: ReactNode;
+}) {
+	return (
+		<label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-sm text-foreground">
+			<span>{children}</span>
+			<Switch checked={checked} onCheckedChange={onCheckedChange} />
+		</label>
+	);
+}
+
+export function CountChip({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+	return (
+		<div className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+			{icon}
+			{children}
 		</div>
 	);
 }
@@ -136,10 +222,12 @@ export function InfoValue({ label, value }: { label: string; value: string | num
 export function Badge({
 	tone = "neutral",
 	variant: variantProp,
+	className,
 	children,
 }: {
 	tone?: "neutral" | "ok" | "warn" | "danger" | "info" | "cyan";
 	variant?: string;
+	className?: string;
 	children: ReactNode;
 }) {
 	const resolvedTone =
@@ -176,7 +264,10 @@ export function Badge({
 						: "bg-muted text-muted-foreground border-border";
 
 	return (
-		<ShadcnBadge variant={variant} className={cn("text-xs font-semibold uppercase", customClass)}>
+		<ShadcnBadge
+			variant={variant}
+			className={cn("text-xs font-semibold uppercase", customClass, className)}
+		>
 			{children}
 		</ShadcnBadge>
 	);
@@ -320,9 +411,6 @@ export function Field({
 		</label>
 	);
 }
-
-export const fieldClassName =
-	"w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-ring focus:ring-1 focus:ring-ring";
 
 export function SectionCard({
 	title,

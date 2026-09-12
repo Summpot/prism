@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 
 import { AppSidebarContent } from "@/components/AppSidebar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { Button } from "@/components/ui/button";
 import { isDesktopApp } from "@/lib/desktopWindow";
 import { m } from "@/paraglide/messages";
 
@@ -18,13 +19,14 @@ export default function Header() {
 			{!isDesktop ? (
 				<div className="fixed top-0 right-0 left-0 z-40 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:hidden">
 					<div className="flex items-center gap-2.5">
-						<button
+						<Button
 							type="button"
+							variant="ghost"
+							size="icon-sm"
 							onClick={() => setMobileOpen(true)}
-							className="rounded-lg p-1.5 text-foreground hover:bg-accent cursor-pointer"
 						>
 							<Menu className="h-5 w-5" />
-						</button>
+						</Button>
 						<img src="/logo192.png" alt="Prism" className="h-6 w-6 rounded-md object-contain" />
 						<span className="text-sm font-semibold text-foreground">Prism</span>
 					</div>
@@ -46,13 +48,15 @@ export default function Header() {
 						}}
 					/>
 					<aside className="relative flex h-full w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-card shadow-2xl">
-						<button
+						<Button
 							type="button"
+							variant="ghost"
+							size="icon-sm"
 							onClick={() => setMobileOpen(false)}
-							className="absolute top-3 right-3 z-10 rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+							className="absolute top-3 right-3 z-10 text-muted-foreground"
 						>
 							<X className="h-4 w-4" />
-						</button>
+						</Button>
 						<AppSidebarContent onNavigate={() => setMobileOpen(false)} />
 					</aside>
 				</div>

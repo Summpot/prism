@@ -14,14 +14,25 @@ import { useCallback, useState } from "react";
 
 import {
 	Badge,
+	CountChip,
 	ErrorBanner,
 	MetricCard,
+	NestedPanel,
 	PageHeader,
 	RefreshButton,
+	ResultBanner,
 	SecondaryButton,
 	StateCard,
 	ToggleChip,
 } from "@/components/ui";
+import { Button } from "@/components/ui/button";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
 import { formatBytes, formatPercentage, formatRelative } from "@/lib/format";
 import {
 	getConnections,
@@ -125,17 +136,19 @@ function AdminDashboardPage() {
 	const drifted = nodes.filter((node) => node.desired_revision !== node.applied_revision).length;
 
 	return (
-		<div className="space-y-8">
+		<div className="space-y-6">
 			<PageHeader
 				eyebrow={m.dashboard_eyebrow()}
 				title={m.dashboard_title()}
 				description={m.dashboard_description()}
 				actions={
 					<>
-						<div className="rounded-3xl border border-white/8 bg-white/4 px-5 py-4 text-sm text-slate-300">
-							<div className="font-medium text-white">{m.dashboard_endpoint()}</div>
-							<div className="mt-2 break-all text-cyan-200/85">{connection.baseUrl}</div>
-						</div>
+						<CountChip>
+							<div>
+								<div className="text-xs font-medium text-foreground">{m.dashboard_endpoint()}</div>
+								<div className="mt-0.5 max-w-56 truncate font-mono text-xs">{connection.baseUrl}</div>
+							</div>
+						</CountChip>
 						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
@@ -148,17 +161,7 @@ function AdminDashboardPage() {
 				}
 			/>
 
-			{reloadResult ? (
-				<div
-					className={`rounded-3xl border px-5 py-4 text-sm ${
-						reloadResult.ok
-							? "border-emerald-400/20 bg-emerald-400/8 text-emerald-100"
-							: "border-red-400/20 bg-red-400/8 text-red-100"
-					}`}
-				>
-					{reloadResult.text}
-				</div>
-			) : null}
+			{reloadResult ? <ResultBanner ok={reloadResult.ok}>{reloadResult.text}</ResultBanner> : null}
 
 			{error ? <ErrorBanner message={error} onRetry={fetchData} /> : null}
 
@@ -214,35 +217,31 @@ function AdminDashboardPage() {
 				/>
 			</section>
 
-			<section className="rounded-[2rem] border border-white/8 bg-slate-950/70 p-6 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:p-8">
-				<div className="flex items-center justify-between gap-4">
+			<Card className="shadow-xs">
+				<CardHeader className="flex flex-row items-start justify-between gap-4">
 					<div>
-						<h2 className="text-2xl font-semibold text-white">{m.dashboard_node_fleet()}</h2>
-						<p className="mt-2 text-sm leading-6 text-slate-400">
+						<CardTitle>{m.dashboard_node_fleet()}</CardTitle>
+						<CardDescription className="mt-1.5">
 							{m.dashboard_node_fleet_description()}
-						</p>
+						</CardDescription>
 					</div>
-					<Link
-						to="/admin/nodes"
-						className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
-					>
+					<Button variant="outline" size="sm" render={<Link to="/admin/nodes" />}>
 						{m.dashboard_open_nodes()}
 						<ArrowRight className="h-4 w-4" />
-					</Link>
-				</div>
-
-				<div className="mt-6 grid gap-4 xl:grid-cols-2">
-					{loading && nodes.length === 0 ? (
-						<StateCard label={m.dashboard_loading_inventory()} />
-					) : nodes.length > 0 ? (
-						nodes.slice(0, 6).map((node) => <NodeCard key={node.node_id} node={node} />)
-					) : (
-						<div className="rounded-3xl border border-dashed border-white/10 bg-white/3 px-6 py-10 text-sm text-slate-400">
-							{m.dashboard_no_workers()}
-						</div>
-					)}
-				</div>
-			</section>
+					</Button>
+				</CardHeader>
+				<CardContent>
+					<div className="grid gap-4 xl:grid-cols-2">
+						{loading && nodes.length === 0 ? (
+							<StateCard label={m.dashboard_loading_inventory()} />
+						) : nodes.length > 0 ? (
+							nodes.slice(0, 6).map((node) => <NodeCard key={node.node_id} node={node} />)
+						) : (
+							<StateCard label={m.dashboard_no_workers()} />
+						)}
+					</div>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }
@@ -253,33 +252,31 @@ function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
 		<Link
 			to="/admin/nodes/$nodeId"
 			params={{ nodeId: node.node_id }}
-			className="rounded-3xl border border-white/8 bg-white/4 p-5 transition hover:border-cyan-400/25 hover:bg-cyan-400/8"
+			className="block rounded-xl border border-border bg-card p-4 shadow-xs transition-colors hover:bg-muted/40"
 		>
 			<div className="flex items-start justify-between gap-4">
 				<div>
-					<div className="text-lg font-semibold text-white">{node.node_id}</div>
-					<div className="mt-2 text-sm text-slate-400">
+					<div className="text-lg font-semibold text-foreground">{node.node_id}</div>
+					<div className="mt-1.5 text-sm text-muted-foreground">
 						{m.admin_mode()}:{" "}
-						<span className="text-cyan-200">{node.connection_mode ?? m.admin_unknown()}</span>
+						<span className="text-foreground">{node.connection_mode ?? m.admin_unknown()}</span>
 						{" · "}
-						<span className="text-slate-300">{formatRelative(node.last_seen_unix_ms)}</span>
+						<span>{formatRelative(node.last_seen_unix_ms)}</span>
 					</div>
 				</div>
 				<div className="flex flex-col items-end gap-2">
 					<Badge tone={node.pending_restart ? "warn" : "ok"}>
-						{node.pending_restart
-							? m.dashboard_badge_restart()
-							: m.dashboard_badge_steady()}
+						{node.pending_restart ? m.dashboard_badge_restart() : m.dashboard_badge_steady()}
 					</Badge>
 					{drifted ? <Badge tone="info">{m.admin_drift()}</Badge> : null}
 				</div>
 			</div>
-			<div className="mt-5 grid gap-3 sm:grid-cols-2">
+			<div className="mt-4 grid gap-3 sm:grid-cols-2">
 				<StatusMini label={m.dashboard_desired()} value={node.desired_revision} />
 				<StatusMini label={m.dashboard_applied()} value={node.applied_revision} />
 			</div>
 			{node.last_apply_error ? (
-				<div className="mt-4 truncate rounded-2xl border border-red-400/20 bg-red-400/8 px-3 py-2 text-xs text-red-100">
+				<div className="mt-3 truncate rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
 					{node.last_apply_error}
 				</div>
 			) : null}
@@ -289,32 +286,33 @@ function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
 
 function StatusMini({ label, value }: { label: string; value: string | number }) {
 	return (
-		<div className="rounded-2xl border border-white/8 bg-slate-950/70 px-4 py-3">
-			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</div>
-			<div className="mt-2 text-xl font-semibold text-white">{value}</div>
-		</div>
+		<NestedPanel className="px-3 py-2.5">
+			<div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+				{label}
+			</div>
+			<div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+		</NestedPanel>
 	);
 }
 
 function ConnectState() {
 	return (
 		<section className="flex min-h-[70vh] items-center justify-center">
-			<div className="max-w-2xl rounded-[2rem] border border-white/8 bg-slate-950/70 px-8 py-10 text-center shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
-				<div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-300">
-					<ServerCog className="h-8 w-8" />
-				</div>
-				<h1 className="mt-6 text-3xl font-semibold text-white">{m.dashboard_connect_title()}</h1>
-				<p className="mt-4 text-base leading-7 text-slate-400">
-					{m.dashboard_connect_description()}
-				</p>
-				<Link
-					to="/login"
-					className="mt-8 inline-flex items-center gap-3 rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
-				>
-					{m.dashboard_configure_connection()}
-					<ArrowRight className="h-4 w-4" />
-				</Link>
-			</div>
+			<Card className="max-w-lg text-center shadow-xs">
+				<CardHeader className="items-center">
+					<div className="mx-auto flex size-14 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
+						<ServerCog className="size-7" />
+					</div>
+					<CardTitle className="text-2xl">{m.dashboard_connect_title()}</CardTitle>
+					<CardDescription>{m.dashboard_connect_description()}</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<Button render={<Link to="/login" />}>
+						{m.dashboard_configure_connection()}
+						<ArrowRight className="h-4 w-4" />
+					</Button>
+				</CardContent>
+			</Card>
 		</section>
 	);
 }

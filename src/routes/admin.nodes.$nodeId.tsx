@@ -6,11 +6,15 @@ import { NodeConfigEditor } from "@/components/cluster/NodeConfigEditor";
 import {
 	Badge,
 	ErrorBanner,
+	InfoValue,
 	MetricCard,
 	PageHeader,
 	RefreshButton,
 	StateCard,
+	WarningBanner,
 } from "@/components/ui";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { formatRelative, formatTime } from "@/lib/format";
 import {
 	getManagedNodeConfig,
@@ -91,13 +95,10 @@ function AdminNodeDetailPage() {
 	if (error || !data) {
 		return (
 			<div className="space-y-4">
-				<Link
-					to="/admin/nodes"
-					className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
-				>
+				<Button variant="ghost" size="sm" render={<Link to="/admin/nodes" />}>
 					<ArrowLeft className="h-4 w-4" />
 					{m.nodetail_back()}
-				</Link>
+				</Button>
 				<ErrorBanner message={error || m.nodetail_not_found()} onRetry={fetchData} />
 			</div>
 		);
@@ -108,13 +109,10 @@ function AdminNodeDetailPage() {
 
 	return (
 		<div className="space-y-6">
-			<Link
-				to="/admin/nodes"
-				className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
-			>
+			<Button variant="ghost" size="sm" render={<Link to="/admin/nodes" />}>
 				<ArrowLeft className="h-4 w-4" />
 				{m.nodetail_back()}
-			</Link>
+			</Button>
 
 			<PageHeader
 				eyebrow={m.nodetail_eyebrow()}
@@ -160,48 +158,37 @@ function AdminNodeDetailPage() {
 			{(node.agent_url || node.last_apply_attempt_unix_ms || node.last_apply_success_unix_ms) && (
 				<section className="grid gap-4 md:grid-cols-3">
 					{node.agent_url ? (
-						<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 text-sm">
-							<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-								{m.nodetail_agent_url()}
-							</div>
-							<div className="mt-2 break-all text-white">{node.agent_url}</div>
-						</div>
+						<InfoValue label={m.nodetail_agent_url()} value={node.agent_url} />
 					) : null}
-					<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 text-sm">
-						<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-							{m.nodetail_last_apply_attempt()}
-						</div>
-						<div className="mt-2 text-white">
-							{formatTime(node.last_apply_attempt_unix_ms, "short")}
-						</div>
-					</div>
-					<div className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 text-sm">
-						<div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-							{m.nodetail_last_apply_success()}
-						</div>
-						<div className="mt-2 text-white">
-							{formatTime(node.last_apply_success_unix_ms, "short")}
-						</div>
-					</div>
+					<InfoValue
+						label={m.nodetail_last_apply_attempt()}
+						value={formatTime(node.last_apply_attempt_unix_ms, "short")}
+					/>
+					<InfoValue
+						label={m.nodetail_last_apply_success()}
+						value={formatTime(node.last_apply_success_unix_ms, "short")}
+					/>
 				</section>
 			)}
 
 			{node.restart_reasons.length > 0 ? (
-				<section className="rounded-3xl border border-amber-400/20 bg-amber-400/8 p-5 text-sm text-amber-100">
-					<div className="font-semibold">{m.nodetail_restart_reasons()}</div>
-					<ul className="mt-3 list-disc space-y-2 pl-5">
+				<WarningBanner title={m.nodetail_restart_reasons()}>
+					<ul className="mt-2 list-disc space-y-1 pl-5">
 						{node.restart_reasons.map((reason) => (
 							<li key={reason}>{reason}</li>
 						))}
 					</ul>
-				</section>
+				</WarningBanner>
 			) : null}
 
 			{node.last_apply_error ? (
-				<section className="rounded-3xl border border-red-400/20 bg-red-400/8 p-5 text-sm text-red-100">
-					<div className="font-semibold">{m.nodetail_last_apply_error()}</div>
-					<div className="mt-2 whitespace-pre-wrap break-all">{node.last_apply_error}</div>
-				</section>
+				<Alert variant="destructive">
+					<AlertTriangle />
+					<AlertTitle>{m.nodetail_last_apply_error()}</AlertTitle>
+					<AlertDescription className="whitespace-pre-wrap break-all">
+						{node.last_apply_error}
+					</AlertDescription>
+				</Alert>
 			) : null}
 
 			<NodeConfigEditor

@@ -6,13 +6,27 @@ import {
 	Badge,
 	EmptyState,
 	ErrorBanner,
-	fieldClassName,
 	PageHeader,
-	PrimaryButton,
 	RefreshButton,
 	SearchInput,
 	StateCard,
 } from "@/components/ui";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	type AuthSessionResponse,
 	createAuthToken,
@@ -42,7 +56,6 @@ function AdminUsersPage() {
 	const [query, setQuery] = useState("");
 	const [activeTab, setActiveTab] = useState<"users" | "tokens">("users");
 
-	// Token creation modal state
 	const [createTokenOpen, setCreateTokenOpen] = useState(false);
 	const [tokenName, setTokenName] = useState("");
 	const [tokenType, setTokenType] = useState<"client" | "admin" | "connector">("client");
@@ -51,7 +64,6 @@ function AdminUsersPage() {
 	const [copiedToken, setCopiedToken] = useState(false);
 	const [tokenCreating, setTokenCreating] = useState(false);
 
-	// User editing modal state
 	const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
 	const [editRole, setEditRole] = useState<"admin" | "member" | "disabled">("member");
 	const [editServiceRules, setEditServiceRules] = useState<string>("");
@@ -183,9 +195,7 @@ function AdminUsersPage() {
 	}
 
 	if (!connection) {
-		return (
-			<StateCard label={m.users_connect_panel()} />
-		);
+		return <StateCard label={m.users_connect_panel()} />;
 	}
 
 	return (
@@ -198,7 +208,7 @@ function AdminUsersPage() {
 					<div className="flex items-center gap-3">
 						<RefreshButton onClick={fetchData} loading={loading} />
 						{activeTab === "tokens" ? (
-							<PrimaryButton
+							<Button
 								onClick={() => {
 									setCreatedRawToken(null);
 									setCreateTokenOpen(true);
@@ -206,7 +216,7 @@ function AdminUsersPage() {
 							>
 								<Plus className="h-4 w-4" />
 								{m.users_generate_token()}
-							</PrimaryButton>
+							</Button>
 						) : null}
 					</div>
 				}
@@ -214,395 +224,359 @@ function AdminUsersPage() {
 
 			{error ? <ErrorBanner message={error} /> : null}
 
-			{/* Session Identity Banner */}
 			{session?.authenticated ? (
-				<div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 p-4">
-					<div className="flex items-center gap-3">
-						{session.avatar_url ? (
-							<img
-								src={session.avatar_url}
-								alt={session.username ?? m.users_avatar()}
-								className="h-10 w-10 rounded-full border border-white/20"
-							/>
-						) : (
-							<div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10 text-cyan-300">
-								<UserCheck className="h-5 w-5" />
-							</div>
-						)}
-						<div>
-							<div className="flex items-center gap-2">
-								<span className="font-semibold text-white">
-									{session.display_name || session.username || m.users_authenticated_admin()}
+				<Card className="shadow-xs">
+					<CardContent className="flex items-center justify-between gap-4 py-4">
+						<div className="flex items-center gap-3">
+							<Avatar>
+								{session.avatar_url ? (
+									<AvatarImage
+										src={session.avatar_url}
+										alt={session.username ?? m.users_avatar()}
+									/>
+								) : null}
+								<AvatarFallback>
+									<UserCheck className="h-4 w-4" />
+								</AvatarFallback>
+							</Avatar>
+							<div>
+								<div className="flex items-center gap-2">
+									<span className="font-semibold">
+										{session.display_name || session.username || m.users_authenticated_admin()}
+									</span>
+									<Badge variant={session.is_admin ? "success" : "default"}>
+										{session.role ?? "admin"}
+									</Badge>
+								</div>
+								<span className="text-xs text-muted-foreground">
+									{session.username ? `@${session.username}` : m.users_connected_via_token()}
 								</span>
-								<Badge variant={session.is_admin ? "success" : "default"}>
-									{session.role ?? "admin"}
-								</Badge>
 							</div>
-							<span className="text-xs text-slate-400">
-								{session.username ? `@${session.username}` : m.users_connected_via_token()}
-							</span>
 						</div>
-					</div>
-					<div className="text-xs text-slate-400">
-						{session.is_admin ? m.users_full_privileges() : m.users_standard_member()}
-					</div>
-				</div>
+						<div className="text-xs text-muted-foreground">
+							{session.is_admin ? m.users_full_privileges() : m.users_standard_member()}
+						</div>
+					</CardContent>
+				</Card>
 			) : null}
 
-			{/* Navigation Tabs */}
-			<div className="flex items-center gap-2 border-b border-white/8 pb-4">
-				<button
-					type="button"
-					onClick={() => setActiveTab("users")}
-					className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition cursor-pointer ${
-						activeTab === "users"
-							? "bg-cyan-500/15 text-cyan-300 border border-cyan-400/30"
-							: "text-slate-400 hover:text-white"
-					}`}
-				>
-					<Users className="h-4 w-4" />
-					{m.users_tab_users({ count: users.length })}
-				</button>
-				<button
-					type="button"
-					onClick={() => setActiveTab("tokens")}
-					className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition cursor-pointer ${
-						activeTab === "tokens"
-							? "bg-cyan-500/15 text-cyan-300 border border-cyan-400/30"
-							: "text-slate-400 hover:text-white"
-					}`}
-				>
-					<Key className="h-4 w-4" />
-					{m.users_tab_tokens({ count: tokens.length })}
-				</button>
-			</div>
+			<Tabs
+				value={activeTab}
+				onValueChange={(value) => setActiveTab(value as "users" | "tokens")}
+			>
+				<TabsList>
+					<TabsTrigger value="users">
+						<Users className="h-4 w-4" />
+						{m.users_tab_users({ count: users.length })}
+					</TabsTrigger>
+					<TabsTrigger value="tokens">
+						<Key className="h-4 w-4" />
+						{m.users_tab_tokens({ count: tokens.length })}
+					</TabsTrigger>
+				</TabsList>
+			</Tabs>
 
-			{/* Search */}
 			<div className="max-w-md">
 				<SearchInput
 					value={query}
 					onChange={setQuery}
-					placeholder={
-						activeTab === "users" ? m.users_search_users() : m.users_search_tokens()
-					}
+					placeholder={activeTab === "users" ? m.users_search_users() : m.users_search_tokens()}
 				/>
 			</div>
 
-			{/* Users Tab */}
 			{activeTab === "users" ? (
 				filteredUsers.length === 0 ? (
 					<EmptyState
-						icon={<Users className="h-8 w-8 text-slate-500" />}
+						icon={<Users className="h-8 w-8" />}
 						title={m.users_no_users_title()}
-						description={
-							query
-								? m.users_no_users_match()
-								: m.users_no_users_hint()
-						}
+						description={query ? m.users_no_users_match() : m.users_no_users_hint()}
 					/>
 				) : (
 					<div className="grid gap-4 md:grid-cols-2">
 						{filteredUsers.map((user) => (
-							<div
-								key={user.id}
-								className="rounded-2xl border border-white/8 bg-slate-950/70 p-5 shadow-lg"
-							>
-								<div className="flex items-start justify-between">
-									<div className="flex items-center gap-3">
-										{user.avatar_url ? (
-											<img
-												src={user.avatar_url}
-												alt={user.username}
-												className="h-10 w-10 rounded-full border border-white/20"
-											/>
-										) : (
-											<div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white font-semibold">
-												{user.username.slice(0, 2).toUpperCase()}
+							<Card key={user.id} className="shadow-xs">
+								<CardContent className="space-y-4 pt-0">
+									<div className="flex items-start justify-between">
+										<div className="flex items-center gap-3">
+											<Avatar>
+												{user.avatar_url ? (
+													<AvatarImage src={user.avatar_url} alt={user.username} />
+												) : null}
+												<AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+											</Avatar>
+											<div>
+												<div className="flex items-center gap-2">
+													<span className="font-medium">
+														{user.display_name || user.username}
+													</span>
+													<Badge
+														variant={
+															user.role === "admin"
+																? "success"
+																: user.role === "disabled"
+																	? "danger"
+																	: "default"
+														}
+													>
+														{user.role}
+													</Badge>
+												</div>
+												<span className="text-xs text-muted-foreground">@{user.username}</span>
 											</div>
-										)}
-										<div>
-											<div className="flex items-center gap-2">
-												<span className="font-medium text-white">
-													{user.display_name || user.username}
+										</div>
+										<Button
+											variant="outline"
+											size="xs"
+											onClick={() => {
+												setEditingUser(user);
+												setEditRole(user.role);
+												setEditServiceRules(user.service_rules.join("\n"));
+											}}
+										>
+											{m.common_edit()}
+										</Button>
+									</div>
+									<div className="border-t border-border pt-3">
+										<span className="text-xs font-medium text-muted-foreground">
+											{m.users_acl_label()}
+										</span>
+										<div className="mt-1.5 flex flex-wrap gap-1.5">
+											{user.service_rules.length === 0 ? (
+												<span className="text-xs text-muted-foreground italic">
+													{m.users_no_rules()}
 												</span>
-												<Badge
-													variant={
-														user.role === "admin"
-															? "success"
-															: user.role === "disabled"
-																? "danger"
-																: "default"
-													}
-												>
-													{user.role}
-												</Badge>
-											</div>
-											<span className="text-xs text-slate-400">@{user.username}</span>
+											) : (
+												user.service_rules.map((rule) => (
+													<Badge key={rule} tone="info" className="font-mono normal-case">
+														{rule}
+													</Badge>
+												))
+											)}
 										</div>
 									</div>
-
-									<button
-										type="button"
-										onClick={() => {
-											setEditingUser(user);
-											setEditRole(user.role);
-											setEditServiceRules(user.service_rules.join("\n"));
-										}}
-										className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5 cursor-pointer"
-									>
-										{m.common_edit()}
-									</button>
-								</div>
-
-								<div className="mt-4 border-t border-white/6 pt-3">
-									<span className="text-xs font-medium text-slate-400">
-										{m.users_acl_label()}
-									</span>
-									<div className="mt-1.5 flex flex-wrap gap-1.5">
-										{user.service_rules.length === 0 ? (
-											<span className="text-xs text-slate-500 italic">
-												{m.users_no_rules()}
-											</span>
-										) : (
-											user.service_rules.map((rule) => (
-												<span
-													key={rule}
-													className="rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-0.5 font-mono text-xs text-cyan-300"
-												>
-													{rule}
-												</span>
-											))
-										)}
-									</div>
-								</div>
-							</div>
+								</CardContent>
+							</Card>
 						))}
 					</div>
 				)
 			) : null}
 
-			{/* Tokens Tab */}
 			{activeTab === "tokens" ? (
 				filteredTokens.length === 0 ? (
 					<EmptyState
-						icon={<Key className="h-8 w-8 text-slate-500" />}
+						icon={<Key className="h-8 w-8" />}
 						title={m.users_no_tokens_title()}
 						description={m.users_no_tokens_hint()}
 					/>
 				) : (
 					<div className="space-y-3">
 						{filteredTokens.map((token) => (
-							<div
-								key={token.id}
-								className="flex items-center justify-between rounded-2xl border border-white/8 bg-slate-950/70 p-4"
-							>
-								<div className="space-y-1">
-									<div className="flex items-center gap-2">
-										<span className="font-semibold text-white">{token.name}</span>
-										<Badge
-											variant={
-												token.token_type === "admin"
-													? "success"
-													: token.token_type === "connector"
-														? "info"
-														: "default"
-											}
-										>
-											{token.token_type}
-										</Badge>
-										<span className="font-mono text-xs text-slate-500">{token.id}</span>
+							<Card key={token.id} className="shadow-xs">
+								<CardContent className="flex items-center justify-between gap-4 py-4">
+									<div className="space-y-1">
+										<div className="flex flex-wrap items-center gap-2">
+											<span className="font-semibold">{token.name}</span>
+											<Badge
+												variant={
+													token.token_type === "admin"
+														? "success"
+														: token.token_type === "connector"
+															? "info"
+															: "default"
+												}
+											>
+												{token.token_type}
+											</Badge>
+											<span className="font-mono text-xs text-muted-foreground">{token.id}</span>
+										</div>
+										<div className="text-xs text-muted-foreground">
+											{m.users_created({
+												date: new Date(token.created_at_unix_ms).toLocaleString(),
+											})}
+											{token.last_used_unix_ms > 0
+												? m.users_last_used({
+														date: new Date(token.last_used_unix_ms).toLocaleString(),
+													})
+												: m.users_never_used()}
+										</div>
 									</div>
-									<div className="text-xs text-slate-400">
-										{m.users_created({ date: new Date(token.created_at_unix_ms).toLocaleString() })}
-										{token.last_used_unix_ms > 0
-											? m.users_last_used({ date: new Date(token.last_used_unix_ms).toLocaleString() })
-											: m.users_never_used()}
-									</div>
-								</div>
-
-								<button
-									type="button"
-									onClick={() => void handleRevokeToken(token.id)}
-									className="flex items-center gap-1.5 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-1.5 text-xs text-red-200 transition hover:bg-red-400/20 cursor-pointer"
-								>
-									<Trash2 className="h-3.5 w-3.5" />
-									{m.users_revoke()}
-								</button>
-							</div>
+									<Button
+										variant="destructive"
+										size="xs"
+										onClick={() => void handleRevokeToken(token.id)}
+									>
+										<Trash2 className="h-3.5 w-3.5" />
+										{m.users_revoke()}
+									</Button>
+								</CardContent>
+							</Card>
 						))}
 					</div>
 				)
 			) : null}
 
-			{/* Create Token Modal */}
-			{createTokenOpen ? (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-					<div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900 p-6 shadow-2xl">
-						<h3 className="text-lg font-semibold text-white">{m.users_token_modal_title()}</h3>
-						<p className="mt-1 text-sm text-slate-400">
-							{m.users_token_modal_description()}
-						</p>
-
-						{createdRawToken ? (
-							<div className="mt-5 space-y-4">
-								<div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-4">
-									<div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
-										<Check className="h-4 w-4" /> {m.users_token_created()}
-									</div>
-									<p className="mt-2 text-xs text-emerald-200">
-										{m.users_token_copy_hint()}
-									</p>
-									<div className="mt-3 flex items-center justify-between rounded-lg border border-emerald-400/30 bg-black/40 p-2.5 font-mono text-xs text-emerald-100">
-										<span className="truncate">{createdRawToken}</span>
-										<button
-											type="button"
-											onClick={() => {
-												navigator.clipboard.writeText(createdRawToken);
-												setCopiedToken(true);
-												setTimeout(() => setCopiedToken(false), 2000);
-											}}
-											className="ml-2 flex items-center gap-1 rounded bg-emerald-400/20 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-400/30 cursor-pointer"
-										>
-											{copiedToken ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-											{copiedToken ? m.common_copied() : m.common_copy()}
-										</button>
-									</div>
+			<Dialog
+				open={createTokenOpen}
+				onOpenChange={(open) => {
+					setCreateTokenOpen(open);
+					if (!open) {
+						setCreatedRawToken(null);
+					}
+				}}
+			>
+				<DialogContent className="sm:max-w-lg" showCloseButton>
+					<DialogHeader>
+						<DialogTitle>{m.users_token_modal_title()}</DialogTitle>
+						<DialogDescription>{m.users_token_modal_description()}</DialogDescription>
+					</DialogHeader>
+					{createdRawToken ? (
+						<div className="space-y-4">
+							<div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4">
+								<div className="flex items-center gap-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+									<Check className="h-4 w-4" /> {m.users_token_created()}
 								</div>
-
-								<div className="flex justify-end">
-									<button
+								<p className="mt-2 text-xs text-muted-foreground">{m.users_token_copy_hint()}</p>
+								<div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-2.5 font-mono text-xs">
+									<span className="truncate">{createdRawToken}</span>
+									<Button
 										type="button"
+										variant="outline"
+										size="xs"
 										onClick={() => {
-											setCreateTokenOpen(false);
-											setCreatedRawToken(null);
+											navigator.clipboard.writeText(createdRawToken);
+											setCopiedToken(true);
+											setTimeout(() => setCopiedToken(false), 2000);
 										}}
-										className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-400 transition cursor-pointer"
 									>
-										{m.common_done()}
-									</button>
+										{copiedToken ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+										{copiedToken ? m.common_copied() : m.common_copy()}
+									</Button>
 								</div>
 							</div>
-						) : (
-							<form onSubmit={handleCreateToken} className="mt-5 space-y-4">
-								<label className="block space-y-1.5">
-									<span className="text-xs font-medium text-slate-300">{m.users_token_name()}</span>
-									<input
-										value={tokenName}
-										onChange={(e) => setTokenName(e.target.value)}
-										placeholder={m.users_token_name_placeholder()}
-										className={fieldClassName}
-										required
-									/>
-								</label>
-
-								<label className="block space-y-1.5">
-									<span className="text-xs font-medium text-slate-300">{m.users_token_type()}</span>
-									<select
-										value={tokenType}
-										onChange={(e) =>
-											setTokenType(e.target.value as "client" | "admin" | "connector")
-										}
-										className={fieldClassName}
-									>
-										<option value="client">{m.users_token_type_client()}</option>
-										<option value="connector">{m.users_token_type_connector()}</option>
-										<option value="admin">{m.users_token_type_admin()}</option>
-									</select>
-								</label>
-
-								<label className="block space-y-1.5">
-									<span className="text-xs font-medium text-slate-300">
-										{m.users_token_expiry()}
-									</span>
-									<input
-										type="number"
-										min="1"
-										value={tokenExpiryDays ?? ""}
-										onChange={(e) =>
-											setTokenExpiryDays(e.target.value ? Number(e.target.value) : undefined)
-										}
-										placeholder={m.users_token_expiry_placeholder()}
-										className={fieldClassName}
-									/>
-								</label>
-
-								<div className="mt-6 flex justify-end gap-3">
-									<button
-										type="button"
-										onClick={() => setCreateTokenOpen(false)}
-										className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 transition cursor-pointer"
-									>
-										{m.common_cancel()}
-									</button>
-									<PrimaryButton type="submit" disabled={tokenCreating || !tokenName.trim()}>
-										{tokenCreating ? m.users_token_generating() : m.users_token_generate()}
-									</PrimaryButton>
-								</div>
-							</form>
-						)}
-					</div>
-				</div>
-			) : null}
-
-			{/* Edit User Modal */}
-			{editingUser ? (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-					<div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900 p-6 shadow-2xl">
-						<h3 className="text-lg font-semibold text-white">{m.users_edit_title({ username: editingUser.username })}</h3>
-						<p className="mt-1 text-sm text-slate-400">
-							{m.users_edit_description()}
-						</p>
-
-						<form onSubmit={handleSaveUser} className="mt-5 space-y-4">
-							<label className="block space-y-1.5">
-								<span className="text-xs font-medium text-slate-300">{m.users_role()}</span>
-								<select
-									value={editRole}
-									onChange={(e) => setEditRole(e.target.value as "admin" | "member" | "disabled")}
-									className={fieldClassName}
+							<DialogFooter>
+								<Button
+									type="button"
+									onClick={() => {
+										setCreateTokenOpen(false);
+										setCreatedRawToken(null);
+									}}
 								>
-									<option value="admin">{m.users_role_admin()}</option>
-									<option value="member">{m.users_role_member()}</option>
-									<option value="disabled">{m.users_role_disabled()}</option>
-								</select>
-							</label>
+									{m.common_done()}
+								</Button>
+							</DialogFooter>
+						</div>
+					) : (
+						<form onSubmit={handleCreateToken} className="space-y-4">
+							<div className="space-y-1.5">
+								<Label htmlFor="token-name">{m.users_token_name()}</Label>
+								<Input
+									id="token-name"
+									value={tokenName}
+									onChange={(e) => setTokenName(e.target.value)}
+									placeholder={m.users_token_name_placeholder()}
+									required
+								/>
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="token-type">{m.users_token_type()}</Label>
+								<NativeSelect
+									id="token-type"
+									className="w-full"
+									value={tokenType}
+									onChange={(e) =>
+										setTokenType(e.target.value as "client" | "admin" | "connector")
+									}
+								>
+									<NativeSelectOption value="client">{m.users_token_type_client()}</NativeSelectOption>
+									<NativeSelectOption value="connector">
+										{m.users_token_type_connector()}
+									</NativeSelectOption>
+									<NativeSelectOption value="admin">{m.users_token_type_admin()}</NativeSelectOption>
+								</NativeSelect>
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="token-expiry">{m.users_token_expiry()}</Label>
+								<Input
+									id="token-expiry"
+									type="number"
+									min="1"
+									value={tokenExpiryDays ?? ""}
+									onChange={(e) =>
+										setTokenExpiryDays(e.target.value ? Number(e.target.value) : undefined)
+									}
+									placeholder={m.users_token_expiry_placeholder()}
+								/>
+							</div>
+							<DialogFooter>
+								<Button type="button" variant="outline" onClick={() => setCreateTokenOpen(false)}>
+									{m.common_cancel()}
+								</Button>
+								<Button type="submit" disabled={tokenCreating || !tokenName.trim()}>
+									{tokenCreating ? m.users_token_generating() : m.users_token_generate()}
+								</Button>
+							</DialogFooter>
+						</form>
+					)}
+				</DialogContent>
+			</Dialog>
 
-							<label className="block space-y-1.5">
-								<span className="text-xs font-medium text-slate-300">
-									{m.users_rules_label()}
-								</span>
-								<textarea
+			<Dialog open={Boolean(editingUser)} onOpenChange={(open) => !open && setEditingUser(null)}>
+				<DialogContent className="sm:max-w-lg" showCloseButton>
+					<DialogHeader>
+						<DialogTitle>
+							{editingUser
+								? m.users_edit_title({ username: editingUser.username })
+								: m.common_edit()}
+						</DialogTitle>
+						<DialogDescription>{m.users_edit_description()}</DialogDescription>
+					</DialogHeader>
+					{editingUser ? (
+						<form onSubmit={handleSaveUser} className="space-y-4">
+							<div className="space-y-1.5">
+								<Label htmlFor="edit-role">{m.users_role()}</Label>
+								<NativeSelect
+									id="edit-role"
+									className="w-full"
+									value={editRole}
+									onChange={(e) =>
+										setEditRole(e.target.value as "admin" | "member" | "disabled")
+									}
+								>
+									<NativeSelectOption value="admin">{m.users_role_admin()}</NativeSelectOption>
+									<NativeSelectOption value="member">{m.users_role_member()}</NativeSelectOption>
+									<NativeSelectOption value="disabled">{m.users_role_disabled()}</NativeSelectOption>
+								</NativeSelect>
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="edit-rules">{m.users_rules_label()}</Label>
+								<Textarea
+									id="edit-rules"
 									rows={4}
 									value={editServiceRules}
 									onChange={(e) => setEditServiceRules(e.target.value)}
 									placeholder={"mc-*\nsecret-db\n*"}
-									className={`${fieldClassName} font-mono text-xs`}
+									className="font-mono text-xs"
 								/>
-								<span className="text-[11px] text-slate-500">
+								<p className="text-[11px] text-muted-foreground">
 									{m.users_rules_hint_prefix()}
-									<code className="text-cyan-300">mc-*</code>
+									<code className="text-primary">mc-*</code>
 									{m.users_rules_hint_mid()}
-									<code className="text-cyan-300">*</code>
+									<code className="text-primary">*</code>
 									{m.users_rules_hint_tail()}
-								</span>
-							</label>
-
-							<div className="mt-6 flex justify-end gap-3">
-								<button
-									type="button"
-									onClick={() => setEditingUser(null)}
-									className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 transition cursor-pointer"
-								>
-									{m.common_cancel()}
-								</button>
-								<PrimaryButton type="submit" disabled={userSaving}>
-									{userSaving ? m.common_saving() : m.users_save_changes()}
-								</PrimaryButton>
+								</p>
 							</div>
+							<DialogFooter>
+								<Button type="button" variant="outline" onClick={() => setEditingUser(null)}>
+									{m.common_cancel()}
+								</Button>
+								<Button type="submit" disabled={userSaving}>
+									{userSaving ? m.common_saving() : m.users_save_changes()}
+								</Button>
+							</DialogFooter>
 						</form>
-					</div>
-				</div>
-			) : null}
+					) : null}
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

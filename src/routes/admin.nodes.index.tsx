@@ -3,7 +3,9 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
 	Badge,
+	CountChip,
 	ErrorBanner,
+	NestedPanel,
 	PageHeader,
 	RefreshButton,
 	SearchInput,
@@ -98,19 +100,15 @@ function AdminNodesIndexPage() {
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchNodes} loading={loading} />
-						<div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+						<CountChip>
 							{loading ? m.admin_refreshing() : m.admin_nodes_count({ count: nodes.length })}
-						</div>
+						</CountChip>
 					</>
 				}
 			/>
 
 			<div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<SearchInput
-					value={query}
-					onChange={setQuery}
-					placeholder={m.admin_filter_nodes()}
-				/>
+				<SearchInput value={query} onChange={setQuery} placeholder={m.admin_filter_nodes()} />
 				<div className="flex flex-wrap gap-2">
 					{(
 						[
@@ -135,17 +133,20 @@ function AdminNodesIndexPage() {
 						key={node.node_id}
 						to="/admin/nodes/$nodeId"
 						params={{ nodeId: node.node_id }}
-						className="rounded-3xl border border-white/8 bg-slate-950/70 p-5 transition hover:border-cyan-400/25 hover:bg-cyan-400/8"
+						className="block rounded-xl border border-border bg-card p-4 shadow-xs transition-colors hover:bg-muted/40"
 					>
 						<div className="flex items-start justify-between gap-4">
 							<div>
-								<div className="text-xl font-semibold text-white">{node.node_id}</div>
-								<div className="mt-2 text-sm text-slate-400">
-									{m.admin_mode()} <span className="text-cyan-200">{node.connection_mode ?? m.admin_unknown()}</span>
+								<div className="text-xl font-semibold text-foreground">{node.node_id}</div>
+								<div className="mt-1.5 text-sm text-muted-foreground">
+									{m.admin_mode()}{" "}
+									<span className="text-foreground">
+										{node.connection_mode ?? m.admin_unknown()}
+									</span>
 									{node.agent_url ? (
 										<>
 											{" · "}
-											<span className="break-all text-slate-300">{node.agent_url}</span>
+											<span className="break-all">{node.agent_url}</span>
 										</>
 									) : null}
 								</div>
@@ -159,7 +160,7 @@ function AdminNodesIndexPage() {
 								) : null}
 							</div>
 						</div>
-						<div className="mt-5 grid gap-3 sm:grid-cols-2">
+						<div className="mt-4 grid gap-3 sm:grid-cols-2">
 							<Value label={m.admin_desired_revision()} value={node.desired_revision} />
 							<Value label={m.admin_applied_revision()} value={node.applied_revision} />
 							<Value
@@ -173,11 +174,7 @@ function AdminNodesIndexPage() {
 
 				{!loading && filtered.length === 0 ? (
 					<StateCard
-						label={
-							nodes.length === 0
-								? m.admin_no_workers()
-								: m.admin_no_nodes_match()
-						}
+						label={nodes.length === 0 ? m.admin_no_workers() : m.admin_no_nodes_match()}
 					/>
 				) : null}
 			</div>
@@ -187,9 +184,11 @@ function AdminNodesIndexPage() {
 
 function Value({ label, value }: { label: string; value: string | number }) {
 	return (
-		<div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-			<div className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</div>
-			<div className="mt-2 break-all text-sm font-medium text-white">{value}</div>
-		</div>
+		<NestedPanel className="px-3 py-2.5">
+			<div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+				{label}
+			</div>
+			<div className="mt-1 break-all text-sm font-medium text-foreground">{value}</div>
+		</NestedPanel>
 	);
 }

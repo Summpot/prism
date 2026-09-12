@@ -48,21 +48,18 @@ export function ClientLogs() {
 				{/* Action Toolbar */}
 				<div className="flex items-center gap-1.5 flex-wrap">
 					{/* Level Filters */}
-					<div className="flex items-center rounded border border-input p-0.5 text-[10px]">
+					<div className="flex items-center rounded-lg border border-input p-0.5 text-[10px]">
 						{(["ALL", "INFO", "WARN", "ERROR"] as const).map((lvl) => (
-							<button
+							<Button
 								key={lvl}
 								type="button"
+								variant={logFilterLevel === lvl ? "default" : "ghost"}
+								size="xs"
 								onClick={() => setLogFilterLevel(lvl)}
-								className={cn(
-									"rounded px-2 py-0.5 font-semibold transition cursor-pointer",
-									logFilterLevel === lvl
-										? "bg-primary text-primary-foreground"
-										: "text-muted-foreground hover:text-foreground",
-								)}
+								className="h-6 px-2 font-semibold"
 							>
 								{lvl}
-							</button>
+							</Button>
 						))}
 					</div>
 
@@ -121,11 +118,11 @@ export function ClientLogs() {
 			</div>
 
 			{/* Terminal Window Viewport */}
-			<div className="relative flex-1 min-h-0 flex flex-col rounded-xl border border-border bg-slate-950 overflow-hidden shadow-inner">
+			<div className="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs">
 				<div
 					ref={logsContainerRef}
 					onScroll={handleLogsScroll}
-					className="flex-1 min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-slate-200 selection:bg-primary/30 scrollbar-thin"
+					className="flex-1 min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-foreground selection:bg-primary/30 scrollbar-thin"
 				>
 					{filteredLogs.length > 0 ? (
 						<div className="flex flex-col gap-1">
@@ -133,19 +130,19 @@ export function ClientLogs() {
 								const lvl = entry.level.toUpperCase();
 								const badgeColor =
 									lvl === "ERROR"
-										? "text-red-400 bg-red-950/60 border-red-800/40"
+										? "text-destructive bg-destructive/10 border-destructive/20"
 										: lvl === "WARN"
-											? "text-amber-400 bg-amber-950/60 border-amber-800/40"
+											? "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20"
 											: lvl === "DEBUG"
-												? "text-slate-400 bg-slate-900 border-slate-800"
-												: "text-emerald-400 bg-emerald-950/60 border-emerald-800/40";
+												? "text-muted-foreground bg-muted border-border"
+												: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
 
 								return (
 									<div
 										key={idx}
-										className="flex items-start gap-1.5 leading-relaxed hover:bg-white/5 px-1 py-0.5 rounded transition-colors"
+										className="flex items-start gap-1.5 rounded px-1 py-0.5 leading-relaxed transition-colors hover:bg-muted/50"
 									>
-										<span className="shrink-0 text-slate-500 selection:text-slate-300 text-[10px]">
+										<span className="shrink-0 text-[10px] text-muted-foreground">
 											[
 											{entry.timestamp.length > 8
 												? entry.timestamp.includes("T")
@@ -156,39 +153,41 @@ export function ClientLogs() {
 										</span>
 										<span
 											className={cn(
-												"shrink-0 rounded px-1.5 py-0.2 text-[9px] font-bold border",
+												"shrink-0 rounded border px-1.5 py-0.2 text-[9px] font-bold",
 												badgeColor,
 											)}
 										>
 											{entry.level}
 										</span>
-										<span className="shrink-0 text-slate-400 font-semibold">{entry.target}:</span>
-										<span className="break-all text-slate-100">{entry.message}</span>
+										<span className="shrink-0 font-semibold text-muted-foreground">
+											{entry.target}:
+										</span>
+										<span className="break-all text-foreground">{entry.message}</span>
 									</div>
 								);
 							})}
 						</div>
 					) : (
-						<div className="flex h-full flex-col items-center justify-center text-slate-500 py-8">
+						<div className="flex h-full flex-col items-center justify-center py-8 text-muted-foreground">
 							<Terminal className="mb-2 h-8 w-8 opacity-40" />
 							<p className="text-xs">{m.client_logs_empty()}</p>
 						</div>
 					)}
 				</div>
 
-				{/* Floating Jump to Bottom Button */}
 				{!isAtBottom && filteredLogs.length > 0 ? (
-					<button
+					<Button
 						type="button"
+						size="xs"
+						className="absolute right-3 bottom-3 z-10 rounded-full px-3 shadow-lg"
 						onClick={() => {
 							setAutoScrollLogs(true);
 							scrollToBottom(true);
 						}}
-						className="absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1 text-xs font-medium shadow-lg transition-all duration-150 backdrop-blur cursor-pointer"
 					>
 						<ArrowDown className="h-3 w-3" />
-						<span>{m.client_logs_latest()}</span>
-					</button>
+						{m.client_logs_latest()}
+					</Button>
 				) : null}
 			</div>
 		</div>

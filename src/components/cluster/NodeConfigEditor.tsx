@@ -39,11 +39,19 @@ import {
 	DangerButton,
 	Field,
 	PrimaryButton,
+	ResultBanner,
 	SecondaryButton,
 	SectionCard,
+	SwitchRow,
 	ToggleChip,
-	fieldClassName,
+	WarningBanner,
 } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
 import { m } from "@/paraglide/messages";
 
 type EditorMode = "form" | "json";
@@ -154,8 +162,8 @@ export function NodeConfigEditor({
 
 	return (
 		<div className="space-y-6">
-			<section className="rounded-3xl border border-white/8 bg-slate-950/75 p-5">
-				<div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+			<Card className="shadow-xs">
+				<CardContent className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
 					<div className="flex flex-wrap gap-2 text-sm">
 						<SummaryPill label={m.nodecfg_listeners()} value={summary.listeners} />
 						<SummaryPill label={m.nodecfg_hostname_routing()} value={summary.hostnameRoutingListeners} />
@@ -169,13 +177,19 @@ export function NodeConfigEditor({
 							}
 						/>
 						{dirty ? (
-							<span className="rounded-full bg-amber-400/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
+							<Badge
+								variant="outline"
+								className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/20"
+							>
 								{m.nodecfg_unsaved()}
-							</span>
+							</Badge>
 						) : (
-							<span className="rounded-full bg-emerald-400/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100">
+							<Badge
+								variant="outline"
+								className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+							>
 								{m.nodecfg_saved_baseline()}
-							</span>
+							</Badge>
 						)}
 					</div>
 					<div className="flex flex-wrap gap-2">
@@ -188,13 +202,13 @@ export function NodeConfigEditor({
 							{m.nodecfg_mode_json()}
 						</ToggleChip>
 					</div>
-				</div>
+				</CardContent>
 				{issueMap.listeners?.length ? (
-					<div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-sm text-amber-100">
-						{issueMap.listeners.join(" ")}
-					</div>
+					<CardContent className="pt-0">
+						<WarningBanner>{issueMap.listeners.join(" ")}</WarningBanner>
+					</CardContent>
 				) : null}
-			</section>
+			</Card>
 
 			{mode === "json" ? (
 				<SectionCard
@@ -203,7 +217,7 @@ export function NodeConfigEditor({
 					icon={<Braces className="h-5 w-5" />}
 					actions={<SecondaryButton onClick={applyRawToDraft}>{m.nodecfg_apply_to_form()}</SecondaryButton>}
 				>
-					<textarea
+					<Textarea
 						value={rawJson}
 						onChange={(event) => {
 							setRawJson(event.target.value);
@@ -211,11 +225,11 @@ export function NodeConfigEditor({
 						}}
 						spellCheck={false}
 						rows={28}
-						className={`${fieldClassName} font-mono text-sm leading-6 text-cyan-100/90`}
+						className="min-h-96 font-mono text-sm leading-6"
 					/>
 					{rawError ? (
-						<div className="mt-4 whitespace-pre-wrap rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm text-red-100">
-							{rawError}
+						<div className="mt-4">
+							<ResultBanner ok={false}>{rawError}</ResultBanner>
 						</div>
 					) : null}
 				</SectionCard>
@@ -230,7 +244,7 @@ export function NodeConfigEditor({
 							{draft.listeners.map((listener, index) => (
 								<div
 									key={`listener-${index}`}
-									className="rounded-3xl border border-white/8 bg-white/3 p-5"
+									className="rounded-xl border border-border bg-muted/20 p-4"
 								>
 									<div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr,1.6fr,auto]">
 										<Field
@@ -238,7 +252,7 @@ export function NodeConfigEditor({
 											hint={m.nodecfg_listen_address_hint()}
 											error={issueMap[`listeners.${index}.listen_addr`]}
 										>
-											<input
+											<Input
 												value={listener.listen_addr}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -248,7 +262,6 @@ export function NodeConfigEditor({
 														),
 													}))
 												}
-												className={fieldClassName}
 											/>
 										</Field>
 										<Field
@@ -256,7 +269,7 @@ export function NodeConfigEditor({
 											hint={m.nodecfg_protocol_hint()}
 											error={issueMap[`listeners.${index}.protocol`]}
 										>
-											<select
+											<NativeSelect
 												value={listener.protocol}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -266,18 +279,18 @@ export function NodeConfigEditor({
 														),
 													}))
 												}
-												className={fieldClassName}
+												className="w-full"
 											>
-												<option value="tcp">{m.transport_tcp()}</option>
-												<option value="udp">{m.transport_udp()}</option>
-											</select>
+												<NativeSelectOption value="tcp">{m.transport_tcp()}</NativeSelectOption>
+												<NativeSelectOption value="udp">{m.transport_udp()}</NativeSelectOption>
+											</NativeSelect>
 										</Field>
 										<Field
 											title={m.nodecfg_upstream()}
 											hint={m.nodecfg_upstream_hint()}
 											error={issueMap[`listeners.${index}.upstream`]}
 										>
-											<input
+											<Input
 												value={listener.upstream}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -287,7 +300,6 @@ export function NodeConfigEditor({
 														),
 													}))
 												}
-												className={fieldClassName}
 											/>
 										</Field>
 										<div className="flex items-end gap-2">
@@ -347,10 +359,10 @@ export function NodeConfigEditor({
 							{draft.routes.map((route, index) => (
 								<div
 									key={`route-${index}`}
-									className="rounded-3xl border border-white/8 bg-white/3 p-5"
+									className="rounded-xl border border-border bg-muted/20 p-4"
 								>
 									<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-										<div className="text-sm font-medium text-white">{m.nodecfg_route_number({ index: index + 1 })}</div>
+										<div className="text-sm font-medium text-foreground">{m.nodecfg_route_number({ index: index + 1 })}</div>
 										<div className="flex flex-wrap gap-2">
 											<SecondaryButton
 												onClick={() =>
@@ -415,7 +427,7 @@ export function NodeConfigEditor({
 											hint={m.nodecfg_hosts_hint()}
 											error={issueMap[`routes.${index}.hosts`]}
 										>
-											<textarea
+											<Textarea
 												value={route.hosts.join("\n")}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -434,7 +446,6 @@ export function NodeConfigEditor({
 													}))
 												}
 												rows={4}
-												className={fieldClassName}
 											/>
 										</Field>
 										<Field
@@ -442,7 +453,7 @@ export function NodeConfigEditor({
 											hint={m.nodecfg_upstreams_hint()}
 											error={issueMap[`routes.${index}.upstreams`]}
 										>
-											<textarea
+											<Textarea
 												value={route.upstreams.join("\n")}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -461,7 +472,6 @@ export function NodeConfigEditor({
 													}))
 												}
 												rows={4}
-												className={fieldClassName}
 											/>
 										</Field>
 										<Field
@@ -469,7 +479,7 @@ export function NodeConfigEditor({
 											hint={m.nodecfg_middlewares_hint()}
 											error={issueMap[`routes.${index}.middlewares`]}
 										>
-											<textarea
+											<Textarea
 												value={route.middlewares.join("\n")}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -488,7 +498,6 @@ export function NodeConfigEditor({
 													}))
 												}
 												rows={4}
-												className={fieldClassName}
 											/>
 										</Field>
 										<Field
@@ -496,7 +505,7 @@ export function NodeConfigEditor({
 											hint={m.nodecfg_strategy_hint()}
 											error={issueMap[`routes.${index}.strategy`]}
 										>
-											<select
+											<NativeSelect
 												value={route.strategy}
 												onChange={(event) =>
 													setDraft((current) => ({
@@ -506,12 +515,12 @@ export function NodeConfigEditor({
 														),
 													}))
 												}
-												className={fieldClassName}
+												className="w-full"
 											>
-												<option value="sequential">{m.strategy_sequential()}</option>
-												<option value="random">{m.strategy_random()}</option>
-												<option value="round-robin">{m.strategy_round_robin()}</option>
-											</select>
+												<NativeSelectOption value="sequential">{m.strategy_sequential()}</NativeSelectOption>
+												<NativeSelectOption value="random">{m.strategy_random()}</NativeSelectOption>
+												<NativeSelectOption value="round-robin">{m.strategy_round_robin()}</NativeSelectOption>
+											</NativeSelect>
 										</Field>
 									</div>
 								</div>
@@ -536,34 +545,31 @@ export function NodeConfigEditor({
 						onChange={(tunnel) => setDraft((current) => ({ ...current, tunnel }))}
 					/>
 
-					<section className="rounded-3xl border border-white/8 bg-slate-950/75">
-						<button
-							type="button"
-							onClick={() => setAdvancedOpen((value) => !value)}
-							className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
-						>
-							<div className="flex items-center gap-3">
-								<div className="rounded-2xl border border-cyan-400/25 bg-cyan-400/10 p-2 text-cyan-300">
-									<FolderSync className="h-5 w-5" />
-								</div>
-								<div>
-									<div className="text-lg font-semibold text-white">{m.nodecfg_advanced_runtime()}</div>
-									<div className="mt-1 text-sm text-slate-400">
-										{m.nodecfg_advanced_runtime_description()}
+					<Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+						<Card className="shadow-xs">
+							<CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left">
+								<div className="flex items-center gap-3">
+									<div className="rounded-lg bg-primary/10 p-2 text-primary ring-1 ring-primary/20">
+										<FolderSync className="h-5 w-5" />
+									</div>
+									<div>
+										<div className="text-base font-semibold text-foreground">{m.nodecfg_advanced_runtime()}</div>
+										<div className="mt-1 text-sm text-muted-foreground">
+											{m.nodecfg_advanced_runtime_description()}
+										</div>
 									</div>
 								</div>
-							</div>
-							{advancedOpen ? (
-								<ChevronDown className="h-5 w-5 text-slate-400" />
-							) : (
-								<ChevronRight className="h-5 w-5 text-slate-400" />
-							)}
-						</button>
-						{advancedOpen ? (
-							<div className="space-y-6 border-t border-white/8 px-6 py-6">
+								{advancedOpen ? (
+									<ChevronDown className="h-5 w-5 text-muted-foreground" />
+								) : (
+									<ChevronRight className="h-5 w-5 text-muted-foreground" />
+								)}
+							</CollapsibleTrigger>
+							<CollapsibleContent>
+							<div className="space-y-6 border-t border-border px-6 py-6">
 								<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 									<Field title={m.nodecfg_max_header_bytes()} hint={m.nodecfg_max_header_bytes_hint()}>
-										<input
+										<Input
 											type="number"
 											value={draft.max_header_bytes}
 											onChange={(event) =>
@@ -572,11 +578,10 @@ export function NodeConfigEditor({
 													max_header_bytes: Number(event.target.value),
 												}))
 											}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field title={m.nodecfg_buffer_size()} hint={m.nodecfg_buffer_size_hint()}>
-										<input
+										<Input
 											type="number"
 											value={draft.buffer_size}
 											onChange={(event) =>
@@ -585,11 +590,10 @@ export function NodeConfigEditor({
 													buffer_size: Number(event.target.value),
 												}))
 											}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field title={m.nodecfg_dial_timeout()} hint={m.nodecfg_dial_timeout_hint()}>
-										<input
+										<Input
 											type="number"
 											value={draft.upstream_dial_timeout_ms}
 											onChange={(event) =>
@@ -598,27 +602,23 @@ export function NodeConfigEditor({
 													upstream_dial_timeout_ms: Number(event.target.value),
 												}))
 											}
-											className={fieldClassName}
 										/>
 									</Field>
-									<label className="flex items-end gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-										<input
-											type="checkbox"
-											checked={draft.proxy_protocol_v2}
-											onChange={(event) =>
-												setDraft((current) => ({
-													...current,
-													proxy_protocol_v2: event.target.checked,
-												}))
-											}
-											className="h-4 w-4 accent-cyan-400"
-										/>
+									<SwitchRow
+										checked={draft.proxy_protocol_v2}
+										onCheckedChange={(checked) =>
+											setDraft((current) => ({
+												...current,
+												proxy_protocol_v2: checked,
+											}))
+										}
+									>
 										{m.nodecfg_proxy_protocol()}
-									</label>
+									</SwitchRow>
 								</div>
 								<div className="grid gap-4 md:grid-cols-2">
 									<Field title={m.nodecfg_handshake_timeout()} hint={m.nodecfg_handshake_timeout_hint()}>
-										<input
+										<Input
 											type="number"
 											value={draft.timeouts?.handshake_timeout_ms ?? 0}
 											onChange={(event) =>
@@ -630,14 +630,13 @@ export function NodeConfigEditor({
 													},
 												}))
 											}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field
 										title={m.nodecfg_idle_timeout()}
 										hint={m.nodecfg_idle_timeout_hint()}
 									>
-										<input
+										<Input
 											type="number"
 											value={draft.timeouts?.idle_timeout_ms ?? 0}
 											onChange={(event) =>
@@ -649,47 +648,49 @@ export function NodeConfigEditor({
 													},
 												}))
 											}
-											className={fieldClassName}
 										/>
 									</Field>
 								</div>
-								<div className="flex items-center gap-2 text-sm text-slate-400">
-									<Clock className="h-4 w-4 text-cyan-300" />
+								<div className="flex items-center gap-2 text-sm text-muted-foreground">
+									<Clock className="h-4 w-4 text-primary" />
 									{m.nodecfg_hot_reload_note()}
 								</div>
 							</div>
-						) : null}
-					</section>
+							</CollapsibleContent>
+						</Card>
+					</Collapsible>
 
 					<SectionCard
 						title={m.nodecfg_revision_preview()}
 						description={m.nodecfg_revision_preview_description()}
 						icon={<CheckCircle2 className="h-5 w-5" />}
 					>
-						<pre className="max-h-[20rem] overflow-auto rounded-3xl border border-white/8 bg-slate-950 p-4 text-sm leading-6 whitespace-pre-wrap break-all text-cyan-100/85">
+						<pre className="max-h-[20rem] overflow-auto rounded-xl border border-border bg-muted/30 p-4 font-mono text-sm leading-6 whitespace-pre-wrap break-all text-foreground">
 							{JSON.stringify(normalizedDraft, null, 2)}
 						</pre>
 					</SectionCard>
 				</>
 			)}
 
-			<div className="rounded-3xl border border-white/8 bg-slate-950/75 p-6">
-				{saveError ? (
-					<div className="mb-4 rounded-2xl border border-red-400/20 bg-red-400/8 px-4 py-3 text-sm text-red-100">
-						{saveError}
-					</div>
-				) : null}
+			<Card className="shadow-xs">
+				<CardContent className="space-y-4">
+				{saveError ? <ResultBanner ok={false}>{saveError}</ResultBanner> : null}
 				{mode === "form" && issues.length > 0 ? (
-					<div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-sm text-amber-100">
-						{issues.length === 1 ? m.nodecfg_fix_issue({ count: issues.length }) : m.nodecfg_fix_issues({ count: issues.length })}
+					<WarningBanner
+						title={
+							issues.length === 1
+								? m.nodecfg_fix_issue({ count: issues.length })
+								: m.nodecfg_fix_issues({ count: issues.length })
+						}
+					>
 						<ul className="mt-2 list-disc space-y-1 pl-5">
 							{issues.slice(0, 8).map((issue) => (
 								<li key={`${issue.path}-${issue.message}`}>
-									<span className="font-mono text-amber-50/90">{issue.path}</span>: {issue.message}
+									<span className="font-mono">{issue.path}</span>: {issue.message}
 								</li>
 							))}
 						</ul>
-					</div>
+					</WarningBanner>
 				) : null}
 				<div className="flex flex-wrap items-center gap-3">
 					<PrimaryButton onClick={save} disabled={!canSave}>
@@ -710,16 +711,17 @@ export function NodeConfigEditor({
 						</SecondaryButton>
 					) : null}
 				</div>
-			</div>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }
 
 function SummaryPill({ label, value }: { label: string; value: string | number }) {
 	return (
-		<span className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-slate-300">
-			<span className="text-slate-500">{label}</span>{" "}
-			<span className="font-medium text-white">{value}</span>
+		<span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-sm text-muted-foreground">
+			<span>{label}</span>{" "}
+			<span className="font-medium text-foreground">{value}</span>
 		</span>
 	);
 }
@@ -735,16 +737,16 @@ function TunnelSection({
 }) {
 	if (!tunnel) {
 		return (
-			<section className="rounded-3xl border border-dashed border-white/10 bg-white/3 p-6">
+			<section className="rounded-xl border border-dashed border-border bg-muted/20 p-6">
 				<div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 					<div>
-						<div className="flex items-center gap-3 text-white">
-							<div className="rounded-2xl border border-cyan-400/25 bg-cyan-400/10 p-2 text-cyan-300">
+						<div className="flex items-center gap-3 text-foreground">
+							<div className="rounded-lg bg-primary/10 p-2 text-primary ring-1 ring-primary/20">
 								<Waypoints className="h-5 w-5" />
 							</div>
 							<h2 className="text-lg font-semibold">{m.nodecfg_tunnel()}</h2>
 						</div>
-						<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{m.nodecfg_tunnel_enable_hint()}</p>
+						<p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{m.nodecfg_tunnel_enable_hint()}</p>
 					</div>
 					<SecondaryButton onClick={() => onChange(createEmptyTunnel())}>
 						<Plus className="h-4 w-4" />
@@ -774,37 +776,33 @@ function TunnelSection({
 			<div className="space-y-6">
 				<div className="grid gap-4 md:grid-cols-2">
 					<Field title={m.nodecfg_auth_token()} hint={m.nodecfg_auth_token_hint()}>
-						<input
+						<Input
 							type="password"
 							value={tunnel.auth_token}
 							onChange={(event) => updateTunnel({ auth_token: event.target.value })}
-							className={fieldClassName}
 						/>
 					</Field>
-					<label className="flex items-end gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-						<input
-							type="checkbox"
-							checked={tunnel.auto_listen_services}
-							onChange={(event) =>
-								updateTunnel({
-									auto_listen_services: event.target.checked,
-								})
-							}
-							className="h-4 w-4 accent-cyan-400"
-						/>
+					<SwitchRow
+						checked={tunnel.auto_listen_services}
+						onCheckedChange={(checked) =>
+							updateTunnel({
+								auto_listen_services: checked,
+							})
+						}
+					>
 						{m.nodecfg_auto_listen()}
-					</label>
+					</SwitchRow>
 				</div>
 
 				<div className="space-y-3">
-					<div className="text-sm font-medium text-white">{m.nodecfg_endpoints()}</div>
-					<div className="text-xs leading-5 text-slate-500">
+					<div className="text-sm font-medium text-foreground">{m.nodecfg_endpoints()}</div>
+					<div className="text-xs leading-5 text-muted-foreground">
 						{m.nodecfg_endpoints_description()}
 					</div>
 					{tunnel.endpoints.map((endpoint, index) => (
 						<div
 							key={`endpoint-${index}`}
-							className="rounded-3xl border border-white/8 bg-white/3 p-5"
+							className="rounded-xl border border-border bg-muted/20 p-4"
 						>
 							<div className="grid gap-4 lg:grid-cols-[1.3fr,0.7fr,auto]">
 								<Field
@@ -812,7 +810,7 @@ function TunnelSection({
 									hint={m.nodecfg_listen_address_short_hint()}
 									error={issueMap[`tunnel.endpoints.${index}.listen_addr`]}
 								>
-									<input
+									<Input
 										value={endpoint.listen_addr}
 										onChange={(event) => {
 											const endpoints = [...tunnel.endpoints];
@@ -822,7 +820,6 @@ function TunnelSection({
 											};
 											updateTunnel({ endpoints });
 										}}
-										className={fieldClassName}
 									/>
 								</Field>
 								<Field
@@ -830,7 +827,7 @@ function TunnelSection({
 									hint={m.nodecfg_transport_hint()}
 									error={issueMap[`tunnel.endpoints.${index}.transport`]}
 								>
-									<select
+									<NativeSelect
 										value={endpoint.transport}
 										onChange={(event) => {
 											const endpoints = [...tunnel.endpoints];
@@ -840,14 +837,14 @@ function TunnelSection({
 											};
 											updateTunnel({ endpoints });
 										}}
-										className={fieldClassName}
+										className="w-full"
 									>
-										<option value="tcp">{m.transport_tcp()}</option>
-										<option value="udp">{m.transport_udp_kcp()}</option>
-										<option value="quic">{m.transport_quic()}</option>
-										<option value="websocket">{m.transport_websocket()}</option>
-										<option value="webtransport">{m.transport_webtransport()}</option>
-									</select>
+										<NativeSelectOption value="tcp">{m.transport_tcp()}</NativeSelectOption>
+										<NativeSelectOption value="udp">{m.transport_udp_kcp()}</NativeSelectOption>
+										<NativeSelectOption value="quic">{m.transport_quic()}</NativeSelectOption>
+										<NativeSelectOption value="websocket">{m.transport_websocket()}</NativeSelectOption>
+										<NativeSelectOption value="webtransport">{m.transport_webtransport()}</NativeSelectOption>
+									</NativeSelect>
 								</Field>
 								<div className="flex items-end">
 									<DangerButton
@@ -865,7 +862,7 @@ function TunnelSection({
 							{endpoint.transport === "quic" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
 									<Field title={m.nodecfg_quic_cert_file()} hint={m.nodecfg_quic_cert_file_hint()}>
-										<input
+										<Input
 											value={endpoint.quic?.cert_file ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -878,11 +875,10 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field title={m.nodecfg_quic_key_file()} hint={m.nodecfg_tls_key_path_hint()}>
-										<input
+										<Input
 											value={endpoint.quic?.key_file ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -895,7 +891,6 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
-											className={fieldClassName}
 										/>
 									</Field>
 								</div>
@@ -905,7 +900,7 @@ function TunnelSection({
 							endpoint.transport === "wss" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-3">
 									<Field title={m.nodecfg_ws_cert_file()} hint={m.nodecfg_ws_cert_file_hint()}>
-										<input
+										<Input
 											value={endpoint.websocket?.cert_file ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -919,11 +914,10 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field title={m.nodecfg_ws_key_file()} hint={m.nodecfg_tls_key_path_hint()}>
-										<input
+										<Input
 											value={endpoint.websocket?.key_file ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -937,11 +931,10 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field title={m.nodecfg_ws_path()} hint={m.nodecfg_ws_path_hint()}>
-										<input
+										<Input
 											value={endpoint.websocket?.url_path ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -956,7 +949,6 @@ function TunnelSection({
 												updateTunnel({ endpoints });
 											}}
 											placeholder="/ws"
-											className={fieldClassName}
 										/>
 									</Field>
 								</div>
@@ -964,7 +956,7 @@ function TunnelSection({
 							{endpoint.transport === "webtransport" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
 									<Field title={m.nodecfg_wt_cert_file()} hint={m.nodecfg_wt_cert_file_hint()}>
-										<input
+										<Input
 											value={endpoint.webtransport?.cert_file ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -977,11 +969,10 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
-											className={fieldClassName}
 										/>
 									</Field>
 									<Field title={m.nodecfg_wt_key_file()} hint={m.nodecfg_wt_cert_file_hint()}>
-										<input
+										<Input
 											value={endpoint.webtransport?.key_file ?? ""}
 											onChange={(event) => {
 												const endpoints = [...tunnel.endpoints];
@@ -994,7 +985,6 @@ function TunnelSection({
 												};
 												updateTunnel({ endpoints });
 											}}
-											className={fieldClassName}
 										/>
 									</Field>
 								</div>
@@ -1014,19 +1004,19 @@ function TunnelSection({
 				</div>
 
 				<div className="space-y-3">
-					<div className="text-sm font-medium text-white">{m.nodecfg_client()}</div>
-					<div className="text-xs leading-5 text-slate-500">
+					<div className="text-sm font-medium text-foreground">{m.nodecfg_client()}</div>
+					<div className="text-xs leading-5 text-muted-foreground">
 						{m.nodecfg_client_description()}
 					</div>
 					{tunnel.client ? (
-						<div className="rounded-3xl border border-white/8 bg-white/3 p-5">
+						<div className="rounded-xl border border-border bg-muted/20 p-4">
 							<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 								<Field
 									title={m.nodecfg_server_address()}
 									hint={m.nodecfg_server_address_hint()}
 									error={issueMap["tunnel.client.server_addr"]}
 								>
-									<input
+									<Input
 										value={tunnel.client.server_addr}
 										onChange={(event) =>
 											tunnel.client &&
@@ -1037,7 +1027,6 @@ function TunnelSection({
 												},
 											})
 										}
-										className={fieldClassName}
 									/>
 								</Field>
 								<Field
@@ -1045,7 +1034,7 @@ function TunnelSection({
 									hint={m.nodecfg_transport_hint()}
 									error={issueMap["tunnel.client.transport"]}
 								>
-									<select
+									<NativeSelect
 										value={tunnel.client.transport}
 										onChange={(event) =>
 											tunnel.client &&
@@ -1056,18 +1045,18 @@ function TunnelSection({
 												},
 											})
 										}
-										className={fieldClassName}
+										className="w-full"
 									>
-										<option value="auto">{m.transport_auto()}</option>
-										<option value="webtransport">{m.transport_webtransport()}</option>
-										<option value="quic">{m.transport_quic()}</option>
-										<option value="tcp">{m.transport_tcp()}</option>
-										<option value="udp">{m.transport_udp_kcp()}</option>
-										<option value="websocket">{m.transport_websocket()}</option>
-									</select>
+										<NativeSelectOption value="auto">{m.transport_auto()}</NativeSelectOption>
+										<NativeSelectOption value="webtransport">{m.transport_webtransport()}</NativeSelectOption>
+										<NativeSelectOption value="quic">{m.transport_quic()}</NativeSelectOption>
+										<NativeSelectOption value="tcp">{m.transport_tcp()}</NativeSelectOption>
+										<NativeSelectOption value="udp">{m.transport_udp_kcp()}</NativeSelectOption>
+										<NativeSelectOption value="websocket">{m.transport_websocket()}</NativeSelectOption>
+									</NativeSelect>
 								</Field>
 								<Field title={m.nodecfg_dial_timeout_ms()} hint={m.nodecfg_dial_timeout_ms_hint()}>
-									<input
+									<Input
 										type="number"
 										value={tunnel.client.dial_timeout_ms ?? 5000}
 										onChange={(event) =>
@@ -1079,7 +1068,6 @@ function TunnelSection({
 												},
 											})
 										}
-										className={fieldClassName}
 									/>
 								</Field>
 								<div className="flex items-end">
@@ -1092,7 +1080,7 @@ function TunnelSection({
 							{tunnel.client.transport === "quic" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
 									<Field title={m.nodecfg_quic_server_name()} hint={m.nodecfg_tls_sni()}>
-										<input
+										<Input
 											value={tunnel.client.quic?.server_name ?? ""}
 											onChange={(event) =>
 												tunnel.client &&
@@ -1107,60 +1095,53 @@ function TunnelSection({
 													},
 												})
 											}
-											className={fieldClassName}
 										/>
 									</Field>
-									<label className="flex items-end gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-										<input
-											type="checkbox"
-											checked={tunnel.client.quic?.insecure_skip_verify ?? false}
-											onChange={(event) =>
-												tunnel.client &&
-												updateTunnel({
-													client: {
-														...tunnel.client,
-														quic: {
-															server_name: tunnel.client.quic?.server_name ?? "",
-															insecure_skip_verify: event.target.checked,
-														},
+									<SwitchRow
+										checked={tunnel.client.quic?.insecure_skip_verify ?? false}
+										onCheckedChange={(checked) =>
+											tunnel.client &&
+											updateTunnel({
+												client: {
+													...tunnel.client,
+													quic: {
+														server_name: tunnel.client.quic?.server_name ?? "",
+														insecure_skip_verify: checked,
 													},
-												})
-											}
-											className="h-4 w-4 accent-cyan-400"
-										/>
+												},
+											})
+										}
+									>
 										{m.nodecfg_skip_tls_verify()}
-									</label>
+									</SwitchRow>
 								</div>
 							) : null}
 							{tunnel.client.transport === "websocket" ||
 							tunnel.client.transport === "ws" ||
 							tunnel.client.transport === "wss" ? (
 								<div className="mt-4">
-									<label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-										<input
-											type="checkbox"
-											checked={tunnel.client.websocket?.insecure_skip_verify ?? false}
-											onChange={(event) =>
-												tunnel.client &&
-												updateTunnel({
-													client: {
-														...tunnel.client,
-														websocket: {
-															insecure_skip_verify: event.target.checked,
-														},
+									<SwitchRow
+										checked={tunnel.client.websocket?.insecure_skip_verify ?? false}
+										onCheckedChange={(checked) =>
+											tunnel.client &&
+											updateTunnel({
+												client: {
+													...tunnel.client,
+													websocket: {
+														insecure_skip_verify: checked,
 													},
-												})
-											}
-											className="h-4 w-4 accent-cyan-400"
-										/>
+												},
+											})
+										}
+									>
 										{m.nodecfg_skip_tls_verify_wss()}
-									</label>
+									</SwitchRow>
 								</div>
 							) : null}
 							{tunnel.client.transport === "webtransport" ? (
 								<div className="mt-4 grid gap-4 md:grid-cols-2">
 									<Field title={m.nodecfg_wt_server_name()} hint={m.nodecfg_tls_sni()}>
-										<input
+										<Input
 											value={tunnel.client.webtransport?.server_name ?? ""}
 											onChange={(event) =>
 												tunnel.client &&
@@ -1175,29 +1156,25 @@ function TunnelSection({
 													},
 												})
 											}
-											className={fieldClassName}
 										/>
 									</Field>
-									<label className="flex items-end gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-										<input
-											type="checkbox"
-											checked={tunnel.client.webtransport?.insecure_skip_verify ?? false}
-											onChange={(event) =>
-												tunnel.client &&
-												updateTunnel({
-													client: {
-														...tunnel.client,
-														webtransport: {
-															server_name: tunnel.client.webtransport?.server_name ?? "",
-															insecure_skip_verify: event.target.checked,
-														},
+									<SwitchRow
+										checked={tunnel.client.webtransport?.insecure_skip_verify ?? false}
+										onCheckedChange={(checked) =>
+											tunnel.client &&
+											updateTunnel({
+												client: {
+													...tunnel.client,
+													webtransport: {
+														server_name: tunnel.client.webtransport?.server_name ?? "",
+														insecure_skip_verify: checked,
 													},
-												})
-											}
-											className="h-4 w-4 accent-cyan-400"
-										/>
+												},
+											})
+										}
+									>
 										{m.nodecfg_skip_tls_verify()}
-									</label>
+									</SwitchRow>
 								</div>
 							) : null}
 						</div>
@@ -1210,14 +1187,14 @@ function TunnelSection({
 				</div>
 
 				<div className="space-y-3">
-					<div className="text-sm font-medium text-white">{m.nodecfg_services()}</div>
-					<div className="text-xs leading-5 text-slate-500">
+					<div className="text-sm font-medium text-foreground">{m.nodecfg_services()}</div>
+					<div className="text-xs leading-5 text-muted-foreground">
 						{m.nodecfg_services_description()}
 					</div>
 					{tunnel.services.map((service, index) => (
 						<div
 							key={`service-${index}`}
-							className="rounded-3xl border border-white/8 bg-white/3 p-5"
+							className="rounded-xl border border-border bg-muted/20 p-4"
 						>
 							<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
 								<Field
@@ -1225,14 +1202,13 @@ function TunnelSection({
 									hint={m.nodecfg_service_name_hint()}
 									error={issueMap[`tunnel.services.${index}.name`]}
 								>
-									<input
+									<Input
 										value={service.name}
 										onChange={(event) => {
 											const services = [...tunnel.services];
 											services[index] = { ...service, name: event.target.value };
 											updateTunnel({ services });
 										}}
-										className={fieldClassName}
 									/>
 								</Field>
 								<Field
@@ -1240,32 +1216,31 @@ function TunnelSection({
 									hint={m.nodecfg_service_protocol_hint()}
 									error={issueMap[`tunnel.services.${index}.proto`]}
 								>
-									<select
+									<NativeSelect
 										value={service.proto}
 										onChange={(event) => {
 											const services = [...tunnel.services];
 											services[index] = { ...service, proto: event.target.value };
 											updateTunnel({ services });
 										}}
-										className={fieldClassName}
+										className="w-full"
 									>
-										<option value="tcp">{m.transport_tcp()}</option>
-										<option value="udp">{m.transport_udp()}</option>
-									</select>
+										<NativeSelectOption value="tcp">{m.transport_tcp()}</NativeSelectOption>
+										<NativeSelectOption value="udp">{m.transport_udp()}</NativeSelectOption>
+									</NativeSelect>
 								</Field>
 								<Field
 									title={m.nodecfg_local_address()}
 									hint={m.nodecfg_local_address_hint()}
 									error={issueMap[`tunnel.services.${index}.local_addr`]}
 								>
-									<input
+									<Input
 										value={service.local_addr}
 										onChange={(event) => {
 											const services = [...tunnel.services];
 											services[index] = { ...service, local_addr: event.target.value };
 											updateTunnel({ services });
 										}}
-										className={fieldClassName}
 									/>
 								</Field>
 								<Field
@@ -1273,18 +1248,17 @@ function TunnelSection({
 									hint={m.nodecfg_remote_address_hint()}
 									error={issueMap[`tunnel.services.${index}.remote_addr`]}
 								>
-									<input
+									<Input
 										value={service.remote_addr}
 										onChange={(event) => {
 											const services = [...tunnel.services];
 											services[index] = { ...service, remote_addr: event.target.value };
 											updateTunnel({ services });
 										}}
-										className={fieldClassName}
 									/>
 								</Field>
 								<Field title={m.nodecfg_masquerade_host()} hint={m.nodecfg_masquerade_host_hint()}>
-									<input
+									<Input
 										value={service.masquerade_host}
 										onChange={(event) => {
 											const services = [...tunnel.services];
@@ -1294,26 +1268,22 @@ function TunnelSection({
 											};
 											updateTunnel({ services });
 										}}
-										className={fieldClassName}
 									/>
 								</Field>
 								<div className="flex items-end gap-3">
-									<label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-										<input
-											type="checkbox"
-											checked={service.route_only}
-											onChange={(event) => {
-												const services = [...tunnel.services];
-												services[index] = {
-													...service,
-													route_only: event.target.checked,
-												};
-												updateTunnel({ services });
-											}}
-											className="h-4 w-4 accent-cyan-400"
-										/>
+									<SwitchRow
+										checked={service.route_only}
+										onCheckedChange={(checked) => {
+											const services = [...tunnel.services];
+											services[index] = {
+												...service,
+												route_only: checked,
+											};
+											updateTunnel({ services });
+										}}
+									>
 										{m.nodecfg_route_only()}
-									</label>
+									</SwitchRow>
 									<DangerButton
 										onClick={() =>
 											updateTunnel({

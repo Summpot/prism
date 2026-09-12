@@ -3,6 +3,7 @@ import { Cable, Wifi, Zap } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import {
+	CountChip,
 	EmptyState,
 	ErrorBanner,
 	PageHeader,
@@ -11,6 +12,14 @@ import {
 	StateCard,
 	ToggleChip,
 } from "@/components/ui";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { formatBytes, formatDuration, formatPercentage, formatTime } from "@/lib/format";
 import {
 	getConnections,
@@ -91,9 +100,8 @@ function AdminConnectionsPage() {
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
 						{optimizerStats?.global && optimizerStats.global.raw_bytes > 0 ? (
-							<div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-								<Zap className="h-4 w-4 text-emerald-400" />
-								<span>
+							<CountChip icon={<Zap className="h-4 w-4 text-emerald-500" />}>
+								<span className="text-emerald-600 dark:text-emerald-400">
 									{m.admin_optimizer_saved({
 										bytes: formatBytes(optimizerStats.global.saved_bytes),
 										percentage: formatPercentage(optimizerStats.global.saved_ratio),
@@ -102,16 +110,15 @@ function AdminConnectionsPage() {
 										? ` · net -${optimizerStats.global.net_gain_ms.toFixed(1)}ms`
 										: ""}
 								</span>
-							</div>
+							</CountChip>
 						) : null}
-						<div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-							<Cable className="h-4 w-4 text-cyan-300" />
+						<CountChip icon={<Cable className="h-4 w-4" />}>
 							{loading
 								? m.common_loading()
 								: conns.length === 1
 									? m.admin_connections_count_one({ shown: filtered.length, total: conns.length })
 									: m.admin_connections_count({ shown: filtered.length, total: conns.length })}
-						</div>
+						</CountChip>
 					</>
 				}
 			/>
@@ -125,90 +132,45 @@ function AdminConnectionsPage() {
 			{error ? <ErrorBanner message={error} onRetry={fetchConns} /> : null}
 
 			{filtered.length > 0 ? (
-				<div className="overflow-hidden rounded-3xl border border-white/8 bg-slate-950/70">
+				<div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
 					<div className="hidden md:block">
-						<table className="w-full text-sm">
-							<thead>
-								<tr className="border-b border-white/8 text-xs uppercase tracking-[0.2em] text-slate-500">
-									<th className="px-5 py-4 text-left font-medium">{m.admin_client()}</th>
-									<th className="px-5 py-4 text-left font-medium">{m.admin_host()}</th>
-									<th className="px-5 py-4 text-left font-medium">{m.admin_upstream()}</th>
-									<th className="px-5 py-4 text-left font-medium">{m.admin_optimizer()}</th>
-									<th className="px-5 py-4 text-left font-medium">{m.admin_started()}</th>
-									<th className="px-5 py-4 text-left font-medium">{m.admin_duration()}</th>
-								</tr>
-							</thead>
-							<tbody className="divide-y divide-white/5">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>{m.admin_client()}</TableHead>
+									<TableHead>{m.admin_host()}</TableHead>
+									<TableHead>{m.admin_upstream()}</TableHead>
+									<TableHead>{m.admin_optimizer()}</TableHead>
+									<TableHead>{m.admin_started()}</TableHead>
+									<TableHead>{m.admin_duration()}</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
 								{filtered.map((conn) => (
-									<tr key={conn.id} className="transition hover:bg-white/3">
-										<td className="px-5 py-4 font-mono text-cyan-200/85">{conn.client}</td>
-										<td className="px-5 py-4 text-white">{conn.host || "—"}</td>
-										<td className="px-5 py-4 font-mono text-slate-300">{conn.upstream}</td>
-										<td className="px-5 py-4 font-mono text-xs">
-											{conn.raw_bytes || conn.wire_bytes ? (
-												<div className="space-y-1">
-													{conn.uplink_raw_bytes || conn.uplink_wire_bytes ? (
-														<div className="flex items-center gap-1.5 text-[11px]">
-															<span className="font-bold text-cyan-400">↑</span>
-															<span className="text-slate-400">
-																{formatBytes(conn.uplink_raw_bytes || 0)}
-															</span>
-															<span className="text-slate-600">→</span>
-															<span className="text-cyan-300">
-																{formatBytes(conn.uplink_wire_bytes || 0)}
-															</span>
-														</div>
-													) : null}
-													{conn.downlink_raw_bytes || conn.downlink_wire_bytes ? (
-														<div className="flex items-center gap-1.5 text-[11px]">
-															<span className="font-bold text-emerald-400">↓</span>
-															<span className="text-slate-400">
-																{formatBytes(conn.downlink_raw_bytes || 0)}
-															</span>
-															<span className="text-slate-600">→</span>
-															<span className="text-emerald-300">
-																{formatBytes(conn.downlink_wire_bytes || 0)}
-															</span>
-														</div>
-													) : null}
-													{!conn.uplink_raw_bytes && !conn.downlink_raw_bytes ? (
-														<div className="flex items-center gap-1.5">
-															<span className="text-slate-400">{formatBytes(conn.raw_bytes)}</span>
-															<span className="text-slate-600">→</span>
-															<span className="font-medium text-cyan-300">
-																{formatBytes(conn.wire_bytes)}
-															</span>
-															{conn.raw_bytes &&
-															conn.wire_bytes &&
-															conn.raw_bytes > conn.wire_bytes ? (
-																<span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
-																	-{formatPercentage(1 - conn.wire_bytes / conn.raw_bytes)}
-																</span>
-															) : null}
-														</div>
-													) : null}
-												</div>
-											) : (
-												<span className="text-slate-600">—</span>
-											)}
-										</td>
-										<td className="px-5 py-4 text-slate-400">
+									<TableRow key={conn.id}>
+										<TableCell className="font-mono text-xs">{conn.client}</TableCell>
+										<TableCell>{conn.host || "—"}</TableCell>
+										<TableCell className="font-mono text-xs">{conn.upstream}</TableCell>
+										<TableCell className="font-mono text-xs whitespace-normal">
+											<OptimizerCell conn={conn} />
+										</TableCell>
+										<TableCell className="text-muted-foreground">
 											{formatTime(conn.started_at_unix_ms)}
-										</td>
-										<td className="px-5 py-4 text-slate-400">
+										</TableCell>
+										<TableCell className="text-muted-foreground">
 											{formatDuration(conn.started_at_unix_ms)}
-										</td>
-									</tr>
+										</TableCell>
+									</TableRow>
 								))}
-							</tbody>
-						</table>
+							</TableBody>
+						</Table>
 					</div>
-					<div className="divide-y divide-white/5 md:hidden">
+					<div className="divide-y divide-border md:hidden">
 						{filtered.map((conn) => (
-							<div key={conn.id} className="space-y-3 px-5 py-4">
+							<div key={conn.id} className="space-y-3 px-4 py-4">
 								<div className="flex items-center gap-2">
-									<Wifi className="h-4 w-4 text-cyan-300" />
-									<span className="font-mono text-sm text-cyan-200/85">{conn.client}</span>
+									<Wifi className="h-4 w-4 text-muted-foreground" />
+									<span className="font-mono text-sm">{conn.client}</span>
 								</div>
 								<div className="grid grid-cols-2 gap-3">
 									<MiniValue label={m.admin_host()} value={conn.host || "—"} />
@@ -221,7 +183,10 @@ function AdminConnectionsPage() {
 												: "—"
 										}
 									/>
-									<MiniValue label={m.admin_duration()} value={formatDuration(conn.started_at_unix_ms)} />
+									<MiniValue
+										label={m.admin_duration()}
+										value={formatDuration(conn.started_at_unix_ms)}
+									/>
 								</div>
 							</div>
 						))}
@@ -230,9 +195,7 @@ function AdminConnectionsPage() {
 			) : !loading ? (
 				<EmptyState
 					label={
-						conns.length === 0
-							? m.admin_no_connections()
-							: m.admin_no_connection_match()
+						conns.length === 0 ? m.admin_no_connections() : m.admin_no_connection_match()
 					}
 				/>
 			) : null}
@@ -240,11 +203,56 @@ function AdminConnectionsPage() {
 	);
 }
 
+function OptimizerCell({ conn }: { conn: SessionInfo }) {
+	if (!(conn.raw_bytes || conn.wire_bytes)) {
+		return <span className="text-muted-foreground">—</span>;
+	}
+
+	return (
+		<div className="space-y-1">
+			{conn.uplink_raw_bytes || conn.uplink_wire_bytes ? (
+				<div className="flex items-center gap-1.5 text-[11px]">
+					<span className="font-bold text-primary">↑</span>
+					<span className="text-muted-foreground">{formatBytes(conn.uplink_raw_bytes || 0)}</span>
+					<span className="text-muted-foreground/60">→</span>
+					<span>{formatBytes(conn.uplink_wire_bytes || 0)}</span>
+				</div>
+			) : null}
+			{conn.downlink_raw_bytes || conn.downlink_wire_bytes ? (
+				<div className="flex items-center gap-1.5 text-[11px]">
+					<span className="font-bold text-emerald-500">↓</span>
+					<span className="text-muted-foreground">
+						{formatBytes(conn.downlink_raw_bytes || 0)}
+					</span>
+					<span className="text-muted-foreground/60">→</span>
+					<span className="text-emerald-600 dark:text-emerald-400">
+						{formatBytes(conn.downlink_wire_bytes || 0)}
+					</span>
+				</div>
+			) : null}
+			{!conn.uplink_raw_bytes && !conn.downlink_raw_bytes ? (
+				<div className="flex items-center gap-1.5">
+					<span className="text-muted-foreground">{formatBytes(conn.raw_bytes)}</span>
+					<span className="text-muted-foreground/60">→</span>
+					<span className="font-medium">{formatBytes(conn.wire_bytes)}</span>
+					{conn.raw_bytes && conn.wire_bytes && conn.raw_bytes > conn.wire_bytes ? (
+						<span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+							-{formatPercentage(1 - conn.wire_bytes / conn.raw_bytes)}
+						</span>
+					) : null}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
 function MiniValue({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="rounded-xl border border-white/8 bg-white/4 px-3 py-2">
-			<div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{label}</div>
-			<div className="mt-1 truncate text-xs text-white">{value}</div>
+		<div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+			<div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+				{label}
+			</div>
+			<div className="mt-1 truncate text-xs text-foreground">{value}</div>
 		</div>
 	);
 }

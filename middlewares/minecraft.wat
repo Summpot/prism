@@ -10,10 +10,12 @@
 ;;         Action 0 (NEED_MORE_DATA): buffer incomplete
 ;;         Action 1 (ROUTE_MATCH): handshake parsed, Value = pointer to struct { host_ptr, host_len, rewrite_ptr, rewrite_len } at 65536
 ;;         Action 2 (NO_MATCH): format does not match
-;;       state == 1 (Streaming):
+;;       state == 1 (Streaming) / 2 (StreamingEgress):
 ;;         Action 0 (NEED_MORE_DATA): packet incomplete
 ;;         Action 1 (FRAME_DEFER): sliced packet (normal game packet), Value = total packet bytes
 ;;         Action 2 (FRAME_URGENT): sliced packet (KeepAlive / Ping / Pong), Value = total packet bytes
+;;         Action 3/4: rewritten frame (defer/urgent), Value = pointer to {consumed, ptr, len} at 65552
+;;         Action 6 (BLOCKED): waiting for peer session data (shared secret)
 ;;   - set_data(ptr, len) -> i32: copies injected data (e.g. RSA private key) to offset 196608, returns 0
 
 (component
@@ -326,12 +328,13 @@
     (global.set $waiting_key (i32.const 0))
   )
 
+  ;; Install the shared secret only. Encryption starts after Encryption Response
+  ;; has been forwarded; enabling it here would re-encrypt that packet.
   (func (export "set_session_data") (param $ptr i32) (param $len i32) (result i32)
     (if (i32.lt_s (local.get $len) (i32.const 16))
       (then (return (i32.const -1)))
     )
     (call $install_aes_key (local.get $ptr))
-    (global.set $encryption_enabled (i32.const 1))
     (i32.const 0)
   )
 
@@ -569,14 +572,68 @@
     (call $pack_result (local.get $action) (local.get $total_len))
   )
 
-  ;; Inspect login/config packets for compression, encryption and state transitions.
+  ;; Inspect handshake/login/config packets for compression, encryption and state transitions.
   (func $session_hooks (param $pid i32) (param $body_ptr i32) (param $body_end i32)
     (local $tmp i64)
     (local $arr_len i32)
     (local $arr_n i32)
     (local $secret_len i32)
     (local $st i32)
+    (local $p i32)
+    (local $n i32)
+    (local $proto i32)
+    (local $addr_len i32)
+    (local $next_state i32)
     (local.set $st (global.get $conn_state))
+
+    ;; Login Set Compression is clientbound id 3. Enable immediately so the next
+    ;; packet on this session recompresses; this packet itself uses id 3, not
+    ;; data_length 0, so it is not rewritten. Status never uses id 3.
+    (if (i32.and
+          (i32.eq (local.get $pid) (i32.const 3))
+          (i32.or (i32.eq (local.get $st) (i32.const 0)) (i32.eq (local.get $st) (i32.const 2)))
+        )
+      (then
+        (global.set $compression_pending (i32.const 1))
+        (global.set $compression_enabled (i32.const 1))
+      )
+    )
+
+    ;; Handshake (streaming sessions never see host state 0, so recover next_state here)
+    (if (i32.eq (local.get $st) (i32.const 0))
+      (then
+        (if (i32.eq (local.get $pid) (i32.const 0))
+          (then
+            (local.set $tmp (call $read_varint (local.get $body_ptr) (local.get $body_end)))
+            (local.set $proto (i32.wrap_i64 (local.get $tmp)))
+            (local.set $n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+            (if (i32.eq (local.get $n) (i32.const 0)) (then (return)))
+            (global.set $proto_version (local.get $proto))
+            (local.set $p (i32.add (local.get $body_ptr) (local.get $n)))
+            (local.set $tmp (call $read_varint (local.get $p) (local.get $body_end)))
+            (local.set $addr_len (i32.wrap_i64 (local.get $tmp)))
+            (local.set $n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+            (if (i32.eq (local.get $n) (i32.const 0)) (then (return)))
+            (local.set $p (i32.add (i32.add (local.get $p) (local.get $n)) (local.get $addr_len)))
+            (if (i32.gt_u (i32.add (local.get $p) (i32.const 2)) (local.get $body_end))
+              (then (return))
+            )
+            (local.set $p (i32.add (local.get $p) (i32.const 2)))
+            (local.set $tmp (call $read_varint (local.get $p) (local.get $body_end)))
+            (local.set $next_state (i32.wrap_i64 (local.get $tmp)))
+            (local.set $n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+            (if (i32.eq (local.get $n) (i32.const 0)) (then (return)))
+            (if (i32.eq (local.get $next_state) (i32.const 1))
+              (then (global.set $conn_state (i32.const 1)))
+            )
+            (if (i32.eq (local.get $next_state) (i32.const 2))
+              (then (global.set $conn_state (i32.const 2)))
+            )
+          )
+        )
+        (return)
+      )
+    )
 
     ;; Login
     (if (i32.eq (local.get $st) (i32.const 2))
@@ -883,7 +940,7 @@
 
     (local.set $p (i32.add (local.get $buf_ptr) (local.get $len_n)))
 
-    ;; Check for compressed framing only after Set Compression
+    ;; Compressed framing ([data_length][payload]) is only valid after Set Compression.
     (local.set $tmp (call $read_varint (local.get $p) (i32.add (local.get $buf_ptr) (local.get $total_len))))
     (local.set $data_len (i32.wrap_i64 (local.get $tmp)))
     (local.set $data_len_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
@@ -931,8 +988,12 @@
     )
 
     ;; Fallback / uncompressed packet:
-    ;; If data_length was 0, packet ID starts at $p + $data_len_n. Otherwise at $p.
-    (if (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+    ;; After Set Compression, data_length 0 means the rest is uncompressed.
+    ;; Before that, the first VarInt is the packet id (status response is 0x00).
+    (if (i32.and
+          (global.get $compression_enabled)
+          (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+        )
       (then
         (local.set $p (i32.add (local.get $p) (local.get $data_len_n)))
       )
@@ -1051,25 +1112,44 @@
     (local.set $data_len (i32.wrap_i64 (local.get $tmp)))
     (local.set $data_len_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
 
-    ;; Only recompress if data_length == 0 and data_len_n > 0
-    (if (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+    ;; Packet id is data_length-prefixed only after Set Compression. Status/login
+    ;; packets use raw [len][id][payload]; id 0 would otherwise look like data_length 0.
+    (if (global.get $compression_enabled)
+      (then
+        (if (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+          (then
+            (local.set $body_ptr (i32.add (local.get $p) (local.get $data_len_n)))
+          )
+          (else
+            (local.set $body_ptr (local.get $p))
+          )
+        )
+      )
+      (else
+        (local.set $body_ptr (local.get $p))
+      )
+    )
+    (local.set $tmp (call $read_varint (local.get $body_ptr) (i32.add (local.get $buf_ptr) (local.get $total_len))))
+    (local.set $pid (i32.wrap_i64 (local.get $tmp)))
+    (local.set $pid_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+    (if (i32.gt_s (local.get $pid_n) (i32.const 0))
+      (then
+        (call $session_hooks
+          (local.get $pid)
+          (i32.add (local.get $body_ptr) (local.get $pid_n))
+          (i32.add (local.get $buf_ptr) (local.get $total_len))
+        )
+      )
+    )
+
+    ;; Recompress uncompressed-framed packets only after Set Compression.
+    (if (i32.and
+          (global.get $compression_enabled)
+          (i32.and (i32.eq (local.get $data_len) (i32.const 0)) (i32.gt_s (local.get $data_len_n) (i32.const 0)))
+        )
       (then
         (local.set $raw_payload_ptr (i32.add (local.get $p) (local.get $data_len_n)))
         (local.set $raw_payload_len (i32.sub (local.get $pkt_len) (local.get $data_len_n)))
-
-        (local.set $body_ptr (local.get $raw_payload_ptr))
-        (local.set $tmp (call $read_varint (local.get $body_ptr) (i32.add (local.get $buf_ptr) (local.get $total_len))))
-        (local.set $pid (i32.wrap_i64 (local.get $tmp)))
-        (local.set $pid_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
-        (if (i32.gt_s (local.get $pid_n) (i32.const 0))
-          (then
-            (call $session_hooks
-              (local.get $pid)
-              (i32.add (local.get $body_ptr) (local.get $pid_n))
-              (i32.add (local.get $buf_ptr) (local.get $total_len))
-            )
-          )
-        )
 
         ;; Recompress when threshold > 0 and payload is large enough
         (if (i32.and

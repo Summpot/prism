@@ -2874,6 +2874,8 @@ mod tests {
 
         // 3. Test poll state == 1 (Streaming)
         session.set_state(SessionState::Streaming);
+        session.set_conn_state(1);
+        session.set_flow_direction(false);
 
         // Partial streaming packet -> Action 0 (NEED_MORE_DATA)
         let ping_pkt = mc_ping_packet(12345); // Status ping packet ID is 0x01 (urgent)
@@ -3125,6 +3127,135 @@ mod tests {
             &egress_out, &out,
             "WASM egress output must match recompressed packet"
         );
+    }
+
+    fn mc_status_response(json: &str) -> Vec<u8> {
+        let mut pkt = Vec::new();
+        push_varint(0, &mut pkt);
+        push_varint(json.len() as u32, &mut pkt);
+        pkt.extend_from_slice(json.as_bytes());
+        let mut out = Vec::new();
+        push_varint(pkt.len() as u32, &mut out);
+        out.extend_from_slice(&pkt);
+        out
+    }
+
+    #[tokio::test]
+    async fn test_minecraft_status_response_not_recompressed_before_set_compression() {
+        let wat = get_default_middleware_wat("minecraft").unwrap();
+        let mut session = WasmProtocolSession::from_wat(wat).expect("session");
+        session.set_state(SessionState::StreamingEgress);
+        session.set_flow_direction(true);
+        session.set_conn_state(1);
+
+        let json = format!("{{\"description\":\"{}\"}}", "a".repeat(400));
+        let pkt = mc_status_response(&json);
+        assert!(
+            pkt.len() > 256,
+            "status JSON must exceed the recompress threshold"
+        );
+
+        let mut pending = pkt.clone();
+        let mut out = Vec::new();
+        session
+            .process_egress_stream(&mut pending, &mut out)
+            .await
+            .unwrap();
+        assert!(pending.is_empty());
+        assert_eq!(
+            out, pkt,
+            "status response must not be zlib-framed before Set Compression"
+        );
+    }
+
+    #[test]
+    fn test_minecraft_streaming_handshake_makes_status_ping_urgent() {
+        let wat = get_default_middleware_wat("minecraft").unwrap();
+        let mut session = WasmProtocolSession::from_wat(wat).expect("session");
+        session.set_state(SessionState::Streaming);
+        session.set_flow_direction(false);
+
+        let handshake = mc_handshake_prelude("play.example.com", 25565);
+        match session.poll(&handshake).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
+                assert_eq!(len, handshake.len());
+                assert_eq!(priority, FramePriority::Defer);
+            }
+            other => panic!("expected handshake as streaming frame, got {other:?}"),
+        }
+
+        let ping = mc_ping_packet(42);
+        match session.poll(&ping).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, priority, .. }) => {
+                assert_eq!(len, ping.len());
+                assert_eq!(priority, FramePriority::Urgent);
+            }
+            other => panic!("expected status ping to be urgent after handshake, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_minecraft_set_compression_then_recompresses_play_packets() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let wat_bytes = fs::read(root.join("middlewares").join("minecraft.wat")).expect("read wat");
+        let mut session = WasmProtocolSession::from_wat(&wat_bytes).expect("session");
+        session.set_state(SessionState::Streaming);
+        session.set_flow_direction(false);
+
+        let mut login_hs = Vec::new();
+        push_varint(0, &mut login_hs);
+        push_varint(47, &mut login_hs);
+        let host = b"play.example.com";
+        push_varint(host.len() as u32, &mut login_hs);
+        login_hs.extend_from_slice(host);
+        login_hs.extend_from_slice(&25565u16.to_be_bytes());
+        push_varint(2, &mut login_hs);
+        let mut hs_pkt = Vec::new();
+        push_varint(login_hs.len() as u32, &mut hs_pkt);
+        hs_pkt.extend_from_slice(&login_hs);
+        match session.poll(&hs_pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { .. }) => {}
+            other => panic!("expected login handshake frame, got {other:?}"),
+        }
+
+        session.set_state(SessionState::StreamingEgress);
+        session.set_conn_state(2);
+        session.set_flow_direction(true);
+        let mut set_comp = Vec::new();
+        push_varint(3, &mut set_comp);
+        push_varint(256, &mut set_comp);
+        let mut set_comp_pkt = Vec::new();
+        push_varint(set_comp.len() as u32, &mut set_comp_pkt);
+        set_comp_pkt.extend_from_slice(&set_comp);
+        match session.poll(&set_comp_pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { len, payload, .. }) => {
+                assert_eq!(len, set_comp_pkt.len());
+                assert!(payload.is_none(), "Set Compression itself must pass through");
+            }
+            other => panic!("expected Set Compression frame, got {other:?}"),
+        }
+
+        let mut raw_packet = Vec::new();
+        push_varint(0x27, &mut raw_packet);
+        for i in 0..500 {
+            raw_packet.push((i % 256) as u8);
+        }
+        let framed = frame_uncompressed_packet(&raw_packet);
+        let mut pending = framed.clone();
+        let mut out = Vec::new();
+        session
+            .process_egress_stream(&mut pending, &mut out)
+            .await
+            .unwrap();
+        assert!(pending.is_empty());
+        assert_ne!(out, framed, "play packets must recompress after Set Compression");
+        let (pkt_len, len_n) = read_varint(&out).unwrap();
+        let (data_len, dl_n) = read_varint(&out[len_n..]).unwrap();
+        assert_eq!(data_len as usize, raw_packet.len());
+        let decomp = deflate_decompress(&out[len_n + dl_n..len_n + pkt_len as usize]).unwrap();
+        assert_eq!(&decomp, &raw_packet);
     }
 
     #[test]

@@ -143,18 +143,13 @@ pub async fn run(
 
     let mw_name = opts.middleware.clone();
     let mw_dir = opts.middleware_dir.clone();
-    let from_local = load_pair_session(
-        mw_name.as_deref(),
-        mw_dir.as_deref(),
-        SessionState::Streaming,
-        opts.local_role.local_reads_from_server(),
-    )?;
-    let to_local = load_pair_session(
-        mw_name.as_deref(),
-        mw_dir.as_deref(),
-        SessionState::StreamingEgress,
-        opts.local_role.local_writes_to_client(),
-    )?;
+    // One WASM instance per stream so handshake state, compression, and the AES
+    // key are shared between ingress and egress. Direction is set on each poll.
+    let wasm = load_session(mw_name.as_deref(), mw_dir.as_deref())?;
+    let from_local = wasm.clone();
+    let to_local = wasm;
+    let from_server_out = opts.local_role.local_reads_from_server();
+    let from_server_in = opts.local_role.local_writes_to_client();
 
     let (control_tx, mut control_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let session_notify = Arc::new(Notify::new());
@@ -178,26 +173,30 @@ pub async fn run(
     }
     opt_reader.set_record_raw_metrics(record_raw_on_reader);
 
-    if !opts.initial_bytes.is_empty() {
-        opt_writer
-            .write_frame(&opts.initial_bytes, FramePriority::Defer)
-            .await?;
-        opt_writer.flush_batch().await?;
-    }
-
     let from_local_ctrl = from_local.clone();
-    let to_local_ctrl = to_local.clone();
     let notify_ctrl = session_notify.clone();
     tokio::spawn(async move {
         while let Some(data) = control_rx.recv().await {
             apply_session_data(&from_local_ctrl, &data);
-            apply_session_data(&to_local_ctrl, &data);
             notify_ctrl.notify_waiters();
         }
     });
 
     let mut sampler = DictSampler::new();
     let service_name = opts.service_name.clone();
+    let mut read_buf = opts.initial_bytes;
+    if !read_buf.is_empty() {
+        drain_wasm_frames(
+            &from_local,
+            &mut read_buf,
+            &mut opt_writer,
+            &session_notify,
+            &mut sampler,
+            from_server_out,
+        )
+        .await?;
+        opt_writer.flush_batch().await?;
+    }
 
     let inbound_stats = opts.stats.clone();
     let inbound = {
@@ -227,8 +226,13 @@ pub async fn run(
                     }
                 }
                 if let Some(ref sess) = to_local {
-                    let written =
-                        process_egress_unlocked(sess, &mut pending, &mut local_write).await?;
+                    let written = process_egress_unlocked(
+                        sess,
+                        &mut pending,
+                        &mut local_write,
+                        from_server_in,
+                    )
+                    .await?;
                     if !record_raw_on_reader {
                         let now = optimizer::unix_ms();
                         for s in &inbound_stats {
@@ -250,7 +254,6 @@ pub async fn run(
         let mut local_read = local_read;
         let session_notify = session_notify.clone();
         async move {
-            let mut read_buf = Vec::with_capacity(64 * 1024);
             let mut tmp = [0u8; 8192];
             loop {
                 let flush_dur = opt_writer.time_until_flush();
@@ -274,6 +277,7 @@ pub async fn run(
                             &mut opt_writer,
                             &session_notify,
                             &mut sampler,
+                            from_server_out,
                         ).await?;
                     }
                     _ = async {
@@ -292,6 +296,7 @@ pub async fn run(
                             &mut opt_writer,
                             &session_notify,
                             &mut sampler,
+                            from_server_out,
                         ).await?;
                     }
                 }
@@ -337,6 +342,7 @@ async fn process_egress_unlocked<W: tokio::io::AsyncWrite + Unpin>(
     sess: &SessionHandle,
     pending: &mut Vec<u8>,
     writer: &mut W,
+    from_server: bool,
 ) -> std::io::Result<usize> {
     let mut written = 0;
     let mut offset = 0;
@@ -345,6 +351,7 @@ async fn process_egress_unlocked<W: tokio::io::AsyncWrite + Unpin>(
         let poll_res = {
             let mut guard = sess.lock().unwrap();
             guard.set_state(SessionState::StreamingEgress);
+            guard.set_flow_direction(from_server);
             guard.poll(&pending[offset..])
         };
         match poll_res {
@@ -393,6 +400,7 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
     opt_writer: &mut OptimizedWriter<W>,
     session_notify: &Notify,
     sampler: &mut DictSampler,
+    from_server: bool,
 ) -> anyhow::Result<()> {
     if wasm.is_none() {
         if !read_buf.is_empty() {
@@ -412,6 +420,8 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
         }
         let poll_res = {
             let mut guard = sess.lock().unwrap();
+            guard.set_state(SessionState::Streaming);
+            guard.set_flow_direction(from_server);
             let res = guard.poll(read_buf);
             let announced = guard.take_announced();
             (res, announced)
@@ -466,11 +476,9 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
     Ok(())
 }
 
-fn load_pair_session(
+fn load_session(
     mw_name: Option<&str>,
     middleware_dir: Option<&Path>,
-    state: SessionState,
-    from_server: bool,
 ) -> anyhow::Result<Option<SessionHandle>> {
     let Some(name) = mw_name else {
         return Ok(None);
@@ -509,8 +517,6 @@ fn load_pair_session(
     };
     {
         let mut guard = sess.lock().unwrap();
-        guard.set_state(state);
-        guard.set_flow_direction(from_server);
         if let Some(data) =
             crate::prism::middleware::get_injected_middleware_data(base_name, None)
         {

@@ -1694,6 +1694,16 @@ mod tests {
         player.read_exact(&mut received).await.unwrap();
         assert_eq!(&received, message);
 
+        let snap = client_arc.optimizer_stats().snapshot();
+        assert!(
+            snap.raw_bytes > 0,
+            "client sidecar optimizer should record raw_bytes, got {snap:?}"
+        );
+        assert!(
+            snap.wire_bytes > 0,
+            "client sidecar optimizer should record wire_bytes, got {snap:?}"
+        );
+
         // Shutdown everything
         shutdown_tx.send(true).unwrap();
     }
@@ -1900,6 +1910,20 @@ mod tests {
         let mut received = vec![0u8; message.len()];
         player.read_exact(&mut received).await.unwrap();
         assert_eq!(&received, message);
+
+        let snap = client_arc.optimizer_stats().snapshot();
+        assert!(
+            snap.raw_bytes > 0,
+            "auto-adopted optimizer should record raw_bytes, got {snap:?}"
+        );
+        assert!(
+            snap.wire_bytes > 0,
+            "auto-adopted optimizer should record wire_bytes, got {snap:?}"
+        );
+        assert!(
+            snap.uplink.raw_bytes > 0 || snap.downlink.raw_bytes > 0,
+            "auto-adopted optimizer should record directional bytes, got {snap:?}"
+        );
 
         // Shutdown everything
         shutdown_tx.send(true).unwrap();

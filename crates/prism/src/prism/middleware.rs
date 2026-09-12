@@ -331,7 +331,7 @@ pub enum HandshakeResult {
 pub enum FramePriority {
     /// Default time-slice (typically 20ms). Independent compression lane.
     Defer = 1,
-    /// Bypass pending High/Defer/Bulk batches. Independent compression lane.
+    /// Flush immediately. Independent compression lane; does not skip earlier frames.
     Urgent = 2,
     /// Short queue (typically 8ms). Independent compression lane.
     High = 3,

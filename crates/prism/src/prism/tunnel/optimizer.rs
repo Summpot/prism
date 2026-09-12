@@ -467,6 +467,145 @@ impl Batcher {
     }
 }
 
+/// One contiguous run of frames that share a compression lane.
+struct LaneSegment {
+    lane: u32,
+    buffer: Vec<u8>,
+    first_frame_at: Instant,
+    deadline: Instant,
+}
+
+struct LaneFlush {
+    lane: u32,
+    bytes: Vec<u8>,
+    queue_delay_us: u64,
+}
+
+/// Arrival-ordered queue of per-lane segments.
+///
+/// Each [`FramePriority`] still has its own zstd context, but segments are
+/// emitted in enqueue order so the reconstructed byte stream stays FIFO.
+/// A later High/Urgent frame shortens the deadline of earlier Bulk data
+/// instead of overtaking it.
+struct LaneQueue {
+    config: BatcherConfig,
+    segments: Vec<LaneSegment>,
+    buffered_len: usize,
+}
+
+impl LaneQueue {
+    fn new(config: BatcherConfig) -> Self {
+        Self {
+            config,
+            segments: Vec::new(),
+            buffered_len: 0,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    fn set_flush_interval(&mut self, interval: Duration) {
+        let interval = interval.max(Duration::from_millis(1));
+        self.config.flush_interval = interval;
+        for seg in &mut self.segments {
+            if seg.lane != LANE_DEFER {
+                continue;
+            }
+            let candidate = seg.first_frame_at + interval;
+            if candidate < seg.deadline {
+                seg.deadline = candidate;
+            }
+        }
+    }
+
+    fn time_until_flush_at(&self, now: Instant) -> Option<Duration> {
+        self.segments
+            .iter()
+            .map(|seg| {
+                if now >= seg.deadline {
+                    Duration::ZERO
+                } else {
+                    seg.deadline - now
+                }
+            })
+            .min()
+    }
+
+    fn push(&mut self, frame: &[u8], priority: FramePriority) -> Option<Vec<LaneFlush>> {
+        self.push_at(frame, priority, Instant::now())
+    }
+
+    fn push_at(
+        &mut self,
+        frame: &[u8],
+        priority: FramePriority,
+        now: Instant,
+    ) -> Option<Vec<LaneFlush>> {
+        let lane = lane_of(priority);
+        let deadline = now + self.config.interval_for(priority);
+        self.append(lane, frame, now, deadline);
+
+        let size_reached = self.buffered_len >= self.config.buffer_threshold;
+        let time_reached = self.segments.iter().any(|seg| now >= seg.deadline);
+        if size_reached || time_reached {
+            Some(self.flush_at(now))
+        } else {
+            None
+        }
+    }
+
+    fn append(&mut self, lane: u32, frame: &[u8], now: Instant, deadline: Instant) {
+        if let Some(last) = self.segments.last_mut() {
+            if last.lane == lane {
+                last.buffer.extend_from_slice(frame);
+                if deadline < last.deadline {
+                    last.deadline = deadline;
+                }
+                self.buffered_len += frame.len();
+                return;
+            }
+        }
+        self.buffered_len += frame.len();
+        self.segments.push(LaneSegment {
+            lane,
+            buffer: frame.to_vec(),
+            first_frame_at: now,
+            deadline,
+        });
+    }
+
+    fn flush(&mut self) -> Vec<LaneFlush> {
+        self.flush_at(Instant::now())
+    }
+
+    fn flush_at(&mut self, now: Instant) -> Vec<LaneFlush> {
+        self.buffered_len = 0;
+        self.segments
+            .drain(..)
+            .filter(|seg| !seg.buffer.is_empty())
+            .map(|seg| LaneFlush {
+                lane: seg.lane,
+                queue_delay_us: now.saturating_duration_since(seg.first_frame_at).as_micros()
+                    as u64,
+                bytes: seg.buffer,
+            })
+            .collect()
+    }
+
+    fn check_timer_at(&mut self, now: Instant) -> Option<Vec<LaneFlush>> {
+        if self.segments.is_empty() {
+            return None;
+        }
+        if self.segments.iter().any(|seg| now >= seg.deadline) {
+            Some(self.flush_at(now))
+        } else {
+            None
+        }
+    }
+}
+
 // ============================================================================
 // Component 2: ZstdStreamCompressor
 // ============================================================================
@@ -838,27 +977,6 @@ pub fn decode_stream(
     Ok(decompressed)
 }
 
-fn lane_batchers(config: &BatcherConfig) -> [Batcher; LANE_COUNT] {
-    [
-        Batcher::new(BatcherConfig {
-            flush_interval: Duration::ZERO,
-            buffer_threshold: config.buffer_threshold,
-            ..config.clone()
-        }),
-        Batcher::new(BatcherConfig {
-            flush_interval: config.high_flush_interval,
-            buffer_threshold: config.buffer_threshold,
-            ..config.clone()
-        }),
-        Batcher::new(config.clone()),
-        Batcher::new(BatcherConfig {
-            flush_interval: config.bulk_flush_interval,
-            buffer_threshold: config.buffer_threshold,
-            ..config.clone()
-        }),
-    ]
-}
-
 fn lane_compressors(config: &CompressorConfig) -> io::Result<[ZstdStreamCompressor; LANE_COUNT]> {
     Ok([
         ZstdStreamCompressor::new(config.clone())?,
@@ -886,12 +1004,12 @@ pin_project! {
     /// Can be used as a standard [`tokio::io::AsyncWrite`] stream, or directly via
     /// priority-aware methods like [`Self::write_frame`].
     ///
-    /// Each [`FramePriority`] has its own time-slice queue and zstd context so
-    /// Urgent frames can bypass a pending Bulk batch without sharing history.
+    /// Each [`FramePriority`] has its own zstd context. Frames are emitted in
+    /// arrival order so a later Urgent/High frame cannot overtake earlier Bulk.
     pub struct OptimizedWriter<W> {
         #[pin]
         inner: W,
-        batchers: [Batcher; LANE_COUNT],
+        queue: LaneQueue,
         compressors: [ZstdStreamCompressor; LANE_COUNT],
         write_buf: Vec<u8>,
         write_pos: usize,
@@ -914,7 +1032,7 @@ impl<W> OptimizedWriter<W> {
         let flush_interval = batcher_config.flush_interval;
         Ok(Self {
             inner,
-            batchers: lane_batchers(&batcher_config),
+            queue: LaneQueue::new(batcher_config),
             compressors: lane_compressors(&compressor_config)?,
             write_buf: Vec::new(),
             write_pos: 0,
@@ -1046,7 +1164,7 @@ impl<W> OptimizedWriter<W> {
         self.flush_interval = base;
         self.flush_interval_min = min;
         self.flush_interval_max = max;
-        self.batchers[LANE_DEFER as usize].set_flush_interval(base);
+        self.queue.set_flush_interval(base);
         self
     }
 
@@ -1061,7 +1179,7 @@ impl<W> OptimizedWriter<W> {
             self.flush_interval_max,
             stats,
         );
-        self.batchers[LANE_DEFER as usize].set_flush_interval(next);
+        self.queue.set_flush_interval(next);
     }
 
     /// Returns the remaining duration until a time-based batch flush is due.
@@ -1070,16 +1188,7 @@ impl<W> OptimizedWriter<W> {
     }
 
     fn time_until_flush_at(&self, now: Instant) -> Option<Duration> {
-        let mut soonest: Option<Duration> = None;
-        for batcher in self.batchers.iter().skip(1) {
-            if let Some(dur) = batcher.time_until_flush_at(now) {
-                soonest = Some(match soonest {
-                    Some(existing) if existing <= dur => existing,
-                    _ => dur,
-                });
-            }
-        }
-        soonest
+        self.queue.time_until_flush_at(now)
     }
 }
 
@@ -1123,25 +1232,25 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
             } else {
                 self.record_explicit();
             }
+            if !self.queue.is_empty() {
+                let pending = self.queue.flush();
+                self.encode_flushed(pending).await?;
+            }
             self.encode_lane(lane, frame, raw, 0).await?;
             return Ok(());
         }
 
-        let queue_delay = self.batchers[lane as usize]
-            .first_frame_at()
-            .map(|t| t.elapsed().as_micros() as u64)
-            .unwrap_or(0);
-        if let Some(batch) = self.batchers[lane as usize].push(frame, priority) {
+        if let Some(flushed) = self.queue.push(frame, priority) {
             self.record_threshold();
-            self.encode_lane(lane, &batch, false, queue_delay).await?;
+            self.encode_flushed(flushed).await?;
         }
         Ok(())
     }
 
     /// Writes a frame with the specified priority.
     ///
-    /// If `FramePriority::Urgent` is given, the frame bypasses pending High/Defer/Bulk
-    /// batches. Other priorities flush when their own time/size threshold is reached.
+    /// Urgent frames flush any pending earlier data first (preserving order), then
+    /// write immediately on their own compression lane.
     pub async fn write_frame(&mut self, frame: &[u8], priority: FramePriority) -> io::Result<()> {
         self.write_frame_with_hints(frame.len(), frame, priority, false)
             .await
@@ -1167,22 +1276,25 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         self.flush_pending_write_buf().await
     }
 
+    async fn encode_flushed(&mut self, flushed: Vec<LaneFlush>) -> io::Result<()> {
+        for flush in flushed {
+            if flush.bytes.is_empty() {
+                continue;
+            }
+            self.encode_lane(flush.lane, &flush.bytes, false, flush.queue_delay_us)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Explicitly flushes any buffered frames through compression and writes them to `inner`.
     pub async fn flush_batch(&mut self) -> io::Result<()> {
         self.flush_pending_write_buf().await?;
 
-        for lane in 1..LANE_COUNT {
-            if self.batchers[lane].is_empty() {
-                continue;
-            }
-            let queue_delay = self.batchers[lane]
-                .first_frame_at()
-                .map(|t| t.elapsed().as_micros() as u64)
-                .unwrap_or(0);
-            let batch = self.batchers[lane].flush();
+        if !self.queue.is_empty() {
             self.record_explicit();
-            self.encode_lane(lane as u32, &batch, false, queue_delay)
-                .await?;
+            let pending = self.queue.flush();
+            self.encode_flushed(pending).await?;
         }
 
         tokio::io::AsyncWriteExt::flush(&mut self.inner).await?;
@@ -1194,21 +1306,13 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
     pub async fn flush_if_due(&mut self) -> io::Result<bool> {
         self.apply_adaptive_flush();
         let now = Instant::now();
-        let mut flushed = false;
-        for lane in 1..LANE_COUNT {
-            let queue_delay = self.batchers[lane]
-                .first_frame_at()
-                .map(|t| t.elapsed().as_micros() as u64)
-                .unwrap_or(0);
-            if let Some(batch) = self.batchers[lane].check_timer_at(now) {
-                self.flush_pending_write_buf().await?;
-                self.record_timer();
-                self.encode_lane(lane as u32, &batch, false, queue_delay)
-                    .await?;
-                flushed = true;
-            }
+        if let Some(flushed) = self.queue.check_timer_at(now) {
+            self.flush_pending_write_buf().await?;
+            self.record_timer();
+            self.encode_flushed(flushed).await?;
+            return Ok(true);
         }
-        Ok(flushed)
+        Ok(false)
     }
 
     /// Flushes pending batches, sends a dictionary control frame, then resets every
@@ -1251,6 +1355,36 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         self.record_link(pending as usize, start.elapsed());
         Ok(())
     }
+}
+
+fn encode_flushes_into(
+    compressors: &mut [ZstdStreamCompressor; LANE_COUNT],
+    write_buf: &mut Vec<u8>,
+    flushed: Vec<LaneFlush>,
+    stats: &[SharedOptimizerStats],
+    direction: TrafficDirection,
+) -> io::Result<()> {
+    for flush in flushed {
+        if flush.bytes.is_empty() {
+            continue;
+        }
+        let start = Instant::now();
+        let framed = encode_batch_into(
+            &mut compressors[flush.lane as usize],
+            &flush.bytes,
+            write_buf,
+            flush.lane,
+            false,
+        )?;
+        record_batch_pinned(
+            stats,
+            direction,
+            framed,
+            start.elapsed().as_micros() as u64,
+            flush.queue_delay_us,
+        );
+    }
+    Ok(())
 }
 
 /// Records one flushed batch for pinned (poll-based) writer paths.
@@ -1359,33 +1493,21 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
             s.add_direction_raw_bytes(*this.direction, buf.len() as u64, now_ms);
         }
 
-        let defer = LANE_DEFER as usize;
-        let queue_delay = this.batchers[defer]
-            .first_frame_at()
-            .map(|t| t.elapsed().as_micros() as u64)
-            .unwrap_or(0);
-
-        // 2. Add incoming bytes to the defer lane with defer priority
-        let flushed = this.batchers[defer].push(buf, FramePriority::Defer);
-        if let Some(batch) = flushed {
+        // 2. Add incoming bytes as defer-priority frames, preserving lane order.
+        if let Some(flushed) = this.queue.push(buf, FramePriority::Defer) {
             for s in this.stats.iter() {
                 s.inc_threshold();
             }
-            let start = Instant::now();
-            let framed = match encode_batch_into(
-                &mut this.compressors[defer],
-                &batch,
+            if let Err(e) = encode_flushes_into(
+                this.compressors,
                 this.write_buf,
-                LANE_DEFER,
-                false,
+                flushed,
+                this.stats,
+                *this.direction,
             ) {
-                Ok(framed) => framed,
-                Err(e) => return Poll::Ready(Err(e)),
-            };
-            let comp_us = start.elapsed().as_micros() as u64;
-            record_batch_pinned(this.stats, *this.direction, framed, comp_us, queue_delay);
+                return Poll::Ready(Err(e));
+            }
             *this.write_pos = 0;
-            // Best effort immediate write
             let _ = poll_drain_pinned(
                 this.inner.as_mut(),
                 this.write_buf,
@@ -1413,32 +1535,20 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
             other => return other,
         }
 
-        // Flush every non-urgent lane if non-empty
-        for lane in 1..LANE_COUNT {
-            if this.batchers[lane].is_empty() {
-                continue;
-            }
-            let queue_delay = this.batchers[lane]
-                .first_frame_at()
-                .map(|t| t.elapsed().as_micros() as u64)
-                .unwrap_or(0);
-            let batch = this.batchers[lane].flush();
+        if !this.queue.is_empty() {
+            let flushed = this.queue.flush();
             for s in this.stats.iter() {
                 s.inc_explicit();
             }
-            let start = Instant::now();
-            let framed = match encode_batch_into(
-                &mut this.compressors[lane],
-                &batch,
+            if let Err(e) = encode_flushes_into(
+                this.compressors,
                 this.write_buf,
-                lane as u32,
-                false,
+                flushed,
+                this.stats,
+                *this.direction,
             ) {
-                Ok(framed) => framed,
-                Err(e) => return Poll::Ready(Err(e)),
-            };
-            let comp_us = start.elapsed().as_micros() as u64;
-            record_batch_pinned(this.stats, *this.direction, framed, comp_us, queue_delay);
+                return Poll::Ready(Err(e));
+            }
             *this.write_pos = 0;
             match poll_drain_pinned(
                 this.inner.as_mut(),
@@ -2406,8 +2516,75 @@ mod tests {
         assert_eq!(out, sample);
     }
 
+    #[test]
+    fn test_lane_queue_keeps_interleaved_lanes_in_arrival_order() {
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(40),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut queue = LaneQueue::new(config);
+        let base = Instant::now();
+
+        assert!(
+            queue
+                .push_at(b"AAAA", FramePriority::Bulk, base)
+                .is_none()
+        );
+        assert!(
+            queue
+                .push_at(b"BB", FramePriority::Defer, base + Duration::from_millis(1))
+                .is_none()
+        );
+        assert!(
+            queue
+                .push_at(b"CC", FramePriority::Bulk, base + Duration::from_millis(2))
+                .is_none()
+        );
+
+        let flushed = queue.flush_at(base + Duration::from_millis(2));
+        assert_eq!(flushed.len(), 3);
+        assert_eq!(flushed[0].lane, LANE_BULK);
+        assert_eq!(flushed[0].bytes, b"AAAA");
+        assert_eq!(flushed[1].lane, LANE_DEFER);
+        assert_eq!(flushed[1].bytes, b"BB");
+        assert_eq!(flushed[2].lane, LANE_BULK);
+        assert_eq!(flushed[2].bytes, b"CC");
+    }
+
+    #[test]
+    fn test_lane_queue_high_deadline_flushes_earlier_bulk() {
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(40),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut queue = LaneQueue::new(config);
+        let base = Instant::now();
+
+        assert!(
+            queue
+                .push_at(b"REGDATA", FramePriority::Bulk, base)
+                .is_none()
+        );
+        assert!(
+            queue
+                .push_at(b"FINCFG", FramePriority::High, base + Duration::from_millis(1))
+                .is_none()
+        );
+
+        let flushed = queue
+            .check_timer_at(base + Duration::from_millis(9))
+            .expect("high deadline must flush the whole prefix");
+        assert_eq!(flushed.len(), 2);
+        assert_eq!(flushed[0].bytes, b"REGDATA");
+        assert_eq!(flushed[1].bytes, b"FINCFG");
+    }
+
     #[tokio::test]
-    async fn test_urgent_bypasses_pending_bulk_batch() {
+    async fn test_urgent_flushes_pending_bulk_in_order() {
         let (client_io, server_io) = tokio::io::duplex(64 * 1024);
         let config = BatcherConfig {
             flush_interval: Duration::from_millis(20),
@@ -2428,14 +2605,70 @@ mod tests {
             .await
             .unwrap();
 
-        let mut urgent = vec![0u8; 2];
-        reader.read_exact(&mut urgent).await.unwrap();
-        assert_eq!(&urgent, b"ka");
+        let mut received = vec![0u8; 18];
+        reader.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"bulk-chunk-byteska");
+    }
 
-        writer.flush_batch().await.unwrap();
-        let mut bulk = vec![0u8; 16];
-        reader.read_exact(&mut bulk).await.unwrap();
-        assert_eq!(&bulk, b"bulk-chunk-bytes");
+    #[tokio::test]
+    async fn test_independent_lanes_preserve_packet_order() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(500),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut writer =
+            OptimizedWriter::new(client_io, config, CompressorConfig::default()).unwrap();
+        let mut reader = OptimizedReader::with_defaults(server_io).unwrap();
+
+        writer
+            .write_frame(b"CHUNK", FramePriority::Bulk)
+            .await
+            .unwrap();
+        writer
+            .write_frame(b"MOVE", FramePriority::High)
+            .await
+            .unwrap();
+        writer
+            .write_frame(b"KA", FramePriority::Urgent)
+            .await
+            .unwrap();
+
+        let mut received = vec![0u8; 11];
+        reader.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"CHUNKMOVEKA");
+    }
+
+    #[tokio::test]
+    async fn test_high_timer_does_not_reorder_earlier_bulk() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(500),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut writer =
+            OptimizedWriter::new(client_io, config, CompressorConfig::default()).unwrap();
+        let mut reader = OptimizedReader::with_defaults(server_io).unwrap();
+
+        writer
+            .write_frame(b"REGDATA", FramePriority::Bulk)
+            .await
+            .unwrap();
+        writer
+            .write_frame(b"FINCFG", FramePriority::High)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(12)).await;
+        assert!(writer.flush_if_due().await.unwrap());
+
+        let mut received = vec![0u8; 13];
+        reader.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"REGDATAFINCFG");
     }
 
     #[test]

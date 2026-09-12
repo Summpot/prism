@@ -292,25 +292,28 @@ pub async fn exchange_optimizer_params_acceptor<RW: AsyncRead + AsyncWrite + Unp
     Ok(peer)
 }
 
-/// Picks the dictionary both sides will use. Prefer a matching id; otherwise accept
-/// peer-supplied bytes; otherwise disable the dictionary.
-pub fn agree_dictionary(
+/// Dictionary this host compresses with: its own trained/configured bytes.
+pub fn encode_dictionary(local: Option<&[u8]>) -> Option<Vec<u8>> {
+    local.filter(|d| !d.is_empty()).map(Vec::from)
+}
+
+/// Dictionary this host decompresses with: the peer's encode dict.
+///
+/// When ids match, local bytes are reused so the peer does not need to send the
+/// payload. Otherwise the peer-supplied bytes are used. Directions stay independent:
+/// each side may compress with a different dict.
+pub fn decode_dictionary(
     local: Option<&[u8]>,
     local_id: u32,
     peer: &OptimizerStreamParams,
 ) -> Option<Vec<u8>> {
-    if local_id != 0 && local_id == peer.dict_id {
-        return local.map(Vec::from);
+    if peer.dict_id != 0 && local_id == peer.dict_id {
+        return local.filter(|d| !d.is_empty()).map(Vec::from);
     }
-    if let Some(ref bytes) = peer.dictionary {
-        if !bytes.is_empty() {
-            return Some(bytes.clone());
-        }
-    }
-    if local_id != 0 && peer.dict_id == 0 {
-        return local.map(Vec::from);
-    }
-    None
+    peer.dictionary
+        .as_deref()
+        .filter(|d| !d.is_empty())
+        .map(Vec::from)
 }
 
 pub async fn write_proxy_stream_header<W: AsyncWrite + Unpin>(
@@ -605,13 +608,31 @@ mod tests {
         assert_eq!(got.dict_id, 42);
         assert_eq!(got.dictionary.as_deref(), Some(dict.as_slice()));
 
-        let agreed = agree_dictionary(Some(&dict), 42, &OptimizerStreamParams {
-            encode_window_log: 23,
-            decode_window_log: 23,
-            dict_id: 42,
-            dictionary: None,
-        });
-        assert_eq!(agreed.as_deref(), Some(dict.as_slice()));
+        let decoded = decode_dictionary(
+            Some(&dict),
+            42,
+            &OptimizerStreamParams {
+                encode_window_log: 23,
+                decode_window_log: 23,
+                dict_id: 42,
+                dictionary: None,
+            },
+        );
+        assert_eq!(decoded.as_deref(), Some(dict.as_slice()));
+
+        let peer_only = vec![9u8; 16];
+        let decoded_peer = decode_dictionary(
+            Some(&dict),
+            42,
+            &OptimizerStreamParams {
+                encode_window_log: 23,
+                decode_window_log: 23,
+                dict_id: 99,
+                dictionary: Some(peer_only.clone()),
+            },
+        );
+        assert_eq!(decoded_peer.as_deref(), Some(peer_only.as_slice()));
+        assert_eq!(encode_dictionary(Some(&dict)).as_deref(), Some(dict.as_slice()));
     }
 
     #[tokio::test]

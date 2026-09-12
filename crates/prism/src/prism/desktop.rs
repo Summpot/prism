@@ -38,6 +38,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     };
 
     let workdir = crate::prism::runtime_paths::resolve_desktop_data_dir();
+    crate::prism::tunnel::optimizer::set_dictionary_dir(workdir.join("optimizer-dicts"));
 
     let auth_manager = Arc::new(crate::prism::auth::AuthManager::new(
         auth_cfg,

@@ -13,8 +13,10 @@
 ;;       state == 1 (Streaming) / 2 (StreamingEgress):
 ;;         Action 0 (NEED_MORE_DATA): packet incomplete
 ;;         Action 1 (FRAME_DEFER): sliced packet (normal game packet), Value = total packet bytes
-;;         Action 2 (FRAME_URGENT): sliced packet (KeepAlive / Ping / Pong), Value = total packet bytes
-;;         Action 3/4: rewritten frame (defer/urgent), Value = pointer to {consumed, ptr, len} at 65552
+;;         Action 2 (FRAME_URGENT): KeepAlive / Ping / Pong
+;;         Action 5 (FRAME_HIGH): movement / teleport / combat
+;;         Action 7 (FRAME_BULK): chunk and other large payloads
+;;         Action 3/4/8/9: rewritten frame (defer/urgent/high/bulk), Value = pointer to {consumed, ptr, len} at 65552
 ;;         Action 6 (BLOCKED): waiting for peer session data (shared secret)
 ;;   - set_data(ptr, len) -> i32: copies injected data (e.g. RSA private key) to offset 196608, returns 0
 
@@ -99,6 +101,14 @@
     )
   )
 
+  ;; Host memcpy (handles overlap).
+  (import "prism" "mem_copy"
+    (func $mem_copy
+      (param $dst i32) (param $src i32) (param $n i32)
+      (result i32)
+    )
+  )
+
   ;; ---------------------------------------------------------------------------
   ;; Memory (384 pages = 24 MiB)
   ;; ---------------------------------------------------------------------------
@@ -148,6 +158,8 @@
 
   (global $PLAIN_BUF i32 (i32.const 10485760))  ;; 0xA00000
   (global $PLAIN_MAX i32 (i32.const 4194304))
+  (global $REBUILD_BUF i32 (i32.const 12582912)) ;; 0xC00000
+  (global $REBUILD_MAX i32 (i32.const 2097152))
   (global $DECOMP_BUF i32 (i32.const 14680064)) ;; 0xE00000
   (global $DECOMP_MAX i32 (i32.const 8388608))
   (global $AES_KEY i32 (i32.const 196480))
@@ -289,35 +301,17 @@
 
   ;; Copy n bytes from src to dst
   (func $memcpy (param $dst i32) (param $src i32) (param $n i32)
-    (local $i i32)
-    (local.set $i (i32.const 0))
-    (block $done
-      (loop $loop
-        (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
-        (i32.store8
-          (i32.add (local.get $dst) (local.get $i))
-          (i32.load8_u (i32.add (local.get $src) (local.get $i)))
-        )
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $loop)
-      )
+    (if (i32.eqz (local.get $n))
+      (then (return))
     )
+    (drop (call $mem_copy (local.get $dst) (local.get $src) (local.get $n)))
   )
 
   (func $memmove_left (param $dst i32) (param $src i32) (param $n i32)
-    (local $i i32)
-    (local.set $i (i32.const 0))
-    (block $done
-      (loop $loop
-        (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
-        (i32.store8
-          (i32.add (local.get $dst) (local.get $i))
-          (i32.load8_u (i32.add (local.get $src) (local.get $i)))
-        )
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $loop)
-      )
+    (if (i32.eqz (local.get $n))
+      (then (return))
     )
+    (drop (call $mem_copy (local.get $dst) (local.get $src) (local.get $n)))
   )
 
   (func $install_aes_key (param $ptr i32)
@@ -468,8 +462,8 @@
     (local.get $len)
   )
 
-  ;; Urgent only for keepalive / ping / pong of the *current* state and direction.
-  (func $is_urgent_packet (param $pid i32) (result i32)
+  ;; Packet class: 0 defer, 1 urgent, 2 high, 3 bulk.
+  (func $packet_class (param $pid i32) (result i32)
     (local $st i32)
     (local $from_server i32)
     (local $ver i32)
@@ -479,7 +473,12 @@
 
     ;; Status: ping/pong is packet id 1
     (if (i32.eq (local.get $st) (i32.const 1))
-      (then (return (i32.eq (local.get $pid) (i32.const 1))))
+      (then
+        (if (i32.eq (local.get $pid) (i32.const 1))
+          (then (return (i32.const 1)))
+        )
+        (return (i32.const 0))
+      )
     )
 
     ;; Login: no keepalive
@@ -491,7 +490,8 @@
     (if (i32.eq (local.get $st) (i32.const 3))
       (then
         (if (i32.eq (local.get $pid) (i32.const 4)) (then (return (i32.const 1))))
-        (return (i32.eq (local.get $pid) (i32.const 5)))
+        (if (i32.eq (local.get $pid) (i32.const 5)) (then (return (i32.const 1))))
+        (return (i32.const 0))
       )
     )
 
@@ -500,49 +500,85 @@
       (then
         (if (local.get $from_server)
           (then
-            ;; Clientbound keep_alive / ping. 1.21 / proto 767+: 0x26 / 0x35
+            ;; Clientbound. 772 / 1.21.8: KA 0x25, ping 0x35, chunk 0x26
+            (if (i32.ge_s (local.get $ver) (i32.const 772))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x25)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x35)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x18)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x1F)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x23)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x40)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x60)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 3))))
+                (return (i32.const 0))
+              )
+            )
+            ;; 767 / 1.21.1: KA 0x25, ping 0x34, chunk 0x26
             (if (i32.ge_s (local.get $ver) (i32.const 767))
               (then
-                (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 1))))
-                (return (i32.eq (local.get $pid) (i32.const 0x35)))
+                (if (i32.eq (local.get $pid) (i32.const 0x25)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x34)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x19)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x1F)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x23)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x3F)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x5C)) (then (return (i32.const 2))))
+                (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 3))))
+                (return (i32.const 0))
               )
             )
             (if (i32.ge_s (local.get $ver) (i32.const 765))
               (then
                 (if (i32.eq (local.get $pid) (i32.const 0x24)) (then (return (i32.const 1))))
-                (return (i32.eq (local.get $pid) (i32.const 0x33)))
+                (return (select (i32.const 1) (i32.const 0) (i32.eq (local.get $pid) (i32.const 0x33))))
               )
             )
             (if (i32.ge_s (local.get $ver) (i32.const 764))
               (then
                 (if (i32.eq (local.get $pid) (i32.const 0x26)) (then (return (i32.const 1))))
-                (return (i32.eq (local.get $pid) (i32.const 0x32)))
+                (return (select (i32.const 1) (i32.const 0) (i32.eq (local.get $pid) (i32.const 0x32))))
               )
             )
             (if (i32.ge_s (local.get $ver) (i32.const 763))
               (then
                 (if (i32.eq (local.get $pid) (i32.const 0x23)) (then (return (i32.const 1))))
-                (return (i32.eq (local.get $pid) (i32.const 0x30)))
+                (return (select (i32.const 1) (i32.const 0) (i32.eq (local.get $pid) (i32.const 0x30))))
               )
             )
-            ;; Older play: keep the historical clientbound keepalive ids only
             (if (i32.eq (local.get $pid) (i32.const 0x1F)) (then (return (i32.const 1))))
             (if (i32.eq (local.get $pid) (i32.const 0x20)) (then (return (i32.const 1))))
             (if (i32.eq (local.get $pid) (i32.const 0x21)) (then (return (i32.const 1))))
             (return (i32.const 0))
           )
           (else
-            ;; Serverbound keep_alive / pong. 1.21: 0x18 / 0x27
+            ;; Serverbound
+            (if (i32.ge_s (local.get $ver) (i32.const 772))
+              (then
+                (if (i32.eq (local.get $pid) (i32.const 0x1B)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x2C)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x00)) (then (return (i32.const 2))))
+                (if (i32.and (i32.ge_u (local.get $pid) (i32.const 0x1D)) (i32.le_u (local.get $pid) (i32.const 0x20)))
+                  (then (return (i32.const 2)))
+                )
+                (return (i32.const 0))
+              )
+            )
             (if (i32.ge_s (local.get $ver) (i32.const 767))
               (then
                 (if (i32.eq (local.get $pid) (i32.const 0x18)) (then (return (i32.const 1))))
-                (return (i32.eq (local.get $pid) (i32.const 0x27)))
+                (if (i32.eq (local.get $pid) (i32.const 0x27)) (then (return (i32.const 1))))
+                (if (i32.eq (local.get $pid) (i32.const 0x00)) (then (return (i32.const 2))))
+                (if (i32.and (i32.ge_u (local.get $pid) (i32.const 0x1A)) (i32.le_u (local.get $pid) (i32.const 0x1D)))
+                  (then (return (i32.const 2)))
+                )
+                (return (i32.const 0))
               )
             )
             (if (i32.ge_s (local.get $ver) (i32.const 764))
               (then
                 (if (i32.eq (local.get $pid) (i32.const 0x14)) (then (return (i32.const 1))))
-                (return (i32.eq (local.get $pid) (i32.const 0x24)))
+                (return (select (i32.const 1) (i32.const 0) (i32.eq (local.get $pid) (i32.const 0x24))))
               )
             )
             (if (i32.eq (local.get $pid) (i32.const 0x0F)) (then (return (i32.const 1))))
@@ -556,20 +592,57 @@
     (i32.const 0)
   )
 
-  (func $finish_frame (param $action i32) (param $total_len i32) (result i64)
+  (func $is_custom_payload (param $pid i32) (result i32)
+    (local $ver i32)
+    (if (i32.ne (global.get $conn_state) (i32.const 4))
+      (then (return (i32.const 0)))
+    )
+    (local.set $ver (global.get $proto_version))
+    (if (global.get $direction)
+      (then
+        (if (i32.ge_s (local.get $ver) (i32.const 772))
+          (then (return (i32.eq (local.get $pid) (i32.const 0x17))))
+        )
+        (if (i32.ge_s (local.get $ver) (i32.const 767))
+          (then (return (i32.eq (local.get $pid) (i32.const 0x18))))
+        )
+        (return (i32.const 0))
+      )
+    )
+    (if (i32.ge_s (local.get $ver) (i32.const 772))
+      (then (return (i32.eq (local.get $pid) (i32.const 0x15))))
+    )
+    (if (i32.ge_s (local.get $ver) (i32.const 767))
+      (then (return (i32.eq (local.get $pid) (i32.const 0x12))))
+    )
+    (i32.const 0)
+  )
+
+  (func $class_to_action (param $class i32) (result i32)
+    (if (i32.eq (local.get $class) (i32.const 1)) (then (return (i32.const 2))))
+    (if (i32.eq (local.get $class) (i32.const 2)) (then (return (i32.const 5))))
+    (if (i32.eq (local.get $class) (i32.const 3)) (then (return (i32.const 7))))
+    (i32.const 1)
+  )
+
+  (func $rewrite_action (param $class i32) (result i32)
+    (if (i32.eq (local.get $class) (i32.const 1)) (then (return (i32.const 4))))
+    (if (i32.eq (local.get $class) (i32.const 2)) (then (return (i32.const 8))))
+    (if (i32.eq (local.get $class) (i32.const 3)) (then (return (i32.const 9))))
+    (i32.const 3)
+  )
+
+  (func $finish_frame (param $class i32) (param $total_len i32) (result i64)
     (global.set $last_consumed (local.get $total_len))
     (if (global.get $encryption_enabled)
       (then
         (i32.store (i32.const 65552) (local.get $total_len))
         (i32.store (i32.const 65556) (global.get $PLAIN_BUF))
         (i32.store (i32.const 65560) (local.get $total_len))
-        (if (i32.eq (local.get $action) (i32.const 2))
-          (then (return (call $pack_result (i32.const 4) (i32.const 65552))))
-        )
-        (return (call $pack_result (i32.const 3) (i32.const 65552)))
+        (return (call $pack_result (call $rewrite_action (local.get $class)) (i32.const 65552)))
       )
     )
-    (call $pack_result (local.get $action) (local.get $total_len))
+    (call $pack_result (call $class_to_action (local.get $class)) (local.get $total_len))
   )
 
   ;; Inspect handshake/login/config packets for compression, encryption and state transitions.
@@ -700,6 +773,171 @@
     (if (i32.and (i32.eq (local.get $st) (i32.const 3)) (i32.eq (local.get $pid) (i32.const 3)))
       (then (global.set $conn_state (i32.const 4)))
     )
+  )
+
+  (func $maybe_compact_ident
+    (param $pid_ptr i32)
+    (param $pid_n i32)
+    (param $pkt_end i32)
+    (param $total_len i32)
+    (param $class i32)
+    (param $compressed_framing i32)
+    (result i64)
+    (local $ident_ptr i32)
+    (local $tmp i64)
+    (local $ident_len i32)
+    (local $ident_n i32)
+    (local $index i32)
+    (local $rest_ptr i32)
+    (local $rest_len i32)
+    (local $out_p i32)
+    (local $n i32)
+    (local $inner_len i32)
+    (local $pkt_varint_n i32)
+    (local $frame_ptr i32)
+
+    (if (i32.eqz (call $is_custom_payload (i32.wrap_i64 (call $read_varint (local.get $pid_ptr) (local.get $pkt_end)))))
+      (then (return (i64.const 0)))
+    )
+    (local.set $ident_ptr (i32.add (local.get $pid_ptr) (local.get $pid_n)))
+    (if (i32.ge_u (local.get $ident_ptr) (local.get $pkt_end))
+      (then (return (i64.const 0)))
+    )
+    (local.set $tmp (call $read_varint (local.get $ident_ptr) (local.get $pkt_end)))
+    (local.set $ident_len (i32.wrap_i64 (local.get $tmp)))
+    (local.set $ident_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+    (if (i32.or (i32.eqz (local.get $ident_n)) (i32.eqz (local.get $ident_len)))
+      (then (return (i64.const 0)))
+    )
+    (if (i32.gt_u (i32.add (i32.add (local.get $ident_ptr) (local.get $ident_n)) (local.get $ident_len)) (local.get $pkt_end))
+      (then (return (i64.const 0)))
+    )
+    (local.set $tmp (call $sym_intern (i32.add (local.get $ident_ptr) (local.get $ident_n)) (local.get $ident_len)))
+    (if (i32.ne (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))) (i32.const 0))
+      (then (return (i64.const 0)))
+    )
+    (local.set $index (i32.wrap_i64 (local.get $tmp)))
+    (local.set $rest_ptr (i32.add (i32.add (local.get $ident_ptr) (local.get $ident_n)) (local.get $ident_len)))
+    (local.set $rest_len (i32.sub (local.get $pkt_end) (local.get $rest_ptr)))
+    (local.set $out_p (i32.add (global.get $REBUILD_BUF) (i32.const 16)))
+    (if (local.get $compressed_framing)
+      (then
+        (local.set $n (call $write_varint (local.get $out_p) (i32.const 0)))
+        (local.set $out_p (i32.add (local.get $out_p) (local.get $n)))
+      )
+    )
+    (call $memcpy (local.get $out_p) (local.get $pid_ptr) (local.get $pid_n))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $pid_n)))
+    (local.set $n (call $write_varint (local.get $out_p) (i32.const 0)))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $n)))
+    (local.set $n (call $write_varint (local.get $out_p) (local.get $index)))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $n)))
+    (if (i32.gt_s (local.get $rest_len) (i32.const 0))
+      (then
+        (call $memcpy (local.get $out_p) (local.get $rest_ptr) (local.get $rest_len))
+        (local.set $out_p (i32.add (local.get $out_p) (local.get $rest_len)))
+      )
+    )
+    (local.set $inner_len (i32.sub (local.get $out_p) (i32.add (global.get $REBUILD_BUF) (i32.const 16))))
+    (if (i32.gt_u (local.get $inner_len) (global.get $REBUILD_MAX))
+      (then (return (i64.const 0)))
+    )
+    (local.set $pkt_varint_n (call $write_varint (i32.const 131080) (local.get $inner_len)))
+    (local.set $frame_ptr (i32.sub (i32.add (global.get $REBUILD_BUF) (i32.const 16)) (local.get $pkt_varint_n)))
+    (call $memcpy (local.get $frame_ptr) (i32.const 131080) (local.get $pkt_varint_n))
+    (i32.store (i32.const 65552) (local.get $total_len))
+    (i32.store (i32.const 65556) (local.get $frame_ptr))
+    (i32.store (i32.const 65560) (i32.add (local.get $pkt_varint_n) (local.get $inner_len)))
+    (global.set $last_consumed (local.get $total_len))
+    (call $pack_result (call $rewrite_action (local.get $class)) (i32.const 65552))
+  )
+
+  (func $maybe_expand_ident
+    (param $pid_ptr i32)
+    (param $pid_n i32)
+    (param $pkt_end i32)
+    (param $total_len i32)
+    (param $compressed_framing i32)
+    (result i64)
+    (local $ident_ptr i32)
+    (local $tmp i64)
+    (local $ident_len i32)
+    (local $ident_n i32)
+    (local $index i32)
+    (local $index_n i32)
+    (local $resolved_len i32)
+    (local $rest_ptr i32)
+    (local $rest_len i32)
+    (local $out_p i32)
+    (local $n i32)
+    (local $inner_len i32)
+    (local $pkt_varint_n i32)
+    (local $frame_ptr i32)
+    (local $pid i32)
+
+    (local.set $tmp (call $read_varint (local.get $pid_ptr) (local.get $pkt_end)))
+    (local.set $pid (i32.wrap_i64 (local.get $tmp)))
+    (if (i32.eqz (call $is_custom_payload (local.get $pid)))
+      (then (return (i64.const 0)))
+    )
+    (local.set $ident_ptr (i32.add (local.get $pid_ptr) (local.get $pid_n)))
+    (if (i32.ge_u (local.get $ident_ptr) (local.get $pkt_end))
+      (then (return (i64.const 0)))
+    )
+    (local.set $tmp (call $read_varint (local.get $ident_ptr) (local.get $pkt_end)))
+    (local.set $ident_len (i32.wrap_i64 (local.get $tmp)))
+    (local.set $ident_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+    (if (i32.eqz (local.get $ident_n))
+      (then (return (i64.const 0)))
+    )
+    (if (i32.gt_s (local.get $ident_len) (i32.const 0))
+      (then
+        (drop (call $sym_intern (i32.add (local.get $ident_ptr) (local.get $ident_n)) (local.get $ident_len)))
+        (return (i64.const 0))
+      )
+    )
+    (local.set $tmp (call $read_varint (i32.add (local.get $ident_ptr) (local.get $ident_n)) (local.get $pkt_end)))
+    (local.set $index (i32.wrap_i64 (local.get $tmp)))
+    (local.set $index_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
+    (if (i32.eqz (local.get $index_n))
+      (then (return (i64.const 0)))
+    )
+    (local.set $resolved_len
+      (call $sym_resolve (local.get $index) (i32.const 134048) (i32.const 1024))
+    )
+    (if (i32.le_s (local.get $resolved_len) (i32.const 0))
+      (then (return (i64.const 0)))
+    )
+    (local.set $rest_ptr (i32.add (i32.add (local.get $ident_ptr) (local.get $ident_n)) (local.get $index_n)))
+    (local.set $rest_len (i32.sub (local.get $pkt_end) (local.get $rest_ptr)))
+    (local.set $out_p (i32.add (global.get $REBUILD_BUF) (i32.const 16)))
+    (if (local.get $compressed_framing)
+      (then
+        (local.set $n (call $write_varint (local.get $out_p) (i32.const 0)))
+        (local.set $out_p (i32.add (local.get $out_p) (local.get $n)))
+      )
+    )
+    (call $memcpy (local.get $out_p) (local.get $pid_ptr) (local.get $pid_n))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $pid_n)))
+    (local.set $n (call $write_varint (local.get $out_p) (local.get $resolved_len)))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $n)))
+    (call $memcpy (local.get $out_p) (i32.const 134048) (local.get $resolved_len))
+    (local.set $out_p (i32.add (local.get $out_p) (local.get $resolved_len)))
+    (if (i32.gt_s (local.get $rest_len) (i32.const 0))
+      (then
+        (call $memcpy (local.get $out_p) (local.get $rest_ptr) (local.get $rest_len))
+        (local.set $out_p (i32.add (local.get $out_p) (local.get $rest_len)))
+      )
+    )
+    (local.set $inner_len (i32.sub (local.get $out_p) (i32.add (global.get $REBUILD_BUF) (i32.const 16))))
+    (local.set $pkt_varint_n (call $write_varint (i32.const 131080) (local.get $inner_len)))
+    (local.set $frame_ptr (i32.sub (i32.add (global.get $REBUILD_BUF) (i32.const 16)) (local.get $pkt_varint_n)))
+    (call $memcpy (local.get $frame_ptr) (i32.const 131080) (local.get $pkt_varint_n))
+    (i32.store (i32.const 65552) (local.get $total_len))
+    (i32.store (i32.const 65556) (local.get $frame_ptr))
+    (i32.store (i32.const 65560) (i32.add (local.get $pkt_varint_n) (local.get $inner_len)))
+    (global.set $last_consumed (local.get $total_len))
+    (call $pack_result (i32.const 3) (i32.const 65552))
   )
 
   ;; ---------------------------------------------------------------------------
@@ -935,7 +1173,7 @@
     ;; Full packet sliced! Total packet bytes = varint_len + packet_length
     ;; If packet payload is empty (pkt_len == 0): FRAME_DEFER
     (if (i32.eq (local.get $pkt_len) (i32.const 0))
-      (then (return (call $finish_frame (i32.const 1) (local.get $total_len))))
+      (then (return (call $finish_frame (i32.const 0) (local.get $total_len))))
     )
 
     (local.set $p (i32.add (local.get $buf_ptr) (local.get $len_n)))
@@ -980,8 +1218,15 @@
 
             (global.set $last_consumed (local.get $total_len))
             (global.set $compression_enabled (i32.const 1))
-            ;; Decompressed game payloads must always defer so they batch into the zstd stream.
-            (return (call $pack_result (i32.const 3) (i32.const 65552)))
+            (local.set $tmp (call $read_varint
+              (i32.add (global.get $DECOMP_BUF) (i32.const 16))
+              (i32.add (i32.add (global.get $DECOMP_BUF) (i32.const 16)) (local.get $decomp_len))
+            ))
+            (local.set $pid (i32.wrap_i64 (local.get $tmp)))
+            (return (call $pack_result
+              (call $rewrite_action (call $packet_class (local.get $pid)))
+              (i32.const 65552)
+            ))
           )
         )
       )
@@ -1004,7 +1249,7 @@
     (local.set $pid_n (i32.wrap_i64 (i64.shr_u (local.get $tmp) (i64.const 32))))
 
     (if (i32.eq (local.get $pid_n) (i32.const 0))
-      (then (return (call $finish_frame (i32.const 1) (local.get $total_len))))
+      (then (return (call $finish_frame (i32.const 0) (local.get $total_len))))
     )
 
     (call $session_hooks
@@ -1013,13 +1258,25 @@
       (i32.add (local.get $buf_ptr) (local.get $total_len))
     )
 
-    (if (call $is_urgent_packet (local.get $pid))
+    (local.set $is_urgent (call $packet_class (local.get $pid)))
+    (if (call $is_custom_payload (local.get $pid))
       (then
-        (return (call $finish_frame (i32.const 2) (local.get $total_len)))
+        (local.set $tmp
+          (call $maybe_compact_ident
+            (local.get $p)
+            (local.get $pid_n)
+            (i32.add (local.get $buf_ptr) (local.get $total_len))
+            (local.get $total_len)
+            (local.get $is_urgent)
+            (global.get $compression_enabled)
+          )
+        )
+        (if (i64.ne (local.get $tmp) (i64.const 0))
+          (then (return (local.get $tmp)))
+        )
       )
     )
-
-    (call $finish_frame (i32.const 1) (local.get $total_len))
+    (call $finish_frame (local.get $is_urgent) (local.get $total_len))
   )
 
   ;; ---------------------------------------------------------------------------
@@ -1138,6 +1395,18 @@
           (local.get $pid)
           (i32.add (local.get $body_ptr) (local.get $pid_n))
           (i32.add (local.get $buf_ptr) (local.get $total_len))
+        )
+        (local.set $tmp
+          (call $maybe_expand_ident
+            (local.get $body_ptr)
+            (local.get $pid_n)
+            (i32.add (local.get $buf_ptr) (local.get $total_len))
+            (local.get $total_len)
+            (global.get $compression_enabled)
+          )
+        )
+        (if (i64.ne (local.get $tmp) (i64.const 0))
+          (then (return (local.get $tmp)))
         )
       )
     )

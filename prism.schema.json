@@ -698,8 +698,13 @@
 				},
 				"flush_interval_ms": {
 					"$ref": "#/$defs/ms",
-					"description": "Base time-slice aggregation interval in milliseconds (default 20). Adaptive flush may vary this between min and max.",
+					"description": "Downlink time-slice aggregation interval in milliseconds (default 20). Adaptive flush may vary this between min and max.",
 					"default": 20
+				},
+				"flush_interval_uplink_ms": {
+					"$ref": "#/$defs/ms",
+					"description": "Uplink time-slice aggregation interval in milliseconds (default 8).",
+					"default": 8
 				},
 				"flush_interval_min_ms": {
 					"$ref": "#/$defs/ms",

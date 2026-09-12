@@ -580,6 +580,7 @@ pub struct ManagedOptimizerDocument {
     #[serde(default)]
     pub enabled: bool,
     pub flush_interval_ms: Option<u64>,
+    pub flush_interval_uplink_ms: Option<u64>,
     pub flush_interval_min_ms: Option<u64>,
     pub flush_interval_max_ms: Option<u64>,
     pub adaptive_flush: Option<bool>,
@@ -844,6 +845,7 @@ impl Default for AcmeConfig {
 pub struct OptimizerConfig {
     pub enabled: bool,
     pub flush_interval_ms: Option<u64>,
+    pub flush_interval_uplink_ms: Option<u64>,
     pub flush_interval_min_ms: Option<u64>,
     pub flush_interval_max_ms: Option<u64>,
     pub adaptive_flush: Option<bool>,
@@ -861,6 +863,7 @@ impl Default for OptimizerConfig {
         Self {
             enabled: false,
             flush_interval_ms: Some(20),
+            flush_interval_uplink_ms: Some(8),
             flush_interval_min_ms: Some(8),
             flush_interval_max_ms: Some(50),
             adaptive_flush: Some(true),
@@ -879,6 +882,10 @@ impl Default for OptimizerConfig {
 impl OptimizerConfig {
     pub fn flush_interval_ms(&self) -> u64 {
         self.flush_interval_ms.unwrap_or(20)
+    }
+
+    pub fn flush_interval_uplink_ms(&self) -> u64 {
+        self.flush_interval_uplink_ms.unwrap_or(8)
     }
 
     pub fn flush_interval_min_ms(&self) -> u64 {
@@ -1217,6 +1224,7 @@ struct FileOptimizer {
     #[serde(default)]
     enabled: bool,
     flush_interval_ms: Option<u64>,
+    flush_interval_uplink_ms: Option<u64>,
     flush_interval_min_ms: Option<u64>,
     flush_interval_max_ms: Option<u64>,
     adaptive_flush: Option<bool>,
@@ -1627,6 +1635,7 @@ impl Config {
                     let optimizer = s.optimizer.as_ref().map(|to| OptimizerConfig {
                         enabled: to.enabled,
                         flush_interval_ms: Some(to.flush_interval_ms.unwrap_or(20)),
+                        flush_interval_uplink_ms: to.flush_interval_uplink_ms,
                         flush_interval_min_ms: to.flush_interval_min_ms,
                         flush_interval_max_ms: to.flush_interval_max_ms,
                         adaptive_flush: to.adaptive_flush,
@@ -2135,6 +2144,7 @@ pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::
                         optimizer: service.optimizer.as_ref().map(|to| FileOptimizer {
                             enabled: to.enabled,
                             flush_interval_ms: to.flush_interval_ms,
+                            flush_interval_uplink_ms: to.flush_interval_uplink_ms,
                             flush_interval_min_ms: to.flush_interval_min_ms,
                             flush_interval_max_ms: to.flush_interval_max_ms,
                             adaptive_flush: to.adaptive_flush,

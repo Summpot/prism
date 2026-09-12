@@ -31,6 +31,8 @@ pub async fn run(
         tracing::warn!(path = %resolved.path.display(), source = %resolved.source, "config: created new config file");
     }
 
+    tunnel::optimizer::set_dictionary_dir(paths.workdir.join("optimizer-dicts"));
+
     let created_mws = middleware::materialize_default_middlewares(&paths.middleware_dir)
         .with_context(|| {
             format!(

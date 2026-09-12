@@ -27,8 +27,11 @@ pub use dict::*;
 pub use stats::*;
 
 pub const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(20);
+pub const DEFAULT_FLUSH_INTERVAL_UPLINK: Duration = Duration::from_millis(8);
 pub const DEFAULT_FLUSH_INTERVAL_MIN: Duration = Duration::from_millis(8);
 pub const DEFAULT_FLUSH_INTERVAL_MAX: Duration = Duration::from_millis(50);
+pub const DEFAULT_FLUSH_INTERVAL_HIGH: Duration = Duration::from_millis(8);
+pub const DEFAULT_FLUSH_INTERVAL_BULK: Duration = Duration::from_millis(40);
 pub const DEFAULT_BUFFER_THRESHOLD: usize = 64 * 1024; // 64 KB
 pub const DEFAULT_BUFFER_THRESHOLD_UPLINK: usize = 16 * 1024;
 pub const DEFAULT_ZSTD_LEVEL: i32 = 3;
@@ -61,6 +64,7 @@ fn unpack_frame_header(header: [u8; 4]) -> (usize, u32) {
 pub struct OptimizerConfig {
     pub enabled: bool,
     pub flush_interval: Duration,
+    pub flush_interval_uplink: Duration,
     pub flush_interval_min: Duration,
     pub flush_interval_max: Duration,
     pub adaptive_flush: bool,
@@ -78,6 +82,7 @@ impl Default for OptimizerConfig {
         Self {
             enabled: false,
             flush_interval: DEFAULT_FLUSH_INTERVAL,
+            flush_interval_uplink: DEFAULT_FLUSH_INTERVAL_UPLINK,
             flush_interval_min: DEFAULT_FLUSH_INTERVAL_MIN,
             flush_interval_max: DEFAULT_FLUSH_INTERVAL_MAX,
             adaptive_flush: true,
@@ -107,6 +112,13 @@ impl OptimizerConfig {
         }
     }
 
+    pub fn flush_interval_for(&self, direction: TrafficDirection) -> Duration {
+        match direction {
+            TrafficDirection::Uplink => self.flush_interval_uplink,
+            TrafficDirection::Downlink => self.flush_interval,
+        }
+    }
+
     pub fn dictionary_id(&self) -> u32 {
         self.dictionary
             .as_deref()
@@ -125,6 +137,7 @@ impl From<&ManagedOptimizerDocument> for OptimizerConfig {
         Self {
             enabled: doc.enabled,
             flush_interval: opt_ms(doc.flush_interval_ms, 20),
+            flush_interval_uplink: opt_ms(doc.flush_interval_uplink_ms, 8),
             flush_interval_min: opt_ms(doc.flush_interval_min_ms, 8),
             flush_interval_max: opt_ms(doc.flush_interval_max_ms, 50),
             adaptive_flush: doc.adaptive_flush.unwrap_or(true),
@@ -163,6 +176,7 @@ impl From<&PrismOptimizerConfig> for OptimizerConfig {
         Self {
             enabled: cfg.enabled,
             flush_interval: Duration::from_millis(cfg.flush_interval_ms()),
+            flush_interval_uplink: Duration::from_millis(cfg.flush_interval_uplink_ms()),
             flush_interval_min: Duration::from_millis(cfg.flush_interval_min_ms()),
             flush_interval_max: Duration::from_millis(cfg.flush_interval_max_ms()),
             adaptive_flush: cfg.adaptive_flush(),
@@ -209,8 +223,11 @@ pub fn adaptive_flush_interval(
         return base;
     }
 
-    let mut ms = base_ms;
-    if snap.link_rate_measured {
+    let mut ms;
+    if !snap.link_rate_measured {
+        // No drain backpressure yet: prefer latency (loopback / idle links).
+        ms = min_ms;
+    } else {
         // Fast links: cut queuing delay. Slow links: wait for more compressible data.
         let rate = snap.link_rate_bps;
         if rate >= 100_000_000.0 {
@@ -236,6 +253,8 @@ pub fn adaptive_flush_interval(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatcherConfig {
     pub flush_interval: Duration,
+    pub high_flush_interval: Duration,
+    pub bulk_flush_interval: Duration,
     pub buffer_threshold: usize,
 }
 
@@ -243,7 +262,20 @@ impl Default for BatcherConfig {
     fn default() -> Self {
         Self {
             flush_interval: DEFAULT_FLUSH_INTERVAL,
+            high_flush_interval: DEFAULT_FLUSH_INTERVAL_HIGH,
+            bulk_flush_interval: DEFAULT_FLUSH_INTERVAL_BULK,
             buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
+        }
+    }
+}
+
+impl BatcherConfig {
+    fn interval_for(&self, priority: FramePriority) -> Duration {
+        match priority {
+            FramePriority::Urgent => Duration::ZERO,
+            FramePriority::High => self.high_flush_interval,
+            FramePriority::Defer => self.flush_interval,
+            FramePriority::Bulk => self.bulk_flush_interval,
         }
     }
 }
@@ -260,12 +292,20 @@ pub struct Batcher {
     config: BatcherConfig,
     buffer: Vec<u8>,
     first_frame_at: Option<Instant>,
+    earliest_deadline: Option<Instant>,
 }
 
 impl Batcher {
     /// Updates the time-slice interval (used by adaptive flush).
     pub fn set_flush_interval(&mut self, interval: Duration) {
-        self.config.flush_interval = interval.max(Duration::from_millis(1));
+        let interval = interval.max(Duration::from_millis(1));
+        self.config.flush_interval = interval;
+        if let (Some(start), Some(deadline)) = (self.first_frame_at, self.earliest_deadline) {
+            let candidate = start + interval;
+            if candidate < deadline {
+                self.earliest_deadline = Some(candidate);
+            }
+        }
     }
 
     /// Creates a new `Batcher` with the specified configuration.
@@ -275,6 +315,7 @@ impl Batcher {
             config,
             buffer: Vec::with_capacity(capacity),
             first_frame_at: None,
+            earliest_deadline: None,
         }
     }
 
@@ -311,11 +352,11 @@ impl Batcher {
 
     /// Returns the remaining duration until flush at a specific timestamp.
     pub fn time_until_flush_at(&self, now: Instant) -> Option<Duration> {
-        self.first_frame_at.map(|start| {
-            if now >= start + self.config.flush_interval {
+        self.earliest_deadline.map(|deadline| {
+            if now >= deadline {
                 Duration::ZERO
             } else {
-                (start + self.config.flush_interval) - now
+                deadline - now
             }
         })
     }
@@ -341,24 +382,25 @@ impl Batcher {
 
         self.buffer.extend_from_slice(frame);
 
-        match priority {
-            FramePriority::Urgent => {
-                // High-priority frames immediately trigger flush (0 extra queuing delay).
-                Some(self.flush())
-            }
-            FramePriority::Defer => {
-                let time_reached = self
-                    .first_frame_at
-                    .map(|start| now.duration_since(start) >= self.config.flush_interval)
-                    .unwrap_or(false);
-                let size_reached = self.buffer.len() >= self.config.buffer_threshold;
+        let deadline = now + self.config.interval_for(priority);
+        self.earliest_deadline = Some(match self.earliest_deadline {
+            Some(existing) if existing <= deadline => existing,
+            _ => deadline,
+        });
 
-                if time_reached || size_reached {
-                    Some(self.flush())
-                } else {
-                    None
-                }
-            }
+        if priority == FramePriority::Urgent {
+            return Some(self.flush());
+        }
+
+        let time_reached = self
+            .earliest_deadline
+            .map(|d| now >= d)
+            .unwrap_or(false);
+        let size_reached = self.buffer.len() >= self.config.buffer_threshold;
+        if time_reached || size_reached {
+            Some(self.flush())
+        } else {
+            None
         }
     }
 
@@ -373,8 +415,8 @@ impl Batcher {
             return None;
         }
 
-        if let Some(start) = self.first_frame_at {
-            if now.duration_since(start) >= self.config.flush_interval {
+        if let Some(deadline) = self.earliest_deadline {
+            if now >= deadline {
                 return Some(self.flush());
             }
         }
@@ -385,6 +427,7 @@ impl Batcher {
     /// Unconditionally flushes all buffered frames.
     pub fn flush(&mut self) -> Vec<u8> {
         self.first_frame_at = None;
+        self.earliest_deadline = None;
         if self.buffer.is_empty() {
             Vec::new()
         } else {
@@ -435,6 +478,9 @@ impl ZstdStreamCompressor {
         };
         encoder.set_parameter(CParameter::WindowLog(config.window_log))?;
         encoder.set_parameter(CParameter::ChecksumFlag(false))?;
+        if config.window_log >= 20 {
+            encoder.set_parameter(CParameter::EnableLongDistanceMatching(true))?;
+        }
         Ok(encoder)
     }
 
@@ -466,7 +512,7 @@ impl ZstdStreamCompressor {
     /// while preserving dictionary history for subsequent batches.
     pub fn compress_batch_into(&mut self, input: &[u8], output: &mut Vec<u8>) -> io::Result<()> {
         let mut in_buf = InBuffer::around(input);
-        let mut scratch = [0u8; 8192];
+        let mut scratch = [0u8; 65536];
 
         while in_buf.pos() < in_buf.src.len() {
             let mut out = OutBuffer::around(&mut scratch);
@@ -557,7 +603,7 @@ impl ZstdStreamDecompressor {
         output: &mut Vec<u8>,
     ) -> io::Result<()> {
         let mut in_buf = InBuffer::around(compressed);
-        let mut scratch = [0u8; 8192];
+        let mut scratch = [0u8; 65536];
 
         while in_buf.pos() < in_buf.src.len() {
             let mut out = OutBuffer::around(&mut scratch);
@@ -609,8 +655,10 @@ pub fn encode_batch(
 
 /// Encodes a raw batch into an existing buffer as `[header: u32 BE][payload]`.
 ///
-/// The header stores the payload length in the low 30 bits. [`FRAME_FLAG_RAW`] is set
-/// when zstd would not shrink the batch, so the payload is the original bytes.
+/// The header stores the payload length in the low 30 bits.
+///
+/// [`FRAME_FLAG_RAW`] is accepted by the decoder for compatibility but is never
+/// set here: a raw payload would desynchronize the decoder's sliding window.
 pub fn encode_batch_into(
     compressor: &mut ZstdStreamCompressor,
     raw_batch: &[u8],
@@ -624,9 +672,6 @@ pub fn encode_batch_into(
     let payload_start = output.len();
 
     compressor.compress_batch_into(raw_batch, output)?;
-    // Always emit a zstd block. Sending a parallel uncompressed payload would
-    // desynchronize the decoder's sliding window, which is built from decoded
-    // zstd output. zstd already stores incompressible input as raw blocks.
     let payload_len = output.len() - payload_start;
     let header = pack_frame_header(payload_len, 0);
     output[header_start..header_start + 4].copy_from_slice(&header);
@@ -915,7 +960,9 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         if let Some(batch) = self.batcher.push(frame, priority) {
             match priority {
                 FramePriority::Urgent => self.record_urgent(),
-                FramePriority::Defer => self.record_threshold(),
+                FramePriority::Defer | FramePriority::High | FramePriority::Bulk => {
+                    self.record_threshold()
+                }
             }
             let start = Instant::now();
             let framed = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
@@ -1495,6 +1542,7 @@ mod tests {
         let config = BatcherConfig {
             flush_interval: Duration::from_millis(20),
             buffer_threshold: 64 * 1024,
+            ..Default::default()
         };
         let mut batcher = Batcher::new(config);
         let base_time = Instant::now();
@@ -1539,6 +1587,7 @@ mod tests {
         let config = BatcherConfig {
             flush_interval: Duration::from_millis(20),
             buffer_threshold: 64 * 1024,
+            ..Default::default()
         };
         let mut batcher = Batcher::new(config);
         let base_time = Instant::now();
@@ -1578,6 +1627,43 @@ mod tests {
 
         assert_eq!(flushed, vec![0x01, 0x02, 0x99, 0x88]);
         assert!(batcher.is_empty());
+    }
+
+    #[test]
+    fn test_batcher_high_shortens_bulk_deadline() {
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(40),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut batcher = Batcher::new(config);
+        let base = Instant::now();
+
+        assert!(
+            batcher
+                .push_at(&[0x01], FramePriority::Bulk, base)
+                .is_none()
+        );
+        assert_eq!(
+            batcher.time_until_flush_at(base),
+            Some(Duration::from_millis(40))
+        );
+
+        assert!(
+            batcher
+                .push_at(&[0x02], FramePriority::High, base + Duration::from_millis(1))
+                .is_none()
+        );
+        assert_eq!(
+            batcher.time_until_flush_at(base + Duration::from_millis(1)),
+            Some(Duration::from_millis(8))
+        );
+
+        let flushed = batcher
+            .check_timer_at(base + Duration::from_millis(9))
+            .expect("high deadline");
+        assert_eq!(flushed, vec![0x01, 0x02]);
     }
 
     #[test]
@@ -1716,6 +1802,7 @@ mod tests {
         let config = BatcherConfig {
             flush_interval: Duration::from_millis(20),
             buffer_threshold: 64 * 1024,
+            ..Default::default()
         };
         let mut writer =
             OptimizedWriter::new(client_io, config, CompressorConfig::default()).unwrap();

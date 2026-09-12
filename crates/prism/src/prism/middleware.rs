@@ -329,8 +329,30 @@ pub enum HandshakeResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FramePriority {
+    /// Default time-slice (typically 20ms).
     Defer = 1,
+    /// Flush immediately. Safe to bypass a large pending batch on a side channel.
     Urgent = 2,
+    /// Short queue (typically 8ms). Ordered with Defer/Bulk.
+    High = 3,
+    /// Long queue (typically 40ms). Ordered with Defer/High.
+    Bulk = 4,
+}
+
+impl FramePriority {
+    fn from_stream_action(action: u32) -> Option<(Self, bool)> {
+        match action {
+            1 => Some((Self::Defer, false)),
+            2 => Some((Self::Urgent, false)),
+            5 => Some((Self::High, false)),
+            7 => Some((Self::Bulk, false)),
+            3 => Some((Self::Defer, true)),
+            4 => Some((Self::Urgent, true)),
+            8 => Some((Self::High, true)),
+            9 => Some((Self::Bulk, true)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -670,10 +692,33 @@ impl Default for DynamicSymbolTable {
 /// cannot clobber driver structs, scratch, or injected key material in pages 0-15.
 pub const WASM_INPUT_OFFSET: usize = 0x100000;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct HostEnv {
-    pub sym_table: Arc<Mutex<DynamicSymbolTable>>,
+    pub sym_table_from_client: Arc<Mutex<DynamicSymbolTable>>,
+    pub sym_table_from_server: Arc<Mutex<DynamicSymbolTable>>,
+    pub flow_from_server: bool,
     pub announced: Vec<Vec<u8>>,
+}
+
+impl Default for HostEnv {
+    fn default() -> Self {
+        Self {
+            sym_table_from_client: Arc::new(Mutex::new(DynamicSymbolTable::default())),
+            sym_table_from_server: Arc::new(Mutex::new(DynamicSymbolTable::default())),
+            flow_from_server: false,
+            announced: Vec::new(),
+        }
+    }
+}
+
+impl HostEnv {
+    fn active_sym_table(&self) -> &Arc<Mutex<DynamicSymbolTable>> {
+        if self.flow_from_server {
+            &self.sym_table_from_server
+        } else {
+            &self.sym_table_from_client
+        }
+    }
 }
 
 /// Standalone RSA PKCS#1 v1.5 decryption helper.
@@ -1087,7 +1132,7 @@ pub fn host_sym_intern(mut caller: Caller<'_, HostEnv>, str_ptr: i32, str_len: i
         return -1;
     }
 
-    let table_arc = caller.data().sym_table.clone();
+    let table_arc = caller.data().active_sym_table().clone();
     let mut table = table_arc.lock().unwrap();
     table.intern(&sym_bytes)
 }
@@ -1101,7 +1146,7 @@ pub fn host_sym_resolve(
     if index <= 0 || out_ptr < 0 || max_len < 0 {
         return -1;
     }
-    let table_arc = caller.data().sym_table.clone();
+    let table_arc = caller.data().active_sym_table().clone();
     let sym_bytes = {
         let table = table_arc.lock().unwrap();
         match table.resolve(index) {
@@ -1160,6 +1205,34 @@ pub fn host_announce_session_data(
     0
 }
 
+pub fn host_mem_copy(
+    mut caller: Caller<'_, HostEnv>,
+    dst: i32,
+    src: i32,
+    n: i32,
+) -> i32 {
+    if n <= 0 {
+        return 0;
+    }
+    if dst < 0 || src < 0 {
+        return -1;
+    }
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return -1,
+    };
+    let mem_size = memory.data_size(&caller);
+    let n = n as usize;
+    let dst = dst as usize;
+    let src = src as usize;
+    if dst.saturating_add(n) > mem_size || src.saturating_add(n) > mem_size {
+        return -2;
+    }
+    let data = memory.data_mut(&mut caller);
+    data.copy_within(src..src + n, dst);
+    0
+}
+
 pub fn create_prism_linker(engine: &Engine) -> anyhow::Result<Linker<HostEnv>> {
     let mut linker = Linker::new(engine);
     linker.func_wrap("prism", "crypto_rsa_decrypt", host_crypto_rsa_decrypt)?;
@@ -1169,6 +1242,7 @@ pub fn create_prism_linker(engine: &Engine) -> anyhow::Result<Linker<HostEnv>> {
     linker.func_wrap("prism", "sym_intern", host_sym_intern)?;
     linker.func_wrap("prism", "sym_resolve", host_sym_resolve)?;
     linker.func_wrap("prism", "announce_session_data", host_announce_session_data)?;
+    linker.func_wrap("prism", "mem_copy", host_mem_copy)?;
     Ok(linker)
 }
 
@@ -1181,6 +1255,12 @@ pub struct WasmProtocolSession {
     #[allow(dead_code)]
     set_data_fn: Option<TypedFunc<(i32, i32), i32>>,
     state: SessionState,
+    /// Bytes currently valid at [`WASM_INPUT_OFFSET`].
+    input_len: usize,
+    /// Prefix of `input_len` consumed by the last streaming frame, if any.
+    last_consumed: usize,
+    input_head: [u8; 8],
+    input_head_len: usize,
 }
 
 #[allow(dead_code)]
@@ -1210,6 +1290,10 @@ impl WasmProtocolSession {
             poll_fn,
             set_data_fn,
             state: SessionState::Handshake,
+            input_len: 0,
+            last_consumed: 0,
+            input_head: [0u8; 8],
+            input_head_len: 0,
         })
     }
 
@@ -1242,7 +1326,7 @@ impl WasmProtocolSession {
     }
 
     pub fn sym_table(&self) -> Arc<Mutex<DynamicSymbolTable>> {
-        self.store.data().sym_table.clone()
+        self.store.data().active_sym_table().clone()
     }
 
     pub fn memory(&self) -> &Memory {
@@ -1301,6 +1385,7 @@ impl WasmProtocolSession {
 
     /// `from_server = true` means the buffer is origin→client (clientbound).
     pub fn set_flow_direction(&mut self, from_server: bool) {
+        self.store.data_mut().flow_from_server = from_server;
         let dir = if from_server { 1i32 } else { 0i32 };
         if let Ok(func) = self
             .instance
@@ -1473,16 +1558,7 @@ impl WasmProtocolSession {
         Ok(())
     }
 
-    pub fn poll(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
-        let poll_fn = match &self.poll_fn {
-            Some(f) => f.clone(),
-            None => {
-                return Err(MiddlewareError::Fatal(
-                    "wasm module missing 'poll' export".into(),
-                ));
-            }
-        };
-
+    fn write_poll_input(&mut self, buf: &[u8]) -> Result<(), MiddlewareError> {
         let needed = WASM_INPUT_OFFSET + buf.len() + 65536;
         let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
@@ -1493,11 +1569,84 @@ impl WasmProtocolSession {
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
         }
 
+        if self.state == SessionState::Handshake {
+            if !buf.is_empty() {
+                self.memory
+                    .write(&mut self.store, WASM_INPUT_OFFSET, buf)
+                    .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
+            }
+            self.input_len = buf.len();
+            self.last_consumed = 0;
+            return Ok(());
+        }
+
+        if self.last_consumed > 0 && self.input_len >= self.last_consumed {
+            let remain = self.input_len - self.last_consumed;
+            if remain > 0 {
+                let data = self.memory.data_mut(&mut self.store);
+                let src = WASM_INPUT_OFFSET + self.last_consumed;
+                data.copy_within(src..src + remain, WASM_INPUT_OFFSET);
+            }
+            if buf.len() > remain {
+                self.memory
+                    .write(
+                        &mut self.store,
+                        WASM_INPUT_OFFSET + remain,
+                        &buf[remain..],
+                    )
+                    .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
+            }
+            self.input_len = buf.len();
+            self.last_consumed = 0;
+            self.remember_input_head(buf);
+            return Ok(());
+        }
+
+        if self.last_consumed == 0
+            && self.input_len > 0
+            && buf.len() >= self.input_len
+            && buf.get(..self.input_head_len) == Some(&self.input_head[..self.input_head_len])
+        {
+            if buf.len() > self.input_len {
+                self.memory
+                    .write(
+                        &mut self.store,
+                        WASM_INPUT_OFFSET + self.input_len,
+                        &buf[self.input_len..],
+                    )
+                    .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
+            }
+            self.input_len = buf.len();
+            return Ok(());
+        }
+
         if !buf.is_empty() {
             self.memory
                 .write(&mut self.store, WASM_INPUT_OFFSET, buf)
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
         }
+        self.input_len = buf.len();
+        self.last_consumed = 0;
+        self.remember_input_head(buf);
+        Ok(())
+    }
+
+    fn remember_input_head(&mut self, buf: &[u8]) {
+        self.input_head_len = buf.len().min(8);
+        self.input_head[..self.input_head_len].copy_from_slice(&buf[..self.input_head_len]);
+    }
+
+    pub fn poll(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
+        let poll_fn = match &self.poll_fn {
+            Some(f) => f.clone(),
+            None => {
+                return Err(MiddlewareError::Fatal(
+                    "wasm module missing 'poll' export".into(),
+                ));
+            }
+        };
+
+        self.write_poll_input(buf)?;
 
         let res = poll_fn
             .call(
@@ -1571,12 +1720,20 @@ impl WasmProtocolSession {
                     }
 
                     self.state = SessionState::Streaming;
+                    self.input_len = 0;
+                    self.last_consumed = 0;
+                    self.input_head_len = 0;
                     Ok(PollResult::Handshake(HandshakeResult::RouteMatch {
                         host,
                         rewrite,
                     }))
                 }
-                2 => Ok(PollResult::Handshake(HandshakeResult::NoMatch)),
+                2 => {
+                    self.input_len = 0;
+                    self.last_consumed = 0;
+                    self.input_head_len = 0;
+                    Ok(PollResult::Handshake(HandshakeResult::NoMatch))
+                }
                 other => Err(MiddlewareError::Fatal(format!(
                     "invalid handshake action code: {other}"
                 ))),
@@ -1584,17 +1741,21 @@ impl WasmProtocolSession {
             SessionState::Streaming | SessionState::StreamingEgress => match action {
                 0 => Ok(PollResult::Stream(StreamResult::NeedMoreData)),
                 6 => Ok(PollResult::Stream(StreamResult::Blocked)),
-                1 => Ok(PollResult::Stream(StreamResult::Frame {
-                    len: value as usize,
-                    priority: FramePriority::Defer,
-                    payload: None,
-                })),
-                2 => Ok(PollResult::Stream(StreamResult::Frame {
-                    len: value as usize,
-                    priority: FramePriority::Urgent,
-                    payload: None,
-                })),
-                3 | 4 => {
+                action => {
+                    let Some((priority, rewritten)) = FramePriority::from_stream_action(action)
+                    else {
+                        return Err(MiddlewareError::Fatal(format!(
+                            "invalid streaming action code: {action}"
+                        )));
+                    };
+                    if !rewritten {
+                        self.last_consumed = value as usize;
+                        return Ok(PollResult::Stream(StreamResult::Frame {
+                            len: value as usize,
+                            priority,
+                            payload: None,
+                        }));
+                    }
                     let mem_size = self.memory.data_size(&self.store);
                     let ptr = value as usize;
                     if ptr + 12 > mem_size {
@@ -1628,21 +1789,13 @@ impl WasmProtocolSession {
                             MiddlewareError::Fatal(format!("read stream payload failed: {e}"))
                         })?;
 
-                    let priority = if action == 4 {
-                        FramePriority::Urgent
-                    } else {
-                        FramePriority::Defer
-                    };
-
+                    self.last_consumed = consumed_len;
                     Ok(PollResult::Stream(StreamResult::Frame {
                         len: consumed_len,
                         priority,
                         payload: Some(payload),
                     }))
                 }
-                other => Err(MiddlewareError::Fatal(format!(
-                    "invalid streaming action code: {other}"
-                ))),
             },
         }
     }
@@ -2159,20 +2312,17 @@ mod tests {
     }
 
     fn mc_handshake_prelude(host: &str, port: u16) -> Vec<u8> {
-        // Minecraft handshake packet (status/login):
-        // packet_len VarInt
-        // packet_id VarInt (0)
-        // protocol_version VarInt (use 47)
-        // server_address String (VarInt len + bytes)
-        // server_port u16be
-        // next_state VarInt (1)
+        mc_handshake_prelude_proto(host, port, 47, 1)
+    }
+
+    fn mc_handshake_prelude_proto(host: &str, port: u16, protocol: u32, next_state: u32) -> Vec<u8> {
         let mut pkt = Vec::new();
         push_varint(0, &mut pkt); // packet id
-        push_varint(47, &mut pkt);
+        push_varint(protocol, &mut pkt);
         push_varint(host.len() as u32, &mut pkt);
         pkt.extend_from_slice(host.as_bytes());
         pkt.extend_from_slice(&port.to_be_bytes());
-        push_varint(1, &mut pkt);
+        push_varint(next_state, &mut pkt);
 
         let mut out = Vec::new();
         push_varint(pkt.len() as u32, &mut out);
@@ -3191,6 +3341,138 @@ mod tests {
                 assert_eq!(priority, FramePriority::Urgent);
             }
             other => panic!("expected status ping to be urgent after handshake, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_minecraft_play_priority_classes_proto_772() {
+        let wat = get_default_middleware_wat("minecraft").unwrap();
+        let mut session = WasmProtocolSession::from_wat(wat).expect("session");
+        session.set_state(SessionState::Streaming);
+        session.set_flow_direction(false);
+
+        let hs = mc_handshake_prelude_proto("play.example.com", 25565, 772, 2);
+        match session.poll(&hs).unwrap() {
+            PollResult::Stream(StreamResult::Frame { .. }) => {}
+            other => panic!("expected handshake frame, got {other:?}"),
+        }
+        session.set_conn_state(4);
+
+        let mut ka = Vec::new();
+        push_varint(0x1B, &mut ka);
+        ka.extend_from_slice(&[0u8; 8]);
+        let mut pkt = Vec::new();
+        push_varint(ka.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&ka);
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                assert_eq!(priority, FramePriority::Urgent);
+            }
+            other => panic!("expected keepalive urgent, got {other:?}"),
+        }
+
+        let mut move_pkt = Vec::new();
+        push_varint(0x1D, &mut move_pkt);
+        move_pkt.extend_from_slice(&[0u8; 24]);
+        let mut pkt = Vec::new();
+        push_varint(move_pkt.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&move_pkt);
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                assert_eq!(priority, FramePriority::High);
+            }
+            other => panic!("expected move high, got {other:?}"),
+        }
+
+        session.set_flow_direction(true);
+        let mut chunk = Vec::new();
+        push_varint(0x26, &mut chunk);
+        chunk.extend_from_slice(&[0u8; 32]);
+        let mut pkt = Vec::new();
+        push_varint(chunk.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&chunk);
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                assert_eq!(priority, FramePriority::Bulk);
+            }
+            other => panic!("expected chunk bulk, got {other:?}"),
+        }
+
+        let mut ka = Vec::new();
+        push_varint(0x25, &mut ka);
+        ka.extend_from_slice(&[0u8; 8]);
+        let mut pkt = Vec::new();
+        push_varint(ka.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&ka);
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                assert_eq!(priority, FramePriority::Urgent);
+            }
+            other => panic!("expected clientbound keepalive urgent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_minecraft_custom_payload_identifier_intern_roundtrip() {
+        let wat = get_default_middleware_wat("minecraft").unwrap();
+        let mut ingress = WasmProtocolSession::from_wat(wat).expect("ingress");
+        let mut egress = WasmProtocolSession::from_wat(wat).expect("egress");
+        for sess in [&mut ingress, &mut egress] {
+            sess.set_state(SessionState::Streaming);
+            sess.set_flow_direction(true);
+            let hs = mc_handshake_prelude_proto("play.example.com", 25565, 772, 2);
+            match sess.poll(&hs).unwrap() {
+                PollResult::Stream(StreamResult::Frame { .. }) => {}
+                other => panic!("expected handshake frame, got {other:?}"),
+            }
+            sess.set_conn_state(4);
+        }
+
+        fn custom_payload(ident: &[u8], data: &[u8]) -> Vec<u8> {
+            let mut body = Vec::new();
+            push_varint(0x17, &mut body);
+            push_varint(ident.len() as u32, &mut body);
+            body.extend_from_slice(ident);
+            body.extend_from_slice(data);
+            let mut pkt = Vec::new();
+            push_varint(body.len() as u32, &mut pkt);
+            pkt.extend_from_slice(&body);
+            pkt
+        }
+
+        let first = custom_payload(b"demo:channel", &[1, 2, 3]);
+        match ingress.poll(&first).unwrap() {
+            PollResult::Stream(StreamResult::Frame { payload, .. }) => {
+                assert!(payload.is_none(), "first occurrence stays as identifier string");
+            }
+            other => panic!("expected first custom payload frame, got {other:?}"),
+        }
+        match egress.poll(&first).unwrap() {
+            PollResult::Stream(StreamResult::Frame { .. }) => {}
+            other => panic!("expected egress intern of first identifier, got {other:?}"),
+        }
+
+        let second = custom_payload(b"demo:channel", &[4, 5, 6]);
+        let compact = match ingress.poll(&second).unwrap() {
+            PollResult::Stream(StreamResult::Frame {
+                payload: Some(p), ..
+            }) => p,
+            other => panic!("expected compacted identifier rewrite, got {other:?}"),
+        };
+        assert!(
+            compact.len() < second.len(),
+            "interned identifier should shrink the packet"
+        );
+
+        egress.set_state(SessionState::StreamingEgress);
+        match egress.poll(&compact).unwrap() {
+            PollResult::Stream(StreamResult::Frame {
+                payload: Some(expanded),
+                ..
+            }) => {
+                assert_eq!(expanded, second, "egress must restore the identifier string");
+            }
+            other => panic!("expected expanded custom payload, got {other:?}"),
         }
     }
 

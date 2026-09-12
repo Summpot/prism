@@ -20,7 +20,7 @@ use crate::prism::tunnel::optimizer::{
     OptimizedWriter, SharedOptimizerStats, TrafficDirection, store_trained_dictionary,
 };
 use crate::prism::tunnel::protocol::{
-    self, OptimizerStreamParams, agree_dictionary,
+    self, OptimizerStreamParams, decode_dictionary, encode_dictionary,
 };
 use crate::prism::tunnel::transport::BoxedStream;
 
@@ -113,7 +113,8 @@ pub async fn run(
         }
     };
 
-    let agreed_dict = agree_dictionary(
+    let encode_dict = encode_dictionary(opts.optimizer.dictionary.as_deref());
+    let decode_dict = decode_dictionary(
         opts.optimizer.dictionary.as_deref(),
         local_id,
         &peer,
@@ -124,19 +125,27 @@ pub async fn run(
     let outbound_dir = opts.local_role.outbound_direction();
     let inbound_dir = opts.local_role.inbound_direction();
 
+    let defer_flush = opts.optimizer.flush_interval_for(outbound_dir);
     let batcher_config = BatcherConfig {
-        flush_interval: opts.optimizer.flush_interval,
+        flush_interval: defer_flush,
+        high_flush_interval: opts.optimizer.flush_interval_min,
+        bulk_flush_interval: opts.optimizer.flush_interval_max.max(defer_flush),
         buffer_threshold: opts.optimizer.buffer_threshold_for(outbound_dir),
     };
     let compressor_config = CompressorConfig {
         compression_level: opts.optimizer.zstd_level,
         window_log: encode_window,
-        dictionary: agreed_dict.clone(),
+        dictionary: encode_dict,
     };
     let decompressor_config = DecompressorConfig {
         window_log: decode_window.max(encode_window),
-        dictionary: agreed_dict,
+        dictionary: decode_dict,
     };
+
+    let skip_recompress = local
+        .peer_addr()
+        .map(|addr| addr.ip().is_loopback())
+        .unwrap_or(false);
 
     let (st_read, st_write) = tokio::io::split(tunnel);
     let (local_read, local_write) = local.into_split();
@@ -145,7 +154,7 @@ pub async fn run(
     let mw_dir = opts.middleware_dir.clone();
     // One WASM instance per stream so handshake state, compression, and the AES
     // key are shared between ingress and egress. Direction is set on each poll.
-    let wasm = load_session(mw_name.as_deref(), mw_dir.as_deref())?;
+    let wasm = load_session(mw_name.as_deref(), mw_dir.as_deref(), skip_recompress)?;
     let from_local = wasm.clone();
     let to_local = wasm;
     let from_server_out = opts.local_role.local_reads_from_server();
@@ -161,7 +170,7 @@ pub async fn run(
         .with_direction(outbound_dir)
         .with_adaptive_flush(
             opts.optimizer.adaptive_flush,
-            opts.optimizer.flush_interval,
+            defer_flush,
             opts.optimizer.flush_interval_min,
             opts.optimizer.flush_interval_max,
         );
@@ -338,6 +347,10 @@ fn maybe_sample(sampler: &mut DictSampler, bytes: &[u8]) {
     }
 }
 
+fn maybe_sample_frame(sampler: &mut DictSampler, raw: &[u8], rewritten: Option<&[u8]>) {
+    maybe_sample(sampler, rewritten.unwrap_or(raw));
+}
+
 async fn process_egress_unlocked<W: tokio::io::AsyncWrite + Unpin>(
     sess: &SessionHandle,
     pending: &mut Vec<u8>,
@@ -438,7 +451,7 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
                 if len == 0 || len > read_buf.len() {
                     break;
                 }
-                maybe_sample(sampler, &read_buf[..len]);
+                maybe_sample_frame(sampler, &read_buf[..len], payload.as_deref());
                 if let Some(ref payload) = payload {
                     opt_writer
                         .write_frame_with_metric(len, payload, priority)
@@ -479,6 +492,7 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
 fn load_session(
     mw_name: Option<&str>,
     middleware_dir: Option<&Path>,
+    skip_recompress: bool,
 ) -> anyhow::Result<Option<SessionHandle>> {
     let Some(name) = mw_name else {
         return Ok(None);
@@ -524,6 +538,14 @@ fn load_session(
         }
         if let Some(cfg) = crate::prism::middleware::get_dynamic_middleware_config(base_name) {
             let _ = guard.apply_config_map(&cfg);
+        }
+        if skip_recompress {
+            let mut skip = std::collections::HashMap::new();
+            skip.insert(
+                "recompress_threshold".to_string(),
+                serde_json::json!(0),
+            );
+            let _ = guard.apply_config_map(&skip);
         }
     }
     Ok(Some(sess))

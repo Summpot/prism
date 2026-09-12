@@ -356,6 +356,7 @@ pub async fn run_optimized_tcp_pipeline(
     let batcher_config = BatcherConfig {
         flush_interval,
         buffer_threshold: optimizer::DEFAULT_BUFFER_THRESHOLD,
+        ..Default::default()
     };
     let compressor_config = CompressorConfig {
         compression_level: zstd_level,
@@ -572,6 +573,7 @@ pub async fn run_server_optimized_tcp_pipeline(
     let batcher_config = BatcherConfig {
         flush_interval,
         buffer_threshold: optimizer::DEFAULT_BUFFER_THRESHOLD,
+        ..Default::default()
     };
     let compressor_config = CompressorConfig {
         compression_level: zstd_level,

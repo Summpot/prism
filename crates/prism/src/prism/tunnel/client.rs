@@ -965,6 +965,7 @@ async fn handle_player_connection(
         let batcher_config = BatcherConfig {
             flush_interval,
             buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
+            ..Default::default()
         };
 
         let has_wasm = wasm_module.is_some();

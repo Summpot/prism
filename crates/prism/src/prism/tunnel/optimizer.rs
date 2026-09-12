@@ -778,15 +778,20 @@ impl ZstdStreamDecompressor {
         output: &mut Vec<u8>,
     ) -> io::Result<()> {
         let mut in_buf = InBuffer::around(compressed);
-        let mut scratch = [0u8; 65536];
+        const SCRATCH_LEN: usize = 65536;
+        let mut scratch = [0u8; SCRATCH_LEN];
 
-        while in_buf.pos() < in_buf.src.len() {
+        loop {
             let mut out = OutBuffer::around(&mut scratch);
             let prev_in_pos = in_buf.pos();
             let prev_out_pos = out.pos();
 
             self.decoder.run(&mut in_buf, &mut out)?;
             output.extend_from_slice(out.as_slice());
+
+            if in_buf.pos() == in_buf.src.len() && out.pos() < SCRATCH_LEN {
+                break;
+            }
 
             if in_buf.pos() == prev_in_pos && out.pos() == prev_out_pos {
                 return Err(io::Error::new(
@@ -2713,5 +2718,59 @@ mod tests {
         reader.read_exact(&mut received).await.unwrap();
         assert_eq!(received, payload);
         assert!(reader.take_control_frames().is_empty());
+    }
+
+    #[test]
+    fn test_decompress_large_chunk() {
+        let mut compressor = ZstdStreamCompressor::with_defaults().unwrap();
+        let mut decompressor = ZstdStreamDecompressor::with_defaults().unwrap();
+        let original = vec![0x42u8; 84457];
+        let mut compressed = Vec::new();
+        compressor.compress_batch_into(&original, &mut compressed).unwrap();
+        let mut decompressed = Vec::new();
+        decompressor.decompress_chunk_into(&compressed, &mut decompressed).unwrap();
+        assert_eq!(decompressed.len(), original.len());
+        assert_eq!(decompressed, original);
+    }
+
+    #[tokio::test]
+    async fn test_interleaved_large_chunk_and_small_packets_roundtrip() {
+        let (client_io, server_io) = tokio::io::duplex(256 * 1024);
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(40),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut writer =
+            OptimizedWriter::new(client_io, config, CompressorConfig::default()).unwrap();
+        let mut reader = OptimizedReader::with_defaults(server_io).unwrap();
+
+        let chunk1: Vec<u8> = (0..84457).map(|i| (i % 251) as u8).collect();
+        let ka = b"keepalive_urgent";
+        let mv = b"move_entity_pos_high_priority!!";
+        let chunk2: Vec<u8> = (0..100000).map(|i| ((i * 7) % 251) as u8).collect();
+
+        writer.write_frame(&chunk1, FramePriority::Bulk).await.unwrap();
+        writer.write_frame(ka, FramePriority::Urgent).await.unwrap();
+        writer.write_frame(mv, FramePriority::High).await.unwrap();
+        writer.write_frame(&chunk2, FramePriority::Bulk).await.unwrap();
+        writer.flush_batch().await.unwrap();
+
+        let mut rec_chunk1 = vec![0u8; chunk1.len()];
+        reader.read_exact(&mut rec_chunk1).await.unwrap();
+        assert_eq!(rec_chunk1, chunk1);
+
+        let mut rec_ka = vec![0u8; ka.len()];
+        reader.read_exact(&mut rec_ka).await.unwrap();
+        assert_eq!(&rec_ka, ka);
+
+        let mut rec_mv = vec![0u8; mv.len()];
+        reader.read_exact(&mut rec_mv).await.unwrap();
+        assert_eq!(&rec_mv, mv);
+
+        let mut rec_chunk2 = vec![0u8; chunk2.len()];
+        reader.read_exact(&mut rec_chunk2).await.unwrap();
+        assert_eq!(rec_chunk2, chunk2);
     }
 }

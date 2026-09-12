@@ -1571,57 +1571,6 @@ impl WasmProtocolSession {
                 .map_err(|e| MiddlewareError::Fatal(format!("wasm memory grow failed: {e}")))?;
         }
 
-        if self.state == SessionState::Handshake {
-            if !buf.is_empty() {
-                self.memory
-                    .write(&mut self.store, WASM_INPUT_OFFSET, buf)
-                    .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
-            }
-            self.input_len = buf.len();
-            self.last_consumed = 0;
-            return Ok(());
-        }
-
-        if self.last_consumed > 0 && self.input_len >= self.last_consumed {
-            let remain = self.input_len - self.last_consumed;
-            if remain > 0 {
-                let data = self.memory.data_mut(&mut self.store);
-                let src = WASM_INPUT_OFFSET + self.last_consumed;
-                data.copy_within(src..src + remain, WASM_INPUT_OFFSET);
-            }
-            if buf.len() > remain {
-                self.memory
-                    .write(
-                        &mut self.store,
-                        WASM_INPUT_OFFSET + remain,
-                        &buf[remain..],
-                    )
-                    .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
-            }
-            self.input_len = buf.len();
-            self.last_consumed = 0;
-            self.remember_input_head(buf);
-            return Ok(());
-        }
-
-        if self.last_consumed == 0
-            && self.input_len > 0
-            && buf.len() >= self.input_len
-            && buf.get(..self.input_head_len) == Some(&self.input_head[..self.input_head_len])
-        {
-            if buf.len() > self.input_len {
-                self.memory
-                    .write(
-                        &mut self.store,
-                        WASM_INPUT_OFFSET + self.input_len,
-                        &buf[self.input_len..],
-                    )
-                    .map_err(|e| MiddlewareError::Fatal(format!("wasm write buf failed: {e}")))?;
-            }
-            self.input_len = buf.len();
-            return Ok(());
-        }
-
         if !buf.is_empty() {
             self.memory
                 .write(&mut self.store, WASM_INPUT_OFFSET, buf)

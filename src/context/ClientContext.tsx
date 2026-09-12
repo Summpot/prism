@@ -443,26 +443,20 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 		if (!connection || !isTunnelAdminConnection(connection)) return;
 		if (status?.state === "connected") {
 			void refreshSession();
-			return;
 		}
-		if (status && !status.running && !actionLoading) {
-			suspendSession();
-			setLoginAdminUnlocked(false);
-			if (location.pathname === "/admin" || location.pathname.startsWith("/admin/")) {
-				void navigate({ to: "/" });
-			}
+	}, [connection, refreshSession, status?.state]);
+
+	useEffect(() => {
+		if (!connection || !isTunnelAdminConnection(connection)) return;
+		if (actionLoading) return;
+		if (status?.state !== "idle" && status?.state !== "disconnected") return;
+		setLoginAdminUnlocked(false);
+		const onAdmin = location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+		if (onAdmin) {
+			void navigate({ to: "/" });
 		}
-	}, [
-		actionLoading,
-		authToken,
-		connection,
-		location.pathname,
-		navigate,
-		refreshSession,
-		status?.running,
-		status?.state,
-		suspendSession,
-	]);
+		suspendSession();
+	}, [actionLoading, connection, location.pathname, navigate, status?.state, suspendSession]);
 
 	useEffect(() => {
 		if (!configLoaded) return;
@@ -581,11 +575,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
 			setProvidersError(null);
 
 			try {
-				const res = await exchangeGitHubCode(
-					TUNNEL_ADMIN_CONNECTION,
-					code,
-					deviceId || undefined,
-				);
+				const res = await exchangeGitHubCode(TUNNEL_ADMIN_CONNECTION, code, deviceId || undefined);
 
 				await finalizeLogin(res.token, {
 					token_id: res.token_id,

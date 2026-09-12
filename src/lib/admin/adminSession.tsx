@@ -54,8 +54,7 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 				return res;
 			} catch (err) {
 				console.debug("Failed to get auth session:", err);
-				setAuthSession(null);
-				setIsAdmin(false);
+				// Transient fetch failures must not drop a confirmed admin session.
 				return null;
 			} finally {
 				setIsLoadingSession(false);

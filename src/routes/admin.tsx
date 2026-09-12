@@ -2,14 +2,9 @@ import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { ShieldAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { resolveAdminConsoleAccess } from "@/lib/admin/adminAccess";
 import { usePanelSession } from "@/lib/panelSession";
 import { m } from "@/paraglide/messages";
 
@@ -18,10 +13,17 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminLayout() {
-	const { isAdmin, ready, isLoadingSession } = usePanelSession();
+	const { isAdmin, ready, isLoadingSession, authSession, connection } = usePanelSession();
 	const navigate = useNavigate();
+	const access = resolveAdminConsoleAccess({
+		ready,
+		isLoadingSession,
+		isAdmin,
+		authSession,
+		connection,
+	});
 
-	if (!ready || (isLoadingSession && !isAdmin)) {
+	if (access === "loading") {
 		return (
 			<div className="flex h-full w-full flex-1 items-center justify-center">
 				<Spinner className="size-6 text-muted-foreground" />
@@ -29,7 +31,7 @@ function AdminLayout() {
 		);
 	}
 
-	if (!isAdmin) {
+	if (access === "deny") {
 		return (
 			<div className="flex flex-1 min-h-0 items-center justify-center overflow-y-auto p-4 sm:p-6 lg:p-8">
 				<Card className="w-full max-w-md text-center shadow-xs">

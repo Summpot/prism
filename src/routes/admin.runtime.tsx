@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FileCode2, HeartPulse, RotateCcw } from "lucide-react";
 import { useCallback, useState } from "react";
 
+import { AdminReady } from "@/components/admin/AdminReady";
 import {
 	ErrorBanner,
 	MetricCard,
@@ -9,12 +10,10 @@ import {
 	RefreshButton,
 	ResultBanner,
 	SecondaryButton,
-	StateCard,
 	ToggleChip,
 } from "@/components/ui";
-import { MiddlewareConfigEditor } from "@/components/MiddlewareConfigEditor";
 import { getConfigPath, getHealth, triggerReload } from "@/lib/managementApi";
-import { usePanelSession } from "@/lib/panelSession";
+import type { PanelConnection } from "@/lib/panelConnection";
 import { usePolling } from "@/lib/usePolling";
 import { m } from "@/paraglide/messages";
 
@@ -23,7 +22,14 @@ export const Route = createFileRoute("/admin/runtime")({
 });
 
 function AdminRuntimePage() {
-	const { connection, ready } = usePanelSession();
+	return (
+		<AdminReady connectLabel={m.runtime_connect_panel()}>
+			{(connection) => <AdminRuntimeBody connection={connection} />}
+		</AdminReady>
+	);
+}
+
+function AdminRuntimeBody({ connection }: { connection: PanelConnection }) {
 	const [healthOk, setHealthOk] = useState<boolean | null>(null);
 	const [configPath, setConfigPath] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -83,16 +89,8 @@ function AdminRuntimePage() {
 		}
 	};
 
-	if (!ready) {
-		return <StateCard label={m.common_restoring_session()} />;
-	}
-
-	if (!connection) {
-		return <StateCard label={m.runtime_connect_panel()} />;
-	}
-
 	return (
-		<div className="space-y-6">
+		<div className="space-y-5">
 			<PageHeader
 				eyebrow={m.runtime_eyebrow()}
 				title={m.runtime_title()}
@@ -118,7 +116,9 @@ function AdminRuntimePage() {
 			<section className="grid gap-4 md:grid-cols-2">
 				<MetricCard
 					label={m.runtime_health()}
-					value={healthOk == null ? "…" : healthOk ? m.runtime_health_ok() : m.runtime_health_down()}
+					value={
+						healthOk == null ? "…" : healthOk ? m.runtime_health_ok() : m.runtime_health_down()
+					}
 					icon={<HeartPulse className="h-5 w-5" />}
 				/>
 				<MetricCard
@@ -128,8 +128,6 @@ function AdminRuntimePage() {
 					compact
 				/>
 			</section>
-
-			<MiddlewareConfigEditor connection={connection} />
 		</div>
 	);
 }

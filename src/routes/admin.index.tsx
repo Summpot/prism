@@ -26,13 +26,7 @@ import {
 	ToggleChip,
 } from "@/components/ui";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatBytes, formatPercentage, formatRelative } from "@/lib/format";
 import {
 	getConnections,
@@ -146,7 +140,9 @@ function AdminDashboardPage() {
 						<CountChip>
 							<div>
 								<div className="text-xs font-medium text-foreground">{m.dashboard_endpoint()}</div>
-								<div className="mt-0.5 max-w-56 truncate font-mono text-xs">{connection.baseUrl}</div>
+								<div className="mt-0.5 max-w-56 truncate font-mono text-xs">
+									{connection.baseUrl}
+								</div>
 							</div>
 						</CountChip>
 						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
@@ -225,10 +221,20 @@ function AdminDashboardPage() {
 							{m.dashboard_node_fleet_description()}
 						</CardDescription>
 					</div>
-					<Button variant="outline" size="sm" render={<Link to="/admin/nodes" />}>
-						{m.dashboard_open_nodes()}
-						<ArrowRight className="h-4 w-4" />
-					</Button>
+					<div className="flex flex-wrap gap-2">
+						<Button variant="outline" size="sm" render={<Link to="/admin/traffic" />}>
+							{m.nav_server_traffic()}
+							<ArrowRight className="h-4 w-4" />
+						</Button>
+						<Button variant="outline" size="sm" render={<Link to="/admin/connectors" />}>
+							{m.nav_connector_traffic()}
+							<ArrowRight className="h-4 w-4" />
+						</Button>
+						<Button variant="outline" size="sm" render={<Link to="/admin/nodes" />}>
+							{m.dashboard_open_nodes()}
+							<ArrowRight className="h-4 w-4" />
+						</Button>
+					</div>
 				</CardHeader>
 				<CardContent>
 					<div className="grid gap-4 xl:grid-cols-2">

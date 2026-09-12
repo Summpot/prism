@@ -9,6 +9,12 @@ export const Route = createFileRoute("/client")({
 		if (tab === "settings" || tab === "profiles") {
 			throw redirect({ to: "/settings" });
 		}
+		if (tab === "traffic") {
+			throw redirect({ to: "/traffic" });
+		}
+		if (tab === "middleware") {
+			throw redirect({ to: "/middleware" });
+		}
 		throw redirect({ to: "/" });
 	},
 	component: () => null,

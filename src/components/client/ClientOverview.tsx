@@ -25,12 +25,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { directionTooltip } from "@/components/traffic/OptimizerStatsView";
+import { ThroughputSparkline } from "@/components/traffic/ThroughputSparkline";
 import { selectClientAuthView } from "@/lib/client/clientAuthView";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatCostMs, formatGainMs } from "@/lib/format";
 import { usePanelSession } from "@/lib/panelSession";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
-import type { DirectionStatsSnapshot } from "@/types/admin";
 import { m } from "@/paraglide/messages";
 import { useState } from "react";
 
@@ -66,59 +67,6 @@ function getLoopbackTargetForService(idx: number, port: string): string {
 		}
 	}
 	return port === "25565" ? ip : `${ip}:${port}`;
-}
-
-/** Positive values are latency gains, shown as a reduction (-X.Xms). */
-function formatGainMs(value: number): string {
-	if (value > 0) return `-${value.toFixed(1)}ms`;
-	if (value < 0) return `+${Math.abs(value).toFixed(1)}ms`;
-	return "0.0ms";
-}
-
-/** Positive values are latency costs, shown as an increase (+X.Xms). */
-function formatCostMs(value: number): string {
-	if (value > 0) return `+${value.toFixed(1)}ms`;
-	if (value < 0) return `-${Math.abs(value).toFixed(1)}ms`;
-	return "0.0ms";
-}
-
-function directionTooltip(label: string, dir?: DirectionStatsSnapshot): string {
-	if (!dir) return m.client_dir_tooltip_none({ label });
-	return m.client_dir_tooltip({
-		label,
-		net: dir.net_gain_ms.toFixed(1),
-		gain: dir.transfer_gain_ms.toFixed(1),
-		batching: dir.batching_penalty_ms.toFixed(1),
-		compression: dir.compression_penalty_ms.toFixed(1),
-		p99: dir.batching_delay.p99_us.toFixed(0),
-	});
-}
-
-function ThroughputSparkline({ samples }: { samples: number[] }) {
-	const max = Math.max(...samples, 1024);
-	const width = 280;
-	const height = 18;
-	const points = samples
-		.map((v, i) => {
-			const x = (i / (samples.length - 1)) * width;
-			const y = height - (v / max) * (height - 4) - 2;
-			return `${x.toFixed(1)},${y.toFixed(1)}`;
-		})
-		.join(" ");
-
-	return (
-		<svg viewBox={`0 0 ${width} ${height}`} className="h-4 w-full overflow-visible">
-			<polyline
-				fill="none"
-				stroke="currentColor"
-				strokeWidth="2"
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				className="text-emerald-500 transition-all duration-300"
-				points={points}
-			/>
-		</svg>
-	);
 }
 
 export function ClientOverview() {
@@ -633,11 +581,19 @@ export function ClientOverview() {
 					<div className="border-t border-border/60 pt-2 space-y-2">
 						{/* Mode Switcher */}
 						<div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
-							<span className="font-semibold uppercase tracking-wider text-[9px]">
-								{statsViewMode === "session"
-									? m.client_current_session()
-									: m.client_cumulative_lifetime()}
-							</span>
+							<div className="flex items-center gap-2 min-w-0">
+								<span className="font-semibold uppercase tracking-wider text-[9px]">
+									{statsViewMode === "session"
+										? m.client_current_session()
+										: m.client_cumulative_lifetime()}
+								</span>
+								<Link
+									to="/traffic"
+									className="truncate text-[10px] font-medium text-primary hover:underline"
+								>
+									{m.client_traffic_details()}
+								</Link>
+							</div>
 							<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
 								<button
 									type="button"

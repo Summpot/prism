@@ -1,11 +1,15 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import {
 	Activity,
+	ArrowDownUp,
 	Box,
 	Cable,
 	Gamepad2,
 	Gauge,
+	Radio,
+	Server,
 	Settings2,
+	Sliders,
 	Terminal,
 	Unplug,
 	Users,
@@ -92,6 +96,13 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 						onClick={onNavigate}
 					/>
 					<SidebarNavItem
+						to="/traffic"
+						exact
+						label={m.nav_traffic()}
+						icon={<ArrowDownUp className="h-4 w-4" />}
+						onClick={onNavigate}
+					/>
+					<SidebarNavItem
 						to="/logs"
 						exact
 						label={m.nav_logs()}
@@ -103,6 +114,13 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 						exact
 						label={m.nav_tunnel_config()}
 						icon={<Settings2 className="h-4 w-4" />}
+						onClick={onNavigate}
+					/>
+					<SidebarNavItem
+						to="/middleware"
+						exact
+						label={m.nav_middleware()}
+						icon={<Sliders className="h-4 w-4" />}
 						onClick={onNavigate}
 					/>
 				</div>
@@ -136,6 +154,24 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							to="/admin/tunnel-services"
 							label={m.nav_services()}
 							icon={<Unplug className="h-4 w-4" />}
+							onClick={onNavigate}
+						/>
+						<SidebarNavItem
+							to="/admin/traffic"
+							label={m.nav_server_traffic()}
+							icon={<Server className="h-4 w-4" />}
+							onClick={onNavigate}
+						/>
+						<SidebarNavItem
+							to="/admin/connectors"
+							label={m.nav_connector_traffic()}
+							icon={<Radio className="h-4 w-4" />}
+							onClick={onNavigate}
+						/>
+						<SidebarNavItem
+							to="/admin/middleware"
+							label={m.nav_middleware()}
+							icon={<Sliders className="h-4 w-4" />}
 							onClick={onNavigate}
 						/>
 						<SidebarNavItem

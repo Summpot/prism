@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Cable, Wifi, Zap } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
@@ -100,17 +100,16 @@ function AdminConnectionsPage() {
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
 						{optimizerStats?.global && optimizerStats.global.raw_bytes > 0 ? (
-							<CountChip icon={<Zap className="h-4 w-4 text-emerald-500" />}>
-								<span className="text-emerald-600 dark:text-emerald-400">
-									{m.admin_optimizer_saved({
-										bytes: formatBytes(optimizerStats.global.saved_bytes),
-										percentage: formatPercentage(optimizerStats.global.saved_ratio),
-									})}
-									{optimizerStats.global.net_gain_ms > 0
-										? ` · net -${optimizerStats.global.net_gain_ms.toFixed(1)}ms`
-										: ""}
-								</span>
-							</CountChip>
+							<Link
+								to="/admin/traffic"
+								className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400 hover:bg-muted/70"
+							>
+								<Zap className="h-4 w-4" />
+								{m.admin_optimizer_saved({
+									bytes: formatBytes(optimizerStats.global.saved_bytes),
+									percentage: formatPercentage(optimizerStats.global.saved_ratio),
+								})}
+							</Link>
 						) : null}
 						<CountChip icon={<Cable className="h-4 w-4" />}>
 							{loading
@@ -123,11 +122,7 @@ function AdminConnectionsPage() {
 				}
 			/>
 
-			<SearchInput
-				value={query}
-				onChange={setQuery}
-				placeholder={m.admin_filter_connections()}
-			/>
+			<SearchInput value={query} onChange={setQuery} placeholder={m.admin_filter_connections()} />
 
 			{error ? <ErrorBanner message={error} onRetry={fetchConns} /> : null}
 
@@ -194,9 +189,7 @@ function AdminConnectionsPage() {
 				</div>
 			) : !loading ? (
 				<EmptyState
-					label={
-						conns.length === 0 ? m.admin_no_connections() : m.admin_no_connection_match()
-					}
+					label={conns.length === 0 ? m.admin_no_connections() : m.admin_no_connection_match()}
 				/>
 			) : null}
 		</div>
@@ -221,9 +214,7 @@ function OptimizerCell({ conn }: { conn: SessionInfo }) {
 			{conn.downlink_raw_bytes || conn.downlink_wire_bytes ? (
 				<div className="flex items-center gap-1.5 text-[11px]">
 					<span className="font-bold text-emerald-500">↓</span>
-					<span className="text-muted-foreground">
-						{formatBytes(conn.downlink_raw_bytes || 0)}
-					</span>
+					<span className="text-muted-foreground">{formatBytes(conn.downlink_raw_bytes || 0)}</span>
 					<span className="text-muted-foreground/60">→</span>
 					<span className="text-emerald-600 dark:text-emerald-400">
 						{formatBytes(conn.downlink_wire_bytes || 0)}

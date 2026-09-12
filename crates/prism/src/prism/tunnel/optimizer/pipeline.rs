@@ -88,17 +88,28 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     net::set_nodelay(&local);
 
-    let local_id = opts.optimizer.dictionary_id();
+    fn dict_cache_key(service: &str, direction: TrafficDirection) -> String {
+        match direction {
+            TrafficDirection::Uplink => format!("{service}:up"),
+            TrafficDirection::Downlink => format!("{service}:down"),
+        }
+    }
+
+    let outbound_dir = opts.local_role.outbound_direction();
+    let inbound_dir = opts.local_role.inbound_direction();
+    let dict_key = dict_cache_key(&opts.service_name, outbound_dir);
+    let mut optimizer = opts.optimizer;
+    if optimizer.dictionary.is_none() {
+        optimizer.dictionary = optimizer::resolve_dictionary(None, &dict_key);
+    }
+
+    let local_id = optimizer.dictionary_id();
     let local_params = OptimizerStreamParams {
-        encode_window_log: opts
-            .optimizer
-            .window_log_for(opts.local_role.outbound_direction()) as u8,
-        decode_window_log: opts
-            .optimizer
-            .window_log_for(opts.local_role.inbound_direction()) as u8,
+        encode_window_log: optimizer.window_log_for(outbound_dir) as u8,
+        decode_window_log: optimizer.window_log_for(inbound_dir) as u8,
         dict_id: local_id,
         dictionary: if local_id != 0 {
-            opts.optimizer.dictionary.clone()
+            optimizer.dictionary.clone()
         } else {
             None
         },
@@ -113,27 +124,20 @@ pub async fn run(
         }
     };
 
-    let encode_dict = encode_dictionary(opts.optimizer.dictionary.as_deref());
-    let decode_dict = decode_dictionary(
-        opts.optimizer.dictionary.as_deref(),
-        local_id,
-        &peer,
-    );
+    let encode_dict = encode_dictionary(optimizer.dictionary.as_deref());
+    let decode_dict = decode_dictionary(optimizer.dictionary.as_deref(), local_id, &peer);
     let encode_window = local_params.encode_window_log as u32;
     let decode_window = local_params.agreed_decode_window(peer.encode_window_log);
 
-    let outbound_dir = opts.local_role.outbound_direction();
-    let inbound_dir = opts.local_role.inbound_direction();
-
-    let defer_flush = opts.optimizer.flush_interval_for(outbound_dir);
+    let defer_flush = optimizer.flush_interval_for(outbound_dir);
     let batcher_config = BatcherConfig {
         flush_interval: defer_flush,
-        high_flush_interval: opts.optimizer.flush_interval_min,
-        bulk_flush_interval: opts.optimizer.flush_interval_max.max(defer_flush),
-        buffer_threshold: opts.optimizer.buffer_threshold_for(outbound_dir),
+        high_flush_interval: optimizer.flush_interval_min,
+        bulk_flush_interval: optimizer.flush_interval_max.max(defer_flush),
+        buffer_threshold: optimizer.buffer_threshold_for(outbound_dir),
     };
     let compressor_config = CompressorConfig {
-        compression_level: opts.optimizer.zstd_level,
+        compression_level: optimizer.zstd_level,
         window_log: encode_window,
         dictionary: encode_dict,
     };
@@ -169,10 +173,10 @@ pub async fn run(
     let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
         .with_direction(outbound_dir)
         .with_adaptive_flush(
-            opts.optimizer.adaptive_flush,
+            optimizer.adaptive_flush,
             defer_flush,
-            opts.optimizer.flush_interval_min,
-            opts.optimizer.flush_interval_max,
+            optimizer.flush_interval_min,
+            optimizer.flush_interval_max,
         );
 
     let record_raw_on_reader = to_local.is_none();
@@ -192,7 +196,8 @@ pub async fn run(
     });
 
     let mut sampler = DictSampler::new();
-    let service_name = opts.service_name.clone();
+    let mut dict_installed = optimizer.dictionary.is_some();
+    let dict_key_out = dict_key.clone();
     let mut read_buf = opts.initial_bytes;
     if !read_buf.is_empty() {
         drain_wasm_frames(
@@ -288,6 +293,13 @@ pub async fn run(
                             &mut sampler,
                             from_server_out,
                         ).await?;
+                        if !dict_installed {
+                            if let Some(dict) = sampler.try_train() {
+                                opt_writer.install_dictionary(&dict).await?;
+                                store_trained_dictionary(&dict_key_out, dict);
+                                dict_installed = true;
+                            }
+                        }
                     }
                     _ = async {
                         if let Some(dur) = flush_dur {
@@ -307,11 +319,20 @@ pub async fn run(
                             &mut sampler,
                             from_server_out,
                         ).await?;
+                        if !dict_installed {
+                            if let Some(dict) = sampler.try_train() {
+                                opt_writer.install_dictionary(&dict).await?;
+                                store_trained_dictionary(&dict_key_out, dict);
+                                dict_installed = true;
+                            }
+                        }
                     }
                 }
             }
-            if let Some(dict) = sampler.finish() {
-                store_trained_dictionary(&service_name, dict);
+            if !dict_installed {
+                if let Some(dict) = sampler.finish() {
+                    store_trained_dictionary(&dict_key_out, dict);
+                }
             }
             Ok::<(), anyhow::Error>(())
         }
@@ -447,6 +468,7 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
                 len,
                 priority,
                 payload,
+                incompressible,
             })) => {
                 if len == 0 || len > read_buf.len() {
                     break;
@@ -454,11 +476,16 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
                 maybe_sample_frame(sampler, &read_buf[..len], payload.as_deref());
                 if let Some(ref payload) = payload {
                     opt_writer
-                        .write_frame_with_metric(len, payload, priority)
+                        .write_frame_with_hints(len, payload, priority, incompressible)
                         .await?;
                 } else {
                     opt_writer
-                        .write_frame(&read_buf[..len], priority)
+                        .write_frame_with_hints(
+                            len,
+                            &read_buf[..len],
+                            priority,
+                            incompressible,
+                        )
                         .await?;
                 }
                 read_buf.drain(..len);

@@ -329,13 +329,13 @@ pub enum HandshakeResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FramePriority {
-    /// Default time-slice (typically 20ms).
+    /// Default time-slice (typically 20ms). Independent compression lane.
     Defer = 1,
-    /// Flush immediately. Safe to bypass a large pending batch on a side channel.
+    /// Bypass pending High/Defer/Bulk batches. Independent compression lane.
     Urgent = 2,
-    /// Short queue (typically 8ms). Ordered with Defer/Bulk.
+    /// Short queue (typically 8ms). Independent compression lane.
     High = 3,
-    /// Long queue (typically 40ms). Ordered with Defer/High.
+    /// Long queue (typically 40ms). Independent compression lane.
     Bulk = 4,
 }
 
@@ -365,6 +365,8 @@ pub enum StreamResult {
         len: usize,
         priority: FramePriority,
         payload: Option<Vec<u8>>,
+        /// Host should emit this frame uncompressed (no zstd window update).
+        incompressible: bool,
     },
 }
 
@@ -1754,6 +1756,7 @@ impl WasmProtocolSession {
                             len: value as usize,
                             priority,
                             payload: None,
+                            incompressible: false,
                         }));
                     }
                     let mem_size = self.memory.data_size(&self.store);
@@ -1789,11 +1792,20 @@ impl WasmProtocolSession {
                             MiddlewareError::Fatal(format!("read stream payload failed: {e}"))
                         })?;
 
+                    let mut incompressible = false;
+                    if ptr + 16 <= mem_size {
+                        let mut extra = [0u8; 4];
+                        if self.memory.read(&self.store, ptr + 12, &mut extra).is_ok() {
+                            incompressible = u32::from_le_bytes(extra) & 1 != 0;
+                        }
+                    }
+
                     self.last_consumed = consumed_len;
                     Ok(PollResult::Stream(StreamResult::Frame {
                         len: consumed_len,
                         priority,
                         payload: Some(payload),
+                        incompressible,
                     }))
                 }
             },
@@ -2541,6 +2553,7 @@ mod tests {
                 len: prelude.len(),
                 priority: FramePriority::Defer,
                 payload: None,
+                incompressible: false,
             })
         );
 
@@ -2553,6 +2566,7 @@ mod tests {
                 len: prelude.len(),
                 priority: FramePriority::Defer,
                 payload: None,
+                incompressible: false,
             })
         );
     }
@@ -3233,6 +3247,7 @@ mod tests {
                 len,
                 priority,
                 payload,
+                ..
             }) => {
                 assert_eq!(
                     len,
@@ -3386,7 +3401,7 @@ mod tests {
 
         session.set_flow_direction(true);
         let mut chunk = Vec::new();
-        push_varint(0x26, &mut chunk);
+        push_varint(0x27, &mut chunk);
         chunk.extend_from_slice(&[0u8; 32]);
         let mut pkt = Vec::new();
         push_varint(chunk.len() as u32, &mut pkt);
@@ -3399,7 +3414,7 @@ mod tests {
         }
 
         let mut ka = Vec::new();
-        push_varint(0x25, &mut ka);
+        push_varint(0x26, &mut ka);
         ka.extend_from_slice(&[0u8; 8]);
         let mut pkt = Vec::new();
         push_varint(ka.len() as u32, &mut pkt);
@@ -3409,6 +3424,36 @@ mod tests {
                 assert_eq!(priority, FramePriority::Urgent);
             }
             other => panic!("expected clientbound keepalive urgent, got {other:?}"),
+        }
+
+        let mut border = Vec::new();
+        push_varint(0x25, &mut border);
+        border.extend_from_slice(&[0u8; 8]);
+        let mut pkt = Vec::new();
+        push_varint(border.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&border);
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                assert_eq!(
+                    priority,
+                    FramePriority::Defer,
+                    "initialize_border (0x25) must not be classified as keepalive"
+                );
+            }
+            other => panic!("expected initialize_border defer, got {other:?}"),
+        }
+
+        let mut mv = Vec::new();
+        push_varint(0x2E, &mut mv);
+        mv.extend_from_slice(&[0u8; 8]);
+        let mut pkt = Vec::new();
+        push_varint(mv.len() as u32, &mut pkt);
+        pkt.extend_from_slice(&mv);
+        match session.poll(&pkt).unwrap() {
+            PollResult::Stream(StreamResult::Frame { priority, .. }) => {
+                assert_eq!(priority, FramePriority::High);
+            }
+            other => panic!("expected move_entity_pos high, got {other:?}"),
         }
     }
 
@@ -3430,7 +3475,7 @@ mod tests {
 
         fn custom_payload(ident: &[u8], data: &[u8]) -> Vec<u8> {
             let mut body = Vec::new();
-            push_varint(0x17, &mut body);
+            push_varint(0x18, &mut body);
             push_varint(ident.len() as u32, &mut body);
             body.extend_from_slice(ident);
             body.extend_from_slice(data);

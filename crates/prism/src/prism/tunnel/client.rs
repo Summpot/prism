@@ -16,16 +16,14 @@ use tokio::sync::RwLock;
 
 use crate::prism::config::TunnelClientConfig;
 use crate::prism::middleware::{
-    FramePriority, HandshakeResult, PollResult, SessionState, StreamResult, WasmProtocolSession,
-    compile_module_from_wat, get_default_middleware_wat, get_dynamic_middleware_config,
+    HandshakeResult, PollResult, WasmProtocolSession, compile_module_from_wat,
+    get_default_middleware_wat,
 };
 use crate::prism::control::{self, AdminError, AdminMethod, AdminPayload, ControlChannel};
 use crate::prism::net;
 use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
 use crate::prism::tunnel::optimizer::{
-    BatcherConfig, CompressorConfig, DEFAULT_BUFFER_THRESHOLD, DecompressorConfig, OptimizedReader,
-    OptimizedWriter, OptimizerStats, OptimizerStatsSnapshot, SharedOptimizerStats,
-    TrafficDirection, unix_ms,
+    OptimizerStats, OptimizerStatsSnapshot, SharedOptimizerStats,
 };
 use crate::prism::tunnel::protocol::{
     self, FLAG_OPTIMIZER, FLAG_RAW, ProxyStreamKind, RegisterRequest, RegisteredService,
@@ -901,13 +899,9 @@ async fn handle_player_connection(
             if let Some(ref path) = client_opt.zstd_dictionary {
                 opt_cfg.dictionary = crate::prism::tunnel::optimizer::resolve_dictionary(
                     Some(path),
-                    &target_service.name,
+                    "",
                 );
             }
-        }
-        if opt_cfg.dictionary.is_none() {
-            opt_cfg.dictionary =
-                crate::prism::tunnel::optimizer::resolve_dictionary(None, &target_service.name);
         }
         let mw_name = config
             .middleware
@@ -927,213 +921,6 @@ async fn handle_player_connection(
         )
         .await;
 
-        #[allow(unreachable_code, unused_variables, unused_mut, unused_assignments)]
-        let zstd_window_log = config
-            .optimizer
-            .as_ref()
-            .and_then(|t| t.zstd_window_log)
-            .or_else(|| {
-                target_service
-                    .optimizer
-                    .as_ref()
-                    .and_then(|t| t.zstd_window_log)
-            })
-            .unwrap_or(23);
-
-        let zstd_level = target_service
-            .optimizer
-            .as_ref()
-            .and_then(|t| t.zstd_level)
-            .unwrap_or(3);
-
-        let flush_interval = target_service
-            .optimizer
-            .as_ref()
-            .and_then(|t| t.flush_interval_ms)
-            .map(Duration::from_millis)
-            .unwrap_or_else(|| Duration::from_millis(20));
-
-        let compressor_config = CompressorConfig {
-            compression_level: zstd_level,
-            window_log: zstd_window_log,
-            dictionary: None,
-        };
-        let decompressor_config = DecompressorConfig {
-            window_log: zstd_window_log,
-            dictionary: None,
-        };
-        let batcher_config = BatcherConfig {
-            flush_interval,
-            buffer_threshold: DEFAULT_BUFFER_THRESHOLD,
-            ..Default::default()
-        };
-
-        let has_wasm = wasm_module.is_some();
-
-        let (player_rd, mut player_wr) = player_socket.into_split();
-        let (prpx_rd, prpx_wr) = tokio::io::split(prpx_stream);
-
-        let mut opt_reader = OptimizedReader::new(prpx_rd, decompressor_config)?
-            .with_direction(TrafficDirection::Downlink)
-            .with_stats_and_raw_mode(optimizer_stats.clone(), !has_wasm);
-        let mut opt_writer = OptimizedWriter::new(prpx_wr, batcher_config, compressor_config)?
-            .with_direction(TrafficDirection::Uplink)
-            .with_stats(optimizer_stats.clone());
-
-        // Write initial handshake bytes if any
-        if !initial_bytes.is_empty() {
-            opt_writer.write_all(&initial_bytes).await?;
-            opt_writer.flush().await?;
-        }
-
-        // Inbound: PRPX -> Player (decompress & generic WASM egress transform)
-        let inbound = {
-            let optimizer_stats = optimizer_stats.clone();
-            let mut egress_session = if let Some(module) = &wasm_module {
-                let mut s = WasmProtocolSession::new(&wasm_engine, module).ok();
-                if let Some(ref mut sess) = s {
-                    sess.set_state(SessionState::StreamingEgress);
-                    if let Some(cfg) = get_dynamic_middleware_config("minecraft") {
-                        let _ = sess.apply_config_map(&cfg);
-                    }
-                }
-                s
-            } else {
-                None
-            };
-            async move {
-                if let Some(ref mut sess) = egress_session {
-                    let mut pending = Vec::new();
-                    let mut buf = vec![0u8; 64 * 1024];
-                    loop {
-                        let n = opt_reader.read(&mut buf).await?;
-                        if n == 0 {
-                            break;
-                        }
-                        pending.extend_from_slice(&buf[..n]);
-                        let written = sess
-                            .process_egress_stream(&mut pending, &mut player_wr)
-                            .await?;
-                        optimizer_stats.add_direction_raw_bytes(
-                            TrafficDirection::Downlink,
-                            written as u64,
-                            unix_ms(),
-                        );
-                    }
-                    if !pending.is_empty() {
-                        player_wr.write_all(&pending).await?;
-                        optimizer_stats.add_direction_raw_bytes(
-                            TrafficDirection::Downlink,
-                            pending.len() as u64,
-                            unix_ms(),
-                        );
-                    }
-                } else {
-                    tokio::io::copy(&mut opt_reader, &mut player_wr).await?;
-                }
-                player_wr.shutdown().await?;
-                Ok::<(), anyhow::Error>(())
-            }
-        };
-
-        let mut wasm_session = if let Some(module) = &wasm_module {
-            let mut s = WasmProtocolSession::new(&wasm_engine, module).ok();
-            if let Some(ref mut sess) = s {
-                sess.set_state(SessionState::Streaming);
-            }
-            s
-        } else {
-            None
-        };
-
-        // Outbound: Player -> WasmProtocolSession (sniff keepalive) -> OptimizedWriter -> PRPX
-        let outbound = async move {
-            let mut player_rd = player_rd;
-            let mut read_buf = Vec::with_capacity(64 * 1024);
-            let mut tmp = [0u8; 8192];
-            loop {
-                let flush_dur = opt_writer.time_until_flush();
-                tokio::select! {
-                    res = player_rd.read(&mut tmp) => {
-                        let n = res?;
-                        if n == 0 {
-                            if !read_buf.is_empty() {
-                                opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
-                                read_buf.clear();
-                            }
-                            opt_writer.flush_batch().await?;
-                            opt_writer.shutdown().await?;
-                            break;
-                        }
-                        read_buf.extend_from_slice(&tmp[..n]);
-
-                        if let Some(ref mut sess) = wasm_session {
-                            let mut offset = 0;
-                            while offset < read_buf.len() {
-                                let slice = &read_buf[offset..];
-                                match sess.poll(slice) {
-                                    Ok(PollResult::Stream(StreamResult::Frame {
-                                        len,
-                                        priority,
-                                        payload,
-                                    })) => {
-                                        if len == 0 || len > slice.len() {
-                                            break;
-                                        }
-                                        if let Some(ref payload) = payload {
-                                            opt_writer
-                                                .write_frame_with_metric(len, payload, priority)
-                                                .await?;
-                                        } else {
-                                            opt_writer.write_frame(&slice[..len], priority).await?;
-                                        }
-                                        offset += len;
-                                    }
-                                    Ok(PollResult::Stream(StreamResult::NeedMoreData))
-                                    | Ok(PollResult::Stream(StreamResult::Blocked)) => {
-                                        break;
-                                    }
-                                    Ok(PollResult::Handshake(_)) => {
-                                        opt_writer.write_frame(slice, FramePriority::Defer).await?;
-                                        offset += slice.len();
-                                        break;
-                                    }
-                                    Err(_) => {
-                                        opt_writer.write_frame(slice, FramePriority::Defer).await?;
-                                        offset += slice.len();
-                                        break;
-                                    }
-                                }
-                            }
-                            if offset > 0 {
-                                read_buf.drain(..offset);
-                            }
-                        } else {
-                            opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
-                            read_buf.clear();
-                        }
-                    }
-                    _ = async {
-                        if let Some(dur) = flush_dur {
-                            tokio::time::sleep(dur).await;
-                        } else {
-                            std::future::pending::<()>().await;
-                        }
-                    } => {
-                        opt_writer.flush_if_due().await?;
-                    }
-                }
-            }
-            opt_writer.flush_batch().await?;
-            Ok::<(), anyhow::Error>(())
-        };
-
-        let mut in_fut = std::pin::pin!(inbound);
-        let mut out_fut = std::pin::pin!(outbound);
-        tokio::select! {
-            res = &mut in_fut => { let _ = res; }
-            res = &mut out_fut => { let _ = res; }
-        }
     } else {
         if !initial_bytes.is_empty() {
             prpx_stream.write_all(&initial_bytes).await?;

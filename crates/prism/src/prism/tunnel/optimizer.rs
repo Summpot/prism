@@ -39,20 +39,50 @@ pub const DEFAULT_ZSTD_WINDOW_LOG: u32 = 23; // 8 MB sliding window
 pub const DEFAULT_ZSTD_WINDOW_LOG_UPLINK: u32 = 18; // 256 KB
 pub const MAX_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32 MB guard limit
 
-/// Bits 0-29 of the 4-byte frame header are the payload length.
-pub const FRAME_LEN_MASK: u32 = 0x3FFF_FFFF;
-/// Payload is stored uncompressed (compressor would have expanded it).
+/// Bits 0-27 of the 4-byte frame header are the payload length (256 MiB max).
+pub const FRAME_LEN_MASK: u32 = 0x0FFF_FFFF;
+/// Bits 28-29 select the compression lane (independent zstd context).
+pub const FRAME_LANE_SHIFT: u32 = 28;
+pub const FRAME_LANE_MASK: u32 = 0x3 << FRAME_LANE_SHIFT;
+/// Payload is stored uncompressed; neither side updates its zstd window.
 pub const FRAME_FLAG_RAW: u32 = 1 << 31;
-/// Payload is opaque session data for the peer middleware, not game bytes.
+/// Payload is not stream data (session-data or dictionary control).
 pub const FRAME_FLAG_CONTROL: u32 = 1 << 30;
 
-fn pack_frame_header(len: usize, flags: u32) -> [u8; 4] {
-    (((len as u32) & FRAME_LEN_MASK) | flags).to_be_bytes()
+pub const LANE_URGENT: u32 = 0;
+pub const LANE_HIGH: u32 = 1;
+pub const LANE_DEFER: u32 = 2;
+pub const LANE_BULK: u32 = 3;
+pub const LANE_COUNT: usize = 4;
+/// Control-frame lane 0: opaque bytes for the peer middleware.
+pub const CONTROL_LANE_SESSION: u32 = 0;
+/// Control-frame lane 1: zstd dictionary update for this stream.
+pub const CONTROL_LANE_DICT: u32 = 1;
+/// Urgent frames at or below this size skip zstd (KeepAlive-sized).
+pub const RAW_URGENT_MAX: usize = 128;
+const DICT_CONTROL_VERSION: u8 = 1;
+const DICT_CONTROL_ALL_LANES: u8 = 0xFF;
+
+pub fn lane_of(priority: FramePriority) -> u32 {
+    match priority {
+        FramePriority::Urgent => LANE_URGENT,
+        FramePriority::High => LANE_HIGH,
+        FramePriority::Defer => LANE_DEFER,
+        FramePriority::Bulk => LANE_BULK,
+    }
 }
 
-fn unpack_frame_header(header: [u8; 4]) -> (usize, u32) {
+fn pack_frame_header(len: usize, flags: u32, lane: u32) -> [u8; 4] {
+    (((len as u32) & FRAME_LEN_MASK) | ((lane & 0x3) << FRAME_LANE_SHIFT) | flags).to_be_bytes()
+}
+
+fn unpack_frame_header(header: [u8; 4]) -> (usize, u32, u32) {
     let raw = u32::from_be_bytes(header);
-    ((raw & FRAME_LEN_MASK) as usize, raw & !FRAME_LEN_MASK)
+    (
+        (raw & FRAME_LEN_MASK) as usize,
+        raw & (FRAME_FLAG_RAW | FRAME_FLAG_CONTROL),
+        (raw & FRAME_LANE_MASK) >> FRAME_LANE_SHIFT,
+    )
 }
 
 // ============================================================================
@@ -537,6 +567,12 @@ impl ZstdStreamCompressor {
         self.encoder = Self::build_encoder(&self.config)?;
         Ok(())
     }
+
+    /// Replaces the trained/configured dictionary and resets encoder history.
+    pub fn set_dictionary(&mut self, dict: Option<Vec<u8>>) -> io::Result<()> {
+        self.config.dictionary = dict;
+        self.reset()
+    }
 }
 
 // ============================================================================
@@ -636,6 +672,12 @@ impl ZstdStreamDecompressor {
         self.decoder = Self::build_decoder(&self.config)?;
         Ok(())
     }
+
+    /// Replaces the trained/configured dictionary and resets decoder history.
+    pub fn set_dictionary(&mut self, dict: Option<Vec<u8>>) -> io::Result<()> {
+        self.config.dictionary = dict;
+        self.reset()
+    }
 }
 
 // ============================================================================
@@ -649,31 +691,43 @@ pub fn encode_batch(
     raw_batch: &[u8],
 ) -> io::Result<Vec<u8>> {
     let mut out = Vec::new();
-    encode_batch_into(compressor, raw_batch, &mut out)?;
+    encode_batch_into(compressor, raw_batch, &mut out, LANE_DEFER, false)?;
     Ok(out)
 }
 
 /// Encodes a raw batch into an existing buffer as `[header: u32 BE][payload]`.
 ///
-/// The header stores the payload length in the low 30 bits.
-///
-/// [`FRAME_FLAG_RAW`] is accepted by the decoder for compatibility but is never
-/// set here: a raw payload would desynchronize the decoder's sliding window.
+/// The header stores the payload length in bits 0-27 and the compression lane
+/// in bits 28-29. When `raw` is set, [`FRAME_FLAG_RAW`] is used and `compressor`
+/// is not touched, so both sliding windows stay in sync.
 pub fn encode_batch_into(
     compressor: &mut ZstdStreamCompressor,
     raw_batch: &[u8],
     output: &mut Vec<u8>,
+    lane: u32,
+    raw: bool,
 ) -> io::Result<usize> {
     if raw_batch.is_empty() {
         return Ok(0);
     }
+    if raw_batch.len() > MAX_CHUNK_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame {} exceeds max {MAX_CHUNK_SIZE}", raw_batch.len()),
+        ));
+    }
     let header_start = output.len();
     output.extend_from_slice(&[0u8; 4]);
     let payload_start = output.len();
-
-    compressor.compress_batch_into(raw_batch, output)?;
+    let flags = if raw {
+        output.extend_from_slice(raw_batch);
+        FRAME_FLAG_RAW
+    } else {
+        compressor.compress_batch_into(raw_batch, output)?;
+        0
+    };
     let payload_len = output.len() - payload_start;
-    let header = pack_frame_header(payload_len, 0);
+    let header = pack_frame_header(payload_len, flags, lane);
     output[header_start..header_start + 4].copy_from_slice(&header);
 
     Ok(payload_len + 4)
@@ -681,6 +735,14 @@ pub fn encode_batch_into(
 
 /// Encodes an opaque control payload (never compressed, never delivered as stream data).
 pub fn encode_control_frame(payload: &[u8], output: &mut Vec<u8>) -> io::Result<usize> {
+    encode_control_frame_on_lane(payload, CONTROL_LANE_SESSION, output)
+}
+
+fn encode_control_frame_on_lane(
+    payload: &[u8],
+    lane: u32,
+    output: &mut Vec<u8>,
+) -> io::Result<usize> {
     if payload.is_empty() {
         return Ok(0);
     }
@@ -690,9 +752,42 @@ pub fn encode_control_frame(payload: &[u8], output: &mut Vec<u8>) -> io::Result<
             format!("control frame {} exceeds max {MAX_CHUNK_SIZE}", payload.len()),
         ));
     }
-    output.extend_from_slice(&pack_frame_header(payload.len(), FRAME_FLAG_CONTROL));
+    output.extend_from_slice(&pack_frame_header(
+        payload.len(),
+        FRAME_FLAG_CONTROL,
+        lane,
+    ));
     output.extend_from_slice(payload);
     Ok(payload.len() + 4)
+}
+
+/// Encodes a dictionary replacement for every compression lane on this stream.
+pub fn encode_dict_control(dict: &[u8], output: &mut Vec<u8>) -> io::Result<usize> {
+    if dict.is_empty() || dict.len() > MAX_DICTIONARY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid dictionary control payload",
+        ));
+    }
+    let mut payload = Vec::with_capacity(10 + dict.len());
+    payload.push(DICT_CONTROL_VERSION);
+    payload.push(DICT_CONTROL_ALL_LANES);
+    payload.extend_from_slice(&dictionary_id(dict).to_be_bytes());
+    payload.extend_from_slice(&(dict.len() as u32).to_be_bytes());
+    payload.extend_from_slice(dict);
+    encode_control_frame_on_lane(&payload, CONTROL_LANE_DICT, output)
+}
+
+fn parse_dict_control(payload: &[u8]) -> Option<(u8, Vec<u8>)> {
+    if payload.len() < 10 || payload[0] != DICT_CONTROL_VERSION {
+        return None;
+    }
+    let lane = payload[1];
+    let len = u32::from_be_bytes(payload[6..10].try_into().ok()?) as usize;
+    if payload.len() != 10 + len {
+        return None;
+    }
+    Some((lane, payload[10..].to_vec()))
 }
 
 /// Decodes a sequence of length-prefixed chunks (`[u32 BE][payload]`) from a byte slice.
@@ -712,7 +807,7 @@ pub fn decode_stream(
             ));
         }
         let header: [u8; 4] = framed_bytes[..4].try_into().unwrap();
-        let (chunk_len, flags) = unpack_frame_header(header);
+        let (chunk_len, flags, _lane) = unpack_frame_header(header);
         framed_bytes = &framed_bytes[4..];
 
         if chunk_len > MAX_CHUNK_SIZE {
@@ -743,17 +838,61 @@ pub fn decode_stream(
     Ok(decompressed)
 }
 
+fn lane_batchers(config: &BatcherConfig) -> [Batcher; LANE_COUNT] {
+    [
+        Batcher::new(BatcherConfig {
+            flush_interval: Duration::ZERO,
+            buffer_threshold: config.buffer_threshold,
+            ..config.clone()
+        }),
+        Batcher::new(BatcherConfig {
+            flush_interval: config.high_flush_interval,
+            buffer_threshold: config.buffer_threshold,
+            ..config.clone()
+        }),
+        Batcher::new(config.clone()),
+        Batcher::new(BatcherConfig {
+            flush_interval: config.bulk_flush_interval,
+            buffer_threshold: config.buffer_threshold,
+            ..config.clone()
+        }),
+    ]
+}
+
+fn lane_compressors(config: &CompressorConfig) -> io::Result<[ZstdStreamCompressor; LANE_COUNT]> {
+    Ok([
+        ZstdStreamCompressor::new(config.clone())?,
+        ZstdStreamCompressor::new(config.clone())?,
+        ZstdStreamCompressor::new(config.clone())?,
+        ZstdStreamCompressor::new(config.clone())?,
+    ])
+}
+
+fn lane_decompressors(
+    config: &DecompressorConfig,
+) -> io::Result<[ZstdStreamDecompressor; LANE_COUNT]> {
+    Ok([
+        ZstdStreamDecompressor::new(config.clone())?,
+        ZstdStreamDecompressor::new(config.clone())?,
+        ZstdStreamDecompressor::new(config.clone())?,
+        ZstdStreamDecompressor::new(config.clone())?,
+    ])
+}
+
 pin_project! {
     /// Transparent async writer that batches and compresses data using [`Batcher`]
     /// and [`ZstdStreamCompressor`].
     ///
     /// Can be used as a standard [`tokio::io::AsyncWrite`] stream, or directly via
     /// priority-aware methods like [`Self::write_frame`].
+    ///
+    /// Each [`FramePriority`] has its own time-slice queue and zstd context so
+    /// Urgent frames can bypass a pending Bulk batch without sharing history.
     pub struct OptimizedWriter<W> {
         #[pin]
         inner: W,
-        batcher: Batcher,
-        compressor: ZstdStreamCompressor,
+        batchers: [Batcher; LANE_COUNT],
+        compressors: [ZstdStreamCompressor; LANE_COUNT],
         write_buf: Vec<u8>,
         write_pos: usize,
         stats: Vec<SharedOptimizerStats>,
@@ -775,8 +914,8 @@ impl<W> OptimizedWriter<W> {
         let flush_interval = batcher_config.flush_interval;
         Ok(Self {
             inner,
-            batcher: Batcher::new(batcher_config),
-            compressor: ZstdStreamCompressor::new(compressor_config)?,
+            batchers: lane_batchers(&batcher_config),
+            compressors: lane_compressors(&compressor_config)?,
             write_buf: Vec::new(),
             write_pos: 0,
             stats: Vec::new(),
@@ -907,7 +1046,7 @@ impl<W> OptimizedWriter<W> {
         self.flush_interval = base;
         self.flush_interval_min = min;
         self.flush_interval_max = max;
-        self.batcher.set_flush_interval(base);
+        self.batchers[LANE_DEFER as usize].set_flush_interval(base);
         self
     }
 
@@ -922,12 +1061,25 @@ impl<W> OptimizedWriter<W> {
             self.flush_interval_max,
             stats,
         );
-        self.batcher.set_flush_interval(next);
+        self.batchers[LANE_DEFER as usize].set_flush_interval(next);
     }
 
     /// Returns the remaining duration until a time-based batch flush is due.
     pub fn time_until_flush(&self) -> Option<Duration> {
-        self.batcher.time_until_flush()
+        self.time_until_flush_at(Instant::now())
+    }
+
+    fn time_until_flush_at(&self, now: Instant) -> Option<Duration> {
+        let mut soonest: Option<Duration> = None;
+        for batcher in self.batchers.iter().skip(1) {
+            if let Some(dur) = batcher.time_until_flush_at(now) {
+                soonest = Some(match soonest {
+                    Some(existing) if existing <= dur => existing,
+                    _ => dur,
+                });
+            }
+        }
+        soonest
     }
 }
 
@@ -945,60 +1097,92 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
         frame: &[u8],
         priority: FramePriority,
     ) -> io::Result<()> {
-        // Flush any pending write_buf
+        self.write_frame_with_hints(metric_raw_len, frame, priority, false)
+            .await
+    }
+
+    /// Writes a frame, optionally skipping zstd (RAW, no window update).
+    pub async fn write_frame_with_hints(
+        &mut self,
+        metric_raw_len: usize,
+        frame: &[u8],
+        priority: FramePriority,
+        incompressible: bool,
+    ) -> io::Result<()> {
         self.flush_pending_write_buf().await?;
         self.apply_adaptive_flush();
-
         self.record_raw(metric_raw_len);
 
-        let queue_delay = self
-            .batcher
+        let lane = lane_of(priority);
+        let bypass = priority == FramePriority::Urgent || incompressible;
+        let raw = incompressible
+            || (priority == FramePriority::Urgent && frame.len() <= RAW_URGENT_MAX);
+        if bypass {
+            if priority == FramePriority::Urgent {
+                self.record_urgent();
+            } else {
+                self.record_explicit();
+            }
+            self.encode_lane(lane, frame, raw, 0).await?;
+            return Ok(());
+        }
+
+        let queue_delay = self.batchers[lane as usize]
             .first_frame_at()
             .map(|t| t.elapsed().as_micros() as u64)
             .unwrap_or(0);
-
-        if let Some(batch) = self.batcher.push(frame, priority) {
-            match priority {
-                FramePriority::Urgent => self.record_urgent(),
-                FramePriority::Defer | FramePriority::High | FramePriority::Bulk => {
-                    self.record_threshold()
-                }
-            }
-            let start = Instant::now();
-            let framed = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
-            let comp_us = start.elapsed().as_micros() as u64;
-            self.record_batch(framed, comp_us, queue_delay);
-            self.flush_pending_write_buf().await?;
+        if let Some(batch) = self.batchers[lane as usize].push(frame, priority) {
+            self.record_threshold();
+            self.encode_lane(lane, &batch, false, queue_delay).await?;
         }
         Ok(())
     }
 
     /// Writes a frame with the specified priority.
     ///
-    /// If `FramePriority::Urgent` is given, or if the buffer/time threshold is reached,
-    /// the batch is flushed and written out immediately.
+    /// If `FramePriority::Urgent` is given, the frame bypasses pending High/Defer/Bulk
+    /// batches. Other priorities flush when their own time/size threshold is reached.
     pub async fn write_frame(&mut self, frame: &[u8], priority: FramePriority) -> io::Result<()> {
-        self.write_frame_with_metric(frame.len(), frame, priority)
+        self.write_frame_with_hints(frame.len(), frame, priority, false)
             .await
+    }
+
+    async fn encode_lane(
+        &mut self,
+        lane: u32,
+        batch: &[u8],
+        raw: bool,
+        queue_delay: u64,
+    ) -> io::Result<()> {
+        let start = Instant::now();
+        let framed = encode_batch_into(
+            &mut self.compressors[lane as usize],
+            batch,
+            &mut self.write_buf,
+            lane,
+            raw,
+        )?;
+        let comp_us = start.elapsed().as_micros() as u64;
+        self.record_batch(framed, comp_us, queue_delay);
+        self.flush_pending_write_buf().await
     }
 
     /// Explicitly flushes any buffered frames through compression and writes them to `inner`.
     pub async fn flush_batch(&mut self) -> io::Result<()> {
         self.flush_pending_write_buf().await?;
 
-        if !self.batcher.is_empty() {
-            let queue_delay = self
-                .batcher
+        for lane in 1..LANE_COUNT {
+            if self.batchers[lane].is_empty() {
+                continue;
+            }
+            let queue_delay = self.batchers[lane]
                 .first_frame_at()
                 .map(|t| t.elapsed().as_micros() as u64)
                 .unwrap_or(0);
-            let batch = self.batcher.flush();
+            let batch = self.batchers[lane].flush();
             self.record_explicit();
-            let start = Instant::now();
-            let framed = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
-            let comp_us = start.elapsed().as_micros() as u64;
-            self.record_batch(framed, comp_us, queue_delay);
-            self.flush_pending_write_buf().await?;
+            self.encode_lane(lane as u32, &batch, false, queue_delay)
+                .await?;
         }
 
         tokio::io::AsyncWriteExt::flush(&mut self.inner).await?;
@@ -1009,23 +1193,34 @@ impl<W: AsyncWrite + Unpin> OptimizedWriter<W> {
     /// Returns `true` if a batch was flushed.
     pub async fn flush_if_due(&mut self) -> io::Result<bool> {
         self.apply_adaptive_flush();
-        let queue_delay = self
-            .batcher
-            .first_frame_at()
-            .map(|t| t.elapsed().as_micros() as u64)
-            .unwrap_or(0);
-        if let Some(batch) = self.batcher.check_timer() {
-            self.flush_pending_write_buf().await?;
-            self.record_timer();
-            let start = Instant::now();
-            let framed = encode_batch_into(&mut self.compressor, &batch, &mut self.write_buf)?;
-            let comp_us = start.elapsed().as_micros() as u64;
-            self.record_batch(framed, comp_us, queue_delay);
-            self.flush_pending_write_buf().await?;
-            Ok(true)
-        } else {
-            Ok(false)
+        let now = Instant::now();
+        let mut flushed = false;
+        for lane in 1..LANE_COUNT {
+            let queue_delay = self.batchers[lane]
+                .first_frame_at()
+                .map(|t| t.elapsed().as_micros() as u64)
+                .unwrap_or(0);
+            if let Some(batch) = self.batchers[lane].check_timer_at(now) {
+                self.flush_pending_write_buf().await?;
+                self.record_timer();
+                self.encode_lane(lane as u32, &batch, false, queue_delay)
+                    .await?;
+                flushed = true;
+            }
         }
+        Ok(flushed)
+    }
+
+    /// Flushes pending batches, sends a dictionary control frame, then resets every
+    /// encoder so subsequent compressed frames use `dict`.
+    pub async fn install_dictionary(&mut self, dict: &[u8]) -> io::Result<()> {
+        self.flush_batch().await?;
+        encode_dict_control(dict, &mut self.write_buf)?;
+        self.flush_pending_write_buf().await?;
+        for compressor in &mut self.compressors {
+            compressor.set_dictionary(Some(dict.to_vec()))?;
+        }
+        Ok(())
     }
 
     /// Writes an opaque control payload immediately (not batched, not compressed).
@@ -1164,20 +1359,26 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
             s.add_direction_raw_bytes(*this.direction, buf.len() as u64, now_ms);
         }
 
-        let queue_delay = this
-            .batcher
+        let defer = LANE_DEFER as usize;
+        let queue_delay = this.batchers[defer]
             .first_frame_at()
             .map(|t| t.elapsed().as_micros() as u64)
             .unwrap_or(0);
 
-        // 2. Add incoming bytes to batcher with defer priority
-        let flushed = this.batcher.push(buf, FramePriority::Defer);
+        // 2. Add incoming bytes to the defer lane with defer priority
+        let flushed = this.batchers[defer].push(buf, FramePriority::Defer);
         if let Some(batch) = flushed {
             for s in this.stats.iter() {
                 s.inc_threshold();
             }
             let start = Instant::now();
-            let framed = match encode_batch_into(this.compressor, &batch, this.write_buf) {
+            let framed = match encode_batch_into(
+                &mut this.compressors[defer],
+                &batch,
+                this.write_buf,
+                LANE_DEFER,
+                false,
+            ) {
                 Ok(framed) => framed,
                 Err(e) => return Poll::Ready(Err(e)),
             };
@@ -1212,19 +1413,27 @@ impl<W: AsyncWrite> AsyncWrite for OptimizedWriter<W> {
             other => return other,
         }
 
-        // Flush batcher if non-empty
-        if !this.batcher.is_empty() {
-            let queue_delay = this
-                .batcher
+        // Flush every non-urgent lane if non-empty
+        for lane in 1..LANE_COUNT {
+            if this.batchers[lane].is_empty() {
+                continue;
+            }
+            let queue_delay = this.batchers[lane]
                 .first_frame_at()
                 .map(|t| t.elapsed().as_micros() as u64)
                 .unwrap_or(0);
-            let batch = this.batcher.flush();
+            let batch = this.batchers[lane].flush();
             for s in this.stats.iter() {
                 s.inc_explicit();
             }
             let start = Instant::now();
-            let framed = match encode_batch_into(this.compressor, &batch, this.write_buf) {
+            let framed = match encode_batch_into(
+                &mut this.compressors[lane],
+                &batch,
+                this.write_buf,
+                lane as u32,
+                false,
+            ) {
                 Ok(framed) => framed,
                 Err(e) => return Poll::Ready(Err(e)),
             };
@@ -1261,7 +1470,7 @@ pin_project! {
     pub struct OptimizedReader<R> {
         #[pin]
         inner: R,
-        decompressor: ZstdStreamDecompressor,
+        decompressors: [ZstdStreamDecompressor; LANE_COUNT],
         decompressed_buf: Vec<u8>,
         decompressed_pos: usize,
         header_buf: [u8; 4],
@@ -1282,7 +1491,7 @@ impl<R> OptimizedReader<R> {
     pub fn new(inner: R, config: DecompressorConfig) -> io::Result<Self> {
         Ok(Self {
             inner,
-            decompressor: ZstdStreamDecompressor::new(config)?,
+            decompressors: lane_decompressors(&config)?,
             decompressed_buf: Vec::new(),
             decompressed_pos: 0,
             header_buf: [0u8; 4],
@@ -1429,7 +1638,7 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
 
             // Parse chunk length if not already set
             if *this.chunk_len == 0 {
-                let (len, _flags) = unpack_frame_header(*this.header_buf);
+                let (len, _flags, _lane) = unpack_frame_header(*this.header_buf);
                 if len > MAX_CHUNK_SIZE {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1466,14 +1675,31 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
                 }
             }
 
-            let (_len, flags) = unpack_frame_header(*this.header_buf);
+            let (_len, flags, lane) = unpack_frame_header(*this.header_buf);
 
             // Control frames are not stream data.
             if flags & FRAME_FLAG_CONTROL != 0 {
                 let payload = this.payload_buf[..len].to_vec();
-                this.pending_control.push(payload.clone());
-                if let Some(tx) = this.control_tx.as_ref() {
-                    let _ = tx.send(payload);
+                if lane == CONTROL_LANE_DICT {
+                    if let Some((apply, dict)) = parse_dict_control(&payload) {
+                        let result = if apply == DICT_CONTROL_ALL_LANES {
+                            this.decompressors
+                                .iter_mut()
+                                .try_for_each(|d| d.set_dictionary(Some(dict.clone())))
+                        } else if (apply as usize) < LANE_COUNT {
+                            this.decompressors[apply as usize].set_dictionary(Some(dict))
+                        } else {
+                            Ok(())
+                        };
+                        if let Err(e) = result {
+                            return Poll::Ready(Err(e));
+                        }
+                    }
+                } else {
+                    this.pending_control.push(payload.clone());
+                    if let Some(tx) = this.control_tx.as_ref() {
+                        let _ = tx.send(payload);
+                    }
                 }
                 *this.header_pos = 0;
                 *this.chunk_len = 0;
@@ -1484,11 +1710,11 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
             this.decompressed_buf.clear();
             *this.decompressed_pos = 0;
             let start = Instant::now();
+            let lane_idx = (lane as usize).min(LANE_COUNT - 1);
             if flags & FRAME_FLAG_RAW != 0 {
                 this.decompressed_buf
                     .extend_from_slice(&this.payload_buf[..len]);
-            } else if let Err(e) = this
-                .decompressor
+            } else if let Err(e) = this.decompressors[lane_idx]
                 .decompress_chunk_into(&this.payload_buf[..len], this.decompressed_buf)
             {
                 return Poll::Ready(Err(e));
@@ -2178,5 +2404,81 @@ mod tests {
         let framed = encode_batch(&mut c, &sample).unwrap();
         let out = decode_stream(&mut d, &framed).unwrap();
         assert_eq!(out, sample);
+    }
+
+    #[tokio::test]
+    async fn test_urgent_bypasses_pending_bulk_batch() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let config = BatcherConfig {
+            flush_interval: Duration::from_millis(20),
+            high_flush_interval: Duration::from_millis(8),
+            bulk_flush_interval: Duration::from_millis(500),
+            buffer_threshold: 64 * 1024,
+        };
+        let mut writer =
+            OptimizedWriter::new(client_io, config, CompressorConfig::default()).unwrap();
+        let mut reader = OptimizedReader::with_defaults(server_io).unwrap();
+
+        writer
+            .write_frame(b"bulk-chunk-bytes", FramePriority::Bulk)
+            .await
+            .unwrap();
+        writer
+            .write_frame(b"ka", FramePriority::Urgent)
+            .await
+            .unwrap();
+
+        let mut urgent = vec![0u8; 2];
+        reader.read_exact(&mut urgent).await.unwrap();
+        assert_eq!(&urgent, b"ka");
+
+        writer.flush_batch().await.unwrap();
+        let mut bulk = vec![0u8; 16];
+        reader.read_exact(&mut bulk).await.unwrap();
+        assert_eq!(&bulk, b"bulk-chunk-bytes");
+    }
+
+    #[test]
+    fn test_raw_frame_skips_zstd_window() {
+        let mut compressor = ZstdStreamCompressor::with_defaults().unwrap();
+        let mut decompressor = ZstdStreamDecompressor::with_defaults().unwrap();
+        let raw = b"keepalive";
+        let mut framed = Vec::new();
+        encode_batch_into(&mut compressor, raw, &mut framed, LANE_URGENT, true).unwrap();
+        let header: [u8; 4] = framed[..4].try_into().unwrap();
+        let (len, flags, lane) = unpack_frame_header(header);
+        assert_eq!(len, raw.len());
+        assert_eq!(flags, FRAME_FLAG_RAW);
+        assert_eq!(lane, LANE_URGENT);
+        let decoded = decode_stream(&mut decompressor, &framed).unwrap();
+        assert_eq!(decoded, raw);
+
+        let follow = vec![0x11u8; 64];
+        let framed2 = encode_batch(&mut compressor, &follow).unwrap();
+        let decoded2 = decode_stream(&mut decompressor, &framed2).unwrap();
+        assert_eq!(decoded2, follow);
+    }
+
+    #[tokio::test]
+    async fn test_dictionary_control_resets_reader() {
+        let sample = b"block:stone;block:dirt;entity:zombie;block:stone;".to_vec();
+        let samples: Vec<Vec<u8>> = (0..40).map(|_| sample.clone()).collect();
+        let dict = train_dictionary(&samples, 2048).unwrap();
+
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let mut writer = OptimizedWriter::with_defaults(client_io).unwrap();
+        let mut reader = OptimizedReader::with_defaults(server_io).unwrap();
+
+        writer.install_dictionary(&dict).await.unwrap();
+        let payload = sample.repeat(8);
+        writer
+            .write_frame(&payload, FramePriority::Urgent)
+            .await
+            .unwrap();
+
+        let mut received = vec![0u8; payload.len()];
+        reader.read_exact(&mut received).await.unwrap();
+        assert_eq!(received, payload);
+        assert!(reader.take_control_frames().is_empty());
     }
 }

@@ -92,6 +92,11 @@ impl DictSampler {
 
     /// Trains a dictionary when enough samples were collected.
     pub fn finish(self) -> Option<Vec<u8>> {
+        self.try_train()
+    }
+
+    /// Trains a dictionary without consuming the sampler, so sampling can continue.
+    pub fn try_train(&self) -> Option<Vec<u8>> {
         if self.samples.len() < TRAINER_MIN_SAMPLES {
             return None;
         }

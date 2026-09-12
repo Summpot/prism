@@ -13,15 +13,8 @@ use std::{
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::prism::middleware::{
-    FramePriority, PollResult, SessionHandle, SessionState, StreamResult, WasmMiddleware,
-    WasmProtocolSession,
-};
 use crate::prism::tunnel::{
-    optimizer::{
-        self, BatcherConfig, CompressorConfig, DecompressorConfig, OptimizedReader,
-        OptimizedWriter, TrafficDirection,
-    },
+    optimizer,
     protocol::{self, ProxyStreamKind, RegisterRequest, RegisteredService},
     transport::{BoxedStream, TransportDialOptions},
 };
@@ -290,15 +283,12 @@ pub async fn run_optimized_tcp_pipeline(
             ..Default::default()
         });
     opt_cfg.enabled = true;
-    if opt_cfg.dictionary.is_none() {
-        opt_cfg.dictionary = optimizer::resolve_dictionary(None, &meta.name);
-    }
     let stats = crate::prism::telemetry::optimizer_collectors(
         optimizer.as_ref(),
         &meta.name,
         session_stats,
     );
-    return optimizer::pipeline::run_upstream_facing(
+    optimizer::pipeline::run_upstream_facing(
         st,
         local_sock,
         opt_cfg,
@@ -307,178 +297,12 @@ pub async fn run_optimized_tcp_pipeline(
         stats,
         meta.name,
     )
-    .await;
-
-    #[allow(unreachable_code)]
-    let (st_read, st_write) = tokio::io::split(st);
-    #[allow(unused_variables, unused_mut)]
-    let (mut local_read, mut local_write) = local_sock.into_split();
-
-    let (flush_interval, window_log, zstd_level) = if let Some(ref to) = meta.optimizer {
-        (
-            Duration::from_millis(to.flush_interval_ms()),
-            to.zstd_window_log(),
-            to.zstd_level(),
-        )
-    } else {
-        (
-            optimizer::DEFAULT_FLUSH_INTERVAL,
-            optimizer::DEFAULT_ZSTD_WINDOW_LOG,
-            optimizer::DEFAULT_ZSTD_LEVEL,
-        )
-    };
-
-    // Inbound: PRPX stream -> OptimizedReader -> local_write
-    let decompressor_config = DecompressorConfig {
-        window_log,
-        dictionary: None,
-    };
-    let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?
-        .with_direction(TrafficDirection::Uplink);
-    if let Some(ref optimizer) = optimizer {
-        opt_reader.add_stats(optimizer.service(&meta.name));
-        opt_reader.add_stats(optimizer.global());
-    }
-    let inbound_task = tokio::spawn(async move {
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            let n = opt_reader.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            local_write.write_all(&buf[..n]).await?;
-        }
-        local_write.shutdown().await?;
-        Ok::<(), anyhow::Error>(())
-    });
-
-    // Outbound: local_read -> WasmProtocolSession (if configured) -> OptimizedWriter -> st_write
-    let batcher_config = BatcherConfig {
-        flush_interval,
-        buffer_threshold: optimizer::DEFAULT_BUFFER_THRESHOLD,
-        ..Default::default()
-    };
-    let compressor_config = CompressorConfig {
-        compression_level: zstd_level,
-        window_log,
-        dictionary: None,
-    };
-    let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
-        .with_direction(TrafficDirection::Downlink);
-    if let Some(ref optimizer) = optimizer {
-        opt_writer.add_stats(optimizer.service(&meta.name));
-        opt_writer.add_stats(optimizer.global());
-    }
-    let wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
-
-    let outbound_task = tokio::spawn(async move {
-        let mut read_buf = Vec::with_capacity(64 * 1024);
-        let mut tmp = [0u8; 8192];
-
-        loop {
-            let flush_dur = opt_writer.time_until_flush();
-            tokio::select! {
-                res = local_read.read(&mut tmp) => {
-                    let n = res?;
-                    if n == 0 {
-                        // EOF on local socket: flush remaining bytes
-                        if !read_buf.is_empty() {
-                            opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
-                            read_buf.clear();
-                        }
-                        opt_writer.flush_batch().await?;
-                        opt_writer.shutdown().await?;
-                        break;
-                    }
-                    read_buf.extend_from_slice(&tmp[..n]);
-
-                    if let Some(ref sess_handle) = wasm_session {
-                        let mut offset = 0;
-                        while offset < read_buf.len() {
-                            let slice = &read_buf[offset..];
-                            let poll_res = {
-                                let mut sess = sess_handle.lock().unwrap();
-                                sess.poll(slice)
-                            };
-                            match poll_res {
-                                Ok(PollResult::Stream(StreamResult::Frame {
-                                    len,
-                                    priority,
-                                    payload,
-                                })) => {
-                                    if len == 0 || len > slice.len() {
-                                        // Need more data for a full frame
-                                        break;
-                                    }
-                                    if let Some(ref payload) = payload {
-                                        opt_writer
-                                            .write_frame_with_metric(len, payload, priority)
-                                            .await?;
-                                    } else {
-                                        opt_writer.write_frame(&slice[..len], priority).await?;
-                                    }
-                                    offset += len;
-                                }
-                                Ok(PollResult::Stream(StreamResult::NeedMoreData))
-                                | Ok(PollResult::Stream(StreamResult::Blocked)) => {
-                                    break;
-                                }
-                                Ok(PollResult::Handshake(_)) => {
-                                    opt_writer.write_frame(slice, FramePriority::Defer).await?;
-                                    offset += slice.len();
-                                    break;
-                                }
-                                Err(err) => {
-                                    tracing::warn!(err=%err, "middleware poll failed; writing defer");
-                                    opt_writer.write_frame(slice, FramePriority::Defer).await?;
-                                    offset += slice.len();
-                                    break;
-                                }
-                            }
-                        }
-                        if offset > 0 {
-                            read_buf.drain(..offset);
-                        }
-                    } else {
-                        opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
-                        read_buf.clear();
-                    }
-                }
-                _ = async {
-                    if let Some(dur) = flush_dur {
-                        tokio::time::sleep(dur).await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => {
-                    opt_writer.flush_if_due().await?;
-                }
-            }
-        }
-        Ok::<(), anyhow::Error>(())
-    });
-
-    let mut in_task = inbound_task;
-    let mut out_task = outbound_task;
-    tokio::select! {
-        res = &mut in_task => {
-            out_task.abort();
-            let _ = out_task.await;
-            res??;
-        }
-        res = &mut out_task => {
-            in_task.abort();
-            let _ = in_task.await;
-            res??;
-        }
-    }
-    Ok(())
+    .await
 }
 
 /// Runs the Server-side Native Traffic Optimizer pipeline.
 ///
-/// Bridges an external raw TCP client (e.g. Minecraft player) with a tunnel
-/// PRPX stream connected to a Connector.
+/// Bridges an external raw TCP client with a tunnel PRPX stream connected to a Connector.
 ///
 /// - Inbound (Connector -> Server -> Player): `OptimizedReader` (direction Downlink)
 ///   reads compressed PRPX chunks and writes decompressed bytes to `client_sock`.
@@ -505,15 +329,12 @@ pub async fn run_server_optimized_tcp_pipeline(
             ..Default::default()
         });
     opt_cfg.enabled = true;
-    if opt_cfg.dictionary.is_none() {
-        opt_cfg.dictionary = optimizer::resolve_dictionary(None, &meta.name);
-    }
     let stats = crate::prism::telemetry::optimizer_collectors(
         optimizer.as_ref(),
         &meta.name,
         session_stats,
     );
-    return optimizer::pipeline::run_player_facing(
+    optimizer::pipeline::run_player_facing(
         st,
         client_sock,
         opt_cfg,
@@ -525,252 +346,9 @@ pub async fn run_server_optimized_tcp_pipeline(
         meta.name,
         optimizer::pipeline::ParamsRole::Opener,
     )
-    .await;
-
-    #[allow(unreachable_code, unused_variables, unused_mut, unused_assignments)]
-    let (st_read, st_write) = tokio::io::split(st);
-    let (mut client_read, mut client_write) = client_sock.into_split();
-
-    let (flush_interval, window_log, zstd_level) = if let Some(ref to) = meta.optimizer {
-        (
-            Duration::from_millis(to.flush_interval_ms()),
-            to.zstd_window_log(),
-            to.zstd_level(),
-        )
-    } else {
-        (
-            optimizer::DEFAULT_FLUSH_INTERVAL,
-            optimizer::DEFAULT_ZSTD_WINDOW_LOG,
-            optimizer::DEFAULT_ZSTD_LEVEL,
-        )
-    };
-
-    // Inbound: PRPX stream (Connector) -> OptimizedReader (Downlink) -> client_write (Player)
-    let decompressor_config = DecompressorConfig {
-        window_log,
-        dictionary: None,
-    };
-    let mut opt_reader = OptimizedReader::new(st_read, decompressor_config)?
-        .with_direction(TrafficDirection::Downlink);
-    if let Some(ref optimizer) = optimizer {
-        opt_reader.add_stats(optimizer.service(&meta.name));
-        opt_reader.add_stats(optimizer.global());
-    }
-    let inbound_task = tokio::spawn(async move {
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            let n = opt_reader.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            client_write.write_all(&buf[..n]).await?;
-        }
-        client_write.shutdown().await?;
-        Ok::<(), anyhow::Error>(())
-    });
-
-    // Outbound: client_read (Player) -> WasmProtocolSession (sniff keepalive) -> OptimizedWriter (Uplink) -> st_write (Connector)
-    let batcher_config = BatcherConfig {
-        flush_interval,
-        buffer_threshold: optimizer::DEFAULT_BUFFER_THRESHOLD,
-        ..Default::default()
-    };
-    let compressor_config = CompressorConfig {
-        compression_level: zstd_level,
-        window_log,
-        dictionary: None,
-    };
-    let mut opt_writer = OptimizedWriter::new(st_write, batcher_config, compressor_config)?
-        .with_direction(TrafficDirection::Uplink);
-    if let Some(ref optimizer) = optimizer {
-        opt_writer.add_stats(optimizer.service(&meta.name));
-        opt_writer.add_stats(optimizer.global());
-    }
-
-    if !initial_bytes.is_empty() {
-        opt_writer.write_frame(initial_bytes, FramePriority::Defer).await?;
-        opt_writer.flush_batch().await?;
-    }
-
-    let wasm_session = load_wasm_session(meta.middleware.as_deref(), middleware_dir)?;
-
-    let outbound_task = tokio::spawn(async move {
-        let mut read_buf = Vec::with_capacity(64 * 1024);
-        let mut tmp = [0u8; 8192];
-
-        loop {
-            let flush_dur = opt_writer.time_until_flush();
-            tokio::select! {
-                res = client_read.read(&mut tmp) => {
-                    let n = res?;
-                    if n == 0 {
-                        // EOF on client socket: flush remaining bytes
-                        if !read_buf.is_empty() {
-                            opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
-                            read_buf.clear();
-                        }
-                        opt_writer.flush_batch().await?;
-                        opt_writer.shutdown().await?;
-                        break;
-                    }
-                    read_buf.extend_from_slice(&tmp[..n]);
-
-                    if let Some(ref sess_handle) = wasm_session {
-                        let mut offset = 0;
-                        while offset < read_buf.len() {
-                            let slice = &read_buf[offset..];
-                            let poll_res = {
-                                let mut sess = sess_handle.lock().unwrap();
-                                sess.poll(slice)
-                            };
-                            match poll_res {
-                                Ok(PollResult::Stream(StreamResult::Frame {
-                                    len,
-                                    priority,
-                                    payload,
-                                })) => {
-                                    if len == 0 || len > slice.len() {
-                                        break;
-                                    }
-                                    if let Some(ref payload) = payload {
-                                        opt_writer
-                                            .write_frame_with_metric(len, payload, priority)
-                                            .await?;
-                                    } else {
-                                        opt_writer.write_frame(&slice[..len], priority).await?;
-                                    }
-                                    offset += len;
-                                }
-                                Ok(PollResult::Stream(StreamResult::NeedMoreData))
-                                | Ok(PollResult::Stream(StreamResult::Blocked)) => {
-                                    break;
-                                }
-                                Ok(PollResult::Handshake(_)) => {
-                                    opt_writer.write_frame(slice, FramePriority::Defer).await?;
-                                    offset += slice.len();
-                                    break;
-                                }
-                                Err(err) => {
-                                    tracing::warn!(err=%err, "middleware poll failed; writing defer");
-                                    opt_writer.write_frame(slice, FramePriority::Defer).await?;
-                                    offset += slice.len();
-                                    break;
-                                }
-                            }
-                        }
-                        if offset > 0 {
-                            read_buf.drain(..offset);
-                        }
-                    } else {
-                        opt_writer.write_frame(&read_buf, FramePriority::Defer).await?;
-                        read_buf.clear();
-                    }
-                }
-                _ = async {
-                    if let Some(dur) = flush_dur {
-                        tokio::time::sleep(dur).await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => {
-                    opt_writer.flush_if_due().await?;
-                }
-            }
-        }
-        Ok::<(), anyhow::Error>(())
-    });
-
-    let copy_fut = async {
-        let mut in_task = inbound_task;
-        let mut out_task = outbound_task;
-        tokio::select! {
-            res = &mut in_task => {
-                out_task.abort();
-                let _ = out_task.await;
-                res??;
-            }
-            res = &mut out_task => {
-                in_task.abort();
-                let _ = in_task.await;
-                res??;
-            }
-        }
-        Ok::<(), anyhow::Error>(())
-    };
-
-    if idle_timeout > Duration::from_millis(0) {
-        tokio::time::timeout(idle_timeout, copy_fut)
-            .await
-            .map_err(|_| anyhow::anyhow!("idle timeout"))??;
-    } else {
-        copy_fut.await?;
-    }
-
-    Ok(())
+    .await
 }
 
-pub fn load_wasm_session(
-    mw_name: Option<&str>,
-    middleware_dir: Option<&Path>,
-) -> anyhow::Result<Option<SessionHandle>> {
-    let Some(name) = mw_name else {
-        return Ok(None);
-    };
-    let name = name.trim();
-    if name.is_empty() {
-        return Ok(None);
-    }
-
-    let base_name = name.strip_suffix(".wat").unwrap_or(name);
-
-    let mut sess = if let Some(dir) = middleware_dir {
-        let candidates = [dir.join(name), dir.join(format!("{base_name}.wat"))];
-        let mut found = None;
-        for path in &candidates {
-            if path.exists() {
-                let mw = WasmMiddleware::from_wat_path(base_name, path)?;
-                found = Some(mw.create_shared_session()?);
-                break;
-            }
-        }
-        found
-    } else {
-        None
-    };
-
-    if sess.is_none() {
-        let path = Path::new(name);
-        if path.exists() {
-            let mw = WasmMiddleware::from_wat_path(base_name, path)?;
-            sess = Some(mw.create_shared_session()?);
-        }
-    }
-
-    if sess.is_none() {
-        if let Some(wat) = crate::prism::middleware::get_default_middleware_wat(base_name) {
-            let s = WasmProtocolSession::from_wat(wat)?;
-            sess = Some(s.into_shared(base_name));
-        }
-    }
-
-    let Some(sess) = sess else {
-        anyhow::bail!("middleware not found: {name}");
-    };
-
-    {
-        let mut s = sess.lock().unwrap();
-        s.set_state(SessionState::Streaming);
-        if let Some(data) = crate::prism::middleware::get_injected_middleware_data(base_name, None)
-        {
-            let _ = s.set_data(&data);
-        }
-        if let Some(config) = crate::prism::middleware::get_dynamic_middleware_config(base_name) {
-            let _ = s.apply_config_map(&config);
-        }
-    }
-
-    Ok(Some(sess))
-}
 
 async fn handle_udp_stream(st: BoxedStream, local: &str) -> anyhow::Result<()> {
     let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
@@ -821,6 +399,8 @@ async fn handle_udp_stream(st: BoxedStream, local: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prism::middleware::FramePriority;
+    use crate::prism::tunnel::optimizer::{OptimizedReader, OptimizedWriter};
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;

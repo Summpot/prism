@@ -1,4 +1,5 @@
 import { invokeTauri } from "@/lib/desktopWindow";
+import type { MiddlewareItem } from "@/types/admin";
 import type {
 	ClientConfigResponse,
 	ClientConfigState,
@@ -55,4 +56,21 @@ export function getClientLogs(limit = 200): Promise<ClientLogEntry[]> {
 export async function clearClientLogs(): Promise<{ ok: boolean }> {
 	await invokeTauri("client_clear_logs");
 	return { ok: true };
+}
+
+export function listLocalMiddlewares(): Promise<MiddlewareItem[]> {
+	return invokeTauri<MiddlewareItem[]>("client_list_middlewares");
+}
+
+export function updateLocalMiddlewareConfig(
+	name: string,
+	config: Record<string, unknown>,
+): Promise<{ status: string; name: string; config: Record<string, unknown> }> {
+	return invokeTauri("client_update_middleware_config", { name, config });
+}
+
+export function resetLocalMiddlewareConfig(
+	name: string,
+): Promise<{ status: string; name: string; reset: boolean }> {
+	return invokeTauri("client_reset_middleware_config", { name });
 }

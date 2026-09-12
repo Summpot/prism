@@ -7,6 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+	listLocalMiddlewares,
+	resetLocalMiddlewareConfig,
+	updateLocalMiddlewareConfig,
+} from "@/lib/client/clientIpc";
+import {
 	type ConfigFieldSchema,
 	type MiddlewareItem,
 	listMiddlewares,
@@ -17,10 +22,11 @@ import type { PanelConnection } from "@/lib/panelConnection";
 import { m } from "@/paraglide/messages";
 
 interface MiddlewareConfigEditorProps {
-	connection: PanelConnection;
+	connection?: PanelConnection | null;
+	local?: boolean;
 }
 
-export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorProps) {
+export function MiddlewareConfigEditor({ connection, local = false }: MiddlewareConfigEditorProps) {
 	const [middlewares, setMiddlewares] = useState<MiddlewareItem[]>([]);
 	const [selectedName, setSelectedName] = useState<string>("");
 	const [formValues, setFormValues] = useState<Record<string, any>>({});
@@ -36,11 +42,15 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		setLoading(true);
 		setStatusMessage(null);
 		try {
-			const list = await listMiddlewares(connection);
+			const list = local
+				? await listLocalMiddlewares()
+				: connection
+					? await listMiddlewares(connection)
+					: [];
 			setMiddlewares(list);
 			if (list.length > 0) {
 				const current = selectedName
-					? list.find((m) => m.name === selectedName) || list[0]
+					? list.find((item) => item.name === selectedName) || list[0]
 					: list[0];
 				setSelectedName(current.name);
 				setFormValues(current.effective_config || {});
@@ -55,7 +65,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		} finally {
 			setLoading(false);
 		}
-	}, [connection, selectedName]);
+	}, [connection, local, selectedName]);
 
 	useEffect(() => {
 		loadData();
@@ -82,14 +92,24 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		setSaving(true);
 		setStatusMessage(null);
 		try {
-			const res = await updateMiddlewareConfig(connection, selectedName, formValues);
+			const res = local
+				? await updateLocalMiddlewareConfig(selectedName, formValues)
+				: connection
+					? await updateMiddlewareConfig(connection, selectedName, formValues)
+					: null;
+			if (!res) {
+				throw new Error(m.client_middleware_connect());
+			}
 			setStatusMessage({
 				type: "success",
 				text: m.middleware_applied({ name: selectedName }),
 			});
 			setFormValues(res.config);
-			// Refresh list state
-			const updated = await listMiddlewares(connection);
+			const updated = local
+				? await listLocalMiddlewares()
+				: connection
+					? await listMiddlewares(connection)
+					: [];
 			setMiddlewares(updated);
 		} catch (err) {
 			setStatusMessage({
@@ -108,15 +128,24 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 		setResetting(true);
 		setStatusMessage(null);
 		try {
-			await resetMiddlewareConfig(connection, selectedName);
+			if (local) {
+				await resetLocalMiddlewareConfig(selectedName);
+			} else if (connection) {
+				await resetMiddlewareConfig(connection, selectedName);
+			} else {
+				throw new Error(m.client_middleware_connect());
+			}
 			setStatusMessage({
 				type: "success",
 				text: m.middleware_reset_done({ name: selectedName }),
 			});
-			// Reload values
-			const updated = await listMiddlewares(connection);
+			const updated = local
+				? await listLocalMiddlewares()
+				: connection
+					? await listMiddlewares(connection)
+					: [];
 			setMiddlewares(updated);
-			const current = updated.find((m) => m.name === selectedName);
+			const current = updated.find((item) => item.name === selectedName);
 			if (current) {
 				setFormValues(current.effective_config || {});
 			}
@@ -279,9 +308,7 @@ export function MiddlewareConfigEditor({ connection }: MiddlewareConfigEditorPro
 								<Zap className="size-3" /> {m.middleware_badge()}
 							</Badge>
 						</h3>
-						<p className="text-xs text-muted-foreground">
-							{m.middleware_description()}
-						</p>
+						<p className="text-xs text-muted-foreground">{m.middleware_description()}</p>
 					</div>
 				</div>
 

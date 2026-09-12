@@ -498,6 +498,78 @@ pub(crate) async fn do_client_clear_logs(
     }
 }
 
+pub(crate) fn do_list_middlewares() -> Result<Vec<MiddlewareItem>, String> {
+    let mut items = Vec::new();
+    let engine = wasmtime::Engine::default();
+    for (name, wat) in crate::prism::middleware::DEFAULT_MIDDLEWARES {
+        let (_, schema) =
+            crate::prism::middleware::compile_module_from_wat(&engine, name, wat.as_bytes())
+                .map_err(|e| e.to_string())?;
+        let mut effective = std::collections::HashMap::new();
+        if let Some(ref s) = schema {
+            for f in &s.fields {
+                effective.insert(f.key.clone(), f.default_value.clone());
+            }
+        }
+        if let Some(overrides) = crate::prism::middleware::get_dynamic_middleware_config(name) {
+            for (k, v) in overrides {
+                effective.insert(k, v);
+            }
+        }
+        items.push(MiddlewareItem {
+            name: name.to_string(),
+            schema,
+            effective_config: effective,
+        });
+    }
+    Ok(items)
+}
+
+pub(crate) fn do_put_middleware_config(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+    name: &str,
+    config: HashMap<String, serde_json::Value>,
+) -> Result<HashMap<String, serde_json::Value>, String> {
+    let base_name = name.strip_suffix(".wat").unwrap_or(name).trim().to_string();
+    if crate::prism::middleware::get_default_middleware_wat(&base_name).is_none() {
+        return Err(format!("middleware '{name}' not found"));
+    }
+    if let Some(storage) = storage {
+        storage
+            .save_middleware_config(&base_name, &config)
+            .map_err(|e| e.to_string())?;
+    }
+    crate::prism::middleware::set_dynamic_middleware_config(&base_name, config.clone());
+    Ok(config)
+}
+
+pub(crate) fn do_reset_middleware_config(
+    storage: Option<&crate::prism::storage::StorageEngine>,
+    name: &str,
+) -> Result<(), String> {
+    let base_name = name.strip_suffix(".wat").unwrap_or(name).trim();
+    if crate::prism::middleware::get_default_middleware_wat(base_name).is_none() {
+        return Err(format!("middleware '{name}' not found"));
+    }
+    if let Some(storage) = storage {
+        let _ = storage.delete_middleware_config(base_name);
+    }
+    crate::prism::middleware::reset_dynamic_middleware_config(base_name);
+    if let Some(wat) = crate::prism::middleware::get_default_middleware_wat(base_name) {
+        let engine = wasmtime::Engine::default();
+        if let Ok((_, Some(schema))) =
+            crate::prism::middleware::compile_module_from_wat(&engine, base_name, wat.as_bytes())
+        {
+            let mut defaults = std::collections::HashMap::new();
+            for f in schema.fields {
+                defaults.insert(f.key, f.default_value);
+            }
+            crate::prism::middleware::broadcast_session_config_update(base_name, &defaults);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminHttpRequest {
     #[serde(default)]
@@ -1967,29 +2039,7 @@ impl AdminState {
     }
 
     fn rpc_list_middlewares(&self) -> Result<AdminPayload, AdminError> {
-        let mut items = Vec::new();
-        let engine = wasmtime::Engine::default();
-        for (name, wat) in crate::prism::middleware::DEFAULT_MIDDLEWARES {
-            let (_, schema) =
-                crate::prism::middleware::compile_module_from_wat(&engine, name, wat.as_bytes())
-                    .map_err(|e| AdminError::bad_request(e.to_string()))?;
-            let mut effective = std::collections::HashMap::new();
-            if let Some(ref s) = schema {
-                for f in &s.fields {
-                    effective.insert(f.key.clone(), f.default_value.clone());
-                }
-            }
-            if let Some(overrides) = crate::prism::middleware::get_dynamic_middleware_config(name) {
-                for (k, v) in overrides {
-                    effective.insert(k, v);
-                }
-            }
-            items.push(MiddlewareItem {
-                name: name.to_string(),
-                schema,
-                effective_config: effective,
-            });
-        }
+        let items = do_list_middlewares().map_err(|e| AdminError::bad_request(e))?;
         Ok(AdminPayload::Middlewares(items))
     }
 

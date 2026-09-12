@@ -1158,8 +1158,15 @@ impl ClientController {
                 {
                     return Err(err);
                 }
-                Err(err) if method.requires_session() => return Err(err),
-                Err(_) => {}
+                Err(err) => {
+                    // $admin may already carry the tunnel handshake identity.
+                    // A stale panel token must not block methods on that session.
+                    tracing::debug!(
+                        err = %err,
+                        method = ?method,
+                        "tunnel client: $admin authenticate skipped"
+                    );
+                }
             }
         }
         client.admin_rpc(method).await

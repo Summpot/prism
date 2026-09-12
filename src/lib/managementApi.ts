@@ -49,9 +49,12 @@ export {
 	getClientLogs,
 	getClientProfiles,
 	getClientStatus,
+	listLocalMiddlewares,
 	resetClientStats,
+	resetLocalMiddlewareConfig,
 	saveClientConfig,
 	saveClientProfiles,
 	startClient,
 	stopClient,
+	updateLocalMiddlewareConfig,
 } from "@/lib/client/clientIpc";

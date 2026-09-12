@@ -7,11 +7,14 @@ import {
 	getClientLogs,
 	getClientProfiles,
 	getClientStatus,
+	listLocalMiddlewares,
 	resetClientStats,
+	resetLocalMiddlewareConfig,
 	saveClientConfig,
 	saveClientProfiles,
 	startClient,
 	stopClient,
+	updateLocalMiddlewareConfig,
 } from "./clientIpc";
 
 describe("clientIpc (Native Tauri IPC)", () => {
@@ -147,6 +150,50 @@ describe("clientIpc (Native Tauri IPC)", () => {
 		const logs = await getClientLogs(50);
 		expect(invokeMock).toHaveBeenCalledWith("client_logs", { limit: 50 });
 		expect(logs).toEqual(mockLogs);
+	});
+
+	it("listLocalMiddlewares invokes client_list_middlewares", async () => {
+		const invokeMock = vi
+			.fn()
+			.mockResolvedValue([{ name: "minecraft", schema: null, effective_config: {} }]);
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		const list = await listLocalMiddlewares();
+		expect(invokeMock).toHaveBeenCalledWith("client_list_middlewares", undefined);
+		expect(list[0]?.name).toBe("minecraft");
+	});
+
+	it("updateLocalMiddlewareConfig invokes client_update_middleware_config", async () => {
+		const invokeMock = vi.fn().mockResolvedValue({
+			status: "ok",
+			name: "minecraft",
+			config: { compression: 3 },
+		});
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		const res = await updateLocalMiddlewareConfig("minecraft", { compression: 3 });
+		expect(invokeMock).toHaveBeenCalledWith("client_update_middleware_config", {
+			name: "minecraft",
+			config: { compression: 3 },
+		});
+		expect(res.status).toBe("ok");
+	});
+
+	it("resetLocalMiddlewareConfig invokes client_reset_middleware_config", async () => {
+		const invokeMock = vi.fn().mockResolvedValue({ status: "ok", name: "minecraft", reset: true });
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		const res = await resetLocalMiddlewareConfig("minecraft");
+		expect(invokeMock).toHaveBeenCalledWith("client_reset_middleware_config", {
+			name: "minecraft",
+		});
+		expect(res.reset).toBe(true);
 	});
 
 	it("clearClientLogs invokes client_clear_logs", async () => {

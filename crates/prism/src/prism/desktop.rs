@@ -55,6 +55,11 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     };
 
     if let Some(ref storage_engine) = storage {
+        if let Ok(saved) = storage_engine.load_all_middleware_configs() {
+            for (name, cfg) in saved {
+                crate::prism::middleware::set_dynamic_middleware_config(&name, cfg);
+            }
+        }
         let snap = storage_engine.get_client_config_snapshot();
         if snap.active_config.auto_connect && !snap.active_config.server_addr.trim().is_empty() {
             let payload = crate::prism::admin::StartClientRequest {
@@ -223,6 +228,42 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     }
 
     #[tauri::command]
+    fn client_list_middlewares() -> Result<Vec<crate::prism::control::MiddlewareItem>, String> {
+        crate::prism::admin::do_list_middlewares()
+    }
+
+    #[tauri::command]
+    fn client_update_middleware_config(
+        state: tauri::State<'_, DesktopClientState>,
+        name: String,
+        config: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let applied = crate::prism::admin::do_put_middleware_config(
+            state.storage.as_deref(),
+            &name,
+            config,
+        )?;
+        Ok(serde_json::json!({
+            "status": "ok",
+            "name": name.strip_suffix(".wat").unwrap_or(&name).trim(),
+            "config": applied,
+        }))
+    }
+
+    #[tauri::command]
+    fn client_reset_middleware_config(
+        state: tauri::State<'_, DesktopClientState>,
+        name: String,
+    ) -> Result<serde_json::Value, String> {
+        crate::prism::admin::do_reset_middleware_config(state.storage.as_deref(), &name)?;
+        Ok(serde_json::json!({
+            "status": "ok",
+            "name": name.strip_suffix(".wat").unwrap_or(&name).trim(),
+            "reset": true,
+        }))
+    }
+
+    #[tauri::command]
     async fn admin_request(
         state: tauri::State<'_, DesktopClientState>,
         payload: crate::prism::admin::AdminHttpRequest,
@@ -273,6 +314,9 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             client_reset_stats,
             client_logs,
             client_clear_logs,
+            client_list_middlewares,
+            client_update_middleware_config,
+            client_reset_middleware_config,
             admin_request,
             admin_rpc,
         ])

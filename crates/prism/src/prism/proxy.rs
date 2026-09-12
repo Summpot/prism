@@ -415,17 +415,20 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
         }
     };
 
-    opts.sessions.add(telemetry::SessionInfo::new(
-        sid.clone(),
-        client.clone(),
-        "".into(),
-        upstream_used.clone(),
-    ));
-
     let optimizer_enabled = matched_svc
         .as_ref()
         .and_then(|s| s.optimizer.as_ref())
         .is_some_and(|to| to.enabled);
+
+    let session_stats = opts.sessions.track(
+        telemetry::SessionInfo::new(
+            sid.clone(),
+            client.clone(),
+            "".into(),
+            upstream_used.clone(),
+        ),
+        optimizer_enabled,
+    );
 
     let res = if optimizer_enabled {
         let mut initial_bytes = Vec::new();
@@ -449,6 +452,7 @@ async fn handle_forward(mut conn: TcpStream, opts: Arc<TcpForwardHandlerOptions>
             opts.middleware_dir.as_deref(),
             opts.optimizer.clone(),
             rt.idle_timeout,
+            session_stats,
         )
         .await
     } else {
@@ -659,13 +663,6 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         return;
     };
 
-    opts.sessions.add(telemetry::SessionInfo::new(
-        sid.clone(),
-        client.clone(),
-        host.clone(),
-        upstream_used.clone(),
-    ));
-
     // Apply any middleware prelude overrides from parse phase, then allow a rewrite pass based on
     // the selected upstream.
     let mut prelude = prelude_override.unwrap_or(captured);
@@ -714,6 +711,16 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
         .and_then(|s| s.optimizer.as_ref())
         .is_some_and(|to| to.enabled);
 
+    let session_stats = opts.sessions.track(
+        telemetry::SessionInfo::new(
+            sid.clone(),
+            client.clone(),
+            host.clone(),
+            upstream_used.clone(),
+        ),
+        optimizer_enabled,
+    );
+
     let res = if optimizer_enabled {
         let mut initial_bytes = Vec::new();
         if rt.proxy_protocol_v2 {
@@ -737,6 +744,7 @@ async fn handle_routing(mut conn: TcpStream, opts: Arc<TcpRoutingHandlerOptions>
             opts.middleware_dir.as_deref(),
             opts.optimizer.clone(),
             rt.idle_timeout,
+            session_stats,
         )
         .await
     } else {
@@ -1035,7 +1043,7 @@ mod tests {
 
         let conn_task = tokio::spawn(async move {
             if let Some(conn_st) = open_rx.recv().await {
-                let _ = tunnel::connector::handle_stream(local_map, None, None, conn_st).await;
+                let _ = tunnel::connector::handle_stream(local_map, None, None, None, conn_st).await;
             }
         });
 
@@ -1053,7 +1061,7 @@ mod tests {
 
         let opts = Arc::new(TcpForwardHandlerOptions {
             upstream: "tunnel:opt-forward-svc".into(),
-            sessions,
+            sessions: sessions.clone(),
             tunnel_manager: Some(mgr),
             runtime,
             optimizer: Some(opt_registry.clone()),
@@ -1076,10 +1084,20 @@ mod tests {
         client_sock.read_exact(&mut reply).await.unwrap();
         assert_eq!(&reply, b"ECHO: HELLO_TUNNEL");
 
-        // 7. Verify telemetry recorded
+        // 7. Verify telemetry recorded (global, per-service, and the live session)
         let (global_stats, service_stats) = opt_registry.snapshot();
         assert!(global_stats.raw_bytes > 0);
         assert!(service_stats.contains_key("opt-forward-svc"));
+        let conns = sessions.snapshot();
+        assert_eq!(conns.len(), 1);
+        assert!(
+            conns[0].raw_bytes > 0,
+            "optimizer-enabled connector session should record raw_bytes"
+        );
+        assert!(
+            conns[0].uplink_raw_bytes > 0 || conns[0].downlink_raw_bytes > 0,
+            "optimizer-enabled connector session should record directional bytes"
+        );
 
         drop(client_sock);
         let _ = tokio::time::timeout(Duration::from_secs(2), forward_task).await;
@@ -1135,7 +1153,7 @@ mod tests {
 
         let conn_task = tokio::spawn(async move {
             if let Some(conn_st) = open_rx.recv().await {
-                let _ = tunnel::connector::handle_stream(local_map, None, None, conn_st).await;
+                let _ = tunnel::connector::handle_stream(local_map, None, None, None, conn_st).await;
             }
         });
 

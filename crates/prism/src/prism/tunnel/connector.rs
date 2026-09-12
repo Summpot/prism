@@ -49,6 +49,7 @@ pub struct ConnectorOptions {
     pub websocket: WebSocketConnectorOptions,
     pub middleware_dir: Option<PathBuf>,
     pub optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    pub sessions: Option<crate::prism::telemetry::SharedSessions>,
     pub doh_servers: Vec<String>,
 }
 
@@ -191,8 +192,9 @@ impl Connector {
                     let map = self.local_map.clone();
                     let mw_dir = self.opts.middleware_dir.clone();
                     let optimizer = self.opts.optimizer.clone();
+                    let sessions = self.opts.sessions.clone();
                     tokio::spawn(async move {
-                        if let Err(err) = handle_stream(map, mw_dir, optimizer, st).await {
+                        if let Err(err) = handle_stream(map, mw_dir, optimizer, sessions, st).await {
                             tracing::debug!(err=%err, "tunnel: connector stream ended");
                         }
                     });
@@ -206,6 +208,7 @@ pub async fn handle_stream(
     local_map: Arc<HashMap<String, RegisteredService>>,
     middleware_dir: Option<PathBuf>,
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    sessions: Option<crate::prism::telemetry::SharedSessions>,
     mut st: BoxedStream,
 ) -> anyhow::Result<()> {
     let (kind, svc, flags) = protocol::read_proxy_stream_header_with_flags(&mut st).await?;
@@ -225,7 +228,20 @@ pub async fn handle_stream(
             let optimizer_enabled = (flags & protocol::FLAG_OPTIMIZER != 0)
                 || meta.optimizer.as_ref().is_some_and(|to| to.enabled);
 
-            if optimizer_enabled {
+            let sid = crate::prism::telemetry::new_session_id();
+            let session_stats = sessions.as_ref().and_then(|reg| {
+                reg.track(
+                    crate::prism::telemetry::SessionInfo::new(
+                        sid.clone(),
+                        String::new(),
+                        meta.name.clone(),
+                        local.clone(),
+                    ),
+                    optimizer_enabled,
+                )
+            });
+
+            let res = if optimizer_enabled {
                 crate::prism::net::set_nodelay(&local_sock);
                 run_optimized_tcp_pipeline(
                     st,
@@ -233,13 +249,20 @@ pub async fn handle_stream(
                     meta,
                     middleware_dir.as_deref(),
                     optimizer,
+                    session_stats,
                 )
-                .await?;
+                .await
             } else {
                 let mut up = local_sock;
                 let mut st = st;
                 let _ = tokio::io::copy_bidirectional(&mut st, &mut up).await;
+                Ok(())
+            };
+
+            if let Some(ref sessions) = sessions {
+                sessions.remove(&sid);
             }
+            res?;
         }
         ProxyStreamKind::Udp => {
             handle_udp_stream(st, &local).await?;
@@ -255,6 +278,7 @@ pub async fn run_optimized_tcp_pipeline(
     meta: RegisteredService,
     middleware_dir: Option<&Path>,
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    session_stats: Option<optimizer::SharedOptimizerStats>,
 ) -> anyhow::Result<()> {
     crate::prism::net::set_nodelay(&local_sock);
     let mut opt_cfg = meta
@@ -269,11 +293,11 @@ pub async fn run_optimized_tcp_pipeline(
     if opt_cfg.dictionary.is_none() {
         opt_cfg.dictionary = optimizer::resolve_dictionary(None, &meta.name);
     }
-    let mut stats = Vec::new();
-    if let Some(ref registry) = optimizer {
-        stats.push(registry.service(&meta.name));
-        stats.push(registry.global());
-    }
+    let stats = crate::prism::telemetry::optimizer_collectors(
+        optimizer.as_ref(),
+        &meta.name,
+        session_stats,
+    );
     return optimizer::pipeline::run_upstream_facing(
         st,
         local_sock,
@@ -468,6 +492,7 @@ pub async fn run_server_optimized_tcp_pipeline(
     middleware_dir: Option<&Path>,
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
     idle_timeout: Duration,
+    session_stats: Option<optimizer::SharedOptimizerStats>,
 ) -> anyhow::Result<()> {
     crate::prism::net::set_nodelay(&client_sock);
     let mut opt_cfg = meta
@@ -482,11 +507,11 @@ pub async fn run_server_optimized_tcp_pipeline(
     if opt_cfg.dictionary.is_none() {
         opt_cfg.dictionary = optimizer::resolve_dictionary(None, &meta.name);
     }
-    let mut stats = Vec::new();
-    if let Some(ref registry) = optimizer {
-        stats.push(registry.service(&meta.name));
-        stats.push(registry.global());
-    }
+    let stats = crate::prism::telemetry::optimizer_collectors(
+        optimizer.as_ref(),
+        &meta.name,
+        session_stats,
+    );
     return optimizer::pipeline::run_player_facing(
         st,
         client_sock,
@@ -867,7 +892,7 @@ mod tests {
         let (mut client_st, server_st) = tokio::io::duplex(4096);
         let h =
             tokio::spawn(
-                async move { handle_stream(local_map, None, None, Box::new(server_st)).await },
+                async move { handle_stream(local_map, None, None, None, Box::new(server_st)).await },
             );
 
         // Write header without flags
@@ -928,7 +953,7 @@ mod tests {
 
         let h =
             tokio::spawn(
-                async move { handle_stream(local_map, None, None, Box::new(server_st)).await },
+                async move { handle_stream(local_map, None, None, None, Box::new(server_st)).await },
             );
 
         // Write PRPX header with FLAG_OPTIMIZER
@@ -1024,9 +1049,19 @@ mod tests {
         // 3. Duplex stream representing the tunnel PRPX stream between Server and Connector
         let (server_tunnel_st, connector_tunnel_st) = tokio::io::duplex(64 * 1024);
 
-        // Spawn connector stream handler
+        // Spawn connector stream handler with a session registry so per-stream
+        // optimizer stats are visible the same way the admin connections page reads them.
+        let connector_sessions = Arc::new(crate::prism::telemetry::SessionRegistry::new());
+        let connector_sessions_clone = connector_sessions.clone();
         let connector_handle = tokio::spawn(async move {
-            handle_stream(local_map, None, None, Box::new(connector_tunnel_st)).await
+            handle_stream(
+                local_map,
+                None,
+                None,
+                Some(connector_sessions_clone),
+                Box::new(connector_tunnel_st),
+            )
+            .await
         });
 
         // Server writes PRPX header with FLAG_OPTIMIZER
@@ -1049,7 +1084,17 @@ mod tests {
 
         // 5. Server runs run_server_optimized_tcp_pipeline
         let opt_registry = Arc::new(crate::prism::telemetry::OptimizerStatsRegistry::new());
+        let server_sessions = Arc::new(crate::prism::telemetry::SessionRegistry::new());
         let prelude = b"MINECRAFT_PRELUDE_";
+        let session_stats = server_sessions.track(
+            crate::prism::telemetry::SessionInfo::new(
+                crate::prism::telemetry::new_session_id(),
+                "player".into(),
+                svc_name.into(),
+                "echo".into(),
+            ),
+            true,
+        );
 
         let opt_clone = opt_registry.clone();
         let server_handle = tokio::spawn(async move {
@@ -1061,6 +1106,7 @@ mod tests {
                 None,
                 Some(opt_clone),
                 Duration::ZERO,
+                session_stats,
             )
             .await
         });
@@ -1080,10 +1126,22 @@ mod tests {
         player_sock.read_exact(&mut payload_reply).await.unwrap();
         assert_eq!(&payload_reply, b"ECHO: PLAYER_DATA");
 
-        // 9. Verify stats were recorded in the registry
+        // 9. Verify stats were recorded in the registry and on the live sessions
         let (global_stats, service_stats) = opt_registry.snapshot();
         assert!(global_stats.raw_bytes > 0);
         assert!(service_stats.contains_key(svc_name));
+        let server_conns = server_sessions.snapshot();
+        assert_eq!(server_conns.len(), 1);
+        assert!(
+            server_conns[0].raw_bytes > 0,
+            "server-side optimizer session should record raw_bytes"
+        );
+        let connector_conns = connector_sessions.snapshot();
+        assert_eq!(connector_conns.len(), 1);
+        assert!(
+            connector_conns[0].raw_bytes > 0,
+            "connector-side optimizer session should record raw_bytes"
+        );
 
         drop(player_sock);
         let _ = tokio::time::timeout(Duration::from_secs(2), server_handle).await;

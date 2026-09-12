@@ -687,6 +687,7 @@ mod tests {
             websocket: Default::default(),
             middleware_dir: None,
             optimizer: None,
+            sessions: None,
             doh_servers: Vec::new(),
         })?;
 

@@ -21,6 +21,7 @@ pub struct AutoListenOptions {
     /// How long to keep per-peer UDP flows alive without activity.
     pub udp_flow_idle_timeout: Duration,
     pub optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    pub sessions: Option<crate::prism::telemetry::SharedSessions>,
     pub middleware_dir: Option<PathBuf>,
 }
 
@@ -29,6 +30,7 @@ impl Default for AutoListenOptions {
         Self {
             udp_flow_idle_timeout: Duration::from_secs(60),
             optimizer: None,
+            sessions: None,
             middleware_dir: None,
         }
     }
@@ -239,9 +241,13 @@ async fn run_tcp_listener(
                 let cid = svc.client_id.clone();
                 let name = svc.name.clone();
                 let optimizer = opts.optimizer.clone();
+                let sessions = opts.sessions.clone();
                 let middleware_dir = opts.middleware_dir.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_tcp_conn(mgr, &cid, &name, c, optimizer, middleware_dir).await {
+                    if let Err(err) =
+                        handle_tcp_conn(mgr, &cid, &name, c, peer, optimizer, sessions, middleware_dir)
+                            .await
+                    {
                         tracing::debug!(service=%name, cid=%cid, peer=%peer, err=%err, "tunnel: auto-listen tcp conn ended");
                     }
                 });
@@ -257,7 +263,9 @@ async fn handle_tcp_conn(
     client_id: &str,
     service: &str,
     mut c: TcpStream,
+    peer: SocketAddr,
     optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
+    sessions: Option<crate::prism::telemetry::SharedSessions>,
     middleware_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     crate::prism::net::set_nodelay(&c);
@@ -268,7 +276,20 @@ async fn handle_tcp_conn(
 
     let optimizer_enabled = svc.optimizer.as_ref().is_some_and(|to| to.enabled);
 
-    if optimizer_enabled {
+    let sid = crate::prism::telemetry::new_session_id();
+    let session_stats = sessions.as_ref().and_then(|reg| {
+        reg.track(
+            crate::prism::telemetry::SessionInfo::new(
+                sid.clone(),
+                peer.to_string(),
+                svc.name.clone(),
+                format!("tunnel:{service}"),
+            ),
+            optimizer_enabled,
+        )
+    });
+
+    let res = if optimizer_enabled {
         crate::prism::tunnel::connector::run_server_optimized_tcp_pipeline(
             st,
             c,
@@ -277,15 +298,21 @@ async fn handle_tcp_conn(
             middleware_dir.as_deref(),
             optimizer,
             Duration::ZERO,
+            session_stats,
         )
-        .await?;
+        .await
     } else {
         let mut st = st;
         let _ = tokio::io::copy_bidirectional(&mut c, &mut *st).await;
         let _ = c.shutdown().await;
         let _ = (*st).shutdown().await;
+        Ok(())
+    };
+
+    if let Some(ref sessions) = sessions {
+        sessions.remove(&sid);
     }
-    Ok(())
+    res
 }
 
 struct UdpFlow {
@@ -598,17 +625,19 @@ mod tests {
         let conn_task = tokio::spawn(async move {
             if let Some(conn_st) = open_rx.recv().await {
                 let _ =
-                    crate::prism::tunnel::connector::handle_stream(local_map, None, None, conn_st)
+                    crate::prism::tunnel::connector::handle_stream(local_map, None, None, None, conn_st)
                         .await;
             }
         });
 
         let opt_registry = Arc::new(crate::prism::telemetry::OptimizerStatsRegistry::new());
+        let sessions = Arc::new(crate::prism::telemetry::SessionRegistry::new());
         let a = AutoListener::new(
             mgr,
             AutoListenOptions {
                 udp_flow_idle_timeout: Duration::from_secs(60),
                 optimizer: Some(opt_registry.clone()),
+                sessions: Some(sessions.clone()),
                 middleware_dir: None,
             },
         );
@@ -632,10 +661,16 @@ mod tests {
         player_sock.read_exact(&mut reply).await.unwrap();
         assert_eq!(&reply, b"AL_ECHO: HELLO_AUTOLISTEN");
 
-        // Verify optimizer metrics recorded
+        // Verify optimizer metrics recorded (global, per-service, and the live session)
         let (global_stats, service_stats) = opt_registry.snapshot();
         assert!(global_stats.raw_bytes > 0);
         assert!(service_stats.contains_key("mc-autolisten"));
+        let conns = sessions.snapshot();
+        assert_eq!(conns.len(), 1);
+        assert!(
+            conns[0].raw_bytes > 0,
+            "optimizer-enabled auto-listen session should record raw_bytes"
+        );
 
         drop(player_sock);
         a.shutdown_all().await;

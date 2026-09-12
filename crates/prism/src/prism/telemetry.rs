@@ -70,9 +70,25 @@ impl SessionRegistry {
         self.sessions.insert(s.id.clone(), (s, None));
     }
 
-    #[allow(dead_code)]
     pub fn add_with_stats(&self, s: SessionInfo, stats: SharedOptimizerStats) {
         self.sessions.insert(s.id.clone(), (s, Some(stats)));
+    }
+
+    /// Registers a live session. When `optimizer_enabled`, attaches a dedicated
+    /// collector that [`snapshot`](Self::snapshot) merges into the session row.
+    pub fn track(
+        &self,
+        s: SessionInfo,
+        optimizer_enabled: bool,
+    ) -> Option<SharedOptimizerStats> {
+        if optimizer_enabled {
+            let stats = Arc::new(OptimizerStats::new());
+            self.add_with_stats(s, stats.clone());
+            Some(stats)
+        } else {
+            self.add(s);
+            None
+        }
     }
 
     pub fn remove(&self, id: &str) {
@@ -126,6 +142,22 @@ impl OptimizerStatsRegistry {
             .clone()
     }
 
+    /// Collectors attached to one optimized stream: optional per-session, then
+    /// per-service, then global. All share the same live counters.
+    pub fn collectors(
+        &self,
+        service: &str,
+        session: Option<SharedOptimizerStats>,
+    ) -> Vec<SharedOptimizerStats> {
+        let mut out = Vec::with_capacity(3);
+        if let Some(stats) = session {
+            out.push(stats);
+        }
+        out.push(self.service(service));
+        out.push(self.global());
+        out
+    }
+
     pub fn snapshot(
         &self,
     ) -> (
@@ -142,6 +174,19 @@ impl OptimizerStatsRegistry {
 }
 
 pub type SharedOptimizerRegistry = Arc<OptimizerStatsRegistry>;
+
+/// Builds the stats collectors for an optimized stream when the registry may
+/// be absent (tests, or a host that only wants per-session counters).
+pub fn optimizer_collectors(
+    registry: Option<&SharedOptimizerRegistry>,
+    service: &str,
+    session: Option<SharedOptimizerStats>,
+) -> Vec<SharedOptimizerStats> {
+    match registry {
+        Some(reg) => reg.collectors(service, session),
+        None => session.into_iter().collect(),
+    }
+}
 
 pub fn now_unix_ms() -> u64 {
     SystemTime::now()

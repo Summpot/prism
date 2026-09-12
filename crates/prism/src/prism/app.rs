@@ -436,6 +436,7 @@ pub async fn run(
                 tunnel::autolisten::AutoListenOptions {
                     udp_flow_idle_timeout: std::time::Duration::from_secs(60),
                     optimizer: Some(optimizer.clone()),
+                    sessions: Some(sessions.clone()),
                     middleware_dir: Some(paths.middleware_dir.clone()),
                 },
             );
@@ -497,6 +498,7 @@ pub async fn run(
             websocket: ws_opts,
             middleware_dir: Some(paths.middleware_dir.clone()),
             optimizer: Some(optimizer.clone()),
+            sessions: Some(sessions.clone()),
             doh_servers: conn.doh_servers.clone(),
         })?;
 

@@ -14,7 +14,11 @@ import {
 
 import { Github } from "@/components/icons/Github";
 
-import { useClient } from "@/context/ClientContext";
+import { useClientActions } from "@/hooks/useClientActions";
+import { useClientAuth } from "@/hooks/useClientAuth";
+import { useClientConfig } from "@/hooks/useClientConfig";
+import { useClientLink } from "@/hooks/useClientLink";
+import { useClientRuntime } from "@/hooks/useClientRuntime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +74,7 @@ function getLoopbackTargetForService(idx: number, port: string): string {
 }
 
 export function ClientOverview() {
-	const { authSession, isAdmin, isLoadingSession, clearConnection } = usePanelSession();
+	const { authSession, isAdmin, isLoadingSession } = usePanelSession();
 	const [copiedLink, setCopiedLink] = useState(false);
 
 	const {
@@ -87,20 +91,12 @@ export function ClientOverview() {
 		rawBytes,
 		wireBytes,
 		savedRatio,
-		actionLoading,
-		error,
+	} = useClientRuntime();
+	const { profileName, serverAddr, transport, authToken, listenAddr, fakeLanBroadcast } =
+		useClientConfig();
+	const {
 		copied,
 		copyText,
-		handleConnect,
-		handleDisconnect,
-		handleResetStats,
-		profileName,
-		serverAddr,
-		transport,
-		authToken,
-		setAuthToken,
-		listenAddr,
-		fakeLanBroadcast,
 		remoteLinkInput,
 		setRemoteLinkInput,
 		linkProtocol,
@@ -108,7 +104,8 @@ export function ClientOverview() {
 		handleAddressChange,
 		handleAddressPaste,
 		handleAddressCopy,
-		handleConnectFromLink,
+	} = useClientLink();
+	const {
 		checkingProviders,
 		providersResult,
 		setProvidersResult,
@@ -123,10 +120,19 @@ export function ClientOverview() {
 		oauthExchanging,
 		manualCallbackInput,
 		setManualCallbackInput,
-		handleManualOAuthCallback,
 		startGitHubAuthWithUrl,
 		loginAdminUnlocked,
-	} = useClient();
+	} = useClientAuth();
+	const {
+		actionLoading,
+		error,
+		handleConnect,
+		handleDisconnect,
+		handleResetStats,
+		handleConnectFromLink,
+		handleManualOAuthCallback,
+		handleSignOut,
+	} = useClientActions();
 
 	const hasGithubProvider = Boolean(
 		providersResult &&
@@ -212,13 +218,7 @@ export function ClientOverview() {
 							variant="outline"
 							size="xs"
 							onClick={() => {
-								clearConnection();
-								setAuthToken("");
-								setProvidersResult(null);
-								setAuthError(null);
-								if (status?.running) {
-									void handleDisconnect();
-								}
+								void handleSignOut();
 							}}
 							className="h-7 text-xs px-2.5 text-muted-foreground hover:text-destructive cursor-pointer"
 						>

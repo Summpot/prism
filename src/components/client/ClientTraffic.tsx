@@ -4,7 +4,8 @@ import { OptimizerStatsView } from "@/components/traffic/OptimizerStatsView";
 import { ThroughputSparkline } from "@/components/traffic/ThroughputSparkline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useClient } from "@/context/ClientContext";
+import { useClientActions } from "@/hooks/useClientActions";
+import { useClientRuntime } from "@/hooks/useClientRuntime";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
@@ -22,8 +23,8 @@ export function ClientTraffic() {
 		rawBytes,
 		wireBytes,
 		savedRatio,
-		handleResetStats,
-	} = useClient();
+	} = useClientRuntime();
+	const { handleResetStats } = useClientActions();
 
 	const lifetimeRaw = (cumulativeStats?.raw_bytes ?? 0) + (isConnected ? rawBytes : 0);
 	const lifetimeWire = (cumulativeStats?.wire_bytes ?? 0) + (isConnected ? wireBytes : 0);

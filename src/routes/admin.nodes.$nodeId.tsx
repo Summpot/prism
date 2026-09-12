@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, CircleSlash, RefreshCcw, ServerCog } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { NodeConfigEditor } from "@/components/cluster/NodeConfigEditor";
 import {
@@ -19,10 +19,12 @@ import { formatRelative, formatTime } from "@/lib/format";
 import {
 	getManagedNodeConfig,
 	type ManagedConfigDocument,
-	type ManagedNodeConfigResponse,
 	updateManagedNodeConfig,
 } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
+import { getQueryClient, invalidateAdminQueries } from "@/lib/state/queryClient";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/nodes/$nodeId")({
@@ -32,36 +34,18 @@ export const Route = createFileRoute("/admin/nodes/$nodeId")({
 function AdminNodeDetailPage() {
 	const params = Route.useParams();
 	const { connection, ready } = usePanelSession();
-	const [data, setData] = useState<ManagedNodeConfigResponse | null>(null);
-	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
-	const fetchData = useCallback(() => {
-		if (!connection) {
-			setData(null);
-			return;
-		}
-
-		setLoading(true);
-		setError(null);
-
-		getManagedNodeConfig(connection, params.nodeId)
-			.then((response) => {
-				setData(response);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection, params.nodeId]);
-
-	useEffect(() => {
-		fetchData();
-	}, [fetchData]);
+	const nodeQuery = useAdminQuery(queryKeys.admin.nodeConfig(connection, params.nodeId), (conn) =>
+		getManagedNodeConfig(conn, params.nodeId),
+	);
+	const data = nodeQuery.data ?? null;
+	const loading = nodeQuery.isFetching && !nodeQuery.data;
+	const error = nodeQuery.errorMessage;
+	const fetchData = () => {
+		void nodeQuery.refetch();
+	};
 
 	const saveConfig = async (desiredConfig: ManagedConfigDocument) => {
 		if (!connection) {
@@ -72,7 +56,11 @@ function AdminNodeDetailPage() {
 		setSaveError(null);
 		try {
 			const response = await updateManagedNodeConfig(connection, params.nodeId, desiredConfig);
-			setData(response);
+			getQueryClient().setQueryData(
+				queryKeys.admin.nodeConfig(connection, params.nodeId),
+				response,
+			);
+			await invalidateAdminQueries();
 		} catch (nextError) {
 			setSaveError(nextError instanceof Error ? nextError.message : String(nextError));
 		} finally {

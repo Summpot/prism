@@ -1,13 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
 
 import { getAuthSession } from "@/lib/admin/adminApi";
-import {
-	clearPanelConnection,
-	isTunnelAdminConnection,
-	loadPanelConnection,
-	type PanelConnection,
-	persistPanelConnection,
-} from "@/lib/panelConnection";
+import { getClientStatus } from "@/lib/client/clientIpc";
+import type { PanelConnection } from "@/lib/panelConnection";
+import { usePanelStore } from "@/lib/state/panelStore";
+import { queryKeys } from "@/lib/state/queryKeys";
+import { liveAuthSession, sessionIsAdmin, shouldFetchAdminSession } from "@/lib/state/session";
 import type { AuthSessionResponse } from "@/types/admin";
 
 export interface AdminSessionContextValue {
@@ -16,6 +15,7 @@ export interface AdminSessionContextValue {
 	authSession: AuthSessionResponse | null;
 	isAdmin: boolean;
 	isLoadingSession: boolean;
+	tunnelState: string | null;
 	refreshSession: () => Promise<AuthSessionResponse | null>;
 	saveConnection: (value: PanelConnection) => void;
 	applySessionSnapshot: (session: AuthSessionResponse) => void;
@@ -23,105 +23,67 @@ export interface AdminSessionContextValue {
 	clearConnection: () => void;
 }
 
-function sessionIsAdmin(res: AuthSessionResponse | null): boolean {
-	return Boolean(res?.is_admin || res?.role?.toLowerCase() === "admin");
-}
-
 export type PanelSessionContextValue = AdminSessionContextValue;
 
-const AdminSessionContext = createContext<AdminSessionContextValue | null>(null);
+export function useAdminSession(): AdminSessionContextValue {
+	const queryClient = useQueryClient();
+	const connection = usePanelStore((s) => s.connection);
+	const ready = usePanelStore((s) => s.ready);
+	const saveConnection = usePanelStore((s) => s.saveConnection);
+	const clearConnection = usePanelStore((s) => s.clearConnection);
 
-export function AdminSessionProvider({ children }: { children: React.ReactNode }) {
-	const [connection, setConnection] = useState<PanelConnection | null>(null);
-	const [ready, setReady] = useState(false);
-	const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
-	const [isAdmin, setIsAdmin] = useState(false);
-	const [isLoadingSession, setIsLoadingSession] = useState(false);
+	const statusQuery = useQuery({
+		queryKey: queryKeys.client.status,
+		queryFn: getClientStatus,
+		refetchInterval: 1_500,
+		select: (status) => status.state,
+	});
+	const tunnelState =
+		statusQuery.isPending && !statusQuery.data ? null : (statusQuery.data ?? "idle");
 
-	const fetchSession = useCallback(
-		async (conn: PanelConnection | null): Promise<AuthSessionResponse | null> => {
-			if (!conn || (!conn.baseUrl && !isTunnelAdminConnection(conn))) {
-				setAuthSession(null);
-				setIsAdmin(false);
-				return null;
-			}
+	const sessionEnabled = ready && shouldFetchAdminSession(connection, tunnelState);
+	const sessionQuery = useQuery({
+		queryKey: queryKeys.admin.session(connection),
+		queryFn: () => getAuthSession(connection!),
+		enabled: sessionEnabled,
+		staleTime: 5_000,
+		retry: 1,
+	});
 
-			setIsLoadingSession(true);
-			try {
-				const res = await getAuthSession(conn);
-				setAuthSession(res);
-				setIsAdmin(sessionIsAdmin(res) && Boolean(res.authenticated));
-				return res;
-			} catch (err) {
-				console.debug("Failed to get auth session:", err);
-				// Transient fetch failures must not drop a confirmed admin session.
-				return null;
-			} finally {
-				setIsLoadingSession(false);
-			}
-		},
-		[],
-	);
-
-	useEffect(() => {
-		if (typeof window === "undefined") {
-			setReady(true);
-			return;
-		}
-
-		const initialConn = loadPanelConnection(window.localStorage);
-		setConnection(initialConn);
-		setReady(true);
-		// Tunnel `$admin` is only reachable while the sidecar is connected.
-		// ClientContext refreshes the session when the tunnel comes up.
-		if (initialConn && !isTunnelAdminConnection(initialConn)) {
-			void fetchSession(initialConn);
-		}
-	}, [fetchSession]);
-
-	const saveConnection = useCallback(
-		(next: PanelConnection) => {
-			if (typeof window !== "undefined") {
-				const saved = persistPanelConnection(window.localStorage, next);
-				setConnection(saved);
-				if (!isTunnelAdminConnection(saved)) {
-					void fetchSession(saved);
-				}
-			}
-		},
-		[fetchSession],
-	);
-
-	const applySessionSnapshot = useCallback((session: AuthSessionResponse) => {
-		setAuthSession(session);
-		setIsAdmin(sessionIsAdmin(session) && Boolean(session.authenticated));
-	}, []);
-
-	const suspendSession = useCallback(() => {
-		setAuthSession(null);
-		setIsAdmin(false);
-	}, []);
-
-	const clearConnection = useCallback(() => {
-		if (typeof window !== "undefined") {
-			clearPanelConnection(window.localStorage);
-		}
-		setConnection(null);
-		setAuthSession(null);
-		setIsAdmin(false);
-	}, []);
+	const authSession = liveAuthSession(connection, tunnelState, sessionQuery.data);
+	const isAdmin = sessionIsAdmin(authSession) && Boolean(authSession?.authenticated);
+	const isLoadingSession = sessionEnabled && sessionQuery.isPending && authSession === null;
 
 	const refreshSession = useCallback(async () => {
-		return fetchSession(connection);
-	}, [connection, fetchSession]);
+		if (!shouldFetchAdminSession(connection, tunnelState)) {
+			return null;
+		}
+		const result = await queryClient.fetchQuery({
+			queryKey: queryKeys.admin.session(connection),
+			queryFn: () => getAuthSession(connection!),
+		});
+		return result;
+	}, [connection, queryClient, tunnelState]);
 
-	const value = useMemo<AdminSessionContextValue>(
+	const applySessionSnapshot = useCallback(
+		(session: AuthSessionResponse) => {
+			queryClient.setQueryData(queryKeys.admin.session(connection), session);
+		},
+		[connection, queryClient],
+	);
+
+	const suspendSession = useCallback(() => {
+		queryClient.setQueryData(queryKeys.admin.session(connection), null);
+	}, [connection, queryClient]);
+
+	return useMemo<AdminSessionContextValue>(
 		() => ({
 			connection,
 			ready,
 			authSession,
 			isAdmin,
 			isLoadingSession,
+			tunnelState,
 			refreshSession,
 			saveConnection,
 			applySessionSnapshot,
@@ -129,30 +91,28 @@ export function AdminSessionProvider({ children }: { children: React.ReactNode }
 			clearConnection,
 		}),
 		[
-			connection,
-			ready,
+			applySessionSnapshot,
 			authSession,
+			clearConnection,
+			connection,
 			isAdmin,
 			isLoadingSession,
+			ready,
 			refreshSession,
 			saveConnection,
-			applySessionSnapshot,
 			suspendSession,
-			clearConnection,
+			tunnelState,
 		],
 	);
-
-	return <AdminSessionContext.Provider value={value}>{children}</AdminSessionContext.Provider>;
 }
 
-export function useAdminSession() {
-	const value = useContext(AdminSessionContext);
-	if (!value) {
-		throw new Error("useAdminSession must be used within AdminSessionProvider");
-	}
-	return value;
+export function usePanelSession(): AdminSessionContextValue {
+	return useAdminSession();
 }
 
-// Backwards compatibility aliases
+/** No-op: session is derived from the query cache and panel store. */
+export function AdminSessionProvider({ children }: { children: React.ReactNode }) {
+	return <>{children}</>;
+}
+
 export const PanelSessionProvider = AdminSessionProvider;
-export const usePanelSession = useAdminSession;

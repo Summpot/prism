@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Cable, Wifi, Zap } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
 	CountChip,
@@ -21,14 +21,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { formatBytes, formatDuration, formatPercentage, formatTime } from "@/lib/format";
-import {
-	getConnections,
-	getOptimizerStats,
-	type SessionInfo,
-	type OptimizerOverviewResponse,
-} from "@/lib/managementApi";
+import { getConnections, getOptimizerStats, type SessionInfo } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
-import { usePolling } from "@/lib/usePolling";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/connections")({
@@ -37,37 +33,27 @@ export const Route = createFileRoute("/admin/connections")({
 
 function AdminConnectionsPage() {
 	const { connection, ready } = usePanelSession();
-	const [conns, setConns] = useState<SessionInfo[]>([]);
-	const [optimizerStats, setOptimizerStats] = useState<OptimizerOverviewResponse | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [autoRefresh, setAutoRefresh] = useState(true);
+	const interval = autoRefresh ? 3_000 : false;
 
-	const fetchConns = useCallback(() => {
-		if (!connection) {
-			setConns([]);
-			setOptimizerStats(null);
-			return;
-		}
+	const connsQuery = useAdminQuery(queryKeys.admin.connections(connection), getConnections, {
+		refetchInterval: interval,
+	});
+	const optimizerQuery = useAdminQuery(
+		queryKeys.admin.optimizer(connection),
+		(conn) => getOptimizerStats(conn).catch(() => null),
+		{ refetchInterval: interval },
+	);
 
-		setLoading(true);
-		setError(null);
-
-		Promise.all([getConnections(connection), getOptimizerStats(connection).catch(() => null)])
-			.then(([connsResp, statsResp]) => {
-				setConns(connsResp);
-				setOptimizerStats(statsResp);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
-
-	usePolling(fetchConns, 3_000, Boolean(connection) && autoRefresh);
+	const conns = connsQuery.data ?? [];
+	const optimizerStats = optimizerQuery.data ?? null;
+	const loading = connsQuery.isFetching && !connsQuery.data;
+	const error = connsQuery.errorMessage;
+	const fetchConns = () => {
+		void connsQuery.refetch();
+		void optimizerQuery.refetch();
+	};
 
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();

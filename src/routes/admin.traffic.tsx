@@ -1,20 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Server } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 
 import { AdminReady } from "@/components/admin/AdminReady";
 import { OptimizerStatsView } from "@/components/traffic/OptimizerStatsView";
 import { CountChip, ErrorBanner, PageHeader, RefreshButton, ToggleChip } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatPercentage } from "@/lib/format";
-import {
-	getConnections,
-	getOptimizerStats,
-	type OptimizerOverviewResponse,
-	type SessionInfo,
-} from "@/lib/managementApi";
+import { getConnections, getOptimizerStats } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import type { PanelConnection } from "@/lib/panelConnection";
-import { usePolling } from "@/lib/usePolling";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/traffic")({
@@ -26,32 +22,26 @@ function AdminTrafficPage() {
 }
 
 function AdminTrafficBody({ connection }: { connection: PanelConnection }) {
-	const [stats, setStats] = useState<OptimizerOverviewResponse | null>(null);
-	const [conns, setConns] = useState<SessionInfo[]>([]);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [autoRefresh, setAutoRefresh] = useState(true);
+	const interval = autoRefresh ? 3_000 : false;
 
-	const fetchData = useCallback(() => {
-		setLoading(true);
-		setError(null);
-		Promise.all([
-			getOptimizerStats(connection),
-			getConnections(connection).catch(() => [] as SessionInfo[]),
-		])
-			.then(([nextStats, nextConns]) => {
-				setStats(nextStats);
-				setConns(nextConns);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
+	const statsQuery = useAdminQuery(queryKeys.admin.optimizer(connection), getOptimizerStats, {
+		refetchInterval: interval,
+	});
+	const connsQuery = useAdminQuery(
+		queryKeys.admin.connections(connection),
+		(conn) => getConnections(conn).catch(() => []),
+		{ refetchInterval: interval },
+	);
 
-	usePolling(fetchData, 3_000, autoRefresh);
+	const stats = statsQuery.data ?? null;
+	const conns = connsQuery.data ?? [];
+	const loading = statsQuery.isFetching && !statsQuery.data;
+	const error = statsQuery.errorMessage;
+	const fetchData = () => {
+		void statsQuery.refetch();
+		void connsQuery.refetch();
+	};
 
 	const rawFromConns = conns.reduce((sum, conn) => sum + (conn.raw_bytes || 0), 0);
 	const wireFromConns = conns.reduce((sum, conn) => sum + (conn.wire_bytes || 0), 0);

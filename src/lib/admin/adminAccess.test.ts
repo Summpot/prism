@@ -88,4 +88,30 @@ describe("resolveAdminConsoleAccess", () => {
 			}),
 		).toBe("loading");
 	});
+
+	it("denies tunnel admin when the sidecar is down", () => {
+		expect(
+			resolveAdminConsoleAccess({
+				ready: true,
+				isLoadingSession: false,
+				isAdmin: false,
+				authSession: null,
+				connection: tunnel,
+				tunnelState: "disconnected",
+			}),
+		).toBe("deny");
+	});
+
+	it("waits while the tunnel is connecting", () => {
+		expect(
+			resolveAdminConsoleAccess({
+				ready: true,
+				isLoadingSession: false,
+				isAdmin: false,
+				authSession: null,
+				connection: tunnel,
+				tunnelState: "connecting",
+			}),
+		).toBe("loading");
+	});
 });

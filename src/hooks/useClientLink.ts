@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
 import { parseDeepLink } from "@/lib/deepLink";
 import {
@@ -7,61 +7,35 @@ import {
 	extractProtocolAndAddress,
 	parsePrismLink,
 } from "@/lib/prismLink";
+import { applyImportedProfile, connectFromLink } from "@/lib/state/clientActions";
+import { patchActiveConfig, readClientConfig } from "@/lib/state/clientConfig";
+import { useClientUiStore } from "@/lib/state/clientUiStore";
 import { m } from "@/paraglide/messages";
 
-interface UsePrismLinkProps {
-	serverAddr: string;
-	setServerAddr: (addr: string) => void;
-	transport: string;
-	setTransport: (t: string) => void;
-	profileName: string;
-	setProfileName: (n: string) => void;
-	listenAddr: string;
-	setListenAddr: (addr: string) => void;
-	authToken: string;
-	fakeLanBroadcast: boolean;
-	setFakeLanBroadcast: (b: boolean) => void;
-	onConnectFromLink?: (link: string) => void;
-}
-
-export function usePrismLink({
-	serverAddr,
-	setServerAddr,
-	transport,
-	setTransport,
-	profileName,
-	setProfileName,
-	listenAddr,
-	setListenAddr,
-	authToken,
-	fakeLanBroadcast,
-	setFakeLanBroadcast,
-	onConnectFromLink,
-}: UsePrismLinkProps) {
-	const [remoteLinkInput, setRemoteLinkInput] = useState("");
-	const [linkProtocol, setLinkProtocol] = useState<string>("auto://");
-	const [copied, setCopied] = useState<string | null>(null);
-
-	// Import modal state
-	const [importModalOpen, setImportModalOpen] = useState(false);
-	const [importUrl, setImportUrl] = useState("");
-	const [importError, setImportError] = useState<string | null>(null);
-
-	const copyText = useCallback((text: string, id: string) => {
-		navigator.clipboard.writeText(text);
-		setCopied(id);
-		setTimeout(() => setCopied(null), 2000);
-	}, []);
+export function useClientLink() {
+	const remoteLinkInput = useClientUiStore((s) => s.remoteLinkInput);
+	const setRemoteLinkInput = useClientUiStore((s) => s.setRemoteLinkInput);
+	const linkProtocol = useClientUiStore((s) => s.linkProtocol);
+	const setLinkProtocol = useClientUiStore((s) => s.setLinkProtocol);
+	const copied = useClientUiStore((s) => s.copied);
+	const copyText = useClientUiStore((s) => s.copyText);
+	const setCopied = useClientUiStore((s) => s.setCopied);
+	const importModalOpen = useClientUiStore((s) => s.importModalOpen);
+	const setImportModalOpen = useClientUiStore((s) => s.setImportModalOpen);
+	const importUrl = useClientUiStore((s) => s.importUrl);
+	const setImportUrl = useClientUiStore((s) => s.setImportUrl);
+	const importError = useClientUiStore((s) => s.importError);
+	const setImportError = useClientUiStore((s) => s.setImportError);
 
 	const handleSelectProtocol = useCallback(
 		(newProtocol: string) => {
 			setLinkProtocol(newProtocol);
 			const matched = SUPPORTED_LINK_PROTOCOLS.find((p) => p.value === newProtocol);
 			if (matched?.transport) {
-				setTransport(matched.transport);
+				patchActiveConfig({ transport: matched.transport });
 			}
 		},
-		[setTransport],
+		[setLinkProtocol],
 	);
 
 	const handleAddressChange = useCallback(
@@ -74,7 +48,7 @@ export function usePrismLink({
 				if (matched) {
 					setLinkProtocol(matched.value);
 					if (matched.transport) {
-						setTransport(matched.transport);
+						patchActiveConfig({ transport: matched.transport });
 					}
 				} else {
 					setLinkProtocol(protocol);
@@ -84,7 +58,7 @@ export function usePrismLink({
 				setRemoteLinkInput(val);
 			}
 		},
-		[setTransport],
+		[setLinkProtocol, setRemoteLinkInput],
 	);
 
 	const handleAddressPaste = useCallback(
@@ -100,9 +74,7 @@ export function usePrismLink({
 				if (deep.kind === "auth-code" || deep.kind === "auth") {
 					e.preventDefault();
 					setRemoteLinkInput(trimmedText);
-					if (onConnectFromLink) {
-						onConnectFromLink(trimmedText);
-					}
+					void connectFromLink(trimmedText);
 					return;
 				}
 			}
@@ -116,7 +88,7 @@ export function usePrismLink({
 				if (matched) {
 					setLinkProtocol(matched.value);
 					if (matched.transport) {
-						setTransport(matched.transport);
+						patchActiveConfig({ transport: matched.transport });
 					}
 				} else {
 					setLinkProtocol(protocol);
@@ -124,7 +96,7 @@ export function usePrismLink({
 				setRemoteLinkInput(address);
 			}
 		},
-		[onConnectFromLink, setTransport],
+		[setLinkProtocol, setRemoteLinkInput],
 	);
 
 	const handleAddressCopy = useCallback(
@@ -145,33 +117,23 @@ export function usePrismLink({
 			setImportError(m.client_invalid_link());
 			return;
 		}
-
-		if (parsed.name) setProfileName(parsed.name);
-		setServerAddr(parsed.server_addr);
-		if (parsed.transport) setTransport(parsed.transport);
-		if (parsed.listen_addr) setListenAddr(parsed.listen_addr);
-		if (parsed.fake_lan_broadcast !== undefined) {
-			setFakeLanBroadcast(parsed.fake_lan_broadcast);
-		}
-
+		applyImportedProfile(parsed);
 		setImportModalOpen(false);
 		setImportUrl("");
-	}, [importUrl, setFakeLanBroadcast, setListenAddr, setProfileName, setServerAddr, setTransport]);
+	}, [importUrl, setImportError, setImportModalOpen, setImportUrl]);
 
 	const handleShareLink = useCallback(() => {
+		const cfg = readClientConfig().active_config;
 		const link = encodePrismLink({
-			name: profileName,
-			server_addr: serverAddr,
-			transport,
-			auth_token: authToken,
-			listen_addr: listenAddr,
-			fake_lan_broadcast: fakeLanBroadcast,
+			name: cfg.profile_name,
+			server_addr: cfg.server_addr,
+			transport: cfg.transport,
+			auth_token: cfg.auth_token,
+			listen_addr: cfg.listen_addr,
+			fake_lan_broadcast: cfg.fake_lan_broadcast,
 		});
-
-		navigator.clipboard.writeText(link);
-		setCopied("share");
-		setTimeout(() => setCopied(null), 2000);
-	}, [authToken, fakeLanBroadcast, listenAddr, profileName, serverAddr, transport]);
+		copyText(link, "share");
+	}, [copyText]);
 
 	return {
 		remoteLinkInput,
@@ -179,8 +141,8 @@ export function usePrismLink({
 		linkProtocol,
 		setLinkProtocol,
 		copied,
-		setCopied,
 		copyText,
+		setCopied,
 		handleSelectProtocol,
 		handleAddressChange,
 		handleAddressPaste,

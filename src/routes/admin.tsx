@@ -13,7 +13,8 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminLayout() {
-	const { isAdmin, ready, isLoadingSession, authSession, connection } = usePanelSession();
+	const { isAdmin, ready, isLoadingSession, authSession, connection, tunnelState } =
+		usePanelSession();
 	const navigate = useNavigate();
 	const access = resolveAdminConsoleAccess({
 		ready,
@@ -21,6 +22,7 @@ function AdminLayout() {
 		isAdmin,
 		authSession,
 		connection,
+		tunnelState,
 	});
 
 	if (access === "loading") {

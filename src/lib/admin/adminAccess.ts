@@ -15,9 +15,22 @@ export function resolveAdminConsoleAccess(input: {
 	isAdmin: boolean;
 	authSession: AuthSessionResponse | null;
 	connection: PanelConnection | null;
+	tunnelState?: string | null;
 }): AdminConsoleAccess {
 	if (!input.ready) {
 		return "loading";
+	}
+	if (
+		input.connection &&
+		isTunnelAdminConnection(input.connection) &&
+		input.tunnelState !== undefined
+	) {
+		if (!input.tunnelState || input.tunnelState === "connecting") {
+			return "loading";
+		}
+		if (input.tunnelState !== "connected") {
+			return "deny";
+		}
 	}
 	if (input.isAdmin) {
 		return "allow";

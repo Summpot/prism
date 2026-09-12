@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FileCode2, HeartPulse, RotateCcw } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 
 import { AdminReady } from "@/components/admin/AdminReady";
 import {
@@ -13,8 +13,10 @@ import {
 	ToggleChip,
 } from "@/components/ui";
 import { getConfigPath, getHealth, triggerReload } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import type { PanelConnection } from "@/lib/panelConnection";
-import { usePolling } from "@/lib/usePolling";
+import { invalidateAdminQueries } from "@/lib/state/queryClient";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/runtime")({
@@ -30,42 +32,26 @@ function AdminRuntimePage() {
 }
 
 function AdminRuntimeBody({ connection }: { connection: PanelConnection }) {
-	const [healthOk, setHealthOk] = useState<boolean | null>(null);
-	const [configPath, setConfigPath] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [autoRefresh, setAutoRefresh] = useState(true);
 	const [reloading, setReloading] = useState(false);
 	const [reloadResult, setReloadResult] = useState<{ ok: boolean; text: string } | null>(null);
+	const interval = autoRefresh ? 5_000 : false;
 
-	const fetchData = useCallback(() => {
-		if (!connection) {
-			setHealthOk(null);
-			setConfigPath(null);
-			return;
-		}
+	const healthQuery = useAdminQuery(queryKeys.admin.health(connection), getHealth, {
+		refetchInterval: interval,
+	});
+	const pathQuery = useAdminQuery(queryKeys.admin.configPath(connection), getConfigPath, {
+		refetchInterval: interval,
+	});
 
-		setLoading(true);
-		setError(null);
-
-		Promise.all([
-			getHealth(connection)
-				.then((response) => setHealthOk(response.ok))
-				.catch((nextError) => {
-					setHealthOk(false);
-					throw nextError;
-				}),
-			getConfigPath(connection).then((response) => setConfigPath(response.path)),
-		])
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
-
-	usePolling(fetchData, 5_000, Boolean(connection) && autoRefresh);
+	const healthOk = healthQuery.isError ? false : (healthQuery.data?.ok ?? null);
+	const configPath = pathQuery.data?.path ?? null;
+	const loading = healthQuery.isFetching && !healthQuery.data;
+	const error = healthQuery.errorMessage;
+	const fetchData = () => {
+		void healthQuery.refetch();
+		void pathQuery.refetch();
+	};
 
 	const handleReload = async () => {
 		if (!connection) {
@@ -76,6 +62,7 @@ function AdminRuntimeBody({ connection }: { connection: PanelConnection }) {
 		try {
 			const response = await triggerReload(connection);
 			setReloadResult({ ok: true, text: m.admin_reload_sent({ seq: response.seq }) });
+			await invalidateAdminQueries();
 			fetchData();
 		} catch (nextError) {
 			setReloadResult({

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Key, Plus, Trash2, UserCheck, Users } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
 	Badge,
@@ -28,9 +28,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-	type AuthSessionResponse,
 	createAuthToken,
-	getAuthSession,
 	listAuthTokens,
 	listManagedUsers,
 	revokeAuthToken,
@@ -38,8 +36,10 @@ import {
 	updateManagedUser,
 	type UserRecord,
 } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
-import { usePolling } from "@/lib/usePolling";
+import { invalidateAdminQueries } from "@/lib/state/queryClient";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/users")({
@@ -47,11 +47,7 @@ export const Route = createFileRoute("/admin/users")({
 });
 
 function AdminUsersPage() {
-	const { connection, ready } = usePanelSession();
-	const [users, setUsers] = useState<UserRecord[]>([]);
-	const [tokens, setTokens] = useState<TokenRecord[]>([]);
-	const [session, setSession] = useState<AuthSessionResponse | null>(null);
-	const [loading, setLoading] = useState(false);
+	const { connection, ready, authSession: session } = usePanelSession();
 	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [activeTab, setActiveTab] = useState<"users" | "tokens">("users");
@@ -69,42 +65,23 @@ function AdminUsersPage() {
 	const [editServiceRules, setEditServiceRules] = useState<string>("");
 	const [userSaving, setUserSaving] = useState(false);
 
-	const fetchData = useCallback(() => {
-		if (!connection) {
-			setUsers([]);
-			setTokens([]);
-			setSession(null);
-			return;
-		}
-
-		setLoading(true);
-		setError(null);
-
-		Promise.allSettled([
-			listManagedUsers(connection),
-			listAuthTokens(connection),
-			getAuthSession(connection),
-		])
-			.then(([usersRes, tokensRes, sessionRes]) => {
-				if (usersRes.status === "fulfilled") {
-					setUsers(usersRes.value);
-				}
-				if (tokensRes.status === "fulfilled") {
-					setTokens(tokensRes.value);
-				}
-				if (sessionRes.status === "fulfilled") {
-					setSession(sessionRes.value);
-				}
-			})
-			.catch((err) => {
-				setError(err instanceof Error ? err.message : String(err));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
-
-	usePolling(fetchData, 10_000, Boolean(connection));
+	const usersQuery = useAdminQuery(
+		queryKeys.admin.users(connection),
+		(conn) => listManagedUsers(conn).catch(() => [] as UserRecord[]),
+		{ refetchInterval: 10_000 },
+	);
+	const tokensQuery = useAdminQuery(
+		queryKeys.admin.tokens(connection),
+		(conn) => listAuthTokens(conn).catch(() => [] as TokenRecord[]),
+		{ refetchInterval: 10_000 },
+	);
+	const users = usersQuery.data ?? [];
+	const tokens = tokensQuery.data ?? [];
+	const loading = usersQuery.isFetching && !usersQuery.data;
+	const fetchData = () => {
+		void usersQuery.refetch();
+		void tokensQuery.refetch();
+	};
 
 	const handleCreateToken = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -122,6 +99,7 @@ function AdminUsersPage() {
 			});
 			setCreatedRawToken(res.raw_token);
 			setTokenName("");
+			await invalidateAdminQueries();
 			fetchData();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -136,6 +114,7 @@ function AdminUsersPage() {
 		}
 		try {
 			await revokeAuthToken(connection, tokenId);
+			await invalidateAdminQueries();
 			fetchData();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -160,6 +139,7 @@ function AdminUsersPage() {
 				service_rules: rules,
 			});
 			setEditingUser(null);
+			await invalidateAdminQueries();
 			fetchData();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -260,10 +240,7 @@ function AdminUsersPage() {
 				</Card>
 			) : null}
 
-			<Tabs
-				value={activeTab}
-				onValueChange={(value) => setActiveTab(value as "users" | "tokens")}
-			>
+			<Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "users" | "tokens")}>
 				<TabsList>
 					<TabsTrigger value="users">
 						<Users className="h-4 w-4" />
@@ -306,9 +283,7 @@ function AdminUsersPage() {
 											</Avatar>
 											<div>
 												<div className="flex items-center gap-2">
-													<span className="font-medium">
-														{user.display_name || user.username}
-													</span>
+													<span className="font-medium">{user.display_name || user.username}</span>
 													<Badge
 														variant={
 															user.role === "admin"
@@ -483,15 +458,17 @@ function AdminUsersPage() {
 									id="token-type"
 									className="w-full"
 									value={tokenType}
-									onChange={(e) =>
-										setTokenType(e.target.value as "client" | "admin" | "connector")
-									}
+									onChange={(e) => setTokenType(e.target.value as "client" | "admin" | "connector")}
 								>
-									<NativeSelectOption value="client">{m.users_token_type_client()}</NativeSelectOption>
+									<NativeSelectOption value="client">
+										{m.users_token_type_client()}
+									</NativeSelectOption>
 									<NativeSelectOption value="connector">
 										{m.users_token_type_connector()}
 									</NativeSelectOption>
-									<NativeSelectOption value="admin">{m.users_token_type_admin()}</NativeSelectOption>
+									<NativeSelectOption value="admin">
+										{m.users_token_type_admin()}
+									</NativeSelectOption>
 								</NativeSelect>
 							</div>
 							<div className="space-y-1.5">
@@ -538,13 +515,13 @@ function AdminUsersPage() {
 									id="edit-role"
 									className="w-full"
 									value={editRole}
-									onChange={(e) =>
-										setEditRole(e.target.value as "admin" | "member" | "disabled")
-									}
+									onChange={(e) => setEditRole(e.target.value as "admin" | "member" | "disabled")}
 								>
 									<NativeSelectOption value="admin">{m.users_role_admin()}</NativeSelectOption>
 									<NativeSelectOption value="member">{m.users_role_member()}</NativeSelectOption>
-									<NativeSelectOption value="disabled">{m.users_role_disabled()}</NativeSelectOption>
+									<NativeSelectOption value="disabled">
+										{m.users_role_disabled()}
+									</NativeSelectOption>
 								</NativeSelect>
 							</div>
 							<div className="space-y-1.5">

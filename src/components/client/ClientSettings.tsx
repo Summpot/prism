@@ -1,6 +1,7 @@
 import { Check, Download, Plus, Share2, Trash2 } from "lucide-react";
 
-import { useClient } from "@/context/ClientContext";
+import { useClientConfig } from "@/hooks/useClientConfig";
+import { useClientLink } from "@/hooks/useClientLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,6 @@ export function ClientSettings() {
 		setServerAddr,
 		transport,
 		setTransport,
-		setLinkProtocol,
 		listenAddr,
 		setListenAddr,
 		fakeLanBroadcast,
@@ -32,10 +32,8 @@ export function ClientSettings() {
 		managementUrl,
 		handleSaveProfile,
 		handleDeleteProfile,
-		setImportModalOpen,
-		handleShareLink,
-		copied,
-	} = useClient();
+	} = useClientConfig();
+	const { setLinkProtocol, setImportModalOpen, handleShareLink, copied } = useClientLink();
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-hidden">
@@ -103,7 +101,9 @@ export function ClientSettings() {
 				{/* Left Column: Saved Profiles List */}
 				<div className="md:col-span-5 flex flex-col min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs space-y-2">
 					<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
-						<span className="text-xs font-semibold text-foreground">{m.client_saved_profiles()}</span>
+						<span className="text-xs font-semibold text-foreground">
+							{m.client_saved_profiles()}
+						</span>
 						<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
 							{m.client_profile_count({ count: profiles.length })}
 						</Badge>
@@ -129,12 +129,13 @@ export function ClientSettings() {
 												</span>
 												{isSelected ? (
 													<Badge className="bg-primary text-primary-foreground text-[9px] px-1 py-0 h-3.5">
-															{m.client_current()}
+														{m.client_current()}
 													</Badge>
 												) : null}
 											</div>
 											<div className="font-mono text-[10px] text-muted-foreground truncate">
-														{p.server_addr} ({p.transport.toUpperCase()}) &bull; {m.client_local()}: {p.listen_addr}
+												{p.server_addr} ({p.transport.toUpperCase()}) &bull; {m.client_local()}:{" "}
+												{p.listen_addr}
 											</div>
 										</div>
 
@@ -147,7 +148,7 @@ export function ClientSettings() {
 													void handleDeleteProfile(p.id);
 												}}
 												className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 cursor-pointer"
-														title={m.client_delete_profile()}
+												title={m.client_delete_profile()}
 											>
 												<Trash2 className="h-3 w-3" />
 											</Button>

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Shield, Unplug } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
 	Badge,
@@ -15,9 +15,10 @@ import {
 	ToggleChip,
 } from "@/components/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getTunnelServices, type ServiceSnapshot } from "@/lib/managementApi";
+import { getTunnelServices } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
-import { usePolling } from "@/lib/usePolling";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/tunnel-services")({
@@ -26,35 +27,19 @@ export const Route = createFileRoute("/admin/tunnel-services")({
 
 function AdminTunnelServicesPage() {
 	const { connection, ready } = usePanelSession();
-	const [services, setServices] = useState<ServiceSnapshot[]>([]);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [autoRefresh, setAutoRefresh] = useState(true);
 	const [primaryOnly, setPrimaryOnly] = useState(false);
 
-	const fetchServices = useCallback(() => {
-		if (!connection) {
-			setServices([]);
-			return;
-		}
-
-		setLoading(true);
-		setError(null);
-
-		getTunnelServices(connection)
-			.then((response) => {
-				setServices(response);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
-
-	usePolling(fetchServices, 5_000, Boolean(connection) && autoRefresh);
+	const servicesQuery = useAdminQuery(queryKeys.admin.services(connection), getTunnelServices, {
+		refetchInterval: autoRefresh ? 5_000 : false,
+	});
+	const services = servicesQuery.data ?? [];
+	const loading = servicesQuery.isFetching && !servicesQuery.data;
+	const error = servicesQuery.errorMessage;
+	const fetchServices = () => {
+		void servicesQuery.refetch();
+	};
 
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();

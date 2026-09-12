@@ -1,6 +1,6 @@
 import { ArrowDown, Check, Copy, Search, Terminal } from "lucide-react";
 
-import { useClient } from "@/context/ClientContext";
+import { useClientLogs } from "@/hooks/useClientLogs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ export function ClientLogs() {
 		handleClearLogs,
 		handleCopyAllLogs,
 		copied,
-	} = useClient();
+	} = useClientLogs();
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-hidden">
@@ -88,7 +88,11 @@ export function ClientLogs() {
 						className="h-7 text-xs px-2 cursor-pointer"
 					>
 						{m.client_logs_scroll({
-							state: autoScrollLogs ? (isAtBottom ? m.client_logs_on() : m.client_logs_paused()) : m.client_logs_off(),
+							state: autoScrollLogs
+								? isAtBottom
+									? m.client_logs_on()
+									: m.client_logs_paused()
+								: m.client_logs_off(),
 						})}
 					</Button>
 

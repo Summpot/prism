@@ -10,7 +10,7 @@ import {
 	Unplug,
 	Zap,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 
 import {
 	Badge,
@@ -35,67 +35,59 @@ import {
 	getOptimizerStats,
 	getTunnelServices,
 	type ManagedNodeSnapshot,
-	type ManagementStatusResponse,
-	type OptimizerOverviewResponse,
 	triggerReload,
 } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
-import { usePolling } from "@/lib/usePolling";
+import { invalidateAdminQueries } from "@/lib/state/queryClient";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/")({ component: AdminDashboardPage });
 
 function AdminDashboardPage() {
 	const { connection, ready } = usePanelSession();
-	const [status, setStatus] = useState<ManagementStatusResponse | null>(null);
-	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
-	const [optimizerStats, setOptimizerStats] = useState<OptimizerOverviewResponse | null>(null);
-	const [connectionCount, setConnectionCount] = useState(0);
-	const [serviceCount, setServiceCount] = useState(0);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
 	const [reloading, setReloading] = useState(false);
 	const [reloadResult, setReloadResult] = useState<{ ok: boolean; text: string } | null>(null);
 	const [autoRefresh, setAutoRefresh] = useState(true);
+	const interval = autoRefresh ? 8_000 : false;
 
-	const fetchData = useCallback(() => {
-		if (!connection) {
-			setStatus(null);
-			setNodes([]);
-			setOptimizerStats(null);
-			setConnectionCount(0);
-			setServiceCount(0);
-			return;
-		}
+	const statusQuery = useAdminQuery(queryKeys.admin.status(connection), getManagementStatus, {
+		refetchInterval: interval,
+	});
+	const nodesQuery = useAdminQuery(queryKeys.admin.nodes(connection), getManagedNodes, {
+		refetchInterval: interval,
+	});
+	const connsQuery = useAdminQuery(
+		queryKeys.admin.connections(connection),
+		(conn) => getConnections(conn).catch(() => []),
+		{ refetchInterval: interval },
+	);
+	const servicesQuery = useAdminQuery(
+		queryKeys.admin.services(connection),
+		(conn) => getTunnelServices(conn).catch(() => []),
+		{ refetchInterval: interval },
+	);
+	const optimizerQuery = useAdminQuery(
+		queryKeys.admin.optimizer(connection),
+		(conn) => getOptimizerStats(conn).catch(() => null),
+		{ refetchInterval: interval },
+	);
 
-		setLoading(true);
-		setError(null);
-
-		Promise.all([
-			getManagementStatus(connection),
-			getManagedNodes(connection),
-			getConnections(connection).catch(() => [] as Awaited<ReturnType<typeof getConnections>>),
-			getTunnelServices(connection).catch(
-				() => [] as Awaited<ReturnType<typeof getTunnelServices>>,
-			),
-			getOptimizerStats(connection).catch(() => null),
-		])
-			.then(([nextStatus, nextNodes, nextConns, nextServices, nextOptimizer]) => {
-				setStatus(nextStatus);
-				setNodes(nextNodes);
-				setConnectionCount(nextConns.length);
-				setServiceCount(nextServices.length);
-				setOptimizerStats(nextOptimizer);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
-
-	usePolling(fetchData, 8_000, Boolean(connection) && autoRefresh);
+	const status = statusQuery.data ?? null;
+	const nodes = nodesQuery.data ?? [];
+	const optimizerStats = optimizerQuery.data ?? null;
+	const connectionCount = connsQuery.data?.length ?? 0;
+	const serviceCount = servicesQuery.data?.length ?? 0;
+	const loading = statusQuery.isFetching && !statusQuery.data;
+	const error = statusQuery.errorMessage ?? nodesQuery.errorMessage;
+	const fetchData = () => {
+		void statusQuery.refetch();
+		void nodesQuery.refetch();
+		void connsQuery.refetch();
+		void servicesQuery.refetch();
+		void optimizerQuery.refetch();
+	};
 
 	const handleReload = async () => {
 		if (!connection) return;
@@ -104,6 +96,7 @@ function AdminDashboardPage() {
 		try {
 			const response = await triggerReload(connection);
 			setReloadResult({ ok: true, text: m.admin_reload_sent({ seq: response.seq }) });
+			await invalidateAdminQueries();
 			fetchData();
 		} catch (nextError) {
 			setReloadResult({

@@ -1,4 +1,4 @@
-import { useClient } from "@/context/ClientContext";
+import { useClientLink } from "@/hooks/useClientLink";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -20,7 +20,7 @@ export function ClientModals() {
 		importError,
 		setImportError,
 		handleImportLink,
-	} = useClient();
+	} = useClientLink();
 
 	return (
 		<Dialog

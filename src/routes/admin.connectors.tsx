@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Radio, Unplug } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { AdminReady } from "@/components/admin/AdminReady";
 import { hasOptimizerTraffic, OptimizerStatsView } from "@/components/traffic/OptimizerStatsView";
@@ -17,14 +17,10 @@ import {
 } from "@/components/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatBytes, formatPercentage } from "@/lib/format";
-import {
-	getOptimizerStats,
-	getTunnelServices,
-	type OptimizerOverviewResponse,
-	type ServiceSnapshot,
-} from "@/lib/managementApi";
+import { getOptimizerStats, getTunnelServices, type ServiceSnapshot } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import type { PanelConnection } from "@/lib/panelConnection";
-import { usePolling } from "@/lib/usePolling";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/connectors")({
@@ -40,30 +36,27 @@ function AdminConnectorsPage() {
 }
 
 function AdminConnectorsBody({ connection }: { connection: PanelConnection }) {
-	const [services, setServices] = useState<ServiceSnapshot[]>([]);
-	const [optimizer, setOptimizer] = useState<OptimizerOverviewResponse | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [autoRefresh, setAutoRefresh] = useState(true);
+	const interval = autoRefresh ? 4_000 : false;
 
-	const fetchData = useCallback(() => {
-		setLoading(true);
-		setError(null);
-		Promise.all([getTunnelServices(connection), getOptimizerStats(connection).catch(() => null)])
-			.then(([nextServices, nextOptimizer]) => {
-				setServices(nextServices);
-				setOptimizer(nextOptimizer);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
+	const servicesQuery = useAdminQuery(queryKeys.admin.services(connection), getTunnelServices, {
+		refetchInterval: interval,
+	});
+	const optimizerQuery = useAdminQuery(
+		queryKeys.admin.optimizer(connection),
+		(conn) => getOptimizerStats(conn).catch(() => null),
+		{ refetchInterval: interval },
+	);
 
-	usePolling(fetchData, 4_000, autoRefresh);
+	const services = servicesQuery.data ?? [];
+	const optimizer = optimizerQuery.data ?? null;
+	const loading = servicesQuery.isFetching && !servicesQuery.data;
+	const error = servicesQuery.errorMessage;
+	const fetchData = () => {
+		void servicesQuery.refetch();
+		void optimizerQuery.refetch();
+	};
 
 	const grouped = useMemo(() => {
 		const needle = query.trim().toLowerCase();

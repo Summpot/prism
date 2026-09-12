@@ -6,6 +6,7 @@ import {
 	formatCostMs,
 	formatGainMs,
 	formatPercentage,
+	formatUptime,
 } from "@/lib/format";
 
 describe("formatBytes", () => {
@@ -50,5 +51,13 @@ describe("formatBitsPerSecond", () => {
 		expect(formatBitsPerSecond(0)).toBe("0 bps");
 		expect(formatBitsPerSecond(800)).toBe("800 bps");
 		expect(formatBitsPerSecond(12_000_000)).toBe("12 Mbps");
+	});
+});
+
+describe("formatUptime", () => {
+	it("zero-pads hours minutes and seconds", () => {
+		expect(formatUptime(0)).toBe("00:00:00");
+		expect(formatUptime(75)).toBe("00:01:15");
+		expect(formatUptime(3661)).toBe("01:01:01");
 	});
 });

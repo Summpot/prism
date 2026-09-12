@@ -12,7 +12,7 @@ import Header from "@/components/Header";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { ClientModals } from "@/components/client/ClientModals";
 import { Button } from "@/components/ui/button";
-import { ClientProvider } from "@/context/ClientContext";
+import { AppStateProvider } from "@/lib/state/AppStateProvider";
 import { setupDeepLinkListener } from "@/lib/deepLink";
 import { exchangeGitHubCode, getClientConfig } from "@/lib/managementApi";
 import {
@@ -23,7 +23,7 @@ import {
 	toggleMaximizeWindow,
 } from "@/lib/desktopWindow";
 import { TUNNEL_ADMIN_CONNECTION, tunnelAdminConnection } from "@/lib/panelConnection";
-import { PanelSessionProvider, usePanelSession } from "@/lib/panelSession";
+import { usePanelSession } from "@/lib/panelSession";
 import { m } from "@/paraglide/messages";
 import { getLocale } from "@/paraglide/runtime";
 
@@ -206,10 +206,11 @@ function RootContent() {
 		return setupDeepLinkListener((payload) => {
 			if (payload.kind === "auth") {
 				const currentBaseUrl = connectionRef.current?.baseUrl || "";
-				saveConnectionRef.current({
-					baseUrl: currentBaseUrl,
-					token: payload.token,
-				});
+				saveConnectionRef.current(
+					currentBaseUrl
+						? { baseUrl: currentBaseUrl, token: payload.token }
+						: tunnelAdminConnection(payload.token),
+				);
 				window.dispatchEvent(new CustomEvent("prism:deep-link-auth", { detail: payload }));
 				if (locationRef.current.pathname === "/login") {
 					void navigateRef.current({ to: payload.role === "admin" ? "/admin" : "/" });
@@ -230,11 +231,7 @@ function RootContent() {
 						// local config is optional for exchange
 					}
 					try {
-						const res = await exchangeGitHubCode(
-							TUNNEL_ADMIN_CONNECTION,
-							payload.code,
-							deviceId,
-						);
+						const res = await exchangeGitHubCode(TUNNEL_ADMIN_CONNECTION, payload.code, deviceId);
 						if (typeof window !== "undefined") {
 							window.localStorage.removeItem("prism_pending_auth_url");
 							window.sessionStorage.removeItem("prism_pending_auth_url");
@@ -264,9 +261,7 @@ function RootContent() {
 						new CustomEvent("prism:deep-link-exchange-error", {
 							detail: {
 								error:
-									lastErr instanceof Error
-										? lastErr.message
-										: m.client_github_exchange_failed(),
+									lastErr instanceof Error ? lastErr.message : m.client_github_exchange_failed(),
 							},
 						}),
 					);
@@ -284,10 +279,7 @@ function RootContent() {
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
-			if (
-				location.pathname === "/_shell.html" ||
-				location.pathname === "/index.html"
-			) {
+			if (location.pathname === "/_shell.html" || location.pathname === "/index.html") {
 				void navigate({ to: "/", replace: true });
 			}
 		}
@@ -320,12 +312,10 @@ function RootDocument() {
 				<HeadContent />
 			</head>
 			<body className="min-h-screen bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary">
-				<PanelSessionProvider>
-					<ClientProvider>
-						<RootContent />
-						<ClientModals />
-					</ClientProvider>
-				</PanelSessionProvider>
+				<AppStateProvider>
+					<RootContent />
+					<ClientModals />
+				</AppStateProvider>
 				<Scripts />
 			</body>
 		</html>

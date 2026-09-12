@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
 	Badge,
@@ -13,44 +13,29 @@ import {
 	ToggleChip,
 } from "@/components/ui";
 import { formatRelative, formatTime } from "@/lib/format";
-import { getManagedNodes, type ManagedNodeSnapshot } from "@/lib/managementApi";
+import { getManagedNodes } from "@/lib/managementApi";
+import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
-import { usePolling } from "@/lib/usePolling";
+import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
 
 export const Route = createFileRoute("/admin/nodes/")({ component: AdminNodesIndexPage });
 
 function AdminNodesIndexPage() {
 	const { connection, ready } = usePanelSession();
-	const [nodes, setNodes] = useState<ManagedNodeSnapshot[]>([]);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
 	const [autoRefresh, setAutoRefresh] = useState(true);
 	const [filter, setFilter] = useState<"all" | "drift" | "restart" | "error">("all");
 
-	const fetchNodes = useCallback(() => {
-		if (!connection) {
-			setNodes([]);
-			return;
-		}
-
-		setLoading(true);
-		setError(null);
-
-		getManagedNodes(connection)
-			.then((response) => {
-				setNodes(response);
-			})
-			.catch((nextError) => {
-				setError(nextError instanceof Error ? nextError.message : String(nextError));
-			})
-			.finally(() => {
-				setLoading(false);
-			});
-	}, [connection]);
-
-	usePolling(fetchNodes, 8_000, Boolean(connection) && autoRefresh);
+	const nodesQuery = useAdminQuery(queryKeys.admin.nodes(connection), getManagedNodes, {
+		refetchInterval: autoRefresh ? 8_000 : false,
+	});
+	const nodes = nodesQuery.data ?? [];
+	const loading = nodesQuery.isFetching && !nodesQuery.data;
+	const error = nodesQuery.errorMessage;
+	const fetchNodes = () => {
+		void nodesQuery.refetch();
+	};
 
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -167,15 +152,16 @@ function AdminNodesIndexPage() {
 								label={m.admin_last_seen()}
 								value={`${formatRelative(node.last_seen_unix_ms)} · ${formatTime(node.last_seen_unix_ms, "short")}`}
 							/>
-							<Value label={m.admin_apply_error()} value={node.last_apply_error || m.admin_none()} />
+							<Value
+								label={m.admin_apply_error()}
+								value={node.last_apply_error || m.admin_none()}
+							/>
 						</div>
 					</Link>
 				))}
 
 				{!loading && filtered.length === 0 ? (
-					<StateCard
-						label={nodes.length === 0 ? m.admin_no_workers() : m.admin_no_nodes_match()}
-					/>
+					<StateCard label={nodes.length === 0 ? m.admin_no_workers() : m.admin_no_nodes_match()} />
 				) : null}
 			</div>
 		</div>

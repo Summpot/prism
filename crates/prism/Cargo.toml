@@ -86,6 +86,7 @@ rsa = "0.9"
 aes = "0.9"
 cfb-mode = "0.9"
 miniz_oxide = { version = "0.9", features = ["simd"] }
+lz4_flex = "0.14"
 zstd = "0.14"
 base64 = "0.23"
 sha2 = "0.11"

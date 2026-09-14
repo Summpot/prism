@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, LazyLock, Mutex, RwLock as StdRwLock, Weak},
 };
@@ -775,6 +775,83 @@ pub fn deflate_compress(input: &[u8], level: i32) -> Result<Vec<u8>, i32> {
     Ok(miniz_oxide::deflate::compress_to_vec_zlib(input, lvl))
 }
 
+/// Standalone LZ4 decompress helper with optional output buffer limit for raw blocks.
+///
+/// Detection order:
+/// 1. LZ4 Frame format (magic `0x184D2204` or legacy `0x184C2102`).
+/// 2. Prepended-size block format (4-byte little-endian uncompressed length).
+/// 3. Raw block format decompressed into a preallocated buffer when `max_output_size` is provided.
+pub fn lz4_decompress_with_limit(
+    input: &[u8],
+    max_output_size: Option<usize>,
+) -> Result<Vec<u8>, i32> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 1. Try standard or legacy LZ4 Frame format:
+    if input.len() >= 4
+        && (input.starts_with(&[0x04, 0x22, 0x4D, 0x18])
+            || input.starts_with(&[0x02, 0x21, 0x4C, 0x18]))
+    {
+        let mut decoder = lz4_flex::frame::FrameDecoder::new(input);
+        let mut decompressed = Vec::new();
+        if decoder.read_to_end(&mut decompressed).is_ok() {
+            return Ok(decompressed);
+        }
+    }
+
+    // 2. Try size-prepended block format (4-byte LE uncompressed length prefix)
+    if input.len() >= 4 {
+        if let Ok(decompressed) = lz4_flex::block::decompress_size_prepended(input) {
+            return Ok(decompressed);
+        }
+    }
+
+    // 3. Try raw block decompression if max_output_size is provided and > 0
+    if let Some(max_len) = max_output_size {
+        if max_len > 0 {
+            let mut out = vec![0u8; max_len];
+            if let Ok(written) = lz4_flex::block::decompress_into(input, &mut out) {
+                out.truncate(written);
+                return Ok(out);
+            }
+        }
+    }
+
+    Err(-2)
+}
+
+/// Standalone LZ4 decompress helper (supports Frame format and size-prepended block format).
+#[allow(dead_code)]
+pub fn lz4_decompress(input: &[u8]) -> Result<Vec<u8>, i32> {
+    lz4_decompress_with_limit(input, None)
+}
+
+/// Standalone LZ4 compress helper.
+///
+/// Modes:
+/// - `0` (default): Raw block format without header.
+/// - `1`: Block format with 4-byte LE uncompressed size prefix (`compress_prepend_size`).
+/// - `2`: Standard LZ4 Frame format with header descriptor and checksum.
+pub fn lz4_compress(input: &[u8], mode: i32) -> Result<Vec<u8>, i32> {
+    match mode {
+        1 => Ok(lz4_flex::block::compress_prepend_size(input)),
+        2 => {
+            let mut encoder = lz4_flex::frame::FrameEncoder::new(Vec::new());
+            if encoder.write_all(input).is_err() {
+                return Err(-2);
+            }
+            match encoder.finish() {
+                Ok(out) => Ok(out),
+                Err(_) => Err(-2),
+            }
+        }
+        _ => Ok(lz4_flex::block::compress(input)),
+    }
+}
+
+
 #[cfg(test)]
 pub mod legacy_varint_framing {
     use super::*;
@@ -1111,6 +1188,147 @@ pub fn host_deflate_compress(
     compressed.len() as i32
 }
 
+pub fn host_lz4_decompress(
+    mut caller: Caller<'_, HostEnv>,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+    out_max_len: i32,
+) -> i32 {
+    if in_ptr < 0 || in_len < 0 || out_ptr < 0 || out_max_len < 0 {
+        return -1;
+    }
+    if in_len == 0 {
+        return 0;
+    }
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return -1,
+    };
+    let mem_size = memory.data_size(&caller);
+
+    let in_end = (in_ptr as usize).saturating_add(in_len as usize);
+    if in_end > mem_size {
+        return -1;
+    }
+
+    let mut in_bytes = vec![0u8; in_len as usize];
+    if memory
+        .read(&caller, in_ptr as usize, &mut in_bytes)
+        .is_err()
+    {
+        return -1;
+    }
+
+    let max_len_opt = if out_max_len > 0 {
+        Some(out_max_len as usize)
+    } else {
+        None
+    };
+
+    let decompressed = match lz4_decompress_with_limit(&in_bytes, max_len_opt) {
+        Ok(d) => d,
+        Err(code) => return code,
+    };
+
+    if decompressed.len() > out_max_len as usize && out_max_len > 0 {
+        return -3;
+    }
+
+    let out_end = (out_ptr as usize).saturating_add(decompressed.len());
+    let mem_size = memory.data_size(&caller);
+    if out_end > mem_size {
+        let delta = out_end - mem_size;
+        let pages = delta.div_ceil(65536);
+        if memory.grow(&mut caller, pages as u64).is_err() {
+            return -3;
+        }
+    }
+
+    if memory
+        .write(&mut caller, out_ptr as usize, &decompressed)
+        .is_err()
+    {
+        return -3;
+    }
+
+    decompressed.len() as i32
+}
+
+pub fn host_lz4_compress(
+    mut caller: Caller<'_, HostEnv>,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+    out_max_len: i32,
+    mode: i32,
+) -> i32 {
+    if in_ptr < 0 || in_len < 0 || out_ptr < 0 || out_max_len < 0 {
+        return -1;
+    }
+    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return -1,
+    };
+    let mem_size = memory.data_size(&caller);
+
+    let in_end = (in_ptr as usize).saturating_add(in_len as usize);
+    if in_end > mem_size {
+        return -1;
+    }
+
+    let mut in_bytes = vec![0u8; in_len as usize];
+    if memory
+        .read(&caller, in_ptr as usize, &mut in_bytes)
+        .is_err()
+    {
+        return -1;
+    }
+
+    let compressed = match lz4_compress(&in_bytes, mode) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+
+    if compressed.len() > out_max_len as usize {
+        return -3;
+    }
+
+    let out_end = (out_ptr as usize).saturating_add(compressed.len());
+    if out_end > mem_size {
+        return -3;
+    }
+
+    if memory
+        .write(&mut caller, out_ptr as usize, &compressed)
+        .is_err()
+    {
+        return -3;
+    }
+
+    compressed.len() as i32
+}
+
+pub fn host_lz4_block_decompress(
+    caller: Caller<'_, HostEnv>,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+    out_max_len: i32,
+) -> i32 {
+    host_lz4_decompress(caller, in_ptr, in_len, out_ptr, out_max_len)
+}
+
+pub fn host_lz4_block_compress(
+    caller: Caller<'_, HostEnv>,
+    in_ptr: i32,
+    in_len: i32,
+    out_ptr: i32,
+    out_max_len: i32,
+) -> i32 {
+    host_lz4_compress(caller, in_ptr, in_len, out_ptr, out_max_len, 0)
+}
+
 pub fn host_sym_intern(mut caller: Caller<'_, HostEnv>, str_ptr: i32, str_len: i32) -> i64 {
     if str_ptr < 0 || str_len < 0 {
         return -1;
@@ -1241,6 +1459,10 @@ pub fn create_prism_linker(engine: &Engine) -> anyhow::Result<Linker<HostEnv>> {
     linker.func_wrap("prism", "crypto_aes_cfb8", host_crypto_aes_cfb8)?;
     linker.func_wrap("prism", "deflate_decompress", host_deflate_decompress)?;
     linker.func_wrap("prism", "deflate_compress", host_deflate_compress)?;
+    linker.func_wrap("prism", "lz4_decompress", host_lz4_decompress)?;
+    linker.func_wrap("prism", "lz4_compress", host_lz4_compress)?;
+    linker.func_wrap("prism", "lz4_block_decompress", host_lz4_block_decompress)?;
+    linker.func_wrap("prism", "lz4_block_compress", host_lz4_block_compress)?;
     linker.func_wrap("prism", "sym_intern", host_sym_intern)?;
     linker.func_wrap("prism", "sym_resolve", host_sym_resolve)?;
     linker.func_wrap("prism", "announce_session_data", host_announce_session_data)?;
@@ -2768,6 +2990,187 @@ mod tests {
             .read_memory(decomp_offset, &mut read_decomp)
             .unwrap();
         assert_eq!(&read_decomp, payload);
+    }
+
+    #[test]
+    fn host_lz4_compress_decompress_direct_and_wasm() {
+        let payload = b"Prism unified WASM protocol driver traffic optimizer LZ4 test bytes 1234567890!";
+
+        // 1. Direct Rust tests across modes:
+        // Mode 0 (raw block):
+        let raw_comp = lz4_compress(payload, 0).expect("compress raw");
+        let raw_decomp = lz4_decompress_with_limit(&raw_comp, Some(1000)).expect("decompress raw");
+        assert_eq!(&raw_decomp, payload);
+
+        // Mode 1 (prepended size block):
+        let prep_comp = lz4_compress(payload, 1).expect("compress prepended");
+        let prep_decomp = lz4_decompress(&prep_comp).expect("decompress prepended");
+        assert_eq!(&prep_decomp, payload);
+
+        // Mode 2 (standard LZ4 frame):
+        let frame_comp = lz4_compress(payload, 2).expect("compress frame");
+        let frame_decomp = lz4_decompress(&frame_comp).expect("decompress frame");
+        assert_eq!(&frame_decomp, payload);
+
+        // Empty and error cases:
+        let empty_comp = lz4_compress(b"", 1).expect("compress empty prepended");
+        let empty_decomp = lz4_decompress(&empty_comp).expect("decompress empty prepended");
+        assert!(empty_decomp.is_empty());
+
+        let invalid_res = lz4_decompress(b"not-a-valid-lz4-stream-at-all");
+        assert!(invalid_res.is_err());
+
+        // 2. Host function execution via WASM session:
+        let test_wat = r#"(module
+          (import "prism" "lz4_compress"
+            (func $lz4_compress (param i32 i32 i32 i32 i32) (result i32)))
+          (import "prism" "lz4_decompress"
+            (func $lz4_decompress (param i32 i32 i32 i32) (result i32)))
+          (import "prism" "lz4_block_compress"
+            (func $lz4_block_compress (param i32 i32 i32 i32) (result i32)))
+          (import "prism" "lz4_block_decompress"
+            (func $lz4_block_decompress (param i32 i32 i32 i32) (result i32)))
+          (memory (export "memory") 4)
+          (func (export "test_compress") (param $ip i32) (param $il i32) (param $op i32) (param $omax i32) (param $mode i32) (result i32)
+            (call $lz4_compress (local.get $ip) (local.get $il) (local.get $op) (local.get $omax) (local.get $mode))
+          )
+          (func (export "test_decompress") (param $ip i32) (param $il i32) (param $op i32) (param $omax i32) (result i32)
+            (call $lz4_decompress (local.get $ip) (local.get $il) (local.get $op) (local.get $omax))
+          )
+          (func (export "test_block_compress") (param $ip i32) (param $il i32) (param $op i32) (param $omax i32) (result i32)
+            (call $lz4_block_compress (local.get $ip) (local.get $il) (local.get $op) (local.get $omax))
+          )
+          (func (export "test_block_decompress") (param $ip i32) (param $il i32) (param $op i32) (param $omax i32) (result i32)
+            (call $lz4_block_decompress (local.get $ip) (local.get $il) (local.get $op) (local.get $omax))
+          )
+        )"#;
+
+        let engine = Engine::default();
+        let module = Module::new(&engine, test_wat).expect("compile wat");
+        let mut session = WasmProtocolSession::new(&engine, &module).expect("session");
+
+        let in_offset = 1000usize;
+        let comp_offset = 3000usize;
+        let decomp_offset = 6000usize;
+
+        session.write_memory(in_offset, payload).unwrap();
+
+        let comp_fn: TypedFunc<(i32, i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_compress").unwrap();
+        let decomp_fn: TypedFunc<(i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_decompress").unwrap();
+        let block_comp_fn: TypedFunc<(i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_block_compress").unwrap();
+        let block_decomp_fn: TypedFunc<(i32, i32, i32, i32), i32> =
+            session.get_typed_func("test_block_decompress").unwrap();
+
+        // 2a. WASM Mode 1 (prepended-size block roundtrip)
+        let comp_len = comp_fn
+            .call(
+                session.store_mut(),
+                (
+                    in_offset as i32,
+                    payload.len() as i32,
+                    comp_offset as i32,
+                    1000,
+                    1,
+                ),
+            )
+            .expect("call lz4_compress mode 1");
+        assert!(comp_len > 0);
+
+        let decomp_len = decomp_fn
+            .call(
+                session.store_mut(),
+                (comp_offset as i32, comp_len, decomp_offset as i32, 1000),
+            )
+            .expect("call lz4_decompress mode 1");
+        assert_eq!(decomp_len, payload.len() as i32);
+
+        let mut read_decomp = vec![0u8; payload.len()];
+        session
+            .read_memory(decomp_offset, &mut read_decomp)
+            .unwrap();
+        assert_eq!(&read_decomp, payload);
+
+        // 2b. WASM Mode 2 (frame format roundtrip)
+        let frame_len = comp_fn
+            .call(
+                session.store_mut(),
+                (
+                    in_offset as i32,
+                    payload.len() as i32,
+                    comp_offset as i32,
+                    1000,
+                    2,
+                ),
+            )
+            .expect("call lz4_compress mode 2");
+        assert!(frame_len > 0);
+
+        let frame_decomp_len = decomp_fn
+            .call(
+                session.store_mut(),
+                (comp_offset as i32, frame_len, decomp_offset as i32, 1000),
+            )
+            .expect("call lz4_decompress mode 2");
+        assert_eq!(frame_decomp_len, payload.len() as i32);
+
+        session
+            .read_memory(decomp_offset, &mut read_decomp)
+            .unwrap();
+        assert_eq!(&read_decomp, payload);
+
+        // 2c. WASM block compress & block decompress (raw block roundtrip)
+        let raw_len = block_comp_fn
+            .call(
+                session.store_mut(),
+                (
+                    in_offset as i32,
+                    payload.len() as i32,
+                    comp_offset as i32,
+                    1000,
+                ),
+            )
+            .expect("call lz4_block_compress");
+        assert!(raw_len > 0);
+
+        let raw_decomp_len = block_decomp_fn
+            .call(
+                session.store_mut(),
+                (comp_offset as i32, raw_len, decomp_offset as i32, 1000),
+            )
+            .expect("call lz4_block_decompress");
+        assert_eq!(raw_decomp_len, payload.len() as i32);
+
+        session
+            .read_memory(decomp_offset, &mut read_decomp)
+            .unwrap();
+        assert_eq!(&read_decomp, payload);
+
+        // 2d. Error handling: buffer too small returns -3
+        let too_small_res = comp_fn
+            .call(
+                session.store_mut(),
+                (
+                    in_offset as i32,
+                    payload.len() as i32,
+                    comp_offset as i32,
+                    2,
+                    1,
+                ),
+            )
+            .expect("call lz4_compress too small");
+        assert_eq!(too_small_res, -3);
+
+        // Invalid memory pointer returns -1
+        let invalid_ptr_res = comp_fn
+            .call(
+                session.store_mut(),
+                (-1, payload.len() as i32, comp_offset as i32, 1000, 1),
+            )
+            .expect("call lz4_compress invalid ptr");
+        assert_eq!(invalid_ptr_res, -1);
     }
 
     #[test]

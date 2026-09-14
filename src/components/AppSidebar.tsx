@@ -6,6 +6,7 @@ import {
 	Cable,
 	Gamepad2,
 	Gauge,
+	Network,
 	Radio,
 	Server,
 	Settings2,
@@ -136,6 +137,13 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							exact
 							label={m.nav_overview()}
 							icon={<Activity className="h-4 w-4" />}
+							onClick={onNavigate}
+						/>
+						<SidebarNavItem
+							to="/admin/topology"
+							exact
+							label={m.nav_topology()}
+							icon={<Network className="h-4 w-4" />}
 							onClick={onNavigate}
 						/>
 						<SidebarNavItem

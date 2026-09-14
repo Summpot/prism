@@ -3,10 +3,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::prism::auth::{TokenRecord, UserRecord, UserRole};
-use crate::prism::config::ManagedConfigDocument;
-use crate::prism::managed::{
-    ManagedNodeConfigResponse, ManagedNodeSnapshot, ManagementStatusResponse,
-};
 use crate::prism::middleware::MiddlewareConfigSchema;
 use crate::prism::telemetry::SessionInfo;
 use crate::prism::tunnel::manager::ServiceSnapshot;
@@ -19,14 +15,12 @@ pub const FEATURE_RPC: u64 = 1 << 0;
 pub const FEATURE_EVENTS: u64 = 1 << 1;
 pub const FEATURE_AUTH: u64 = 1 << 2;
 pub const FEATURE_PANEL: u64 = 1 << 3;
-pub const FEATURE_MANAGED: u64 = 1 << 4;
 pub const FEATURE_MIDDLEWARE: u64 = 1 << 5;
 
 pub const CLIENT_FEATURES: u64 = FEATURE_RPC
     | FEATURE_EVENTS
     | FEATURE_AUTH
     | FEATURE_PANEL
-    | FEATURE_MANAGED
     | FEATURE_MIDDLEWARE;
 
 pub const TOPIC_CONNECTIONS: u64 = 1 << 0;
@@ -97,20 +91,8 @@ pub enum AdminMethod {
     AuthRevokeToken {
         token_id: String,
     },
-    ManagedStatus,
-    ManagedNodes,
-    ManagedNode {
-        node_id: String,
-    },
-    ManagedNodeConfig {
-        node_id: String,
-    },
-    PutManagedNodeConfig {
-        node_id: String,
-        desired_config: ManagedConfigDocument,
-    },
-    ManagedUsers,
-    PutManagedUser {
+    AuthUsers,
+    PutAuthUser {
         user_id: String,
         role: UserRole,
         service_rules: Vec<String>,
@@ -154,14 +136,9 @@ impl AdminMethod {
             | Self::AuthListTokens
             | Self::AuthCreateToken { .. }
             | Self::AuthRevokeToken { .. }
+            | Self::AuthUsers
+            | Self::PutAuthUser { .. }
             | Self::Authenticate { .. } => FEATURE_AUTH,
-            Self::ManagedStatus
-            | Self::ManagedNodes
-            | Self::ManagedNode { .. }
-            | Self::ManagedNodeConfig { .. }
-            | Self::PutManagedNodeConfig { .. }
-            | Self::ManagedUsers
-            | Self::PutManagedUser { .. } => FEATURE_MANAGED,
             Self::ListMiddlewares
             | Self::MiddlewareSchema { .. }
             | Self::MiddlewareConfig { .. }
@@ -219,29 +196,8 @@ impl AdminMethod {
             "auth.tokens.revoke" => Ok(Self::AuthRevokeToken {
                 token_id: str_field("token_id")?,
             }),
-            "managed.status" => Ok(Self::ManagedStatus),
-            "managed.nodes" => Ok(Self::ManagedNodes),
-            "managed.node" => Ok(Self::ManagedNode {
-                node_id: str_field("node_id")?,
-            }),
-            "managed.node.config" => Ok(Self::ManagedNodeConfig {
-                node_id: str_field("node_id")?,
-            }),
-            "managed.node.config.put" => {
-                let node_id = str_field("node_id")?;
-                let desired_config = obj()
-                    .and_then(|o| o.get("desired_config"))
-                    .cloned()
-                    .ok_or_else(|| AdminError::bad_request("missing field 'desired_config'"))?;
-                let desired_config: ManagedConfigDocument = serde_json::from_value(desired_config)
-                    .map_err(|e| AdminError::bad_request(e.to_string()))?;
-                Ok(Self::PutManagedNodeConfig {
-                    node_id,
-                    desired_config,
-                })
-            }
-            "managed.users" => Ok(Self::ManagedUsers),
-            "managed.user.put" => {
+            "auth.users" | "managed.users" => Ok(Self::AuthUsers),
+            "auth.user.put" | "managed.user.put" => {
                 let user_id = str_field("user_id")?;
                 let role = obj()
                     .and_then(|o| o.get("role"))
@@ -258,7 +214,7 @@ impl AdminMethod {
                             .collect()
                     })
                     .unwrap_or_default();
-                Ok(Self::PutManagedUser {
+                Ok(Self::PutAuthUser {
                     user_id,
                     role,
                     service_rules,
@@ -346,12 +302,8 @@ pub enum AdminPayload {
     AuthRevokeToken {
         revoked: bool,
     },
-    ManagedStatus(ManagementStatusResponse),
-    ManagedNodes(Vec<ManagedNodeSnapshot>),
-    ManagedNode(ManagedNodeSnapshot),
-    ManagedNodeConfig(ManagedNodeConfigResponse),
-    ManagedUsers(Vec<UserRecord>),
-    ManagedUser(UserRecord),
+    AuthUsers(Vec<UserRecord>),
+    AuthUser(UserRecord),
     Middlewares(Vec<MiddlewareItem>),
     MiddlewareSchema(MiddlewareConfigSchema),
     MiddlewareConfig(HashMap<String, serde_json::Value>),
@@ -412,12 +364,8 @@ impl AdminPayload {
                 "token": token,
             }),
             Self::AuthRevokeToken { revoked } => serde_json::json!({ "revoked": revoked }),
-            Self::ManagedStatus(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
-            Self::ManagedNodes(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
-            Self::ManagedNode(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
-            Self::ManagedNodeConfig(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
-            Self::ManagedUsers(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
-            Self::ManagedUser(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            Self::AuthUsers(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            Self::AuthUser(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
             Self::Middlewares(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
             Self::MiddlewareSchema(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
             Self::MiddlewareConfig(v) => serde_json::to_value(v).unwrap_or(serde_json::Value::Null),

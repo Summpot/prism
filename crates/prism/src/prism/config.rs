@@ -206,397 +206,8 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     Config::from_file_config(&mut fc, path)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum PrismRole {
-    #[default]
-    Standalone,
-    Management,
-    Worker,
-}
-
-impl PrismRole {
-    fn parse(value: &str) -> anyhow::Result<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "" | "standalone" => Ok(Self::Standalone),
-            "management" => Ok(Self::Management),
-            "worker" => Ok(Self::Worker),
-            other => anyhow::bail!(
-                "config: unsupported role {:?} (expected standalone, management, or worker)",
-                other
-            ),
-        }
-    }
-}
-
-impl std::fmt::Display for PrismRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Standalone => write!(f, "standalone"),
-            Self::Management => write!(f, "management"),
-            Self::Worker => write!(f, "worker"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ManagedConnectionMode {
-    #[default]
-    Active,
-    Passive,
-}
-
-impl ManagedConnectionMode {
-    fn parse(value: &str) -> anyhow::Result<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "" | "active" => Ok(Self::Active),
-            "passive" => Ok(Self::Passive),
-            other => anyhow::bail!(
-                "config: unsupported managed.worker.connection_mode {:?} (expected active or passive)",
-                other
-            ),
-        }
-    }
-}
-
-impl std::fmt::Display for ManagedConnectionMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Active => write!(f, "active"),
-            Self::Passive => write!(f, "passive"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ManagedBootstrapConfig {
-    pub management: Option<ManagementBootstrapConfig>,
-    pub worker: Option<WorkerBootstrapConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagementBootstrapConfig {
-    pub state_file: String,
-    pub panel_token: String,
-    pub worker_token: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkerBootstrapConfig {
-    pub node_id: String,
-    pub management_url: String,
-    pub auth_token: String,
-    pub connection_mode: ManagedConnectionMode,
-    pub sync_interval: Duration,
-    pub agent_url: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedConfigDocument {
-    #[serde(default)]
-    pub listeners: Vec<ManagedProxyListenerDocument>,
-    #[serde(default)]
-    pub routes: Vec<ManagedRouteDocument>,
-    #[serde(default)]
-    pub max_header_bytes: i64,
-    #[serde(default)]
-    pub proxy_protocol_v2: bool,
-    #[serde(default)]
-    pub buffer_size: i64,
-    #[serde(default)]
-    pub upstream_dial_timeout_ms: i64,
-    pub timeouts: Option<ManagedTimeoutsDocument>,
-    pub tunnel: Option<ManagedTunnelDocument>,
-    #[serde(default)]
-    pub auth: Option<ManagedAuthDocument>,
-    #[serde(default)]
-    pub acme: Option<ManagedAcmeDocument>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedCloudflareDocument {
-    #[serde(default)]
-    pub api_token: String,
-    #[serde(default)]
-    pub zone_id: String,
-    pub propagation_timeout_secs: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedAcmeDocument {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub domains: Vec<String>,
-    pub email: Option<String>,
-    pub directory_url: Option<String>,
-    pub storage_dir: Option<String>,
-    pub cert_file: Option<String>,
-    pub key_file: Option<String>,
-    pub renew_before_days: Option<u32>,
-    #[serde(default)]
-    pub auto_renew: Option<bool>,
-    pub cloudflare: Option<ManagedCloudflareDocument>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedAuthDocument {
-    #[serde(default)]
-    pub mode: String,
-    #[serde(default)]
-    pub legacy_token: Option<String>,
-    pub github: Option<ManagedGitHubOAuthDocument>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedGitHubOAuthDocument {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub client_id: String,
-    #[serde(default)]
-    pub client_secret: String,
-    #[serde(default)]
-    pub redirect_uri: Option<String>,
-    #[serde(default)]
-    pub admin_users: Vec<String>,
-    #[serde(default)]
-    pub admin_orgs: Vec<String>,
-    #[serde(default)]
-    pub allowed_users: Vec<String>,
-    #[serde(default)]
-    pub allowed_orgs: Vec<String>,
-    #[serde(default)]
-    pub default_role: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedProxyListenerDocument {
-    pub listen_addr: String,
-    #[serde(default)]
-    pub protocol: String,
-    #[serde(default)]
-    pub upstream: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedRouteDocument {
-    #[serde(default)]
-    pub hosts: Vec<String>,
-    #[serde(default)]
-    pub upstreams: Vec<String>,
-    #[serde(default)]
-    pub middlewares: Vec<String>,
-    #[serde(default)]
-    pub strategy: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedTimeoutsDocument {
-    pub handshake_timeout_ms: Option<i64>,
-    pub idle_timeout_ms: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedMdnsDocument {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub domain: String,
-    #[serde(default)]
-    pub subdomain: String,
-    #[serde(default)]
-    pub listen_addr: String,
-    #[serde(default)]
-    pub middlewares: Vec<String>,
-    #[serde(default)]
-    pub minecraft_lan: bool,
-    #[serde(default = "default_motd_prefix")]
-    pub motd_prefix: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedTunnelDocument {
-    #[serde(default)]
-    pub auth_token: String,
-    #[serde(default = "default_true")]
-    pub auto_listen_services: bool,
-    #[serde(default)]
-    pub endpoints: Vec<ManagedTunnelEndpointDocument>,
-    #[serde(default)]
-    pub connector: Option<ManagedTunnelConnectorDocument>,
-    #[serde(default)]
-    pub client: Option<ManagedTunnelClientDocument>,
-    #[serde(default)]
-    pub services: Vec<ManagedTunnelServiceDocument>,
-    pub mdns: Option<ManagedMdnsDocument>,
-    pub acme: Option<ManagedAcmeDocument>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_motd_prefix() -> String {
-    "[Prism] ".to_string()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedTunnelEndpointDocument {
-    pub listen_addr: String,
-    #[serde(default)]
-    pub transport: String,
-    pub quic: Option<ManagedQuicServerDocument>,
-    pub websocket: Option<ManagedWebSocketServerDocument>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedTunnelConnectorDocument {
-    pub server_addr: String,
-    #[serde(default)]
-    pub transport: String,
-    #[serde(default)]
-    pub auth_token: String,
-    pub dial_timeout_ms: Option<i64>,
-    pub quic: Option<ManagedQuicClientDocument>,
-    pub websocket: Option<ManagedWebSocketClientDocument>,
-    #[serde(default)]
-    pub doh_servers: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedTunnelClientDocument {
-    pub server_addr: String,
-    #[serde(default)]
-    pub transport: String,
-    #[serde(default)]
-    pub auth_token: String,
-    #[serde(default)]
-    pub listen_addr: String,
-    pub middleware: Option<String>,
-    #[serde(default)]
-    pub fake_lan_broadcast: bool,
-    #[serde(default = "default_motd_prefix")]
-    pub motd_prefix: String,
-    pub optimizer: Option<ManagedOptimizerClientDocument>,
-    pub discovery: Option<ManagedClientDiscoveryDocument>,
-    pub websocket: Option<ManagedWebSocketClientDocument>,
-    #[serde(default)]
-    pub doh_servers: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedClientDiscoveryDocument {
-    pub minecraft_lan: Option<ManagedMinecraftLanDiscoveryDocument>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedMinecraftLanDiscoveryDocument {
-    #[serde(default)]
-    pub enabled: bool,
-    pub motd_prefix: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedOptimizerClientDocument {
-    #[serde(default)]
-    pub enabled: bool,
-    pub zstd_window_log: Option<u32>,
-    pub zstd_window_log_uplink: Option<u32>,
-    pub zstd_window_log_downlink: Option<u32>,
-    pub zstd_dictionary: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedQuicServerDocument {
-    pub cert_file: Option<String>,
-    pub key_file: Option<String>,
-    pub use_acme: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedQuicClientDocument {
-    pub server_name: Option<String>,
-    #[serde(default)]
-    pub insecure_skip_verify: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedWebSocketServerDocument {
-    pub cert_file: Option<String>,
-    pub key_file: Option<String>,
-    pub url_path: Option<String>,
-    pub use_acme: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedWebSocketClientDocument {
-    pub server_name: Option<String>,
-    #[serde(default)]
-    pub insecure_skip_verify: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedTunnelServiceDocument {
-    pub name: String,
-    #[serde(default)]
-    pub proto: String,
-    pub local_addr: String,
-    #[serde(default)]
-    pub route_only: bool,
-    #[serde(default)]
-    pub remote_addr: String,
-    #[serde(default)]
-    pub masquerade_host: String,
-    pub middleware: Option<String>,
-    pub optimizer: Option<ManagedOptimizerDocument>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedOptimizerDocument {
-    #[serde(default)]
-    pub enabled: bool,
-    pub flush_interval_ms: Option<u64>,
-    pub flush_interval_uplink_ms: Option<u64>,
-    pub flush_interval_min_ms: Option<u64>,
-    pub flush_interval_max_ms: Option<u64>,
-    pub adaptive_flush: Option<bool>,
-    pub buffer_threshold: Option<usize>,
-    pub buffer_threshold_uplink: Option<usize>,
-    pub zstd_window_log: Option<u32>,
-    pub zstd_window_log_uplink: Option<u32>,
-    pub zstd_window_log_downlink: Option<u32>,
-    pub zstd_level: Option<i32>,
-    pub zstd_dictionary: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    pub role: PrismRole,
-    pub managed: ManagedBootstrapConfig,
     pub listeners: Vec<ProxyListenerConfig>,
     pub admin_addr: String,
     pub logging: LoggingConfig,
@@ -947,10 +558,10 @@ pub struct TunnelServiceConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
-    #[serde(default)]
-    role: String,
-
-    managed: Option<FileManagedBootstrap>,
+    /// Accepted and ignored for backward compatibility (role concept removed).
+    #[serde(default, deserialize_with = "deserialize_ignored_any")]
+    #[allow(dead_code)]
+    role: (),
 
     #[serde(default)]
     listeners: Vec<FileProxyListener>,
@@ -1015,32 +626,6 @@ struct FileAcmeConfig {
     #[serde(default)]
     auto_renew: Option<bool>,
     cloudflare: Option<FileCloudflareConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FileManagedBootstrap {
-    management: Option<FileManagementBootstrap>,
-    worker: Option<FileWorkerBootstrap>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FileManagementBootstrap {
-    state_file: Option<String>,
-    panel_token: Option<String>,
-    worker_token: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FileWorkerBootstrap {
-    node_id: Option<String>,
-    management_url: Option<String>,
-    auth_token: Option<String>,
-    connection_mode: Option<String>,
-    sync_interval_ms: Option<i64>,
-    agent_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1285,8 +870,6 @@ impl StringOrVec {
 impl Config {
     fn from_file_config(fc: &mut FileConfig, _config_path: &Path) -> anyhow::Result<Config> {
         let mut cfg = Config {
-            role: PrismRole::Standalone,
-            managed: ManagedBootstrapConfig::default(),
             listeners: vec![],
             admin_addr: fc.admin_addr.trim().to_string(),
             logging: LoggingConfig {
@@ -1815,118 +1398,15 @@ impl Config {
             });
         }
 
-        cfg.role = PrismRole::parse(&fc.role)?;
-
-        if let Some(m) = &fc.managed {
-            if let Some(mm) = &m.management {
-                cfg.managed.management = Some(ManagementBootstrapConfig {
-                    state_file: mm
-                        .state_file
-                        .clone()
-                        .unwrap_or_else(|| "managed-state.json".into())
-                        .trim()
-                        .to_string(),
-                    panel_token: mm
-                        .panel_token
-                        .clone()
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string(),
-                    worker_token: mm
-                        .worker_token
-                        .clone()
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string(),
-                });
-            }
-
-            if let Some(mw) = &m.worker {
-                cfg.managed.worker = Some(WorkerBootstrapConfig {
-                    node_id: mw.node_id.clone().unwrap_or_default().trim().to_string(),
-                    management_url: mw
-                        .management_url
-                        .clone()
-                        .unwrap_or_default()
-                        .trim()
-                        .trim_end_matches('/')
-                        .to_string(),
-                    auth_token: mw.auth_token.clone().unwrap_or_default().trim().to_string(),
-                    connection_mode: ManagedConnectionMode::parse(
-                        mw.connection_mode.as_deref().unwrap_or("active"),
-                    )?,
-                    sync_interval: Duration::from_millis(
-                        mw.sync_interval_ms.unwrap_or(5000).max(0) as u64,
-                    ),
-                    agent_url: mw.agent_url.clone().unwrap_or_default().trim().to_string(),
-                });
-            }
-        }
-
-        match cfg.role {
-            PrismRole::Standalone => {}
-            PrismRole::Management => {
-                if cfg.admin_addr.trim().is_empty() {
-                    anyhow::bail!(
-                        "config: role=management requires admin_addr so the management API can bind"
-                    );
-                }
-
-                let management = cfg
-                    .managed
-                    .management
-                    .as_mut()
-                    .context("config: role=management requires managed.management")?;
-
-                if management.state_file.trim().is_empty() {
-                    management.state_file = "managed-state.json".into();
-                }
-                if management.panel_token.trim().is_empty() {
-                    anyhow::bail!(
-                        "config: role=management requires managed.management.panel_token"
-                    );
-                }
-                if management.worker_token.trim().is_empty() {
-                    anyhow::bail!(
-                        "config: role=management requires managed.management.worker_token"
-                    );
-                }
-            }
-            PrismRole::Worker => {
-                if cfg.admin_addr.trim().is_empty() {
-                    anyhow::bail!(
-                        "config: role=worker requires admin_addr so worker agent endpoints can bind"
-                    );
-                }
-
-                let worker = cfg
-                    .managed
-                    .worker
-                    .as_mut()
-                    .context("config: role=worker requires managed.worker")?;
-
-                if worker.node_id.trim().is_empty() {
-                    anyhow::bail!("config: role=worker requires managed.worker.node_id");
-                }
-                if worker.auth_token.trim().is_empty() {
-                    anyhow::bail!("config: role=worker requires managed.worker.auth_token");
-                }
-                if worker.connection_mode == ManagedConnectionMode::Active
-                    && worker.management_url.trim().is_empty()
-                {
-                    anyhow::bail!("config: active workers require managed.worker.management_url");
-                }
-                if worker.sync_interval.is_zero() {
-                    worker.sync_interval = Duration::from_millis(5000);
-                }
-            }
-        }
-
         Ok(cfg)
     }
 }
 
-fn normalize_middleware_ref(s: &str) -> anyhow::Result<String> {
+fn default_motd_prefix() -> String {
+    "[Prism] ".to_string()
+}
+
+pub fn normalize_middleware_ref(s: &str) -> anyhow::Result<String> {
     // Configs refer to middleware modules by name only (no paths/extensions).
     // Normalization:
     // - trim
@@ -1948,314 +1428,6 @@ fn normalize_middleware_ref(s: &str) -> anyhow::Result<String> {
         anyhow::bail!("middleware name must not contain '.' or file extensions");
     }
     Ok(out)
-}
-
-pub fn validate_managed_config_document(doc: &ManagedConfigDocument) -> anyhow::Result<Config> {
-    let mut fc = FileConfig {
-        role: String::new(),
-        managed: None,
-        listeners: doc
-            .listeners
-            .iter()
-            .map(|listener| FileProxyListener {
-                listen_addr: listener.listen_addr.clone(),
-                protocol: listener.protocol.clone(),
-                upstream: listener.upstream.clone(),
-            })
-            .collect(),
-        admin_addr: String::new(),
-        logging: None,
-        routes: doc
-            .routes
-            .iter()
-            .map(|route| FileRoute {
-                host: if route.hosts.is_empty() {
-                    None
-                } else {
-                    Some(StringOrVec::Many(route.hosts.clone()))
-                },
-                hosts: None,
-                upstream: None,
-                upstreams: if route.upstreams.is_empty() {
-                    None
-                } else {
-                    Some(StringOrVec::Many(route.upstreams.clone()))
-                },
-                backend: None,
-                backends: None,
-                middlewares: if route.middlewares.is_empty() {
-                    None
-                } else {
-                    Some(StringOrVec::Many(route.middlewares.clone()))
-                },
-                parsers: None,
-                strategy: if route.strategy.trim().is_empty() {
-                    None
-                } else {
-                    Some(route.strategy.clone())
-                },
-            })
-            .collect(),
-        max_header_bytes: doc.max_header_bytes,
-        reload: None,
-        proxy_protocol_v2: doc.proxy_protocol_v2,
-        buffer_size: doc.buffer_size,
-        upstream_dial_timeout_ms: doc.upstream_dial_timeout_ms,
-        metrics: (),
-        timeouts: doc.timeouts.as_ref().map(|timeouts| FileTimeouts {
-            handshake_timeout_ms: timeouts.handshake_timeout_ms,
-            idle_timeout_ms: timeouts.idle_timeout_ms,
-        }),
-        tunnel: doc.tunnel.as_ref().map(|tunnel| FileTunnel {
-            auth_token: Some(tunnel.auth_token.clone()),
-            auto_listen_services: Some(tunnel.auto_listen_services),
-            endpoints: Some(
-                tunnel
-                    .endpoints
-                    .iter()
-                    .map(|endpoint| FileTunnelEndpoint {
-                        listen_addr: endpoint.listen_addr.clone(),
-                        transport: if endpoint.transport.trim().is_empty() {
-                            None
-                        } else {
-                            Some(endpoint.transport.clone())
-                        },
-                        quic: endpoint.quic.as_ref().map(|quic| FileQuicServer {
-                            cert_file: quic.cert_file.clone(),
-                            key_file: quic.key_file.clone(),
-                            use_acme: quic.use_acme,
-                        }),
-                        websocket: endpoint.websocket.as_ref().map(|ws| FileWebSocketServer {
-                            cert_file: ws.cert_file.clone(),
-                            key_file: ws.key_file.clone(),
-                            use_acme: ws.use_acme,
-                        }),
-                    })
-                    .collect(),
-            ),
-            connector: tunnel
-                .connector
-                .as_ref()
-                .map(|connector| FileTunnelConnector {
-                    server_addr: connector.server_addr.clone(),
-                    transport: if connector.transport.trim().is_empty() {
-                        None
-                    } else {
-                        Some(connector.transport.clone())
-                    },
-                    auth_token: if connector.auth_token.trim().is_empty() {
-                        None
-                    } else {
-                        Some(connector.auth_token.clone())
-                    },
-                    dial_timeout_ms: connector.dial_timeout_ms,
-                    quic: connector.quic.as_ref().map(|quic| FileQuicClient {
-                        server_name: quic.server_name.clone(),
-                        insecure_skip_verify: quic.insecure_skip_verify,
-                    }),
-                    websocket: connector.websocket.as_ref().map(|ws| FileWebSocketClient {
-                        server_name: ws.server_name.clone(),
-                        insecure_skip_verify: ws.insecure_skip_verify,
-                    }),
-                    doh_servers: connector.doh_servers.as_ref().and_then(|v| {
-                        if v.is_empty() {
-                            None
-                        } else {
-                            Some(StringOrVec::Many(v.clone()))
-                        }
-                    }),
-                }),
-            client: tunnel.client.as_ref().map(|client| FileTunnelClient {
-                server_addr: client.server_addr.clone(),
-                transport: if client.transport.trim().is_empty() {
-                    None
-                } else {
-                    Some(client.transport.clone())
-                },
-                auth_token: if client.auth_token.trim().is_empty() {
-                    None
-                } else {
-                    Some(client.auth_token.clone())
-                },
-                listen_addr: if client.listen_addr.trim().is_empty() {
-                    None
-                } else {
-                    Some(client.listen_addr.clone())
-                },
-                middleware: client.middleware.clone(),
-                fake_lan_broadcast: client.fake_lan_broadcast,
-                motd_prefix: if client.motd_prefix.trim().is_empty() {
-                    None
-                } else {
-                    Some(client.motd_prefix.clone())
-                },
-                optimizer: client.optimizer.as_ref().map(|to| FileOptimizerClient {
-                    enabled: to.enabled,
-                    zstd_window_log: to.zstd_window_log,
-                    zstd_window_log_uplink: to.zstd_window_log_uplink,
-                    zstd_window_log_downlink: to.zstd_window_log_downlink,
-                    zstd_dictionary: to.zstd_dictionary.clone(),
-                }),
-                discovery: client.discovery.as_ref().map(|d| FileClientDiscovery {
-                    minecraft_lan: d
-                        .minecraft_lan
-                        .as_ref()
-                        .map(|mc| FileMinecraftLanDiscovery {
-                            enabled: mc.enabled,
-                            motd_prefix: mc.motd_prefix.clone(),
-                        }),
-                }),
-                websocket: client.websocket.as_ref().map(|ws| FileWebSocketClient {
-                    server_name: ws.server_name.clone(),
-                    insecure_skip_verify: ws.insecure_skip_verify,
-                }),
-                doh_servers: client.doh_servers.as_ref().and_then(|v| {
-                    if v.is_empty() {
-                        None
-                    } else {
-                        Some(StringOrVec::Many(v.clone()))
-                    }
-                }),
-            }),
-            services: Some(
-                tunnel
-                    .services
-                    .iter()
-                    .map(|service| FileTunnelService {
-                        name: service.name.clone(),
-                        proto: if service.proto.trim().is_empty() {
-                            None
-                        } else {
-                            Some(service.proto.clone())
-                        },
-                        local_addr: service.local_addr.clone(),
-                        route_only: service.route_only,
-                        remote_addr: if service.remote_addr.trim().is_empty() {
-                            None
-                        } else {
-                            Some(service.remote_addr.clone())
-                        },
-                        masquerade_host: if service.masquerade_host.trim().is_empty() {
-                            None
-                        } else {
-                            Some(service.masquerade_host.clone())
-                        },
-                        middleware: service.middleware.clone(),
-                        optimizer: service.optimizer.as_ref().map(|to| FileOptimizer {
-                            enabled: to.enabled,
-                            flush_interval_ms: to.flush_interval_ms,
-                            flush_interval_uplink_ms: to.flush_interval_uplink_ms,
-                            flush_interval_min_ms: to.flush_interval_min_ms,
-                            flush_interval_max_ms: to.flush_interval_max_ms,
-                            adaptive_flush: to.adaptive_flush,
-                            buffer_threshold: to.buffer_threshold,
-                            buffer_threshold_uplink: to.buffer_threshold_uplink,
-                            zstd_window_log: to.zstd_window_log,
-                            zstd_window_log_uplink: to.zstd_window_log_uplink,
-                            zstd_window_log_downlink: to.zstd_window_log_downlink,
-                            zstd_level: to.zstd_level,
-                            zstd_dictionary: to.zstd_dictionary.clone(),
-                        }),
-                    })
-                    .collect(),
-            ),
-            mdns: tunnel.mdns.as_ref().map(|m| FileMdns {
-                enabled: m.enabled,
-                domain: if m.domain.trim().is_empty() {
-                    None
-                } else {
-                    Some(m.domain.clone())
-                },
-                subdomain: if m.subdomain.trim().is_empty() {
-                    None
-                } else {
-                    Some(m.subdomain.clone())
-                },
-                listen_addr: if m.listen_addr.trim().is_empty() {
-                    None
-                } else {
-                    Some(m.listen_addr.clone())
-                },
-                middlewares: if m.middlewares.is_empty() {
-                    None
-                } else {
-                    Some(StringOrVec::Many(m.middlewares.clone()))
-                },
-                minecraft_lan: m.minecraft_lan,
-                fake_lan_broadcast: false,
-                motd_prefix: if m.motd_prefix.trim().is_empty() {
-                    None
-                } else {
-                    Some(m.motd_prefix.clone())
-                },
-                discovery: None,
-            }),
-            acme: None,
-        }),
-        auth: doc.auth.as_ref().map(|a| FileAuthConfig {
-            mode: if a.mode.trim().is_empty() {
-                None
-            } else {
-                Some(a.mode.clone())
-            },
-            legacy_token: a.legacy_token.clone(),
-            github: a.github.as_ref().map(|g| FileGitHubOAuthConfig {
-                enabled: g.enabled,
-                client_id: Some(g.client_id.clone()),
-                client_secret: Some(g.client_secret.clone()),
-                redirect_uri: g.redirect_uri.clone(),
-                admin_users: Some(StringOrVec::Many(g.admin_users.clone())),
-                admin_orgs: Some(StringOrVec::Many(g.admin_orgs.clone())),
-                allowed_users: Some(StringOrVec::Many(g.allowed_users.clone())),
-                allowed_orgs: Some(StringOrVec::Many(g.allowed_orgs.clone())),
-                default_role: Some(g.default_role.clone()),
-            }),
-        }),
-        acme: doc.acme.as_ref().map(|a| FileAcmeConfig {
-            enabled: a.enabled,
-            domains: Some(StringOrVec::Many(a.domains.clone())),
-            email: a.email.clone(),
-            directory_url: a.directory_url.clone(),
-            storage_dir: a.storage_dir.clone(),
-            cert_file: a.cert_file.clone(),
-            key_file: a.key_file.clone(),
-            renew_before_days: a.renew_before_days,
-            auto_renew: a.auto_renew,
-            cloudflare: a.cloudflare.as_ref().map(|cf| FileCloudflareConfig {
-                api_token: Some(cf.api_token.clone()),
-                zone_id: Some(cf.zone_id.clone()),
-                propagation_timeout_secs: cf.propagation_timeout_secs,
-            }),
-        }),
-    };
-
-    Config::from_file_config(&mut fc, Path::new("managed.json"))
-}
-
-pub fn overlay_managed_config_document(
-    bootstrap: &Config,
-    doc: &ManagedConfigDocument,
-) -> anyhow::Result<Config> {
-    let mut cfg = validate_managed_config_document(doc)?;
-    cfg.role = bootstrap.role;
-    cfg.managed = bootstrap.managed.clone();
-    cfg.admin_addr = bootstrap.admin_addr.clone();
-    cfg.logging = bootstrap.logging.clone();
-    cfg.reload = bootstrap.reload.clone();
-    Ok(cfg)
-}
-
-pub fn worker_bootstrap_runtime_config(bootstrap: &Config) -> Config {
-    let mut cfg = bootstrap.clone();
-    cfg.listeners.clear();
-    cfg.routes.clear();
-    cfg.tunnel = TunnelConfig::default();
-    cfg
-}
-
-pub fn empty_managed_runtime_config() -> Config {
-    validate_managed_config_document(&ManagedConfigDocument::default())
-        .expect("default managed config document must validate")
 }
 
 pub fn restart_required_reasons(current: &Config, next: &Config) -> Vec<String> {
@@ -2482,11 +1654,14 @@ middlewares = ["minecraft"]
 
         std::fs::write(&cfg_path, toml).expect("write");
         let cfg = load_config(&cfg_path).expect("load_config");
-        assert_eq!(cfg.role, PrismRole::Standalone);
-        assert!(cfg.managed.management.is_none());
-        assert!(cfg.managed.worker.is_none());
+        assert_eq!(cfg.listeners.len(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn parse_test_config(s: &str) -> Config {
+        let mut fc: FileConfig = toml::from_str(s).expect("parse toml");
+        Config::from_file_config(&mut fc, Path::new("test.toml")).expect("convert to runtime config")
     }
 
     #[test]
@@ -2513,37 +1688,29 @@ store_path = "local.sqlite"
 
     #[test]
     fn restart_required_reasons_detect_listener_changes() {
-        let current = validate_managed_config_document(&ManagedConfigDocument {
-            listeners: vec![ManagedProxyListenerDocument {
-                listen_addr: ":25565".to_string(),
-                protocol: "tcp".to_string(),
-                upstream: String::new(),
-            }],
-            routes: vec![ManagedRouteDocument {
-                hosts: vec!["play.example.com".to_string()],
-                upstreams: vec!["127.0.0.1:25566".to_string()],
-                middlewares: vec!["minecraft".to_string()],
-                strategy: "sequential".to_string(),
-            }],
-            ..Default::default()
-        })
-        .expect("current config");
+        let current = parse_test_config(
+            r#"
+[[listeners]]
+listen_addr = ":25565"
 
-        let next = validate_managed_config_document(&ManagedConfigDocument {
-            listeners: vec![ManagedProxyListenerDocument {
-                listen_addr: ":25566".to_string(),
-                protocol: "tcp".to_string(),
-                upstream: String::new(),
-            }],
-            routes: vec![ManagedRouteDocument {
-                hosts: vec!["play.example.com".to_string()],
-                upstreams: vec!["127.0.0.1:25566".to_string()],
-                middlewares: vec!["minecraft".to_string()],
-                strategy: "sequential".to_string(),
-            }],
-            ..Default::default()
-        })
-        .expect("next config");
+[[routes]]
+hosts = ["play.example.com"]
+upstreams = ["127.0.0.1:25566"]
+middlewares = ["minecraft"]
+"#,
+        );
+
+        let next = parse_test_config(
+            r#"
+[[listeners]]
+listen_addr = ":25566"
+
+[[routes]]
+hosts = ["play.example.com"]
+upstreams = ["127.0.0.1:25566"]
+middlewares = ["minecraft"]
+"#,
+        );
 
         let reasons = restart_required_reasons(&current, &next);
         assert!(reasons.iter().any(|reason| reason.contains("listener")));
@@ -2807,95 +1974,54 @@ zstd_level = 4
 
     #[test]
     fn restart_required_reasons_detect_connector_and_client_changes() {
-        let current = validate_managed_config_document(&ManagedConfigDocument {
-            tunnel: Some(ManagedTunnelDocument {
-                connector: Some(ManagedTunnelConnectorDocument {
-                    server_addr: "relay.example.com:7000".into(),
-                    transport: "quic".into(),
-                    auth_token: "token1".into(),
-                    dial_timeout_ms: Some(5000),
-                    quic: None,
-                    websocket: None,
-                    doh_servers: None,
-                }),
-                client: Some(ManagedTunnelClientDocument {
-                    server_addr: "relay.example.com:7000".into(),
-                    transport: "quic".into(),
-                    auth_token: "token1".into(),
-                    listen_addr: "127.0.0.1:25565".into(),
-                    middleware: Some("minecraft".into()),
-                    fake_lan_broadcast: false,
-                    motd_prefix: "[Prism] ".into(),
-                    optimizer: None,
-                    discovery: None,
-                    websocket: None,
-                    doh_servers: None,
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .expect("current config");
+        let current = parse_test_config(
+            r#"
+[tunnel.connector]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "token1"
 
-        let next_connector_changed = validate_managed_config_document(&ManagedConfigDocument {
-            tunnel: Some(ManagedTunnelDocument {
-                connector: Some(ManagedTunnelConnectorDocument {
-                    server_addr: "relay2.example.com:7000".into(),
-                    transport: "quic".into(),
-                    auth_token: "token1".into(),
-                    dial_timeout_ms: Some(5000),
-                    quic: None,
-                    websocket: None,
-                    doh_servers: None,
-                }),
-                client: Some(ManagedTunnelClientDocument {
-                    server_addr: "relay.example.com:7000".into(),
-                    transport: "quic".into(),
-                    auth_token: "token1".into(),
-                    listen_addr: "127.0.0.1:25565".into(),
-                    middleware: Some("minecraft".into()),
-                    fake_lan_broadcast: false,
-                    motd_prefix: "[Prism] ".into(),
-                    optimizer: None,
-                    discovery: None,
-                    websocket: None,
-                    doh_servers: None,
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .expect("next connector config");
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "token1"
+listen_addr = "127.0.0.1:25565"
+middleware = "minecraft"
+"#,
+        );
 
-        let next_client_changed = validate_managed_config_document(&ManagedConfigDocument {
-            tunnel: Some(ManagedTunnelDocument {
-                connector: Some(ManagedTunnelConnectorDocument {
-                    server_addr: "relay.example.com:7000".into(),
-                    transport: "quic".into(),
-                    auth_token: "token1".into(),
-                    dial_timeout_ms: Some(5000),
-                    quic: None,
-                    websocket: None,
-                    doh_servers: None,
-                }),
-                client: Some(ManagedTunnelClientDocument {
-                    server_addr: "relay.example.com:7000".into(),
-                    transport: "quic".into(),
-                    auth_token: "token1".into(),
-                    listen_addr: "127.0.0.1:25566".into(),
-                    middleware: Some("minecraft".into()),
-                    fake_lan_broadcast: true,
-                    motd_prefix: "[Prism] ".into(),
-                    optimizer: None,
-                    discovery: None,
-                    websocket: None,
-                    doh_servers: None,
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .expect("next client config");
+        let next_connector_changed = parse_test_config(
+            r#"
+[tunnel.connector]
+server_addr = "relay2.example.com:7000"
+transport = "quic"
+auth_token = "token1"
+
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "token1"
+listen_addr = "127.0.0.1:25565"
+middleware = "minecraft"
+"#,
+        );
+
+        let next_client_changed = parse_test_config(
+            r#"
+[tunnel.connector]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "token1"
+
+[tunnel.client]
+server_addr = "relay.example.com:7000"
+transport = "quic"
+auth_token = "token1"
+listen_addr = "127.0.0.1:25566"
+middleware = "minecraft"
+fake_lan_broadcast = true
+"#,
+        );
 
         let reasons_conn = restart_required_reasons(&current, &next_connector_changed);
         assert!(reasons_conn.iter().any(|r| r.contains("connector")));
@@ -2954,37 +2080,27 @@ motd_prefix = "[Custom] "
 
     #[test]
     fn restart_required_reasons_detect_mdns_changes() {
-        let current = validate_managed_config_document(&ManagedConfigDocument {
-            tunnel: Some(ManagedTunnelDocument {
-                mdns: Some(ManagedMdnsDocument {
-                    enabled: false,
-                    domain: "local".into(),
-                    subdomain: "prism".into(),
-                    listen_addr: ":25565".into(),
-                    middlewares: vec!["minecraft".into()],
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .expect("current config");
+        let current = parse_test_config(
+            r#"
+[tunnel.mdns]
+enabled = false
+domain = "local"
+subdomain = "prism"
+listen_addr = ":25565"
+middlewares = ["minecraft"]
+"#,
+        );
 
-        let next = validate_managed_config_document(&ManagedConfigDocument {
-            tunnel: Some(ManagedTunnelDocument {
-                mdns: Some(ManagedMdnsDocument {
-                    enabled: true,
-                    domain: "local".into(),
-                    subdomain: "prism".into(),
-                    listen_addr: ":25565".into(),
-                    middlewares: vec!["minecraft".into()],
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .expect("next config");
+        let next = parse_test_config(
+            r#"
+[tunnel.mdns]
+enabled = true
+domain = "local"
+subdomain = "prism"
+listen_addr = ":25565"
+middlewares = ["minecraft"]
+"#,
+        );
 
         let reasons = restart_required_reasons(&current, &next);
         assert!(reasons.iter().any(|reason| reason.contains("mdns")));

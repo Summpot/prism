@@ -16,10 +16,8 @@ import { Route as ConnectionsRouteImport } from './routes/connections'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MiddlewareRouteImport } from './routes/middleware'
-import { Route as NodesRouteImport } from './routes/nodes'
 import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as TopologyRouteImport } from './routes/topology'
 import { Route as TrafficRouteImport } from './routes/traffic'
 import { Route as TunnelServicesRouteImport } from './routes/tunnel-services'
 import { Route as UsersRouteImport } from './routes/users'
@@ -27,14 +25,11 @@ import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminConnectionsRouteImport } from './routes/admin.connections'
 import { Route as AdminConnectorsRouteImport } from './routes/admin.connectors'
 import { Route as AdminMiddlewareRouteImport } from './routes/admin.middleware'
-import { Route as AdminNodesRouteImport } from './routes/admin.nodes'
 import { Route as AdminRuntimeRouteImport } from './routes/admin.runtime'
 import { Route as AdminTopologyRouteImport } from './routes/admin.topology'
 import { Route as AdminTrafficRouteImport } from './routes/admin.traffic'
 import { Route as AdminTunnelServicesRouteImport } from './routes/admin.tunnel-services'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
-import { Route as AdminNodesIndexRouteImport } from './routes/admin.nodes.index'
-import { Route as AdminNodesNodeIdRouteImport } from './routes/admin.nodes.$nodeId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -71,11 +66,6 @@ const MiddlewareRoute = MiddlewareRouteImport.update({
   path: '/middleware',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NodesRoute = NodesRouteImport.update({
-  id: '/nodes',
-  path: '/nodes',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const RuntimeRoute = RuntimeRouteImport.update({
   id: '/runtime',
   path: '/runtime',
@@ -84,11 +74,6 @@ const RuntimeRoute = RuntimeRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TopologyRoute = TopologyRouteImport.update({
-  id: '/topology',
-  path: '/topology',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TrafficRoute = TrafficRouteImport.update({
@@ -126,11 +111,6 @@ const AdminMiddlewareRoute = AdminMiddlewareRouteImport.update({
   path: '/middleware',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminNodesRoute = AdminNodesRouteImport.update({
-  id: '/nodes',
-  path: '/nodes',
-  getParentRoute: () => AdminRoute,
-} as any)
 const AdminRuntimeRoute = AdminRuntimeRouteImport.update({
   id: '/runtime',
   path: '/runtime',
@@ -156,16 +136,6 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminNodesIndexRoute = AdminNodesIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AdminNodesRoute,
-} as any)
-const AdminNodesNodeIdRoute = AdminNodesNodeIdRouteImport.update({
-  id: '/$nodeId',
-  path: '/$nodeId',
-  getParentRoute: () => AdminNodesRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -175,25 +145,20 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
-  '/nodes': typeof NodesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
-  '/topology': typeof TopologyRoute
   '/traffic': typeof TrafficRoute
   '/tunnel-services': typeof TunnelServicesRoute
   '/users': typeof UsersRoute
   '/admin/connections': typeof AdminConnectionsRoute
   '/admin/connectors': typeof AdminConnectorsRoute
   '/admin/middleware': typeof AdminMiddlewareRoute
-  '/admin/nodes': typeof AdminNodesRouteWithChildren
   '/admin/runtime': typeof AdminRuntimeRoute
   '/admin/topology': typeof AdminTopologyRoute
   '/admin/traffic': typeof AdminTrafficRoute
   '/admin/tunnel-services': typeof AdminTunnelServicesRoute
   '/admin/users': typeof AdminUsersRoute
   '/admin/': typeof AdminIndexRoute
-  '/admin/nodes/$nodeId': typeof AdminNodesNodeIdRoute
-  '/admin/nodes/': typeof AdminNodesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -202,10 +167,8 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
-  '/nodes': typeof NodesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
-  '/topology': typeof TopologyRoute
   '/traffic': typeof TrafficRoute
   '/tunnel-services': typeof TunnelServicesRoute
   '/users': typeof UsersRoute
@@ -218,8 +181,6 @@ export interface FileRoutesByTo {
   '/admin/tunnel-services': typeof AdminTunnelServicesRoute
   '/admin/users': typeof AdminUsersRoute
   '/admin': typeof AdminIndexRoute
-  '/admin/nodes/$nodeId': typeof AdminNodesNodeIdRoute
-  '/admin/nodes': typeof AdminNodesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -230,25 +191,20 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
-  '/nodes': typeof NodesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
-  '/topology': typeof TopologyRoute
   '/traffic': typeof TrafficRoute
   '/tunnel-services': typeof TunnelServicesRoute
   '/users': typeof UsersRoute
   '/admin/connections': typeof AdminConnectionsRoute
   '/admin/connectors': typeof AdminConnectorsRoute
   '/admin/middleware': typeof AdminMiddlewareRoute
-  '/admin/nodes': typeof AdminNodesRouteWithChildren
   '/admin/runtime': typeof AdminRuntimeRoute
   '/admin/topology': typeof AdminTopologyRoute
   '/admin/traffic': typeof AdminTrafficRoute
   '/admin/tunnel-services': typeof AdminTunnelServicesRoute
   '/admin/users': typeof AdminUsersRoute
   '/admin/': typeof AdminIndexRoute
-  '/admin/nodes/$nodeId': typeof AdminNodesNodeIdRoute
-  '/admin/nodes/': typeof AdminNodesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -260,25 +216,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
-    | '/nodes'
     | '/runtime'
     | '/settings'
-    | '/topology'
     | '/traffic'
     | '/tunnel-services'
     | '/users'
     | '/admin/connections'
     | '/admin/connectors'
     | '/admin/middleware'
-    | '/admin/nodes'
     | '/admin/runtime'
     | '/admin/topology'
     | '/admin/traffic'
     | '/admin/tunnel-services'
     | '/admin/users'
     | '/admin/'
-    | '/admin/nodes/$nodeId'
-    | '/admin/nodes/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -287,10 +238,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
-    | '/nodes'
     | '/runtime'
     | '/settings'
-    | '/topology'
     | '/traffic'
     | '/tunnel-services'
     | '/users'
@@ -303,8 +252,6 @@ export interface FileRouteTypes {
     | '/admin/tunnel-services'
     | '/admin/users'
     | '/admin'
-    | '/admin/nodes/$nodeId'
-    | '/admin/nodes'
   id:
     | '__root__'
     | '/'
@@ -314,25 +261,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
-    | '/nodes'
     | '/runtime'
     | '/settings'
-    | '/topology'
     | '/traffic'
     | '/tunnel-services'
     | '/users'
     | '/admin/connections'
     | '/admin/connectors'
     | '/admin/middleware'
-    | '/admin/nodes'
     | '/admin/runtime'
     | '/admin/topology'
     | '/admin/traffic'
     | '/admin/tunnel-services'
     | '/admin/users'
     | '/admin/'
-    | '/admin/nodes/$nodeId'
-    | '/admin/nodes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -343,10 +285,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   LogsRoute: typeof LogsRoute
   MiddlewareRoute: typeof MiddlewareRoute
-  NodesRoute: typeof NodesRoute
   RuntimeRoute: typeof RuntimeRoute
   SettingsRoute: typeof SettingsRoute
-  TopologyRoute: typeof TopologyRoute
   TrafficRoute: typeof TrafficRoute
   TunnelServicesRoute: typeof TunnelServicesRoute
   UsersRoute: typeof UsersRoute
@@ -403,13 +343,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MiddlewareRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/nodes': {
-      id: '/nodes'
-      path: '/nodes'
-      fullPath: '/nodes'
-      preLoaderRoute: typeof NodesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/runtime': {
       id: '/runtime'
       path: '/runtime'
@@ -422,13 +355,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/topology': {
-      id: '/topology'
-      path: '/topology'
-      fullPath: '/topology'
-      preLoaderRoute: typeof TopologyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/traffic': {
@@ -480,13 +406,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminMiddlewareRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/nodes': {
-      id: '/admin/nodes'
-      path: '/nodes'
-      fullPath: '/admin/nodes'
-      preLoaderRoute: typeof AdminNodesRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/admin/runtime': {
       id: '/admin/runtime'
       path: '/runtime'
@@ -522,42 +441,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/nodes/': {
-      id: '/admin/nodes/'
-      path: '/'
-      fullPath: '/admin/nodes/'
-      preLoaderRoute: typeof AdminNodesIndexRouteImport
-      parentRoute: typeof AdminNodesRoute
-    }
-    '/admin/nodes/$nodeId': {
-      id: '/admin/nodes/$nodeId'
-      path: '/$nodeId'
-      fullPath: '/admin/nodes/$nodeId'
-      preLoaderRoute: typeof AdminNodesNodeIdRouteImport
-      parentRoute: typeof AdminNodesRoute
-    }
   }
 }
-
-interface AdminNodesRouteChildren {
-  AdminNodesNodeIdRoute: typeof AdminNodesNodeIdRoute
-  AdminNodesIndexRoute: typeof AdminNodesIndexRoute
-}
-
-const AdminNodesRouteChildren: AdminNodesRouteChildren = {
-  AdminNodesNodeIdRoute: AdminNodesNodeIdRoute,
-  AdminNodesIndexRoute: AdminNodesIndexRoute,
-}
-
-const AdminNodesRouteWithChildren = AdminNodesRoute._addFileChildren(
-  AdminNodesRouteChildren,
-)
 
 interface AdminRouteChildren {
   AdminConnectionsRoute: typeof AdminConnectionsRoute
   AdminConnectorsRoute: typeof AdminConnectorsRoute
   AdminMiddlewareRoute: typeof AdminMiddlewareRoute
-  AdminNodesRoute: typeof AdminNodesRouteWithChildren
   AdminRuntimeRoute: typeof AdminRuntimeRoute
   AdminTopologyRoute: typeof AdminTopologyRoute
   AdminTrafficRoute: typeof AdminTrafficRoute
@@ -570,7 +460,6 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminConnectionsRoute: AdminConnectionsRoute,
   AdminConnectorsRoute: AdminConnectorsRoute,
   AdminMiddlewareRoute: AdminMiddlewareRoute,
-  AdminNodesRoute: AdminNodesRouteWithChildren,
   AdminRuntimeRoute: AdminRuntimeRoute,
   AdminTopologyRoute: AdminTopologyRoute,
   AdminTrafficRoute: AdminTrafficRoute,
@@ -589,10 +478,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   LogsRoute: LogsRoute,
   MiddlewareRoute: MiddlewareRoute,
-  NodesRoute: NodesRoute,
   RuntimeRoute: RuntimeRoute,
   SettingsRoute: SettingsRoute,
-  TopologyRoute: TopologyRoute,
   TrafficRoute: TrafficRoute,
   TunnelServicesRoute: TunnelServicesRoute,
   UsersRoute: UsersRoute,

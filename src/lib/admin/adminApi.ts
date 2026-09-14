@@ -17,49 +17,6 @@ import type {
 	TokenRecord,
 	UserRecord,
 } from "@/types/admin";
-import type {
-	ManagedConfigDocument,
-	ManagedNodeConfigResponse,
-	ManagedNodeSnapshot,
-	ManagementStatusResponse,
-} from "@/types/cluster";
-
-export function getManagementStatus(connection: PanelConnection) {
-	return adminRequest<ManagementStatusResponse>(connection, "/managed/status");
-}
-
-export function getManagedNodes(connection: PanelConnection) {
-	return adminRequest<ManagedNodeSnapshot[]>(connection, "/managed/nodes");
-}
-
-export function getManagedNode(connection: PanelConnection, nodeId: string) {
-	return adminRequest<ManagedNodeSnapshot>(
-		connection,
-		`/managed/nodes/${encodeURIComponent(nodeId)}`,
-	);
-}
-
-export function getManagedNodeConfig(connection: PanelConnection, nodeId: string) {
-	return adminRequest<ManagedNodeConfigResponse>(
-		connection,
-		`/managed/nodes/${encodeURIComponent(nodeId)}/config`,
-	);
-}
-
-export function updateManagedNodeConfig(
-	connection: PanelConnection,
-	nodeId: string,
-	desiredConfig: ManagedConfigDocument,
-) {
-	return adminRequest<ManagedNodeConfigResponse>(
-		connection,
-		`/managed/nodes/${encodeURIComponent(nodeId)}/config`,
-		{
-			method: "PUT",
-			body: JSON.stringify({ desired_config: desiredConfig }),
-		},
-	);
-}
 
 export function getConnections(connection: PanelConnection) {
 	return adminRequest<SessionInfo[]>(connection, "/conns");
@@ -151,20 +108,23 @@ export function revokeAuthToken(connection: PanelConnection, tokenId: string) {
 	});
 }
 
-export function listManagedUsers(connection: PanelConnection) {
-	return adminRequest<UserRecord[]>(connection, "/managed/users");
+export function listUsers(connection: PanelConnection) {
+	return adminRequest<UserRecord[]>(connection, "/auth/users");
 }
 
-export function updateManagedUser(
+export function updateUser(
 	connection: PanelConnection,
 	userId: string,
 	payload: { role?: string; service_rules?: string[] },
 ) {
-	return adminRequest<UserRecord>(connection, `/managed/users/${encodeURIComponent(userId)}`, {
+	return adminRequest<UserRecord>(connection, `/auth/users/${encodeURIComponent(userId)}`, {
 		method: "PUT",
 		body: JSON.stringify(payload),
 	});
 }
+
+export const listManagedUsers = listUsers;
+export const updateManagedUser = updateUser;
 
 export function listMiddlewares(connection: PanelConnection) {
 	return adminRequest<MiddlewareItem[]>(connection, "/middlewares");

@@ -74,9 +74,7 @@ describe("panelConnection", () => {
 		const conn = tunnelAdminConnection("prism_cl_abc");
 		expect(isTunnelAdminConnection(conn)).toBe(true);
 		expect(isValidPanelConnection(conn)).toBe(true);
-		expect(isTunnelAdminConnection({ baseUrl: "http://127.0.0.1:8080", token: "x" })).toBe(
-			false,
-		);
+		expect(isTunnelAdminConnection({ baseUrl: "http://127.0.0.1:8080", token: "x" })).toBe(false);
 	});
 
 	it("persists tunnel-admin connections", () => {

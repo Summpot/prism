@@ -6,7 +6,7 @@ use tokio::task::JoinSet;
 use crate::prism::middleware::MiddlewareProvider;
 use crate::prism::control::AdminControl;
 use crate::prism::{
-    admin, config, logging, managed, middleware, net, proxy, router, runtime_paths, telemetry,
+    admin, config, logging, middleware, net, proxy, router, runtime_paths, telemetry,
     tunnel,
 };
 
@@ -48,55 +48,7 @@ pub async fn run(
         );
     }
 
-    let management_plane = match bootstrap_cfg.role {
-        config::PrismRole::Management => Some(Arc::new(managed::ManagementPlane::open(
-            &paths.workdir,
-            bootstrap_cfg
-                .managed
-                .management
-                .as_ref()
-                .expect("management role validated in config"),
-        )?)),
-        _ => None,
-    };
-
-    let worker_agent = match bootstrap_cfg.role {
-        config::PrismRole::Worker => Some(Arc::new(managed::WorkerAgent::open(
-            &paths.workdir,
-            bootstrap_cfg
-                .managed
-                .worker
-                .as_ref()
-                .expect("worker role validated in config"),
-        )?)),
-        _ => None,
-    };
-
-    if let Some(worker_agent) = &worker_agent
-        && worker_agent.connection_mode() == config::ManagedConnectionMode::Active
-    {
-        if let Err(err) = worker_agent.sync_once().await {
-            tracing::warn!(
-                node_id = %bootstrap_cfg.managed.worker.as_ref().expect("worker config present").node_id,
-                err = %err,
-                "managed: initial worker sync failed; starting from persisted state"
-            );
-        }
-    }
-
-    let startup_managed_cfg = if let Some(worker_agent) = &worker_agent {
-        worker_agent.startup_config().await.map(|(_, cfg)| cfg)
-    } else {
-        None
-    };
-
-    let cfg = if let Some(startup_managed_cfg) = startup_managed_cfg.as_ref() {
-        config::overlay_managed_config_document(&bootstrap_cfg, startup_managed_cfg)?
-    } else if bootstrap_cfg.role == config::PrismRole::Worker {
-        config::worker_bootstrap_runtime_config(&bootstrap_cfg)
-    } else {
-        bootstrap_cfg.clone()
-    };
+    let cfg = bootstrap_cfg.clone();
 
     let proxy_enabled = !cfg.listeners.is_empty();
     let tunnel_server_enabled = !cfg.tunnel.endpoints.is_empty();
@@ -108,10 +60,6 @@ pub async fn run(
         && !tunnel_server_enabled
         && !tunnel_connector_enabled
         && !tunnel_client_enabled
-        && !matches!(
-            cfg.role,
-            config::PrismRole::Management | config::PrismRole::Worker
-        )
     {
         anyhow::bail!(
             "config: nothing to run (set listeners and/or routes and/or tunnel.endpoints and/or tunnel.connector+services and/or tunnel.client)"
@@ -122,7 +70,6 @@ pub async fn run(
         config = %resolved.path.display(),
         workdir = %paths.workdir.display(),
         middleware_dir = %paths.middleware_dir.display(),
-        role = %cfg.role,
         proxy_enabled,
         tunnel_server_enabled,
         tunnel_connector_enabled,
@@ -162,7 +109,7 @@ pub async fn run(
     let mut tasks = JoinSet::new();
 
     // Config reload loop (polling + admin-triggered).
-    if cfg.role != config::PrismRole::Worker {
+    {
         let config_path = resolved.path.clone();
         let static_cfg = cfg.clone();
         let router = rtr.clone();
@@ -203,14 +150,9 @@ pub async fn run(
         }
     };
 
-    // HTTP admin is only bound when `admin_addr` is set (management / worker / LAN).
+    // HTTP admin is only bound when `admin_addr` is set.
     // In-band `$admin` uses AdminState directly and does not dial loopback HTTP.
-    let need_admin_state = !cfg.admin_addr.trim().is_empty()
-        || tunnel_server_enabled
-        || matches!(
-            cfg.role,
-            config::PrismRole::Management | config::PrismRole::Worker
-        );
+    let need_admin_state = !cfg.admin_addr.trim().is_empty() || tunnel_server_enabled;
     let admin_state = if need_admin_state {
         Some(Arc::new(admin::AdminState {
             sessions: sessions.clone(),
@@ -218,21 +160,7 @@ pub async fn run(
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
             tunnel: Some(tunnel_manager.clone()),
-            auth: admin::AdminAuth {
-                panel_token: management_plane
-                    .as_ref()
-                    .map(|plane| plane.panel_token().to_string()),
-                worker_token: if let Some(plane) = &management_plane {
-                    Some(plane.worker_token().to_string())
-                } else {
-                    worker_agent
-                        .as_ref()
-                        .map(|agent| agent.auth_token().to_string())
-                },
-                ..Default::default()
-            },
-            management: management_plane.clone(),
-            worker: worker_agent.clone(),
+            auth: admin::AdminAuth::default(),
             client: Some(client_controller.clone()),
             auth_manager: Some(auth_manager.clone()),
             storage: storage.clone(),
@@ -636,28 +564,6 @@ pub async fn run(
         });
     }
 
-    if let Some(worker_agent) = &worker_agent {
-        worker_agent
-            .attach_runtime(managed::RuntimeApplyHandles {
-                middleware_dir: paths.middleware_dir.clone(),
-                router: rtr.clone(),
-                runtime: tcp_runtime.clone(),
-            })
-            .await;
-
-        if startup_managed_cfg.is_some() {
-            worker_agent.mark_started_with_startup_config().await?;
-        }
-
-        if worker_agent.connection_mode() == config::ManagedConnectionMode::Active {
-            let worker_agent = worker_agent.clone();
-            let shutdown = shutdown_rx.clone();
-            tasks.spawn(async move {
-                worker_agent.run_active_sync_loop(shutdown).await;
-                Ok(())
-            });
-        }
-    }
 
     // Wait for shutdown signal (Ctrl-C / SIGTERM) or unexpected task termination.
     tokio::select! {

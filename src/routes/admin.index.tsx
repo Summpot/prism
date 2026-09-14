@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	Activity,
-	AlertTriangle,
 	ArrowRight,
-	CheckCircle2,
-	RefreshCw,
+	FileCode,
+	Network,
+	Radio,
 	RotateCcw,
+	Server,
 	ServerCog,
 	Unplug,
 	Zap,
@@ -27,21 +28,20 @@ import {
 } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatBytes, formatPercentage, formatRelative } from "@/lib/format";
+import { formatBytes, formatPercentage } from "@/lib/format";
 import {
+	getConfigPath,
 	getConnections,
-	getManagedNodes,
-	getManagementStatus,
 	getOptimizerStats,
 	getTunnelServices,
-	type ManagedNodeSnapshot,
 	triggerReload,
-} from "@/lib/managementApi";
+} from "@/lib/admin/adminApi";
 import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
 import { invalidateAdminQueries } from "@/lib/state/queryClient";
 import { queryKeys } from "@/lib/state/queryKeys";
 import { m } from "@/paraglide/messages";
+import type { ServiceSnapshot } from "@/types/admin";
 
 export const Route = createFileRoute("/admin/")({ component: AdminDashboardPage });
 
@@ -52,12 +52,6 @@ function AdminDashboardPage() {
 	const [autoRefresh, setAutoRefresh] = useState(true);
 	const interval = autoRefresh ? 8_000 : false;
 
-	const statusQuery = useAdminQuery(queryKeys.admin.status(connection), getManagementStatus, {
-		refetchInterval: interval,
-	});
-	const nodesQuery = useAdminQuery(queryKeys.admin.nodes(connection), getManagedNodes, {
-		refetchInterval: interval,
-	});
 	const connsQuery = useAdminQuery(
 		queryKeys.admin.connections(connection),
 		(conn) => getConnections(conn).catch(() => []),
@@ -73,20 +67,26 @@ function AdminDashboardPage() {
 		(conn) => getOptimizerStats(conn).catch(() => null),
 		{ refetchInterval: interval },
 	);
+	const configPathQuery = useAdminQuery(
+		queryKeys.admin.configPath(connection),
+		(conn) => getConfigPath(conn).catch(() => null),
+		{ refetchInterval: interval },
+	);
 
-	const status = statusQuery.data ?? null;
-	const nodes = nodesQuery.data ?? [];
 	const optimizerStats = optimizerQuery.data ?? null;
 	const connectionCount = connsQuery.data?.length ?? 0;
 	const serviceCount = servicesQuery.data?.length ?? 0;
-	const loading = statusQuery.isFetching && !statusQuery.data;
-	const error = statusQuery.errorMessage ?? nodesQuery.errorMessage;
+	const services = servicesQuery.data ?? [];
+	const configPath = configPathQuery.data?.path ?? null;
+
+	const loading = connsQuery.isFetching && !connsQuery.data;
+	const error = connsQuery.errorMessage ?? servicesQuery.errorMessage ?? null;
+
 	const fetchData = () => {
-		void statusQuery.refetch();
-		void nodesQuery.refetch();
 		void connsQuery.refetch();
 		void servicesQuery.refetch();
 		void optimizerQuery.refetch();
+		void configPathQuery.refetch();
 	};
 
 	const handleReload = async () => {
@@ -117,10 +117,6 @@ function AdminDashboardPage() {
 	if (!connection) {
 		return <ConnectState />;
 	}
-
-	const onlineNodes = nodes.filter((node) => node.last_seen_unix_ms > 0).length;
-	const restartNodes = nodes.filter((node) => node.pending_restart).length;
-	const drifted = nodes.filter((node) => node.desired_revision !== node.applied_revision).length;
 
 	return (
 		<div className="space-y-6">
@@ -156,26 +152,6 @@ function AdminDashboardPage() {
 
 			<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 				<MetricCard
-					label={m.dashboard_registered_nodes()}
-					value={status?.node_count ?? nodes.length}
-					icon={<ServerCog className="h-5 w-5" />}
-				/>
-				<MetricCard
-					label={m.dashboard_seen_online()}
-					value={onlineNodes}
-					icon={<CheckCircle2 className="h-5 w-5" />}
-				/>
-				<MetricCard
-					label={m.dashboard_revision_drift()}
-					value={drifted}
-					icon={<RefreshCw className="h-5 w-5" />}
-				/>
-				<MetricCard
-					label={m.dashboard_pending_restart()}
-					value={restartNodes}
-					icon={<AlertTriangle className="h-5 w-5" />}
-				/>
-				<MetricCard
 					label={m.dashboard_active_connections()}
 					value={connectionCount}
 					icon={<Activity className="h-5 w-5" />}
@@ -199,9 +175,9 @@ function AdminDashboardPage() {
 					icon={<Zap className="h-5 w-5" />}
 				/>
 				<MetricCard
-					label={m.dashboard_state_file()}
-					value={status?.state_path ?? m.common_loading()}
-					icon={<ServerCog className="h-5 w-5" />}
+					label={m.dashboard_config_file()}
+					value={configPath ?? m.common_loading()}
+					icon={<FileCode className="h-5 w-5" />}
 					compact
 				/>
 			</section>
@@ -209,34 +185,44 @@ function AdminDashboardPage() {
 			<Card className="shadow-xs">
 				<CardHeader className="flex flex-row items-start justify-between gap-4">
 					<div>
-						<CardTitle>{m.dashboard_node_fleet()}</CardTitle>
+						<CardTitle>{m.dashboard_gateway_overview()}</CardTitle>
 						<CardDescription className="mt-1.5">
-							{m.dashboard_node_fleet_description()}
+							{m.dashboard_gateway_overview_description()}
 						</CardDescription>
 					</div>
 					<div className="flex flex-wrap gap-2">
+						<Button variant="outline" size="sm" render={<Link to="/admin/topology" />}>
+							<Network className="h-4 w-4" />
+							{m.topology_view_button()}
+						</Button>
+						<Button variant="outline" size="sm" render={<Link to="/admin/connections" />}>
+							<Activity className="h-4 w-4" />
+							{m.nav_connections()}
+						</Button>
+						<Button variant="outline" size="sm" render={<Link to="/admin/tunnel-services" />}>
+							<Unplug className="h-4 w-4" />
+							{m.nav_services()}
+						</Button>
 						<Button variant="outline" size="sm" render={<Link to="/admin/traffic" />}>
+							<Server className="h-4 w-4" />
 							{m.nav_server_traffic()}
-							<ArrowRight className="h-4 w-4" />
 						</Button>
 						<Button variant="outline" size="sm" render={<Link to="/admin/connectors" />}>
+							<Radio className="h-4 w-4" />
 							{m.nav_connector_traffic()}
-							<ArrowRight className="h-4 w-4" />
-						</Button>
-						<Button variant="outline" size="sm" render={<Link to="/admin/nodes" />}>
-							{m.dashboard_open_nodes()}
-							<ArrowRight className="h-4 w-4" />
 						</Button>
 					</div>
 				</CardHeader>
 				<CardContent>
 					<div className="grid gap-4 xl:grid-cols-2">
-						{loading && nodes.length === 0 ? (
-							<StateCard label={m.dashboard_loading_inventory()} />
-						) : nodes.length > 0 ? (
-							nodes.slice(0, 6).map((node) => <NodeCard key={node.node_id} node={node} />)
+						{loading && services.length === 0 ? (
+							<StateCard label={m.common_loading()} />
+						) : services.length > 0 ? (
+							services
+								.slice(0, 6)
+								.map((item) => <ServiceCard key={item.service.name} item={item} />)
 						) : (
-							<StateCard label={m.dashboard_no_workers()} />
+							<StateCard label={m.dashboard_no_services()} />
 						)}
 					</div>
 				</CardContent>
@@ -245,52 +231,51 @@ function AdminDashboardPage() {
 	);
 }
 
-function NodeCard({ node }: { node: ManagedNodeSnapshot }) {
-	const drifted = node.desired_revision !== node.applied_revision;
+function ServiceCard({ item }: { item: ServiceSnapshot }) {
+	const svc = item.service;
 	return (
-		<Link
-			to="/admin/nodes/$nodeId"
-			params={{ nodeId: node.node_id }}
-			className="block rounded-xl border border-border bg-card p-4 shadow-xs transition-colors hover:bg-muted/40"
-		>
+		<div className="block rounded-xl border border-border bg-card p-4 shadow-xs transition-colors hover:bg-muted/40">
 			<div className="flex items-start justify-between gap-4">
 				<div>
-					<div className="text-lg font-semibold text-foreground">{node.node_id}</div>
+					<div className="text-lg font-semibold text-foreground">{svc.name}</div>
 					<div className="mt-1.5 text-sm text-muted-foreground">
-						{m.admin_mode()}:{" "}
-						<span className="text-foreground">{node.connection_mode ?? m.admin_unknown()}</span>
+						<span>{svc.proto.toUpperCase()}</span>
 						{" · "}
-						<span>{formatRelative(node.last_seen_unix_ms)}</span>
+						<span>{svc.local_addr}</span>
+						{svc.remote_addr ? (
+							<>
+								{" -> "}
+								<span>{svc.remote_addr}</span>
+							</>
+						) : null}
 					</div>
 				</div>
 				<div className="flex flex-col items-end gap-2">
-					<Badge tone={node.pending_restart ? "warn" : "ok"}>
-						{node.pending_restart ? m.dashboard_badge_restart() : m.dashboard_badge_steady()}
+					<Badge tone={item.primary ? "ok" : "neutral"}>
+						{item.primary ? "Primary" : "Secondary"}
 					</Badge>
-					{drifted ? <Badge tone="info">{m.admin_drift()}</Badge> : null}
+					{svc.route_only ? <Badge tone="info">Route Only</Badge> : null}
 				</div>
 			</div>
 			<div className="mt-4 grid gap-3 sm:grid-cols-2">
-				<StatusMini label={m.dashboard_desired()} value={node.desired_revision} />
-				<StatusMini label={m.dashboard_applied()} value={node.applied_revision} />
+				<NestedPanel className="px-3 py-2.5">
+					<div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+						Client ID
+					</div>
+					<div className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
+						{item.client_id || "—"}
+					</div>
+				</NestedPanel>
+				<NestedPanel className="px-3 py-2.5">
+					<div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+						Remote Peer
+					</div>
+					<div className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
+						{item.remote || "—"}
+					</div>
+				</NestedPanel>
 			</div>
-			{node.last_apply_error ? (
-				<div className="mt-3 truncate rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-					{node.last_apply_error}
-				</div>
-			) : null}
-		</Link>
-	);
-}
-
-function StatusMini({ label, value }: { label: string; value: string | number }) {
-	return (
-		<NestedPanel className="px-3 py-2.5">
-			<div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-				{label}
-			</div>
-			<div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
-		</NestedPanel>
+		</div>
 	);
 }
 

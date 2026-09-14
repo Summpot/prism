@@ -5,24 +5,13 @@ import { useEffect, useState } from "react";
 import { Github } from "@/components/icons/Github";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ErrorBanner } from "@/components/ui";
 import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
-import {
-	getAuthProviders,
-	getGitHubLoginUrl,
-	getHealth,
-	getManagementStatus,
-} from "@/lib/managementApi";
+import { getAuthProviders, getGitHubLoginUrl, getHealth } from "@/lib/admin/adminApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 import { m } from "@/paraglide/messages";
@@ -96,7 +85,6 @@ function LoginPage() {
 				token: token.trim(),
 			};
 			await getHealth(nextConnection);
-			await getManagementStatus(nextConnection);
 			saveConnection(nextConnection);
 			navigate({ to: "/admin" });
 		} catch (nextError) {

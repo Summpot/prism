@@ -105,7 +105,9 @@ export function parsePrismLink(raw: string): Partial<ClientProfile> | null {
 	}
 
 	// Standard prism:// or transport:// URI (auto://, wt://, quic://, tcp://, kcp://, ws://, wss://)
-	const transportMatch = trimmed.match(/^(prism|auto|wt|webtransport|quic|tcp|kcp|ws|wss):\/\/(.*)$/i);
+	const transportMatch = trimmed.match(
+		/^(prism|auto|wt|webtransport|quic|tcp|kcp|ws|wss):\/\/(.*)$/i,
+	);
 	if (transportMatch) {
 		try {
 			const scheme = transportMatch[1].toLowerCase();

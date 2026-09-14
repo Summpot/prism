@@ -18,12 +18,6 @@ export const queryKeys = {
 		all: ["admin"] as const,
 		session: (connection: PanelConnection | null) =>
 			["admin", "session", connectionKey(connection)] as const,
-		status: (connection: PanelConnection | null) =>
-			["admin", "status", connectionKey(connection)] as const,
-		nodes: (connection: PanelConnection | null) =>
-			["admin", "nodes", connectionKey(connection)] as const,
-		nodeConfig: (connection: PanelConnection | null, nodeId: string) =>
-			["admin", "nodeConfig", connectionKey(connection), nodeId] as const,
 		connections: (connection: PanelConnection | null) =>
 			["admin", "connections", connectionKey(connection)] as const,
 		services: (connection: PanelConnection | null) =>

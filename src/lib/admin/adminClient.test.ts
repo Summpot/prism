@@ -158,13 +158,13 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 		});
 		expect(
 			httpToAdminRpc(
-				"/managed/nodes/n1/config",
+				"/auth/users/u1",
 				"PUT",
-				JSON.stringify({ desired_config: { listeners: [] } }),
+				JSON.stringify({ role: "admin", service_rules: ["*"] }),
 			),
 		).toEqual({
-			method: "managed.node.config.put",
-			payload: { node_id: "n1", desired_config: { listeners: [] } },
+			method: "auth.user.put",
+			payload: { user_id: "u1", role: "admin", service_rules: ["*"] },
 		});
 	});
 });

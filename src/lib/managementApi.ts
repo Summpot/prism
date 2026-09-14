@@ -8,7 +8,6 @@
 // Re-export all Types
 export type * from "@/types/client";
 export type * from "@/types/admin";
-export type * from "@/types/cluster";
 
 // Re-export Admin Client and Error
 export { AdminApiError, ManagementApiError, adminRequest } from "@/lib/admin/adminClient";
@@ -23,10 +22,6 @@ export {
 	getConnections,
 	getGitHubLoginUrl,
 	getHealth,
-	getManagedNode,
-	getManagedNodeConfig,
-	getManagedNodes,
-	getManagementStatus,
 	getMiddlewareConfig,
 	getMiddlewareSchema,
 	getOptimizerStats,
@@ -37,7 +32,6 @@ export {
 	resetMiddlewareConfig,
 	revokeAuthToken,
 	triggerReload,
-	updateManagedNodeConfig,
 	updateManagedUser,
 	updateMiddlewareConfig,
 } from "@/lib/admin/adminApi";

@@ -125,40 +125,21 @@ export function httpToAdminRpc(
 		return { method: "auth.tokens.revoke", payload: { token_id: params[2] } };
 	}
 
-	if (params[0] === "managed" && params[1] === "status") {
-		return { method: "managed.status", payload: {} };
-	}
-	if (params[0] === "managed" && params[1] === "nodes" && params.length === 2) {
-		return { method: "managed.nodes", payload: {} };
-	}
-	if (params[0] === "managed" && params[1] === "nodes" && params.length === 3) {
-		return { method: "managed.node", payload: { node_id: params[2] } };
-	}
 	if (
-		params[0] === "managed" &&
-		params[1] === "nodes" &&
-		params[3] === "config" &&
-		verb === "GET"
+		(params[0] === "auth" || params[0] === "managed") &&
+		params[1] === "users" &&
+		params.length === 2
 	) {
-		return { method: "managed.node.config", payload: { node_id: params[2] } };
+		return { method: "auth.users", payload: {} };
 	}
 	if (
-		params[0] === "managed" &&
-		params[1] === "nodes" &&
-		params[3] === "config" &&
+		(params[0] === "auth" || params[0] === "managed") &&
+		params[1] === "users" &&
+		params.length === 3 &&
 		verb === "PUT"
 	) {
 		return {
-			method: "managed.node.config.put",
-			payload: { node_id: params[2], ...json() },
-		};
-	}
-	if (params[0] === "managed" && params[1] === "users" && params.length === 2) {
-		return { method: "managed.users", payload: {} };
-	}
-	if (params[0] === "managed" && params[1] === "users" && params.length === 3 && verb === "PUT") {
-		return {
-			method: "managed.user.put",
+			method: "auth.user.put",
 			payload: { user_id: params[2], ...json() },
 		};
 	}
@@ -216,9 +197,11 @@ export async function adminRequest<T>(
 				token: connection.token || null,
 			},
 		});
-		const text =
-			typeof result.body === "string" ? result.body : JSON.stringify(result.body ?? "");
-		throwIfNotOk(result.status || (result.ok ? 200 : 500), result.message ? JSON.stringify({ error: result.message }) : text);
+		const text = typeof result.body === "string" ? result.body : JSON.stringify(result.body ?? "");
+		throwIfNotOk(
+			result.status || (result.ok ? 200 : 500),
+			result.message ? JSON.stringify({ error: result.message }) : text,
+		);
 		if (result.body === undefined || result.body === null || result.body === "") {
 			return undefined as T;
 		}

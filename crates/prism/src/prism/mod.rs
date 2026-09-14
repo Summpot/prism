@@ -5,7 +5,6 @@ pub mod auth;
 pub mod control;
 pub mod config;
 pub mod logging;
-pub mod managed;
 pub mod middleware;
 pub mod net;
 pub mod proxy;

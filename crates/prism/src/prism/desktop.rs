@@ -94,8 +94,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         reload_tx,
         tunnel: None,
         auth: crate::prism::admin::AdminAuth::default(),
-        management: None,
-        worker: None,
         client: Some(client_controller.clone()),
         auth_manager: Some(auth_manager),
         storage: storage.clone(),

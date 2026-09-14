@@ -38,8 +38,8 @@ services:
       - ./prism.toml:/etc/prism/prism.toml:ro
       - prism-data:/var/lib/prism
     ports:
-      - "8080:8080"   # Admin dashboard & API
-      - "7000:7000"   # Tunnel endpoint
+      - "8080:8080" # Admin dashboard & API
+      - "7000:7000" # Tunnel endpoint
       - "25565:25565" # Public proxy listener
 volumes:
   prism-data:
@@ -97,6 +97,7 @@ middlewares = ["tls_sni"]
 ### 2. Reverse Tunnel (Exposing Private Services)
 
 #### Edge Server (`prism-server.toml`)
+
 Listen for incoming tunnel connections over QUIC and TCP, and auto-expose registered service ports:
 
 ```toml
@@ -116,6 +117,7 @@ transport = "quic"
 ```
 
 #### Private Host / Connector (`prism-connector.toml`)
+
 Connect out to the edge server and publish local services:
 
 ```toml
@@ -139,6 +141,7 @@ adaptive_flush = true
 ### 3. Managed Cluster Mode
 
 #### Management Node (`management.toml`)
+
 ```toml
 role = "management"
 admin_addr = ":8080"
@@ -150,6 +153,7 @@ worker_token = "worker-secret"
 ```
 
 #### Worker Node (`worker.toml`)
+
 ```toml
 role = "worker"
 admin_addr = ":8081"
@@ -166,13 +170,13 @@ sync_interval_ms = 5000
 
 ## CLI & Environment Variables
 
-| Flag | Env Var | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--config <PATH>` | `PRISM_CONFIG` | Auto-detected | Path to `.toml` / `.yaml` config file. Auto-searches CWD then OS default (`/etc/prism/prism.toml` on Linux). |
-| `--workdir <PATH>` | `PRISM_WORKDIR` | `/var/lib/prism` (Linux) | Runtime working directory for state, certs, and SQLite DB. |
-| `--middleware-dir <PATH>` | `PRISM_MIDDLEWARE_DIR` | `<config_dir>/middlewares` | Directory containing `.wat` / `.wasm` middleware files. |
-| `--headless` | - | `false` | Run headless without GUI even if desktop support is compiled in. |
-| `--gui` | - | `false` | Force launch Tauri desktop GUI window. |
+| Flag                      | Env Var                | Default                    | Description                                                                                                  |
+| :------------------------ | :--------------------- | :------------------------- | :----------------------------------------------------------------------------------------------------------- |
+| `--config <PATH>`         | `PRISM_CONFIG`         | Auto-detected              | Path to `.toml` / `.yaml` config file. Auto-searches CWD then OS default (`/etc/prism/prism.toml` on Linux). |
+| `--workdir <PATH>`        | `PRISM_WORKDIR`        | `/var/lib/prism` (Linux)   | Runtime working directory for state, certs, and SQLite DB.                                                   |
+| `--middleware-dir <PATH>` | `PRISM_MIDDLEWARE_DIR` | `<config_dir>/middlewares` | Directory containing `.wat` / `.wasm` middleware files.                                                      |
+| `--headless`              | -                      | `false`                    | Run headless without GUI even if desktop support is compiled in.                                             |
+| `--gui`                   | -                      | `false`                    | Force launch Tauri desktop GUI window.                                                                       |
 
 ---
 
@@ -186,16 +190,20 @@ sync_interval_ms = 5000
 ## Building from Source
 
 ### Prerequisites
+
 - [Rust](https://rustup.rs/) (2024 edition, MSRV 1.85+)
 - [Node.js](https://nodejs.org/) (v22+) and [pnpm](https://pnpm.io/) (v10+)
 
 ### Build Headless CLI / Server
+
 ```bash
 cargo build --release -p prism --no-default-features
 ```
+
 The binary will be located at `target/release/prism`.
 
 ### Build Desktop GUI (Tauri v2)
+
 ```bash
 # Install frontend dependencies
 pnpm install

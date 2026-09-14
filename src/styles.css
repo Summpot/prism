@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@xyflow/react/dist/style.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -124,4 +125,40 @@
   html, body {
     @apply min-h-full bg-background text-foreground font-sans;
   }
+}
+
+/* React Flow theme customizations */
+@keyframes traffic-dash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.react-flow__background {
+  background-color: var(--background);
+}
+.react-flow__controls {
+  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  background-color: var(--card) !important;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background-color: var(--card) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+  fill: var(--foreground) !important;
+}
+.react-flow__controls-button:hover {
+  background-color: var(--muted) !important;
+}
+.react-flow__minimap {
+  background-color: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: none !important;
+}
+.react-flow__attribution {
+  display: none !important;
 }

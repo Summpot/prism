@@ -467,7 +467,18 @@
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["auto", "tcp", "udp", "quic", "kcp", "websocket", "ws", "wss", "webtransport", "wt"],
+					"enum": [
+						"auto",
+						"tcp",
+						"udp",
+						"quic",
+						"kcp",
+						"websocket",
+						"ws",
+						"wss",
+						"webtransport",
+						"wt"
+					],
 					"default": "auto"
 				},
 				"auth_token": {
@@ -500,7 +511,18 @@
 				},
 				"transport": {
 					"type": "string",
-					"enum": ["auto", "tcp", "quic", "kcp", "udp", "websocket", "ws", "wss", "webtransport", "wt"],
+					"enum": [
+						"auto",
+						"tcp",
+						"quic",
+						"kcp",
+						"udp",
+						"websocket",
+						"ws",
+						"wss",
+						"webtransport",
+						"wt"
+					],
 					"default": "auto"
 				},
 				"auth_token": {

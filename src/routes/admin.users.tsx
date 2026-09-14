@@ -35,7 +35,7 @@ import {
 	type TokenRecord,
 	updateManagedUser,
 	type UserRecord,
-} from "@/lib/managementApi";
+} from "@/lib/admin/adminApi";
 import { useAdminQuery } from "@/hooks/useAdminQuery";
 import { usePanelSession } from "@/lib/panelSession";
 import { invalidateAdminQueries } from "@/lib/state/queryClient";

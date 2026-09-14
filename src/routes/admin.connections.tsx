@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Cable, Wifi, Zap } from "lucide-react";
+import { Cable, Network, Wifi, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -85,6 +85,13 @@ function AdminConnectionsPage() {
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
+						<Link
+							to="/admin/topology"
+							className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium hover:bg-muted/70 text-foreground"
+						>
+							<Network className="h-4 w-4 text-primary" />
+							{m.topology_view_button()}
+						</Link>
 						{optimizerStats?.global && optimizerStats.global.raw_bytes > 0 ? (
 							<Link
 								to="/admin/traffic"

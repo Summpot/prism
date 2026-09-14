@@ -15,7 +15,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder, InBuffer, Operation, OutBuffer};
 
 use crate::prism::config::{
-    ManagedOptimizerClientDocument, ManagedOptimizerDocument, OptimizerClientConfig,
+    OptimizerClientConfig,
     OptimizerConfig as PrismOptimizerConfig,
 };
 use crate::prism::middleware::FramePriority;
@@ -161,44 +161,7 @@ fn opt_ms(v: Option<u64>, default: u64) -> Duration {
     Duration::from_millis(v.unwrap_or(default))
 }
 
-impl From<&ManagedOptimizerDocument> for OptimizerConfig {
-    fn from(doc: &ManagedOptimizerDocument) -> Self {
-        let window = doc.zstd_window_log.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG);
-        Self {
-            enabled: doc.enabled,
-            flush_interval: opt_ms(doc.flush_interval_ms, 20),
-            flush_interval_uplink: opt_ms(doc.flush_interval_uplink_ms, 8),
-            flush_interval_min: opt_ms(doc.flush_interval_min_ms, 8),
-            flush_interval_max: opt_ms(doc.flush_interval_max_ms, 50),
-            adaptive_flush: doc.adaptive_flush.unwrap_or(true),
-            buffer_threshold: doc.buffer_threshold.unwrap_or(DEFAULT_BUFFER_THRESHOLD),
-            buffer_threshold_uplink: doc
-                .buffer_threshold_uplink
-                .unwrap_or(DEFAULT_BUFFER_THRESHOLD_UPLINK),
-            zstd_level: doc.zstd_level.unwrap_or(DEFAULT_ZSTD_LEVEL),
-            zstd_window_log: window,
-            zstd_window_log_uplink: doc.zstd_window_log_uplink.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG_UPLINK),
-            zstd_window_log_downlink: doc.zstd_window_log_downlink.unwrap_or(window),
-            dictionary: resolve_dictionary(doc.zstd_dictionary.as_deref(), ""),
-        }
-    }
-}
 
-impl From<&ManagedOptimizerClientDocument> for OptimizerConfig {
-    fn from(doc: &ManagedOptimizerClientDocument) -> Self {
-        let window = doc.zstd_window_log.unwrap_or(DEFAULT_ZSTD_WINDOW_LOG);
-        Self {
-            enabled: doc.enabled,
-            zstd_window_log: window,
-            zstd_window_log_uplink: doc
-                .zstd_window_log_uplink
-                .unwrap_or(DEFAULT_ZSTD_WINDOW_LOG_UPLINK),
-            zstd_window_log_downlink: doc.zstd_window_log_downlink.unwrap_or(window),
-            dictionary: resolve_dictionary(doc.zstd_dictionary.as_deref(), ""),
-            ..Self::default()
-        }
-    }
-}
 
 impl From<&PrismOptimizerConfig> for OptimizerConfig {
     fn from(cfg: &PrismOptimizerConfig) -> Self {
@@ -2197,7 +2160,7 @@ mod tests {
 
     #[test]
     fn test_config_conversions() {
-        let doc = ManagedOptimizerDocument {
+        let doc = PrismOptimizerConfig {
             enabled: true,
             flush_interval_ms: Some(15),
             zstd_window_log: Some(22),
@@ -2210,7 +2173,7 @@ mod tests {
         assert_eq!(cfg.zstd_window_log, 22);
         assert_eq!(cfg.zstd_level, 5);
 
-        let client_doc = ManagedOptimizerClientDocument {
+        let client_doc = OptimizerClientConfig {
             enabled: true,
             zstd_window_log: Some(21),
             ..Default::default()

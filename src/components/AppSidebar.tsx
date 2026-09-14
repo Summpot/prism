@@ -2,7 +2,6 @@ import { Link, useLocation } from "@tanstack/react-router";
 import {
 	Activity,
 	ArrowDownUp,
-	Box,
 	Cable,
 	Gamepad2,
 	Gauge,
@@ -144,12 +143,6 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 							exact
 							label={m.nav_topology()}
 							icon={<Network className="h-4 w-4" />}
-							onClick={onNavigate}
-						/>
-						<SidebarNavItem
-							to="/admin/nodes"
-							label={m.nav_nodes()}
-							icon={<Box className="h-4 w-4" />}
 							onClick={onNavigate}
 						/>
 						<SidebarNavItem

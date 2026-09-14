@@ -16,16 +16,15 @@ use async_trait::async_trait;
 use crate::prism::auth::AuthIdentity;
 use crate::prism::control::{
     self, AdminCallContext, AdminControl, AdminError, AdminEventWatches, AdminMethod, AdminPayload,
-    AuthSessionSnapshot, FEATURE_AUTH, FEATURE_EVENTS, FEATURE_MANAGED, FEATURE_MIDDLEWARE,
-    FEATURE_PANEL, FEATURE_RPC, MiddlewareItem,
+    AuthSessionSnapshot, FEATURE_AUTH, FEATURE_EVENTS, FEATURE_MIDDLEWARE, FEATURE_PANEL,
+    FEATURE_RPC, MiddlewareItem,
 };
 use crate::prism::telemetry;
-use crate::prism::{managed, tunnel};
+use crate::prism::tunnel;
 
 #[derive(Clone, Debug, Default)]
 pub struct AdminAuth {
     pub panel_token: Option<String>,
-    pub worker_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -36,8 +35,6 @@ pub struct AdminState {
     pub reload_tx: watch::Sender<telemetry::ReloadSignal>,
     pub tunnel: Option<Arc<tunnel::manager::Manager>>,
     pub auth: AdminAuth,
-    pub management: Option<Arc<managed::ManagementPlane>>,
-    pub worker: Option<Arc<managed::WorkerAgent>>,
     pub client: Option<Arc<tunnel::client::ClientController>>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
     pub storage: Option<Arc<crate::prism::storage::StorageEngine>>,
@@ -106,16 +103,6 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/tunnel/services", get(tunnel_services))
         .route("/reload", post(reload))
         .route("/config", get(config))
-        .route("/managed/status", get(managed_status))
-        .route("/managed/nodes", get(managed_nodes))
-        .route("/managed/nodes/{node_id}", get(managed_node))
-        .route(
-            "/managed/nodes/{node_id}/config",
-            get(managed_node_config).put(put_managed_node_config),
-        )
-        .route("/managed/worker/sync", post(managed_worker_sync))
-        .route("/managed/worker/status", get(worker_status))
-        .route("/managed/worker/config", put(worker_apply_config))
         .route("/stats/optimizer", get(stats_optimizer))
         .route("/client/status", get(client_status))
         .route("/client/start", post(client_start))
@@ -154,6 +141,8 @@ pub(crate) fn build_router(state: AdminState) -> Router {
             "/auth/tokens/{token_id}",
             axum::routing::delete(auth_revoke_token),
         )
+        .route("/auth/users", get(managed_users))
+        .route("/auth/users/{user_id}", put(put_managed_user))
         .route("/managed/users", get(managed_users))
         .route("/managed/users/{user_id}", put(put_managed_user))
         .with_state(shared)
@@ -810,132 +799,6 @@ async fn config(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
     )
 }
 
-async fn managed_status(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st).await?;
-    let management = st
-        .management
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("management API not enabled"))?;
-    Ok((StatusCode::OK, Json(management.status().await)))
-}
-
-async fn managed_nodes(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st).await?;
-    let management = st
-        .management
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("management API not enabled"))?;
-    Ok((StatusCode::OK, Json(management.list_nodes().await)))
-}
-
-async fn managed_node(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-    AxumPath(node_id): AxumPath<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st).await?;
-    let management = st
-        .management
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("management API not enabled"))?;
-
-    let node = management
-        .get_node(&node_id)
-        .await
-        .ok_or_else(|| ApiError::not_found("managed node not found"))?;
-    Ok((StatusCode::OK, Json(node)))
-}
-
-async fn managed_node_config(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-    AxumPath(node_id): AxumPath<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st).await?;
-    let management = st
-        .management
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("management API not enabled"))?;
-
-    let node = management
-        .get_node_config(&node_id)
-        .await
-        .ok_or_else(|| ApiError::not_found("managed node not found"))?;
-    Ok((StatusCode::OK, Json(node)))
-}
-
-async fn put_managed_node_config(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-    AxumPath(node_id): AxumPath<String>,
-    Json(request): Json<managed::PutManagedNodeConfigRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_panel_auth(&headers, &st).await?;
-    let management = st
-        .management
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("management API not enabled"))?;
-
-    let response = management
-        .set_desired_config(&node_id, request.desired_config)
-        .await
-        .map_err(ApiError::bad_request)?;
-    Ok((StatusCode::OK, Json(response)))
-}
-
-async fn managed_worker_sync(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-    Json(request): Json<managed::WorkerSyncRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_worker_auth(&headers, &st)?;
-    let management = st
-        .management
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("management worker sync not enabled"))?;
-
-    let response = management
-        .worker_sync(request)
-        .await
-        .map_err(ApiError::bad_request)?;
-    Ok((StatusCode::OK, Json(response)))
-}
-
-async fn worker_status(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_worker_auth(&headers, &st)?;
-    let worker = st
-        .worker
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("worker agent not enabled"))?;
-    Ok((StatusCode::OK, Json(worker.status_snapshot().await)))
-}
-
-async fn worker_apply_config(
-    headers: HeaderMap,
-    State(st): State<Arc<AdminState>>,
-    Json(request): Json<managed::WorkerConfigPushRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    require_worker_auth(&headers, &st)?;
-    let worker = st
-        .worker
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("worker agent not enabled"))?;
-    let response = worker
-        .apply_push(request.desired_revision, request.desired_config)
-        .await
-        .map_err(ApiError::bad_request)?;
-    Ok((StatusCode::OK, Json(response)))
-}
-
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct MiddlewareDataPayload {
     pub port: Option<u16>,
@@ -1180,21 +1043,13 @@ async fn require_mutation_auth(headers: &HeaderMap, st: &AdminState) -> Result<(
                 }
             }
         }
-        if let Some(expected) = st
-            .auth
-            .panel_token
-            .as_ref()
-            .or(st.auth.worker_token.as_ref())
-        {
+        if let Some(expected) = st.auth.panel_token.as_ref() {
             if token.trim() == expected.trim() {
                 return Ok(());
             }
         }
         Err(ApiError::unauthorized("invalid bearer token"))
-    } else if st.auth.panel_token.is_none()
-        && st.auth.worker_token.is_none()
-        && st.auth_manager.is_none()
-    {
+    } else if st.auth.panel_token.is_none() && st.auth_manager.is_none() {
         Ok(())
     } else {
         Err(ApiError::unauthorized("missing Authorization header"))
@@ -1222,14 +1077,6 @@ async fn require_panel_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), 
     Err(ApiError::unauthorized("panel authentication required"))
 }
 
-fn require_worker_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), ApiError> {
-    let token = st
-        .auth
-        .worker_token
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("worker auth not configured"))?;
-    require_bearer(headers, token)
-}
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
@@ -1237,15 +1084,6 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     Some(token.trim().to_string())
 }
 
-fn require_bearer(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
-    let Some(token) = extract_bearer_token(headers) else {
-        return Err(ApiError::unauthorized("missing Authorization header"));
-    };
-    if token.trim() != expected.trim() {
-        return Err(ApiError::unauthorized("invalid bearer token"));
-    }
-    Ok(())
-}
 
 #[derive(Debug, Serialize)]
 pub struct AuthProvidersResponse {
@@ -1701,12 +1539,7 @@ async fn put_managed_user(
 #[async_trait]
 impl AdminControl for AdminState {
     fn features(&self) -> u64 {
-        let mut bits =
-            FEATURE_RPC | FEATURE_EVENTS | FEATURE_PANEL | FEATURE_MIDDLEWARE | FEATURE_AUTH;
-        if self.management.is_some() {
-            bits |= FEATURE_MANAGED;
-        }
-        bits
+        FEATURE_RPC | FEATURE_EVENTS | FEATURE_PANEL | FEATURE_MIDDLEWARE | FEATURE_AUTH
     }
 
     fn auth_enabled(&self) -> bool {
@@ -1829,58 +1662,13 @@ impl AdminState {
                 let revoked = am.revoke_token(&token_id).await;
                 Ok(AdminPayload::AuthRevokeToken { revoked })
             }
-            AdminMethod::ManagedStatus => {
-                let management = self.management.as_ref().ok_or_else(|| {
-                    AdminError::not_found("management API not enabled")
-                })?;
-                Ok(AdminPayload::ManagedStatus(management.status().await))
-            }
-            AdminMethod::ManagedNodes => {
-                let management = self.management.as_ref().ok_or_else(|| {
-                    AdminError::not_found("management API not enabled")
-                })?;
-                Ok(AdminPayload::ManagedNodes(management.list_nodes().await))
-            }
-            AdminMethod::ManagedNode { node_id } => {
-                let management = self.management.as_ref().ok_or_else(|| {
-                    AdminError::not_found("management API not enabled")
-                })?;
-                let node = management
-                    .get_node(&node_id)
-                    .await
-                    .ok_or_else(|| AdminError::not_found("managed node not found"))?;
-                Ok(AdminPayload::ManagedNode(node))
-            }
-            AdminMethod::ManagedNodeConfig { node_id } => {
-                let management = self.management.as_ref().ok_or_else(|| {
-                    AdminError::not_found("management API not enabled")
-                })?;
-                let node = management
-                    .get_node_config(&node_id)
-                    .await
-                    .ok_or_else(|| AdminError::not_found("managed node not found"))?;
-                Ok(AdminPayload::ManagedNodeConfig(node))
-            }
-            AdminMethod::PutManagedNodeConfig {
-                node_id,
-                desired_config,
-            } => {
-                let management = self.management.as_ref().ok_or_else(|| {
-                    AdminError::not_found("management API not enabled")
-                })?;
-                let response = management
-                    .set_desired_config(&node_id, desired_config)
-                    .await
-                    .map_err(|e| AdminError::bad_request(e.to_string()))?;
-                Ok(AdminPayload::ManagedNodeConfig(response))
-            }
-            AdminMethod::ManagedUsers => {
+            AdminMethod::AuthUsers => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
                     AdminError::not_found("auth manager not configured")
                 })?;
-                Ok(AdminPayload::ManagedUsers(am.list_users().await))
+                Ok(AdminPayload::AuthUsers(am.list_users().await))
             }
-            AdminMethod::PutManagedUser {
+            AdminMethod::PutAuthUser {
                 user_id,
                 role,
                 service_rules,
@@ -1897,7 +1685,7 @@ impl AdminState {
                 am.upsert_user(user.clone())
                     .await
                     .map_err(|e| AdminError::bad_request(e.to_string()))?;
-                Ok(AdminPayload::ManagedUser(user))
+                Ok(AdminPayload::AuthUser(user))
             }
             AdminMethod::ListMiddlewares => self.rpc_list_middlewares(),
             AdminMethod::MiddlewareSchema { name } => self.rpc_middleware_schema(&name),
@@ -2094,11 +1882,8 @@ mod tests {
             tunnel: None,
             auth: AdminAuth {
                 panel_token: Some("secret123".to_string()),
-                worker_token: None,
                 ..Default::default()
             },
-            management: None,
-            worker: None,
             client: None,
             auth_manager: None,
             storage: None,
@@ -2187,8 +1972,6 @@ mod tests {
             reload_tx,
             tunnel: None,
             auth: AdminAuth::default(),
-            management: None,
-            worker: None,
             client: None,
             auth_manager: None,
             storage: None,
@@ -2250,8 +2033,6 @@ mod tests {
             reload_tx,
             tunnel: None,
             auth: AdminAuth::default(),
-            management: None,
-            worker: None,
             client: Some(client_controller),
             auth_manager: None,
             storage: None,
@@ -2376,8 +2157,6 @@ mod tests {
             reload_tx,
             tunnel: None,
             auth: AdminAuth::default(),
-            management: None,
-            worker: None,
             client: None,
             auth_manager: None,
             storage: None,
@@ -2431,8 +2210,6 @@ mod tests {
             reload_tx,
             tunnel: None,
             auth: AdminAuth::default(),
-            management: None,
-            worker: None,
             client: Some(client_controller),
             auth_manager: None,
             storage: Some(storage.clone()),
@@ -2600,11 +2377,8 @@ mod tests {
             tunnel: None,
             auth: AdminAuth {
                 panel_token: Some("secret123".to_string()),
-                worker_token: None,
                 ..Default::default()
             },
-            management: None,
-            worker: None,
             client: None,
             auth_manager: None,
             storage: Some(storage.clone()),
@@ -2735,8 +2509,6 @@ mod tests {
             reload_tx,
             tunnel: None,
             auth: AdminAuth::default(),
-            management: None,
-            worker: None,
             client: None,
             auth_manager: None,
             storage: None,

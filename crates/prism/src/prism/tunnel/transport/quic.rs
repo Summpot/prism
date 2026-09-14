@@ -321,6 +321,7 @@ mod quic_tls {
         next_protos: Vec<Vec<u8>>,
     ) -> anyhow::Result<rustls::ClientConfig> {
         if insecure_skip_verify {
+            tracing::warn!("quic: TLS certificate verification is disabled (insecure_skip_verify=true). Connections are vulnerable to MITM attacks.");
             let mut cfg = rustls::ClientConfig::builder_with_provider(crypto_provider())
                 .with_safe_default_protocol_versions()?
                 .dangerous()
@@ -330,7 +331,8 @@ mod quic_tls {
             return Ok(cfg);
         }
 
-        let root = rustls::RootCertStore::empty();
+        let mut root = rustls::RootCertStore::empty();
+        root.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let mut cfg = rustls::ClientConfig::builder_with_provider(crypto_provider())
             .with_safe_default_protocol_versions()?
             .with_root_certificates(root)

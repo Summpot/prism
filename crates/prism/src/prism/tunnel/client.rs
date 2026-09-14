@@ -54,7 +54,8 @@ pub struct Client {
 impl Client {
     /// Creates a new `Client` from [`TunnelClientConfig`].
     pub fn new(config: TunnelClientConfig) -> anyhow::Result<Self> {
-        let wasm_engine = wasmtime::Engine::default();
+        let wasm_engine = crate::prism::middleware::create_wasm_engine()
+            .unwrap_or_else(|_| wasmtime::Engine::default());
         let wasm_module = Self::try_compile_middleware(&wasm_engine, &config.middleware, None)?;
 
         let broadcaster = if config.fake_lan_broadcast {
@@ -461,7 +462,7 @@ impl Client {
         let dial_opts = TransportDialOptions {
             quic: QuicDialOptions {
                 server_name: String::new(),
-                insecure_skip_verify: true,
+                insecure_skip_verify: false,
                 next_protos: vec![],
             },
             websocket: WebSocketDialOptions {
@@ -476,11 +477,11 @@ impl Client {
                     .websocket
                     .as_ref()
                     .map(|w| w.insecure_skip_verify)
-                    .unwrap_or(true),
+                    .unwrap_or(false),
             },
             webtransport: crate::prism::tunnel::transport::WebTransportDialOptions {
                 server_name: String::new(),
-                insecure_skip_verify: true,
+                insecure_skip_verify: false,
             },
         };
 

@@ -4225,6 +4225,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "wasmtime",
+ "webpki-roots 0.26.11",
  "wtransport",
  "x509-parser",
  "zstd 0.14.0",

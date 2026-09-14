@@ -88,6 +88,6 @@ RUN mkdir -p /etc/prism \
 
 EXPOSE 25565 8080 7000
 
-USER root
+USER prism
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

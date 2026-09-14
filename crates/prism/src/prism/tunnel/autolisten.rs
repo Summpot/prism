@@ -50,6 +50,20 @@ struct RunningListener {
     task: tokio::task::JoinHandle<()>,
 }
 
+fn validate_autolisten_addr(addr: &str) -> Result<std::net::SocketAddr, String> {
+    let normalized = crate::prism::net::normalize_bind_addr(addr);
+    let parsed: std::net::SocketAddr = normalized
+        .parse()
+        .map_err(|e| format!("invalid address '{addr}': {e}"))?;
+    if parsed.port() > 0 && parsed.port() < 1024 {
+        return Err(format!(
+            "binding to privileged port {} is not allowed for auto-listen",
+            parsed.port()
+        ));
+    }
+    Ok(parsed)
+}
+
 /// Server-side auto listener manager for tunnel-registered services.
 ///
 /// When enabled, Prism opens listeners for services that specify `remote_addr`.
@@ -134,6 +148,10 @@ impl AutoListener {
             }
             let remote = s.service.remote_addr.trim().to_string();
             if remote.is_empty() {
+                continue;
+            }
+            if let Err(err) = validate_autolisten_addr(&remote) {
+                tracing::warn!(service = %name, cid = %cid, remote = %remote, err = %err, "autolisten: rejected binding to restricted or invalid remote_addr");
                 continue;
             }
             let key = format!("{cid}/{name}");

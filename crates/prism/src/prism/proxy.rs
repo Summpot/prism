@@ -838,7 +838,35 @@ async fn dial_upstream(
         addr = format!("{addr}:{p}");
     }
 
+    if is_forbidden_ssrf_host(&addr) {
+        anyhow::bail!("connection to forbidden link-local/metadata address rejected: {addr}");
+    }
+
     Ok((dial_tcp_stream(&addr, timeout).await?, addr, None, None))
+}
+
+fn is_forbidden_ssrf_host(host_port: &str) -> bool {
+    let host = if let Some(idx) = host_port.rfind(':') {
+        &host_port[..idx]
+    } else {
+        host_port
+    };
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        match ip {
+            std::net::IpAddr::V4(v4) => {
+                if v4.is_link_local() || v4.octets()[0] == 0 {
+                    return true;
+                }
+            }
+            std::net::IpAddr::V6(v6) => {
+                if (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 async fn proxy_bidirectional(

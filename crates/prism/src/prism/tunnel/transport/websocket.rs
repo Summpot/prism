@@ -441,6 +441,7 @@ mod ws_tls {
         insecure_skip_verify: bool,
     ) -> anyhow::Result<rustls::ClientConfig> {
         if insecure_skip_verify {
+            tracing::warn!("websocket: TLS certificate verification is disabled (insecure_skip_verify=true). Connections are vulnerable to MITM attacks.");
             let cfg = rustls::ClientConfig::builder_with_provider(crypto_provider())
                 .with_safe_default_protocol_versions()?
                 .dangerous()
@@ -449,7 +450,8 @@ mod ws_tls {
             return Ok(cfg);
         }
 
-        let root = rustls::RootCertStore::empty();
+        let mut root = rustls::RootCertStore::empty();
+        root.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let cfg = rustls::ClientConfig::builder_with_provider(crypto_provider())
             .with_safe_default_protocol_versions()?
             .with_root_certificates(root)

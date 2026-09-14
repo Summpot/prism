@@ -120,7 +120,9 @@ impl ClientConfigState {
             self.transport = v.clone();
         }
         if let Some(v) = patch.auth_token.as_ref().filter(|s| !s.trim().is_empty()) {
-            self.auth_token = v.clone();
+            if !v.starts_with("***") {
+                self.auth_token = v.clone();
+            }
         }
         if let Some(v) = &patch.listen_addr {
             self.listen_addr = v.clone();
@@ -208,10 +210,21 @@ impl StorageEngine {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            }
         }
 
         let conn = Connection::open(path)
             .with_context(|| format!("failed to open or create sqlite at {}", path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
 
         // Configure connection for high-concurrency, low-latency daemon operations
         conn.execute_batch(
@@ -431,9 +444,12 @@ impl StorageEngine {
         if self.use_keyring && secrets::store_tunnel_token(&cred.profile_id, token) {
             keyring_ok = true;
         }
-        // Keep a sqlite blob even when the keyring accepts the token so a
-        // failed keyring read on the next launch can still restore the session.
-        let token_blob = token.to_string();
+        // Do not store plaintext token in sqlite when the keyring successfully stores it.
+        let token_blob = if keyring_ok {
+            String::new()
+        } else {
+            token.to_string()
+        };
 
         let conn = self
             .conn

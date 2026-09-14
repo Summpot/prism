@@ -404,11 +404,21 @@ pub struct WebSocketClientConfig {
     pub insecure_skip_verify: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CloudflareAcmeConfig {
     pub api_token: String,
     pub zone_id: String,
     pub propagation_timeout_secs: u64,
+}
+
+impl std::fmt::Debug for CloudflareAcmeConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudflareAcmeConfig")
+            .field("api_token", &if self.api_token.is_empty() { "" } else { "***" })
+            .field("zone_id", &self.zone_id)
+            .field("propagation_timeout_secs", &self.propagation_timeout_secs)
+            .finish()
+    }
 }
 
 impl Default for CloudflareAcmeConfig {
@@ -602,12 +612,22 @@ struct FileConfig {
     acme: Option<FileAcmeConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileCloudflareConfig {
     api_token: Option<String>,
     zone_id: Option<String>,
     propagation_timeout_secs: Option<u64>,
+}
+
+impl std::fmt::Debug for FileCloudflareConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileCloudflareConfig")
+            .field("api_token", &self.api_token.as_ref().map(|_| "***"))
+            .field("zone_id", &self.zone_id)
+            .field("propagation_timeout_secs", &self.propagation_timeout_secs)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -629,6 +649,7 @@ struct FileAcmeConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileProxyListener {
     listen_addr: String,
     #[serde(default)]
@@ -638,6 +659,7 @@ struct FileProxyListener {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileLogging {
     level: Option<String>,
     format: Option<String>,
@@ -647,6 +669,7 @@ struct FileLogging {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileReload {
     #[serde(default)]
     enabled: bool,
@@ -654,6 +677,7 @@ struct FileReload {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileTimeouts {
     handshake_timeout_ms: Option<i64>,
     idle_timeout_ms: Option<i64>,
@@ -676,7 +700,8 @@ struct FileRoute {
     strategy: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileTunnel {
     auth_token: Option<String>,
     auto_listen_services: Option<bool>,
@@ -688,7 +713,23 @@ struct FileTunnel {
     acme: Option<FileAcmeConfig>,
 }
 
+impl std::fmt::Debug for FileTunnel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileTunnel")
+            .field("auth_token", &self.auth_token.as_ref().map(|_| "***"))
+            .field("auto_listen_services", &self.auto_listen_services)
+            .field("endpoints", &self.endpoints)
+            .field("connector", &self.connector)
+            .field("client", &self.client)
+            .field("services", &self.services)
+            .field("mdns", &self.mdns)
+            .field("acme", &self.acme)
+            .finish()
+    }
+}
+
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileMdns {
     #[serde(default)]
     enabled: bool,
@@ -705,6 +746,7 @@ struct FileMdns {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileTunnelEndpoint {
     listen_addr: String,
     transport: Option<String>,
@@ -712,7 +754,8 @@ struct FileTunnelEndpoint {
     websocket: Option<FileWebSocketServer>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileTunnelConnector {
     server_addr: String,
     transport: Option<String>,
@@ -724,7 +767,22 @@ struct FileTunnelConnector {
     doh_servers: Option<StringOrVec>,
 }
 
-#[derive(Debug, Deserialize)]
+impl std::fmt::Debug for FileTunnelConnector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileTunnelConnector")
+            .field("server_addr", &self.server_addr)
+            .field("transport", &self.transport)
+            .field("auth_token", &self.auth_token.as_ref().map(|_| "***"))
+            .field("dial_timeout_ms", &self.dial_timeout_ms)
+            .field("quic", &self.quic)
+            .field("websocket", &self.websocket)
+            .field("doh_servers", &self.doh_servers)
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileTunnelClient {
     server_addr: String,
     transport: Option<String>,
@@ -741,12 +799,32 @@ struct FileTunnelClient {
     doh_servers: Option<StringOrVec>,
 }
 
+impl std::fmt::Debug for FileTunnelClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileTunnelClient")
+            .field("server_addr", &self.server_addr)
+            .field("transport", &self.transport)
+            .field("auth_token", &self.auth_token.as_ref().map(|_| "***"))
+            .field("listen_addr", &self.listen_addr)
+            .field("middleware", &self.middleware)
+            .field("fake_lan_broadcast", &self.fake_lan_broadcast)
+            .field("motd_prefix", &self.motd_prefix)
+            .field("optimizer", &self.optimizer)
+            .field("discovery", &self.discovery)
+            .field("websocket", &self.websocket)
+            .field("doh_servers", &self.doh_servers)
+            .finish()
+    }
+}
+
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileClientDiscovery {
     minecraft_lan: Option<FileMinecraftLanDiscovery>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileMinecraftLanDiscovery {
     #[serde(default)]
     enabled: bool,
@@ -754,6 +832,7 @@ struct FileMinecraftLanDiscovery {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileOptimizerClient {
     #[serde(default)]
     enabled: bool,
@@ -764,6 +843,7 @@ struct FileOptimizerClient {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileQuicServer {
     cert_file: Option<String>,
     key_file: Option<String>,
@@ -771,6 +851,7 @@ struct FileQuicServer {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileQuicClient {
     server_name: Option<String>,
     #[serde(default)]
@@ -778,6 +859,7 @@ struct FileQuicClient {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileWebSocketServer {
     cert_file: Option<String>,
     key_file: Option<String>,
@@ -785,6 +867,7 @@ struct FileWebSocketServer {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileWebSocketClient {
     server_name: Option<String>,
     #[serde(default)]
@@ -792,6 +875,7 @@ struct FileWebSocketClient {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileTunnelService {
     name: String,
     proto: Option<String>,
@@ -805,6 +889,7 @@ struct FileTunnelService {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileOptimizer {
     #[serde(default)]
     enabled: bool,
@@ -822,7 +907,7 @@ struct FileOptimizer {
     zstd_dictionary: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileAuthConfig {
     #[serde(default)]
@@ -832,7 +917,17 @@ struct FileAuthConfig {
     github: Option<FileGitHubOAuthConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+impl std::fmt::Debug for FileAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileAuthConfig")
+            .field("mode", &self.mode)
+            .field("legacy_token", &self.legacy_token.as_ref().map(|_| "***"))
+            .field("github", &self.github)
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileGitHubOAuthConfig {
     #[serde(default)]
@@ -849,6 +944,22 @@ struct FileGitHubOAuthConfig {
     #[serde(default)]
     allowed_orgs: Option<StringOrVec>,
     default_role: Option<String>,
+}
+
+impl std::fmt::Debug for FileGitHubOAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileGitHubOAuthConfig")
+            .field("enabled", &self.enabled)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &self.client_secret.as_ref().map(|_| "***"))
+            .field("redirect_uri", &self.redirect_uri)
+            .field("admin_users", &self.admin_users)
+            .field("admin_orgs", &self.admin_orgs)
+            .field("allowed_users", &self.allowed_users)
+            .field("allowed_orgs", &self.allowed_orgs)
+            .field("default_role", &self.default_role)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1338,9 +1449,6 @@ impl Config {
                 });
             }
         }
-        if auth_cfg.legacy_token.is_none() && !cfg.tunnel.auth_token.trim().is_empty() {
-            auth_cfg.legacy_token = Some(cfg.tunnel.auth_token.trim().to_string());
-        }
         cfg.auth = auth_cfg;
 
         // --- ACME ---
@@ -1478,7 +1586,7 @@ const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubuserco
 # service remote_addr (for example ":25565"); Prism will auto-listen on that port
 # on the server side.
 
-admin_addr = ":8080"
+admin_addr = "127.0.0.1:8080"
 
 [tunnel]
 auth_token = ""
@@ -1518,7 +1626,7 @@ const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# yaml-language-server: $schema=ht
 # service remote_addr (for example ":25565"); Prism will auto-listen on that port
 # on the server side.
 
-admin_addr: ":8080"
+admin_addr: "127.0.0.1:8080"
 
 tunnel:
   auth_token: ""

@@ -528,6 +528,9 @@ fn load_session(
     if name.is_empty() {
         return Ok(None);
     }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        anyhow::bail!("invalid middleware name: {name}");
+    }
     let base_name = name.strip_suffix(".wat").unwrap_or(name);
 
     let mut sess = None;
@@ -538,13 +541,6 @@ fn load_session(
                 sess = Some(mw.create_shared_session()?);
                 break;
             }
-        }
-    }
-    if sess.is_none() {
-        let path = Path::new(name);
-        if path.exists() {
-            let mw = crate::prism::middleware::WasmMiddleware::from_wat_path(base_name, path)?;
-            sess = Some(mw.create_shared_session()?);
         }
     }
     if sess.is_none() {

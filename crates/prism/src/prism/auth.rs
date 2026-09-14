@@ -410,7 +410,12 @@ impl AuthManager {
             let _ = std::fs::create_dir_all(parent);
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, data)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(data.as_bytes())?;
+            f.sync_all()?;
+        }
         if path.exists() {
             let _ = std::fs::remove_file(path);
         }

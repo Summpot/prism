@@ -87,17 +87,22 @@ export async function closeWindow(): Promise<void> {
  * Open external URL in default system browser directly.
  */
 export async function openExternalUrl(url: string): Promise<void> {
+	const trimmed = url.trim();
+	if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+		console.warn("openExternalUrl: rejected non-http/https URL:", url);
+		return;
+	}
 	const invoke = getTauriInvoke();
 	if (invoke) {
 		try {
-			await invoke("open_external_url", { url });
+			await invoke("open_external_url", { url: trimmed });
 			return;
 		} catch (err) {
 			console.debug("Failed to invoke open_external_url, falling back to window.open:", err);
 		}
 	}
 	if (typeof window !== "undefined") {
-		window.open(url, "_blank");
+		window.open(trimmed, "_blank", "noopener,noreferrer");
 	}
 }
 

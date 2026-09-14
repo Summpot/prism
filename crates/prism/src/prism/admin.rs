@@ -146,7 +146,35 @@ pub(crate) fn build_router(state: AdminState) -> Router {
         .route("/managed/users", get(managed_users))
         .route("/managed/users/{user_id}", put(put_managed_user))
         .with_state(shared)
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin, _| {
+                    if let Ok(s) = origin.to_str() {
+                        if s == "http://localhost:3000"
+                            || s == "http://127.0.0.1:3000"
+                            || s == "tauri://localhost"
+                            || s == "http://tauri.localhost"
+                            || s.starts_with("http://localhost:")
+                            || s.starts_with("http://127.0.0.1:")
+                        {
+                            return true;
+                        }
+                    }
+                    false
+                }))
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PUT,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    header::AUTHORIZATION,
+                    header::CONTENT_TYPE,
+                    header::ACCEPT,
+                ]),
+        )
 }
 
 async fn wait_shutdown(mut shutdown: watch::Receiver<bool>) {
@@ -623,6 +651,28 @@ pub(crate) async fn do_admin_request(
         return Err("admin request: missing base_url".into());
     }
     let url = format!("{base}{path}");
+    let parsed_url = url::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
+    let scheme = parsed_url.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("unsupported URL scheme '{scheme}': only http and https are permitted"));
+    }
+    if let Some(host) = parsed_url.host_str() {
+        let clean_host = host.trim_start_matches('[').trim_end_matches(']');
+        if let Ok(ip) = clean_host.parse::<std::net::IpAddr>() {
+            match ip {
+                std::net::IpAddr::V4(v4) => {
+                    if v4.is_link_local() || v4.octets()[0] == 0 {
+                        return Err(format!("requests to address '{ip}' are forbidden"));
+                    }
+                }
+                std::net::IpAddr::V6(v6) => {
+                    if (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                        return Err(format!("requests to address '{ip}' are forbidden"));
+                    }
+                }
+            }
+        }
+    }
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -672,97 +722,131 @@ pub(crate) async fn do_admin_rpc(
 // HTTP Axum Route Handlers
 // ---------------------------------------------------------------------------
 
-async fn client_status(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+fn mask_token(t: &str) -> String {
+    let t = t.trim();
+    if t.is_empty() {
+        String::new()
+    } else if t.len() <= 4 {
+        "****".to_string()
+    } else {
+        format!("***{}", &t[t.len() - 4..])
+    }
+}
+
+async fn client_status(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let val = do_client_status(st.client.as_deref(), st.storage.as_deref()).await;
-    (StatusCode::OK, Json(val))
+    Ok((StatusCode::OK, Json(val)))
 }
 
 async fn client_start(
+    headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
     Json(payload): Json<StartClientRequest>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
     let Some(ref client) = st.client else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "client controller not enabled" })),
-        );
+        return Err(ApiError::bad_request(anyhow::anyhow!("client controller not enabled")));
     };
 
     match do_client_start(client, st.storage.as_deref(), payload).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err })),
-        ),
+        Ok(()) => Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true })))),
+        Err(err) => Err(ApiError::bad_request(anyhow::anyhow!(err))),
     }
 }
 
-async fn client_stop(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+async fn client_stop(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
     let Some(ref client) = st.client else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "client controller not enabled" })),
-        );
+        return Err(ApiError::bad_request(anyhow::anyhow!("client controller not enabled")));
     };
     let _ = do_client_stop(client, st.storage.as_deref()).await;
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true }))))
 }
 
-async fn client_get_profiles(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let profiles = do_client_get_profiles(st.storage.as_deref());
-    (StatusCode::OK, Json(profiles))
+async fn client_get_profiles(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let mut profiles = do_client_get_profiles(st.storage.as_deref());
+    for p in &mut profiles {
+        p.auth_token = mask_token(&p.auth_token);
+    }
+    Ok((StatusCode::OK, Json(profiles)))
 }
 
 async fn client_save_profiles(
+    headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
     Json(profiles): Json<Vec<ClientProfile>>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
     match do_client_save_profiles(st.storage.as_deref(), &profiles) {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err })),
-        ),
+        Ok(()) => Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true })))),
+        Err(err) => Err(ApiError::bad_request(anyhow::anyhow!(err))),
     }
 }
 
-async fn client_get_config(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    let cfg = do_client_get_config(st.storage.as_deref());
-    (StatusCode::OK, Json(cfg))
+async fn client_get_config(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    let mut cfg = do_client_get_config(st.storage.as_deref());
+    cfg.active_config.auth_token = mask_token(&cfg.active_config.auth_token);
+    for p in &mut cfg.profiles {
+        p.auth_token = mask_token(&p.auth_token);
+    }
+    Ok((StatusCode::OK, Json(cfg)))
 }
 
 async fn client_save_config(
+    headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
     Json(payload): Json<SaveConfigRequest>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
     let _ = do_client_save_config(st.storage.as_deref(), payload);
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true }))))
 }
 
-async fn client_reset_stats(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+async fn client_reset_stats(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
     let _ = do_client_reset_stats(st.storage.as_deref());
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true }))))
 }
 
 async fn client_logs(
+    headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
     Query(query): Query<ClientLogsQuery>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let logs = do_client_logs(st.client.as_deref(), limit).await;
-    (StatusCode::OK, Json(logs)).into_response()
+    Ok((StatusCode::OK, Json(logs)))
 }
 
-async fn client_clear_logs(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+async fn client_clear_logs(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_mutation_auth(&headers, &st).await?;
     if let Some(ref client) = st.client {
         do_client_clear_logs(Some(client)).await;
-        (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true }))))
     } else {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "client controller not enabled" })),
-        )
-            .into_response()
+        Err(ApiError::bad_request(anyhow::anyhow!("client controller not enabled")))
     }
 }
 
@@ -1049,8 +1133,6 @@ async fn require_mutation_auth(headers: &HeaderMap, st: &AdminState) -> Result<(
             }
         }
         Err(ApiError::unauthorized("invalid bearer token"))
-    } else if st.auth.panel_token.is_none() && st.auth_manager.is_none() {
-        Ok(())
     } else {
         Err(ApiError::unauthorized("missing Authorization header"))
     }
@@ -1168,15 +1250,34 @@ pub struct GitHubCallbackQuery {
     pub error_description: Option<String>,
 }
 
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 async fn auth_github_callback(Query(query): Query<GitHubCallbackQuery>) -> impl IntoResponse {
     let content = if let Some(code) = query.code.as_deref() {
         let clean_code = code.trim();
-        let state_param = query
-            .state
-            .as_deref()
-            .map(|s| format!("&state={}", s.trim()))
-            .unwrap_or_default();
-        let deep_link = format!("prism://auth/callback?code={clean_code}{state_param}");
+        let mut pairs = vec![("code", clean_code)];
+        if let Some(s) = query.state.as_deref() {
+            pairs.push(("state", s.trim()));
+        }
+        let query_str = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(pairs)
+            .finish();
+        let deep_link = format!("prism://auth/callback?{query_str}");
+        let escaped_deep_link = html_escape(&deep_link);
+        let escaped_code = html_escape(clean_code);
         format!(
             r#"<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1267,31 +1368,41 @@ async fn auth_github_callback(Query(query): Query<GitHubCallbackQuery>) -> impl 
         <h2>GitHub 授权成功</h2>
         <p>正在自动唤起 Prism 客户端完成登录...</p>
         <div>
-            <a id="deep-link-btn" href="{deep_link}" class="btn">打开 Prism 客户端</a>
-            <button id="copy-btn" class="btn btn-secondary" onclick="copyCode()">复制授权码</button>
+            <a id="deep-link-btn" href="{escaped_deep_link}" data-deep-link="{escaped_deep_link}" class="btn">打开 Prism 客户端</a>
+            <button id="copy-btn" class="btn btn-secondary">复制授权码</button>
         </div>
-        <div class="code-box" id="code-display">{clean_code}</div>
+        <div class="code-box" id="code-display" data-code="{escaped_code}">{escaped_code}</div>
         <div class="tip">如未自动打开客户端，可点击上方按钮唤起，或复制授权码粘贴到客户端</div>
     </div>
     <script>
-        window.location.href = "{deep_link}";
-        function copyCode() {{
-            navigator.clipboard.writeText("{clean_code}").then(function() {{
-                var btn = document.getElementById("copy-btn");
-                btn.innerText = "已复制！";
-                setTimeout(function() {{ btn.innerText = "复制授权码"; }}, 2000);
-            }});
-        }}
+        (function() {{
+            var btn = document.getElementById("deep-link-btn");
+            if (btn && btn.dataset && btn.dataset.deepLink) {{
+                window.location.href = btn.dataset.deepLink;
+            }}
+            var copyBtn = document.getElementById("copy-btn");
+            var codeDisplay = document.getElementById("code-display");
+            if (copyBtn && codeDisplay) {{
+                copyBtn.addEventListener("click", function() {{
+                    var text = (codeDisplay.dataset && codeDisplay.dataset.code) || codeDisplay.textContent || "";
+                    navigator.clipboard.writeText(text).then(function() {{
+                        copyBtn.innerText = "已复制！";
+                        setTimeout(function() {{ copyBtn.innerText = "复制授权码"; }}, 2000);
+                    }});
+                }});
+            }}
+        }})();
     </script>
 </body>
 </html>"#
         )
     } else {
-        let err_msg = query
+        let err_raw = query
             .error_description
             .as_deref()
             .or(query.error.as_deref())
             .unwrap_or("未获得有效授权码");
+        let err_msg = html_escape(err_raw);
         format!(
             r#"<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1316,7 +1427,21 @@ async fn auth_github_callback(Query(query): Query<GitHubCallbackQuery>) -> impl 
     };
 
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none';",
+            ),
+            (
+                header::HeaderName::from_static("x-content-type-options"),
+                "nosniff",
+            ),
+            (
+                header::HeaderName::from_static("x-frame-options"),
+                "DENY",
+            ),
+        ],
         content,
     )
 }
@@ -2032,7 +2157,9 @@ mod tests {
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
-            auth: AdminAuth::default(),
+            auth: AdminAuth {
+                panel_token: Some("secret123".to_string()),
+            },
             client: Some(client_controller),
             auth_manager: None,
             storage: None,
@@ -2054,6 +2181,7 @@ mod tests {
         // 1. Check status when idle
         let resp = http
             .get(format!("http://{addr}/client/status"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2075,6 +2203,7 @@ mod tests {
         });
         let resp = http
             .post(format!("http://{addr}/client/start"))
+            .header("Authorization", "Bearer secret123")
             .json(&start_req)
             .send()
             .await
@@ -2084,6 +2213,7 @@ mod tests {
         // 3. Check status when running
         let resp = http
             .get(format!("http://{addr}/client/status"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2095,6 +2225,7 @@ mod tests {
         // 4. Stop client
         let resp = http
             .post(format!("http://{addr}/client/stop"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2102,6 +2233,7 @@ mod tests {
 
         let resp = http
             .get(format!("http://{addr}/client/status"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2111,6 +2243,7 @@ mod tests {
         // 5. Test logs endpoint
         let resp = http
             .get(format!("http://{addr}/client/logs?limit=50"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2121,6 +2254,7 @@ mod tests {
         // 6. Clear logs
         let resp = http
             .delete(format!("http://{addr}/client/logs"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2128,6 +2262,7 @@ mod tests {
 
         let resp = http
             .get(format!("http://{addr}/client/logs"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2209,7 +2344,9 @@ mod tests {
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
-            auth: AdminAuth::default(),
+            auth: AdminAuth {
+                panel_token: Some("secret123".to_string()),
+            },
             client: Some(client_controller),
             auth_manager: None,
             storage: Some(storage.clone()),
@@ -2231,6 +2368,7 @@ mod tests {
         // 1. Initial /client/config snapshot
         let resp = http
             .get(format!("http://{addr}/client/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2242,6 +2380,7 @@ mod tests {
         // 2. Start client with specific remote and profile metadata -> should auto-persist
         let start_resp = http
             .post(format!("http://{addr}/client/start"))
+            .header("Authorization", "Bearer secret123")
             .json(&serde_json::json!({
                 "server_addr": "relay.mycustomserver.net:7000",
                 "transport": "quic",
@@ -2255,9 +2394,10 @@ mod tests {
             .unwrap();
         assert_eq!(start_resp.status(), reqwest::StatusCode::OK);
 
-        // 3. Verify /client/config reflects newly persisted active profile and config
+        // 3. Verify /client/config reflects newly persisted active profile and config (with masked token)
         let resp2 = http
             .get(format!("http://{addr}/client/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2274,12 +2414,13 @@ mod tests {
         let profiles = cfg_resp2["profiles"].as_array().unwrap();
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0]["id"], "prof-custom-1");
-        assert_eq!(profiles[0]["auth_token"], "token123");
+        assert_eq!(profiles[0]["auth_token"], "***n123");
         assert!(!cfg_resp2["device_id"].as_str().unwrap_or("").is_empty());
 
         // Starting a second profile must insert rather than skip when others already exist.
         let start2 = http
             .post(format!("http://{addr}/client/start"))
+            .header("Authorization", "Bearer secret123")
             .json(&serde_json::json!({
                 "server_addr": "relay-two.example:7000",
                 "transport": "tcp",
@@ -2294,6 +2435,7 @@ mod tests {
         assert_eq!(start2.status(), reqwest::StatusCode::OK);
         let cfg_resp3: serde_json::Value = http
             .get(format!("http://{addr}/client/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap()
@@ -2302,11 +2444,12 @@ mod tests {
             .unwrap();
         assert_eq!(cfg_resp3["profiles"].as_array().unwrap().len(), 2);
         assert_eq!(cfg_resp3["active_profile_id"], "prof-custom-2");
-        assert_eq!(cfg_resp3["active_config"]["auth_token"], "token-two");
+        assert_eq!(cfg_resp3["active_config"]["auth_token"], "***-two");
 
         // Partial config save (no profile_name) must not fail and must keep the token.
         let patch_resp = http
             .post(format!("http://{addr}/client/config"))
+            .header("Authorization", "Bearer secret123")
             .json(&serde_json::json!({
                 "active_profile_id": "prof-custom-2",
                 "active_config": {
@@ -2320,19 +2463,25 @@ mod tests {
         assert_eq!(patch_resp.status(), reqwest::StatusCode::OK);
         let cfg_resp4: serde_json::Value = http
             .get(format!("http://{addr}/client/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        assert_eq!(cfg_resp4["active_config"]["auth_token"], "token-rotated");
+        assert_eq!(cfg_resp4["active_config"]["auth_token"], "***ated");
         assert_eq!(cfg_resp4["active_config"]["profile_name"], "Second Realm");
         assert_eq!(cfg_resp4["active_config"]["transport"], "quic");
+
+        // Verify underlying storage persisted the real token
+        let stored_cfg = storage.load_active_config().unwrap();
+        assert_eq!(stored_cfg.auth_token, "token-rotated");
 
         // 4. Check status includes active_profile_id and cumulative_stats
         let status_resp = http
             .get(format!("http://{addr}/client/status"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2343,6 +2492,7 @@ mod tests {
         // 5. Stop client and test /client/stats reset
         let stop_resp = http
             .post(format!("http://{addr}/client/stop"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2350,6 +2500,7 @@ mod tests {
 
         let reset_resp = http
             .delete(format!("http://{addr}/client/stats"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2534,7 +2685,7 @@ mod tests {
 
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
         let text = resp.text().await.unwrap();
-        assert!(text.contains("prism://auth/callback?code=mock_code_123&state=test_state"));
+        assert!(text.contains("prism://auth/callback?code=mock_code_123&amp;state=test_state"));
         assert!(text.contains("打开 Prism 客户端"));
         assert!(text.contains("mock_code_123"));
 

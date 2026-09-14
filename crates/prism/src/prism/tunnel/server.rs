@@ -172,11 +172,11 @@ async fn handle_session(
                 None => {
                     if !auth_token.trim().is_empty() && req.token == auth_token {
                         Some(crate::prism::auth::AuthIdentity {
-                            user_id: "legacy_admin".to_string(),
-                            username: "Legacy Admin".to_string(),
-                            role: crate::prism::auth::UserRole::Admin,
+                            user_id: "connector".to_string(),
+                            username: "Tunnel Connector".to_string(),
+                            role: crate::prism::auth::UserRole::Member,
                             service_rules: vec!["*".to_string()],
-                            is_admin: true,
+                            is_admin: false,
                         })
                     } else if auth_token.trim().is_empty() && !am.is_auth_enabled().await {
                         None

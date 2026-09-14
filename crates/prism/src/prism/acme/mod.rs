@@ -242,7 +242,9 @@ impl AcmeManager {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600));
+            if let Err(e) = std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600)) {
+                tracing::warn!(err = %e, path = %key_file.display(), "ACME: failed to restrict private key permissions");
+            }
         }
 
         tracing::info!(
@@ -352,7 +354,9 @@ impl AcmeManager {
                                     #[cfg(unix)]
                                     {
                                         use std::os::unix::fs::PermissionsExt;
-                                        let _ = std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600));
+                                        if let Err(e) = std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600)) {
+                                            tracing::warn!(err = %e, path = %key_file.display(), "ACME: failed to restrict renewed private key permissions");
+                                        }
                                     }
                                     tracing::info!("ACME: successfully renewed certificate in background");
                                 }

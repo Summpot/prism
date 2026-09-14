@@ -1,5 +1,5 @@
 #:schema https://raw.githubusercontent.com/Summpot/prism/master/prism.schema.json
-admin_addr = ":8080"
+admin_addr = "127.0.0.1:8080"
 proxy_protocol_v2 = false
 buffer_size = 32768
 upstream_dial_timeout_ms = 5000

@@ -124,24 +124,30 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     #[tauri::command]
     fn open_external_url(url: String) -> Result<(), String> {
+        let trimmed = url.trim();
+        let parsed = url::Url::parse(trimmed).map_err(|e| format!("invalid URL: {e}"))?;
+        let scheme = parsed.scheme().to_ascii_lowercase();
+        if scheme != "http" && scheme != "https" {
+            return Err(format!("unsupported URL scheme '{scheme}': only http and https are permitted"));
+        }
         #[cfg(target_os = "windows")]
         {
             std::process::Command::new("rundll32")
-                .args(["url.dll,FileProtocolHandler", &url])
+                .args(["url.dll,FileProtocolHandler", trimmed])
                 .spawn()
                 .map_err(|e| e.to_string())?;
         }
         #[cfg(target_os = "macos")]
         {
             std::process::Command::new("open")
-                .arg(&url)
+                .arg(trimmed)
                 .spawn()
                 .map_err(|e| e.to_string())?;
         }
         #[cfg(target_os = "linux")]
         {
             std::process::Command::new("xdg-open")
-                .arg(&url)
+                .arg(trimmed)
                 .spawn()
                 .map_err(|e| e.to_string())?;
         }

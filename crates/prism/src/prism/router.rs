@@ -369,6 +369,13 @@ fn compile_wildcard_pattern(pattern: &str) -> anyhow::Result<Regex> {
     if pattern.is_empty() {
         anyhow::bail!("router: empty pattern");
     }
+    if pattern.len() > 256 {
+        anyhow::bail!("router: pattern exceeds maximum length of 256 characters");
+    }
+    let star_count = pattern.chars().filter(|&c| c == '*').count();
+    if star_count > 8 {
+        anyhow::bail!("router: pattern contains too many wildcards (max 8)");
+    }
 
     let mut out = String::with_capacity(pattern.len() + 16);
     out.push('^');
@@ -389,24 +396,30 @@ fn compile_wildcard_pattern(pattern: &str) -> anyhow::Result<Regex> {
                 escape_next = true;
                 out.push('\\');
             }
-            other => {
-                if ".^$+()[]{}|".contains(other) {
-                    out.push('\\');
-                }
-                out.push(other);
+            '.' | '^' | '$' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '|' => {
+                out.push('\\');
+                out.push(ch);
             }
+            _ => out.push(ch),
         }
     }
-
+    if escape_next {
+        out.push('\\');
+    }
     out.push('$');
-    Ok(Regex::new(&out)?)
+
+    Regex::new(&out).map_err(|e| anyhow::anyhow!("router: invalid wildcard pattern '{pattern}': {e}"))
 }
 
 fn match_host(host: &str, p: &CompiledPattern) -> (bool, Vec<String>) {
     if p.exact {
         return (host == p.pattern, Vec::new());
     }
-    let Some(re) = &p.re else {
+    matches_host(&p.re, host)
+}
+
+fn matches_host(re: &Option<Regex>, host: &str) -> (bool, Vec<String>) {
+    let Some(re) = re else {
         return (false, Vec::new());
     };
 
@@ -432,7 +445,11 @@ pub(crate) fn substitute_params(template: &str, groups: &[String]) -> String {
     // Replace from the end so $10 doesn't interfere with $1.
     let mut res = template.to_string();
     for i in (1..=groups.len()).rev() {
-        res = res.replace(&format!("${i}"), &groups[i - 1]);
+        let clean_group: String = groups[i - 1]
+            .chars()
+            .filter(|&c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+            .collect();
+        res = res.replace(&format!("${i}"), &clean_group);
     }
     res
 }

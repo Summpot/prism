@@ -413,6 +413,8 @@ async fn write_mc_string<W: AsyncWrite + Unpin>(w: &mut W, s: &str) -> Result<()
     Ok(())
 }
 
+pub const MAX_MC_STRING_BYTES: usize = 32768;
+
 async fn read_mc_string<R: AsyncRead + Unpin>(
     r: &mut R,
 ) -> Result<Cow<'static, str>, ProtocolError> {
@@ -421,6 +423,9 @@ async fn read_mc_string<R: AsyncRead + Unpin>(
         return Err(ProtocolError::BadMagic);
     }
     let len: usize = len as usize;
+    if len > MAX_MC_STRING_BYTES {
+        return Err(ProtocolError::PayloadTooLarge(len as u32));
+    }
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf).await?;
     Ok(Cow::Owned(String::from_utf8_lossy(&buf).into_owned()))
@@ -681,5 +686,24 @@ mod tests {
         assert_eq!(received[0].name, "web");
         assert_eq!(received[0].middleware.as_deref(), Some("minecraft.wat"));
         assert!(received[0].optimizer.as_ref().unwrap().enabled);
+    }
+
+    #[tokio::test]
+    async fn test_read_mc_string_oversized_rejected() {
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        tokio::spawn(async move {
+            // Write a varint length exceeding MAX_MC_STRING_BYTES
+            write_varint(&mut a, (MAX_MC_STRING_BYTES + 100) as i32)
+                .await
+                .unwrap();
+        });
+
+        let res = read_mc_string(&mut b).await;
+        match res {
+            Err(ProtocolError::PayloadTooLarge(n)) => {
+                assert_eq!(n as usize, MAX_MC_STRING_BYTES + 100);
+            }
+            other => panic!("expected PayloadTooLarge, got {:?}", other),
+        }
     }
 }

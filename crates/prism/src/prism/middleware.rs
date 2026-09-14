@@ -219,6 +219,9 @@ impl MiddlewareProvider for FsWasmMiddlewareProvider {
         if name.is_empty() {
             anyhow::bail!("middleware: empty name");
         }
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            anyhow::bail!("invalid middleware name: {name}");
+        }
 
         if let Ok(guard) = self.cache.lock()
             && let Some(m) = guard.get(name)
@@ -755,14 +758,33 @@ pub fn crypto_aes_cfb8(
     Ok(())
 }
 
-/// Standalone Deflate/Zlib decompress helper (Zlib RFC 1950 with raw Deflate RFC 1951 fallback).
+/// Maximum allowed bytes for decompressed output (16 MiB) to prevent decompression bombs.
+pub const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
+
+/// Maximum allowed memory bytes (32 MiB) for WASM runtime linear memory.
+pub const MAX_WASM_MEMORY_BYTES: usize = 32 * 1024 * 1024;
+
+/// Create a Wasmtime Engine configured with fuel metering.
+pub fn create_wasm_engine() -> anyhow::Result<Engine> {
+    let mut config = wasmtime::Config::new();
+    config.consume_fuel(true);
+    Ok(Engine::new(&config)?)
+}
+
+/// Standalone Deflate/Zlib decompress helper (Zlib RFC 1950 with raw Deflate RFC 1951 fallback)
+/// with safe upper bound.
 pub fn deflate_decompress(input: &[u8]) -> Result<Vec<u8>, i32> {
+    deflate_decompress_with_limit(input, MAX_DECOMPRESSED_BYTES)
+}
+
+/// Standalone Deflate/Zlib decompress helper with explicit limit.
+pub fn deflate_decompress_with_limit(input: &[u8], limit: usize) -> Result<Vec<u8>, i32> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
-    match miniz_oxide::inflate::decompress_to_vec_zlib(input) {
+    match miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(input, limit) {
         Ok(out) => Ok(out),
-        Err(_) => match miniz_oxide::inflate::decompress_to_vec(input) {
+        Err(_) => match miniz_oxide::inflate::decompress_to_vec_with_limit(input, limit) {
             Ok(out) => Ok(out),
             Err(_) => Err(-2),
         },
@@ -794,24 +816,33 @@ pub fn lz4_decompress_with_limit(
         && (input.starts_with(&[0x04, 0x22, 0x4D, 0x18])
             || input.starts_with(&[0x02, 0x21, 0x4C, 0x18]))
     {
-        let mut decoder = lz4_flex::frame::FrameDecoder::new(input);
+        let decoder = lz4_flex::frame::FrameDecoder::new(input);
+        let mut limited = Read::take(decoder, (MAX_DECOMPRESSED_BYTES + 1) as u64);
         let mut decompressed = Vec::new();
-        if decoder.read_to_end(&mut decompressed).is_ok() {
+        if limited.read_to_end(&mut decompressed).is_ok() {
+            if decompressed.len() > MAX_DECOMPRESSED_BYTES {
+                return Err(-2);
+            }
             return Ok(decompressed);
         }
     }
 
     // 2. Try size-prepended block format (4-byte LE uncompressed length prefix)
     if input.len() >= 4 {
-        if let Ok(decompressed) = lz4_flex::block::decompress_size_prepended(input) {
-            return Ok(decompressed);
+        let uncompressed_len =
+            u32::from_le_bytes([input[0], input[1], input[2], input[3]]) as usize;
+        if uncompressed_len <= MAX_DECOMPRESSED_BYTES {
+            if let Ok(decompressed) = lz4_flex::block::decompress_size_prepended(input) {
+                return Ok(decompressed);
+            }
         }
     }
 
     // 3. Try raw block decompression if max_output_size is provided and > 0
     if let Some(max_len) = max_output_size {
-        if max_len > 0 {
-            let mut out = vec![0u8; max_len];
+        let bounded_len = max_len.min(MAX_DECOMPRESSED_BYTES);
+        if bounded_len > 0 {
+            let mut out = vec![0u8; bounded_len];
             if let Ok(written) = lz4_flex::block::decompress_into(input, &mut out) {
                 out.truncate(written);
                 return Ok(out);
@@ -1105,7 +1136,13 @@ pub fn host_deflate_decompress(
         return -1;
     }
 
-    let decompressed = match deflate_decompress(&in_bytes) {
+    let max_len = if out_max_len > 0 {
+        (out_max_len as usize).min(MAX_DECOMPRESSED_BYTES)
+    } else {
+        MAX_DECOMPRESSED_BYTES
+    };
+
+    let decompressed = match deflate_decompress_with_limit(&in_bytes, max_len) {
         Ok(d) => d,
         Err(code) => return code,
     };
@@ -1117,6 +1154,9 @@ pub fn host_deflate_decompress(
     let out_end = (out_ptr as usize).saturating_add(decompressed.len());
     let mem_size = memory.data_size(&caller);
     if out_end > mem_size {
+        if out_end > MAX_WASM_MEMORY_BYTES {
+            return -3;
+        }
         let delta = out_end - mem_size;
         let pages = delta.div_ceil(65536);
         if memory.grow(&mut caller, pages as u64).is_err() {
@@ -1221,9 +1261,9 @@ pub fn host_lz4_decompress(
     }
 
     let max_len_opt = if out_max_len > 0 {
-        Some(out_max_len as usize)
+        Some((out_max_len as usize).min(MAX_DECOMPRESSED_BYTES))
     } else {
-        None
+        Some(MAX_DECOMPRESSED_BYTES)
     };
 
     let decompressed = match lz4_decompress_with_limit(&in_bytes, max_len_opt) {
@@ -1238,6 +1278,9 @@ pub fn host_lz4_decompress(
     let out_end = (out_ptr as usize).saturating_add(decompressed.len());
     let mem_size = memory.data_size(&caller);
     if out_end > mem_size {
+        if out_end > MAX_WASM_MEMORY_BYTES {
+            return -3;
+        }
         let delta = out_end - mem_size;
         let pages = delta.div_ceil(65536);
         if memory.grow(&mut caller, pages as u64).is_err() {
@@ -1491,6 +1534,7 @@ pub struct WasmProtocolSession {
 impl WasmProtocolSession {
     pub fn new(engine: &Engine, module: &Module) -> anyhow::Result<Self> {
         let mut store = Store::new(engine, HostEnv::default());
+        let _ = store.set_fuel(10_000_000);
         let linker = create_prism_linker(engine)?;
         let instance = linker
             .instantiate(&mut store, module)
@@ -1522,7 +1566,7 @@ impl WasmProtocolSession {
     }
 
     pub fn from_wat(wat: impl AsRef<[u8]>) -> anyhow::Result<Self> {
-        let engine = Engine::default();
+        let engine = create_wasm_engine().unwrap_or_else(|_| Engine::default());
         let (module, _) = compile_module_from_wat(&engine, "default", wat.as_ref())?;
         Self::new(&engine, &module)
     }
@@ -1599,6 +1643,7 @@ impl WasmProtocolSession {
     }
 
     pub fn set_conn_state(&mut self, state: i32) {
+        let _ = self.store.set_fuel(10_000_000);
         if let Ok(func) = self
             .instance
             .get_typed_func::<(i32,), ()>(&mut self.store, "set_conn_state")
@@ -1609,6 +1654,7 @@ impl WasmProtocolSession {
 
     /// `from_server = true` means the buffer is origin→client (clientbound).
     pub fn set_flow_direction(&mut self, from_server: bool) {
+        let _ = self.store.set_fuel(10_000_000);
         self.store.data_mut().flow_from_server = from_server;
         let dir = if from_server { 1i32 } else { 0i32 };
         if let Ok(func) = self
@@ -1625,6 +1671,7 @@ impl WasmProtocolSession {
     }
 
     pub fn set_session_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
+        let _ = self.store.set_fuel(10_000_000);
         let func = match self
             .instance
             .get_typed_func::<(i32, i32), i32>(&mut self.store, "set_session_data")
@@ -1633,6 +1680,9 @@ impl WasmProtocolSession {
             Err(_) => return Ok(-1),
         };
         let needed = WASM_INPUT_OFFSET + data.len() + 64;
+        if needed > MAX_WASM_MEMORY_BYTES {
+            return Err(MiddlewareError::Fatal("wasm memory limit exceeded".into()));
+        }
         let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
             let pages = (needed - mem_size).div_ceil(65536);
@@ -1655,6 +1705,7 @@ impl WasmProtocolSession {
     }
 
     pub fn set_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
+        let _ = self.store.set_fuel(10_000_000);
         let set_data_fn = match &self.set_data_fn {
             Some(f) => f.clone(),
             None => {
@@ -1665,6 +1716,9 @@ impl WasmProtocolSession {
         };
 
         let needed = (data.len() as usize).max(65536 * 4);
+        if needed > MAX_WASM_MEMORY_BYTES {
+            return Err(MiddlewareError::Fatal("wasm memory limit exceeded".into()));
+        }
         let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
             let delta = needed - mem_size;
@@ -1701,6 +1755,7 @@ impl WasmProtocolSession {
         &mut self,
         config: &HashMap<String, serde_json::Value>,
     ) -> Result<(), MiddlewareError> {
+        let _ = self.store.set_fuel(10_000_000);
         for (key, val) in config {
             let norm_key = key.replace('-', "_");
             let func_name = format!("set_{norm_key}");
@@ -1749,9 +1804,12 @@ impl WasmProtocolSession {
                     let bytes = s.as_bytes();
                     let scratch_ptr = 131072usize;
                     let scratch_len = bytes.len();
+                    let needed = scratch_ptr + scratch_len;
+                    if needed > MAX_WASM_MEMORY_BYTES {
+                        continue;
+                    }
                     let mem_size = self.memory.data_size(&self.store);
-                    if scratch_ptr + scratch_len > mem_size {
-                        let needed = scratch_ptr + scratch_len;
+                    if needed > mem_size {
                         let delta = needed - mem_size;
                         let pages = delta.div_ceil(65536);
                         let _ = self.memory.grow(&mut self.store, pages as u64);
@@ -1784,6 +1842,11 @@ impl WasmProtocolSession {
 
     fn write_poll_input(&mut self, buf: &[u8]) -> Result<(), MiddlewareError> {
         let needed = WASM_INPUT_OFFSET + buf.len() + 65536;
+        if needed > MAX_WASM_MEMORY_BYTES {
+            return Err(MiddlewareError::Fatal(format!(
+                "wasm memory limit exceeded: needed {needed} bytes > {MAX_WASM_MEMORY_BYTES}"
+            )));
+        }
         let mem_size = self.memory.data_size(&self.store);
         if needed > mem_size {
             let delta = needed - mem_size;
@@ -1810,6 +1873,7 @@ impl WasmProtocolSession {
     }
 
     pub fn poll(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
+        let _ = self.store.set_fuel(10_000_000);
         let poll_fn = match &self.poll_fn {
             Some(f) => f.clone(),
             None => {
@@ -2263,7 +2327,7 @@ impl WasmMiddleware {
             anyhow::bail!("middleware: empty wasm middleware name");
         }
 
-        let engine = Engine::default();
+        let engine = create_wasm_engine().unwrap_or_else(|_| Engine::default());
         let (module, schema) = compile_module_from_wat(&engine, name, &wat_bytes)?;
 
         Ok(Self {

@@ -203,8 +203,14 @@ function RootContent() {
 	});
 
 	useEffect(() => {
-		return setupDeepLinkListener((payload) => {
 			if (payload.kind === "auth") {
+				// H-3: Prevent unsolicited raw token deep link from silently overwriting active credentials.
+				const isCurrentlyLoggingIn = locationRef.current.pathname === "/login";
+				const hasExistingToken = Boolean(connectionRef.current?.token);
+				if (hasExistingToken && !isCurrentlyLoggingIn) {
+					console.warn("Rejected unsolicited deep link raw auth token while session is active");
+					return;
+				}
 				const currentBaseUrl = connectionRef.current?.baseUrl || "";
 				saveConnectionRef.current(
 					currentBaseUrl
@@ -212,10 +218,28 @@ function RootContent() {
 						: tunnelAdminConnection(payload.token),
 				);
 				window.dispatchEvent(new CustomEvent("prism:deep-link-auth", { detail: payload }));
-				if (locationRef.current.pathname === "/login") {
+				if (isCurrentlyLoggingIn) {
 					void navigateRef.current({ to: payload.role === "admin" ? "/admin" : "/" });
 				}
 			} else if (payload.kind === "auth-code") {
+				// M-6: Verify OAuth state to prevent CSRF / session fixation
+				const expectedState =
+					typeof window !== "undefined"
+						? window.sessionStorage.getItem("prism_oauth_state")
+						: null;
+				if (expectedState && payload.state && expectedState !== payload.state) {
+					console.error("OAuth state mismatch! Rejecting unverified callback.");
+					window.dispatchEvent(
+						new CustomEvent("prism:deep-link-exchange-failed", {
+							detail: { error: "OAuth state mismatch: potential CSRF detected" },
+						}),
+					);
+					return;
+				}
+				if (typeof window !== "undefined") {
+					window.sessionStorage.removeItem("prism_oauth_state");
+				}
+
 				window.dispatchEvent(
 					new CustomEvent("prism:deep-link-exchange-start", {
 						detail: { code: payload.code },
@@ -231,7 +255,12 @@ function RootContent() {
 						// local config is optional for exchange
 					}
 					try {
-						const res = await exchangeGitHubCode(TUNNEL_ADMIN_CONNECTION, payload.code, deviceId);
+						const res = await exchangeGitHubCode(
+							TUNNEL_ADMIN_CONNECTION,
+							payload.code,
+							deviceId,
+							payload.state,
+						);
 						if (typeof window !== "undefined") {
 							window.localStorage.removeItem("prism_pending_auth_url");
 							window.sessionStorage.removeItem("prism_pending_auth_url");

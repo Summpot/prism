@@ -250,6 +250,18 @@ impl StorageEngine {
              PRAGMA foreign_keys = ON;",
         )?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for suffix in ["-wal", "-shm"] {
+                let side_file = format!("{}{suffix}", path.display());
+                let side_path = std::path::Path::new(&side_file);
+                if side_path.exists() {
+                    let _ = std::fs::set_permissions(side_path, std::fs::Permissions::from_mode(0o600));
+                }
+            }
+        }
+
         // Create structured tables
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS client_profiles (
@@ -676,7 +688,7 @@ impl StorageEngine {
         }
         drop(conn);
 
-        if !profile.auth_token.trim().is_empty() {
+        if !profile.auth_token.trim().is_empty() && !profile.auth_token.starts_with("***") {
             self.upsert_credential(&TunnelCredential {
                 profile_id: profile.id.clone(),
                 server_addr: profile.server_addr.clone(),

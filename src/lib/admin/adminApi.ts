@@ -64,14 +64,16 @@ export async function getAuthProviders(
 	};
 }
 
-export function getGitHubLoginUrl(connection: PanelConnection) {
-	return adminRequest<GitHubLoginUrlResponse>(connection, "/auth/github/login");
+export function getGitHubLoginUrl(connection: PanelConnection, state?: string) {
+	const path = state ? `/auth/github/login?state=${encodeURIComponent(state)}` : "/auth/github/login";
+	return adminRequest<GitHubLoginUrlResponse>(connection, path);
 }
 
 export function exchangeGitHubCode(
 	connection: PanelConnection,
 	code: string,
 	deviceId?: string | null,
+	state?: string | null,
 ) {
 	return adminRequest<{
 		token: string;
@@ -83,6 +85,7 @@ export function exchangeGitHubCode(
 		body: JSON.stringify({
 			code,
 			...(deviceId ? { device_id: deviceId } : {}),
+			...(state ? { state } : {}),
 		}),
 	});
 }

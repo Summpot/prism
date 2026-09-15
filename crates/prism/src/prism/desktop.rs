@@ -199,9 +199,14 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     fn client_get_config(
         state: tauri::State<'_, DesktopClientState>,
     ) -> Result<crate::prism::storage::ClientConfigResponse, String> {
-        Ok(crate::prism::admin::do_client_get_config(
+        let mut cfg = crate::prism::admin::do_client_get_config(
             state.storage.as_deref(),
-        ))
+        );
+        cfg.active_config.auth_token = crate::prism::admin::mask_token(&cfg.active_config.auth_token);
+        for p in &mut cfg.profiles {
+            p.auth_token = crate::prism::admin::mask_token(&p.auth_token);
+        }
+        Ok(cfg)
     }
 
     #[tauri::command]

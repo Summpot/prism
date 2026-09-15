@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use rand::{RngExt, rng};
@@ -136,7 +136,7 @@ fn now_unix_ms() -> u64 {
 }
 
 // Simple hex encoder without adding extra dependency
-mod hex {
+pub mod hex {
     pub fn encode(data: impl AsRef<[u8]>) -> String {
         let mut s = String::with_capacity(data.as_ref().len() * 2);
         for &b in data.as_ref() {
@@ -147,8 +147,14 @@ mod hex {
     }
 }
 
+pub fn generate_random_state() -> String {
+    let mut bytes = [0u8; 16];
+    rand::rng().fill(&mut bytes);
+    hex::encode(bytes)
+}
+
 /// GitHub OAuth configuration.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubOAuthConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -170,12 +176,28 @@ pub struct GitHubOAuthConfig {
     pub default_role: String,
 }
 
+impl std::fmt::Debug for GitHubOAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitHubOAuthConfig")
+            .field("enabled", &self.enabled)
+            .field("client_id", &self.client_id)
+            .field("client_secret", if self.client_secret.is_empty() { &"" } else { &"***" })
+            .field("redirect_uri", &self.redirect_uri)
+            .field("admin_users", &self.admin_users)
+            .field("admin_orgs", &self.admin_orgs)
+            .field("allowed_users", &self.allowed_users)
+            .field("allowed_orgs", &self.allowed_orgs)
+            .field("default_role", &self.default_role)
+            .finish()
+    }
+}
+
 fn default_member_role() -> String {
     "member".to_string()
 }
 
 /// Complete auth configuration.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthConfig {
     #[serde(default = "default_auth_mode")]
     pub mode: String, // "token" | "oauth" | "hybrid"
@@ -183,6 +205,23 @@ pub struct AuthConfig {
     pub legacy_token: Option<String>,
     #[serde(default)]
     pub github: Option<GitHubOAuthConfig>,
+}
+
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("mode", &self.mode)
+            .field("legacy_token", &self.legacy_token.as_ref().map(|_| "***"))
+            .field("github", &self.github)
+            .finish()
+    }
+}
+
+impl AuthConfig {
+    pub fn is_auth_configured(&self) -> bool {
+        self.legacy_token.as_ref().is_some_and(|t| !t.trim().is_empty())
+            || self.github.as_ref().is_some_and(|g| g.enabled && !g.client_id.trim().is_empty())
+    }
 }
 
 fn default_auth_mode() -> String {
@@ -330,6 +369,7 @@ pub struct AuthManager {
     db_path: Option<PathBuf>,
     state: RwLock<PersistedAuthState>,
     http_client: reqwest::Client,
+    oauth_states: RwLock<HashMap<String, Instant>>,
 }
 
 impl std::fmt::Debug for AuthManager {
@@ -390,7 +430,24 @@ impl AuthManager {
             db_path,
             state: RwLock::new(state),
             http_client,
+            oauth_states: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Registers a newly initiated OAuth state with an expiration TTL (10 minutes).
+    pub async fn register_oauth_state(&self, state: String) {
+        let mut guard = self.oauth_states.write().await;
+        let now = Instant::now();
+        guard.retain(|_, created| now.duration_since(*created) < Duration::from_secs(600));
+        guard.insert(state, now);
+    }
+
+    /// Verifies and consumes a pending OAuth state (one-time use for CSRF protection).
+    pub async fn verify_and_consume_oauth_state(&self, state: &str) -> bool {
+        let mut guard = self.oauth_states.write().await;
+        let now = Instant::now();
+        guard.retain(|_, created| now.duration_since(*created) < Duration::from_secs(600));
+        guard.remove(state).is_some()
     }
 
     /// Saves state to sqlite (preferred) or the legacy JSON file.

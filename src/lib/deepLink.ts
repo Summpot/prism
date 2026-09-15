@@ -37,24 +37,23 @@ export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 
 	if (trimmed.toLowerCase().startsWith("prism://")) {
 		targetString = trimmed.slice("prism://".length);
+		const pathOnly = targetString.split(/[?#]/)[0].replace(/\/+$/, "").toLowerCase();
 		isAuthEndpoint =
-			targetString.startsWith("auth/callback") ||
-			targetString.startsWith("auth/github/callback") ||
-			targetString.startsWith("oauth/callback") ||
-			targetString.startsWith("login") ||
-			targetString.startsWith("auth?") ||
-			targetString.startsWith("auth#") ||
-			targetString.includes("code=");
+			pathOnly === "auth/callback" ||
+			pathOnly === "auth/github/callback" ||
+			pathOnly === "oauth/callback" ||
+			pathOnly === "login";
 	} else if (
 		trimmed.toLowerCase().startsWith("http://") ||
 		trimmed.toLowerCase().startsWith("https://")
 	) {
 		try {
 			const u = new URL(trimmed);
+			const pathOnly = u.pathname.replace(/^\//, "").replace(/\/+$/, "").toLowerCase();
 			if (
-				u.searchParams.has("code") ||
-				u.searchParams.has("token") ||
-				u.pathname.includes("auth")
+				pathOnly === "auth/callback" ||
+				pathOnly === "auth/github/callback" ||
+				pathOnly === "oauth/callback"
 			) {
 				isAuthEndpoint = true;
 				targetString = u.pathname.replace(/^\//, "") + u.search + u.hash;
@@ -62,8 +61,6 @@ export function parseDeepLink(rawUrl: string): DeepLinkPayload {
 		} catch {
 			// ignore
 		}
-	} else if (trimmed.includes("code=")) {
-		isAuthEndpoint = true;
 	}
 
 	if (isAuthEndpoint) {

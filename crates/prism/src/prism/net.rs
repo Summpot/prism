@@ -85,4 +85,90 @@ mod tests {
         let lan: SocketAddr = "192.168.1.5:8080".parse().unwrap();
         assert_eq!(loopback_connect_addr(lan), lan);
     }
+
+    #[test]
+    fn test_is_forbidden_ssrf_ip() {
+        use super::is_forbidden_ssrf_ip;
+        use std::net::IpAddr;
+
+        // Forbidden IPv4
+        assert!(is_forbidden_ssrf_ip("169.254.169.254".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("0.0.0.0".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("0.1.2.3".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("255.255.255.255".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("224.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("100.64.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("198.18.0.1".parse::<IpAddr>().unwrap()));
+
+        // Forbidden IPv4-mapped IPv6
+        assert!(is_forbidden_ssrf_ip("::ffff:169.254.169.254".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("::ffff:0.0.0.0".parse::<IpAddr>().unwrap()));
+
+        // Forbidden IPv6
+        assert!(is_forbidden_ssrf_ip("::".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("fe80::1".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("fc00::1".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("fd12:3456:789a::1".parse::<IpAddr>().unwrap()));
+        assert!(is_forbidden_ssrf_ip("ff02::1".parse::<IpAddr>().unwrap()));
+
+        // Allowed public IPs
+        assert!(!is_forbidden_ssrf_ip("1.1.1.1".parse::<IpAddr>().unwrap()));
+        assert!(!is_forbidden_ssrf_ip("8.8.8.8".parse::<IpAddr>().unwrap()));
+        assert!(!is_forbidden_ssrf_ip("2606:4700:4700::1111".parse::<IpAddr>().unwrap()));
+    }
+}
+
+/// Check if an IP address belongs to link-local, cloud metadata, unspecified, broadcast,
+/// multicast, carrier-grade NAT, or IPv6 ULA reserved ranges. Handles IPv4-mapped IPv6 canonically.
+pub fn is_forbidden_ssrf_ip(ip: IpAddr) -> bool {
+    let canonical = ip.to_canonical();
+    match canonical {
+        IpAddr::V4(v4) => {
+            // Link-local / AWS IMDS / Cloud metadata (169.254.0.0/16)
+            if v4.is_link_local() {
+                return true;
+            }
+            // Current network / unspecified (0.0.0.0/8)
+            if v4.is_unspecified() || v4.octets()[0] == 0 {
+                return true;
+            }
+            // Broadcast (255.255.255.255)
+            if v4.is_broadcast() {
+                return true;
+            }
+            // Multicast (224.0.0.0/4)
+            if v4.is_multicast() {
+                return true;
+            }
+            // Carrier-grade NAT (100.64.0.0/10)
+            if v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64 {
+                return true;
+            }
+            // Benchmark / documentation (198.18.0.0/15, 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
+            if v4.octets()[0] == 198 && (v4.octets()[1] == 18 || v4.octets()[1] == 19) {
+                return true;
+            }
+            false
+        }
+        IpAddr::V6(v6) => {
+            // Unspecified (::)
+            if v6.is_unspecified() {
+                return true;
+            }
+            // IPv6 link-local (fe80::/10)
+            let seg0 = v6.segments()[0];
+            if (seg0 & 0xffc0) == 0xfe80 {
+                return true;
+            }
+            // IPv6 Unique Local Address (ULA fc00::/7)
+            if (seg0 & 0xfe00) == 0xfc00 {
+                return true;
+            }
+            // IPv6 Multicast (ff00::/8)
+            if v6.is_multicast() {
+                return true;
+            }
+            false
+        }
+    }
 }

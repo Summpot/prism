@@ -764,11 +764,23 @@ pub const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum allowed memory bytes (32 MiB) for WASM runtime linear memory.
 pub const MAX_WASM_MEMORY_BYTES: usize = 32 * 1024 * 1024;
 
-/// Create a Wasmtime Engine configured with fuel metering.
+/// Create a Wasmtime Engine configured with fuel metering and epoch interruption.
 pub fn create_wasm_engine() -> anyhow::Result<Engine> {
     let mut config = wasmtime::Config::new();
     config.consume_fuel(true);
-    Ok(Engine::new(&config)?)
+    config.epoch_interruption(true);
+    let engine = Engine::new(&config)?;
+    let ticker_engine = engine.clone();
+    std::thread::Builder::new()
+        .name("prism-wasm-epoch-ticker".to_string())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                ticker_engine.increment_epoch();
+            }
+        })
+        .ok();
+    Ok(engine)
 }
 
 /// Standalone Deflate/Zlib decompress helper (Zlib RFC 1950 with raw Deflate RFC 1951 fallback)
@@ -1460,6 +1472,18 @@ pub fn host_announce_session_data(
     if end > mem_size {
         return -1;
     }
+    const MAX_ANNOUNCED_COUNT: usize = 64;
+    const MAX_ANNOUNCED_TOTAL_BYTES: usize = 1024 * 1024; // 1 MiB
+
+    let env = caller.data();
+    if env.announced.len() >= MAX_ANNOUNCED_COUNT {
+        return -1;
+    }
+    let current_total: usize = env.announced.iter().map(|v| v.len()).sum();
+    if current_total.saturating_add(len as usize) > MAX_ANNOUNCED_TOTAL_BYTES {
+        return -1;
+    }
+
     let mut buf = vec![0u8; len as usize];
     if memory.read(&caller, ptr as usize, &mut buf).is_err() {
         return -1;
@@ -1535,6 +1559,7 @@ impl WasmProtocolSession {
     pub fn new(engine: &Engine, module: &Module) -> anyhow::Result<Self> {
         let mut store = Store::new(engine, HostEnv::default());
         let _ = store.set_fuel(10_000_000);
+        store.set_epoch_deadline(20);
         let linker = create_prism_linker(engine)?;
         let instance = linker
             .instantiate(&mut store, module)

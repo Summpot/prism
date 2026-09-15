@@ -13,7 +13,6 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::prism::net;
 use crate::prism::tunnel::{manager::Manager, protocol};
 
 #[derive(Debug, Clone)]
@@ -23,6 +22,7 @@ pub struct AutoListenOptions {
     pub optimizer: Option<crate::prism::telemetry::SharedOptimizerRegistry>,
     pub sessions: Option<crate::prism::telemetry::SharedSessions>,
     pub middleware_dir: Option<PathBuf>,
+    pub bind_ip: Option<String>,
 }
 
 impl Default for AutoListenOptions {
@@ -32,6 +32,7 @@ impl Default for AutoListenOptions {
             optimizer: None,
             sessions: None,
             middleware_dir: None,
+            bind_ip: None,
         }
     }
 }
@@ -50,8 +51,14 @@ struct RunningListener {
     task: tokio::task::JoinHandle<()>,
 }
 
-fn validate_autolisten_addr(addr: &str) -> Result<std::net::SocketAddr, String> {
-    let normalized = crate::prism::net::normalize_bind_addr(addr);
+fn validate_autolisten_addr(addr: &str, bind_ip: Option<&str>) -> Result<std::net::SocketAddr, String> {
+    let trimmed = addr.trim();
+    let normalized = if trimmed.starts_with(':') {
+        let host = bind_ip.unwrap_or("127.0.0.1");
+        format!("{host}{trimmed}")
+    } else {
+        crate::prism::net::normalize_bind_addr(trimmed).to_string()
+    };
     let parsed: std::net::SocketAddr = normalized
         .parse()
         .map_err(|e| format!("invalid address '{addr}': {e}"))?;
@@ -59,6 +66,11 @@ fn validate_autolisten_addr(addr: &str) -> Result<std::net::SocketAddr, String> 
         return Err(format!(
             "binding to privileged port {} is not allowed for auto-listen",
             parsed.port()
+        ));
+    }
+    if parsed.ip().is_unspecified() && bind_ip != Some("0.0.0.0") && bind_ip != Some("::") {
+        return Err(format!(
+            "binding auto-listen services to unspecified address '{addr}' is not permitted; specify a specific interface or loopback address"
         ));
     }
     Ok(parsed)
@@ -150,10 +162,14 @@ impl AutoListener {
             if remote.is_empty() {
                 continue;
             }
-            if let Err(err) = validate_autolisten_addr(&remote) {
-                tracing::warn!(service = %name, cid = %cid, remote = %remote, err = %err, "autolisten: rejected binding to restricted or invalid remote_addr");
-                continue;
-            }
+            let bind_ip = self.opts.bind_ip.as_deref();
+            let parsed_addr = match validate_autolisten_addr(&remote, bind_ip) {
+                Ok(a) => a.to_string(),
+                Err(err) => {
+                    tracing::warn!(service = %name, cid = %cid, remote = %remote, err = %err, "autolisten: rejected binding to restricted or invalid remote_addr");
+                    continue;
+                }
+            };
             let key = format!("{cid}/{name}");
             desired.insert(
                 key,
@@ -161,7 +177,7 @@ impl AutoListener {
                     client_id: cid,
                     name,
                     proto,
-                    addr: remote,
+                    addr: parsed_addr,
                 },
             );
         }
@@ -239,8 +255,7 @@ async fn run_tcp_listener(
     opts: AutoListenOptions,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    let bind_addr = net::normalize_bind_addr(&svc.addr);
-    let ln = TcpListener::bind(bind_addr.as_ref())
+    let ln = TcpListener::bind(&svc.addr)
         .await
         .with_context(|| format!("tunnel: auto-listen tcp bind {}", svc.addr))?;
     let local = ln.local_addr().ok();
@@ -345,8 +360,7 @@ async fn run_udp_listener(
     opts: AutoListenOptions,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    let bind_addr = net::normalize_bind_addr(&svc.addr);
-    let sock = UdpSocket::bind(bind_addr.as_ref())
+    let sock = UdpSocket::bind(&svc.addr)
         .await
         .with_context(|| format!("tunnel: auto-listen udp bind {}", svc.addr))?;
     let local = sock.local_addr().ok();
@@ -365,16 +379,18 @@ async fn run_udp_listener(
             }
             _ = tick.tick() => {
                 let now = Instant::now();
-                let idle = opts.udp_flow_idle_timeout;
-                if idle > Duration::from_millis(0) {
-                    let dead: Vec<SocketAddr> = flows
-                        .iter()
-                        .filter_map(|(k, v)| if now.duration_since(v.last) > idle { Some(*k) } else { None })
-                        .collect();
-                    for k in dead {
-                        if let Some(f) = flows.remove(&k) {
-                            f.task.abort();
-                        }
+                let idle = if opts.udp_flow_idle_timeout > Duration::from_millis(0) {
+                    opts.udp_flow_idle_timeout
+                } else {
+                    Duration::from_secs(60)
+                };
+                let dead: Vec<SocketAddr> = flows
+                    .iter()
+                    .filter_map(|(k, v)| if now.duration_since(v.last) > idle { Some(*k) } else { None })
+                    .collect();
+                for k in dead {
+                    if let Some(f) = flows.remove(&k) {
+                        f.task.abort();
                     }
                 }
             }
@@ -383,6 +399,12 @@ async fn run_udp_listener(
                 let payload = &buf[..n];
 
                 if n > protocol::MAX_DATAGRAM_BYTES as usize {
+                    continue;
+                }
+
+                const MAX_AUTOLISTEN_UDP_FLOWS: usize = 10_000;
+                if !flows.contains_key(&peer) && flows.len() >= MAX_AUTOLISTEN_UDP_FLOWS {
+                    tracing::warn!(peer = %peer, "tunnel: auto-listen max udp flows reached, dropping datagram");
                     continue;
                 }
 
@@ -508,6 +530,18 @@ mod tests {
         a.reconcile().await;
         assert_eq!(a.running_len().await, 0);
         a.shutdown_all().await;
+    }
+
+    #[test]
+    fn test_validate_autolisten_addr() {
+        assert!(validate_autolisten_addr(":80", None).is_err());
+        assert!(validate_autolisten_addr(":443", None).is_err());
+        assert!(validate_autolisten_addr("0.0.0.0:25565", None).is_err());
+        assert!(validate_autolisten_addr("[::]:25565", None).is_err());
+        let parsed = validate_autolisten_addr(":25565", None).unwrap();
+        assert_eq!(parsed, "127.0.0.1:25565".parse().unwrap());
+        let parsed_loopback = validate_autolisten_addr("127.0.0.1:25565", None).unwrap();
+        assert_eq!(parsed_loopback, "127.0.0.1:25565".parse().unwrap());
     }
 
     #[tokio::test]
@@ -657,6 +691,7 @@ mod tests {
                 optimizer: Some(opt_registry.clone()),
                 sessions: Some(sessions.clone()),
                 middleware_dir: None,
+                bind_ip: None,
             },
         );
         a.reconcile().await;

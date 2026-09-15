@@ -151,6 +151,12 @@ pub async fn run(
         .map(|addr| addr.ip().is_loopback())
         .unwrap_or(false);
 
+    let port = local
+        .local_addr()
+        .ok()
+        .map(|a| a.port())
+        .or_else(|| local.peer_addr().ok().map(|a| a.port()));
+
     let (st_read, st_write) = tokio::io::split(tunnel);
     let (local_read, local_write) = local.into_split();
 
@@ -158,7 +164,7 @@ pub async fn run(
     let mw_dir = opts.middleware_dir.clone();
     // One WASM instance per stream so handshake state, compression, and the AES
     // key are shared between ingress and egress. Direction is set on each poll.
-    let wasm = load_session(mw_name.as_deref(), mw_dir.as_deref(), skip_recompress)?;
+    let wasm = load_session(mw_name.as_deref(), mw_dir.as_deref(), port, skip_recompress)?;
     let from_local = wasm.clone();
     let to_local = wasm;
     let from_server_out = opts.local_role.local_reads_from_server();
@@ -519,6 +525,7 @@ async fn drain_wasm_frames<W: tokio::io::AsyncWrite + Unpin>(
 fn load_session(
     mw_name: Option<&str>,
     middleware_dir: Option<&Path>,
+    port: Option<u16>,
     skip_recompress: bool,
 ) -> anyhow::Result<Option<SessionHandle>> {
     let Some(name) = mw_name else {
@@ -555,7 +562,7 @@ fn load_session(
     {
         let mut guard = sess.lock().unwrap();
         if let Some(data) =
-            crate::prism::middleware::get_injected_middleware_data(base_name, None)
+            crate::prism::middleware::get_injected_middleware_data(base_name, port)
         {
             let _ = guard.set_data(&data);
         }

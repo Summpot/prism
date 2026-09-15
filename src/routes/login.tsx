@@ -99,11 +99,16 @@ function LoginPage() {
 			setOauthLoading(true);
 			setError(null);
 			const norm = normalizeBaseUrl(baseUrl);
+			const state =
+				typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+					? crypto.randomUUID()
+					: Math.random().toString(36).substring(2) + Date.now().toString(36);
 			if (typeof window !== "undefined") {
 				window.localStorage.setItem("prism_pending_auth_url", norm);
 				window.sessionStorage.setItem("prism_pending_auth_url", norm);
+				window.sessionStorage.setItem("prism_oauth_state", state);
 			}
-			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" });
+			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" }, state);
 			if (res.url) {
 				await openExternalUrl(res.url);
 			}

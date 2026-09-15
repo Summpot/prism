@@ -139,16 +139,22 @@ pub async fn serve_udp_with_shutdown(
 
     tracing::info!(listen_addr = %listen_addr, "udp: listening");
 
+    pub const MAX_UDP_SESSIONS: usize = 10_000;
+
     let sock = Arc::new(sock);
     let sessions: Arc<DashMap<std::net::SocketAddr, Arc<UdpSession>>> = Arc::new(DashMap::new());
 
-    if opts.idle_timeout > Duration::from_millis(0) {
-        let sessions = sessions.clone();
-        let shutdown2 = shutdown.clone();
-        tokio::spawn(async move {
-            udp_sweep_loop(sessions, opts.idle_timeout, shutdown2).await;
-        });
-    }
+    let sweep_idle_timeout = if opts.idle_timeout > Duration::from_millis(0) {
+        opts.idle_timeout
+    } else {
+        Duration::from_secs(30)
+    };
+
+    let sessions_sweep = sessions.clone();
+    let shutdown2 = shutdown.clone();
+    tokio::spawn(async move {
+        udp_sweep_loop(sessions_sweep, sweep_idle_timeout, shutdown2).await;
+    });
 
     let mut buf = vec![0u8; 64 * 1024];
     loop {
@@ -161,6 +167,11 @@ pub async fn serve_udp_with_shutdown(
             res = sock.recv_from(&mut buf) => {
                 let (n, src) = res?;
                 if n == 0 {
+                    continue;
+                }
+
+                if !sessions.contains_key(&src) && sessions.len() >= MAX_UDP_SESSIONS {
+                    tracing::warn!(src = %src, "udp: max session limit reached ({MAX_UDP_SESSIONS}), dropping datagram");
                     continue;
                 }
 
@@ -838,14 +849,12 @@ async fn dial_upstream(
         addr = format!("{addr}:{p}");
     }
 
-    if is_forbidden_ssrf_host(&addr) {
-        anyhow::bail!("connection to forbidden link-local/metadata address rejected: {addr}");
-    }
+    validate_ssrf_and_self_connect(&addr).await?;
 
     Ok((dial_tcp_stream(&addr, timeout).await?, addr, None, None))
 }
 
-fn is_forbidden_ssrf_host(host_port: &str) -> bool {
+pub fn is_forbidden_ssrf_host(host_port: &str) -> bool {
     let host = if let Some(idx) = host_port.rfind(':') {
         &host_port[..idx]
     } else {
@@ -853,20 +862,26 @@ fn is_forbidden_ssrf_host(host_port: &str) -> bool {
     };
     let host = host.trim().trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        match ip {
-            std::net::IpAddr::V4(v4) => {
-                if v4.is_link_local() || v4.octets()[0] == 0 {
-                    return true;
-                }
-            }
-            std::net::IpAddr::V6(v6) => {
-                if (v6.segments()[0] & 0xffc0) == 0xfe80 {
-                    return true;
-                }
+        return crate::prism::net::is_forbidden_ssrf_ip(ip);
+    }
+    false
+}
+
+async fn validate_ssrf_and_self_connect(addr: &str) -> anyhow::Result<()> {
+    if is_forbidden_ssrf_host(addr) {
+        anyhow::bail!("connection to forbidden link-local/metadata address rejected: {addr}");
+    }
+
+    // If host is a DNS name, lookup and verify all resolved addresses
+    if let Ok(addrs) = tokio::net::lookup_host(addr).await {
+        for sa in addrs {
+            if crate::prism::net::is_forbidden_ssrf_ip(sa.ip()) {
+                anyhow::bail!("host '{addr}' resolved to forbidden link-local/metadata address '{sa}'");
             }
         }
     }
-    false
+
+    Ok(())
 }
 
 async fn proxy_bidirectional(

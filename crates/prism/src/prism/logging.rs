@@ -218,6 +218,20 @@ fn make_writer(
         "discard" => Ok(tracing_appender::non_blocking(io::sink())),
         other => {
             let p = Path::new(other);
+            if p.is_absolute()
+                || p.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                anyhow::bail!(
+                    "logging: output must be 'stdout', 'stderr', 'discard', or a safe relative path without directory traversal ('{other}')"
+                );
+            }
             if let Some(parent) = p.parent()
                 && !parent.as_os_str().is_empty()
             {

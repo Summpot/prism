@@ -410,11 +410,11 @@ async fn handle_request(
 }
 
 fn method_needs_auth(
-    handler: &dyn AdminControl,
+    _handler: &dyn AdminControl,
     identity: &Option<AuthIdentity>,
     requires_session: bool,
 ) -> bool {
-    if !requires_session || !handler.auth_enabled() {
+    if !requires_session {
         return false;
     }
     match identity {

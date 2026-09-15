@@ -166,6 +166,16 @@ pub fn ensure_config_file(path: &Path) -> anyhow::Result<bool> {
     use std::io::Write;
     f.write_all(tmpl.as_bytes())
         .with_context(|| format!("config: write {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+
     Ok(true)
 }
 
@@ -210,6 +220,7 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
 pub struct Config {
     pub listeners: Vec<ProxyListenerConfig>,
     pub admin_addr: String,
+    pub admin_allow_remote: bool,
     pub logging: LoggingConfig,
     pub routes: Vec<RouteConfig>,
     pub max_header_bytes: usize,
@@ -233,7 +244,7 @@ pub struct Timeouts {
 pub struct ProxyListenerConfig {
     pub listen_addr: String,
     pub protocol: String, // tcp | udp
-    pub upstream: String,
+    pub upstream: String, // Default upstream when no route matches (legacy/simple mode).
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,7 +272,7 @@ pub struct RouteConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MdnsConfig {
     pub enabled: bool,
-    /// Domain suffix, default "local".
+    /// Domain suffix for mDNS names, e.g. "local"
     pub domain: String,
     /// Optional subdomain label, e.g. "prism" -> <name>.prism.local
     pub subdomain: String,
@@ -275,15 +286,31 @@ pub struct MdnsConfig {
     pub motd_prefix: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct TunnelConfig {
     pub auth_token: String,
     pub auto_listen_services: bool,
+    pub allow_unauthenticated: bool,
     pub endpoints: Vec<TunnelEndpointConfig>,
     pub connector: Option<TunnelConnectorConfig>,
     pub client: Option<TunnelClientConfig>,
     pub services: Vec<TunnelServiceConfig>,
     pub mdns: MdnsConfig,
+}
+
+impl std::fmt::Debug for TunnelConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TunnelConfig")
+            .field("auth_token", if self.auth_token.is_empty() { &"" } else { &"***" })
+            .field("auto_listen_services", &self.auto_listen_services)
+            .field("allow_unauthenticated", &self.allow_unauthenticated)
+            .field("endpoints", &self.endpoints)
+            .field("connector", &self.connector)
+            .field("client", &self.client)
+            .field("services", &self.services)
+            .field("mdns", &self.mdns)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,7 +321,7 @@ pub struct TunnelEndpointConfig {
     pub websocket: WebSocketServerConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct TunnelConnectorConfig {
     pub server_addr: String,
     pub transport: String,
@@ -306,7 +333,22 @@ pub struct TunnelConnectorConfig {
     pub doh_servers: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl std::fmt::Debug for TunnelConnectorConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TunnelConnectorConfig")
+            .field("server_addr", &self.server_addr)
+            .field("transport", &self.transport)
+            .field("auth_token", if self.auth_token.is_empty() { &"" } else { &"***" })
+            .field("dial_timeout_ms", &self.dial_timeout_ms)
+            .field("dial_timeout", &self.dial_timeout)
+            .field("quic", &self.quic)
+            .field("websocket", &self.websocket)
+            .field("doh_servers", &self.doh_servers)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct TunnelClientConfig {
     pub server_addr: String,
     pub transport: String,
@@ -318,6 +360,23 @@ pub struct TunnelClientConfig {
     pub optimizer: Option<OptimizerClientConfig>,
     pub websocket: Option<WebSocketClientConfig>,
     pub doh_servers: Vec<String>,
+}
+
+impl std::fmt::Debug for TunnelClientConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TunnelClientConfig")
+            .field("server_addr", &self.server_addr)
+            .field("transport", &self.transport)
+            .field("auth_token", if self.auth_token.is_empty() { &"" } else { &"***" })
+            .field("listen_addr", &self.listen_addr)
+            .field("middleware", &self.middleware)
+            .field("fake_lan_broadcast", &self.fake_lan_broadcast)
+            .field("motd_prefix", &self.motd_prefix)
+            .field("optimizer", &self.optimizer)
+            .field("websocket", &self.websocket)
+            .field("doh_servers", &self.doh_servers)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -579,6 +638,9 @@ struct FileConfig {
     #[serde(default)]
     admin_addr: String,
 
+    #[serde(default)]
+    admin_allow_remote: bool,
+
     /// Accepted and ignored for backward compatibility (metrics support removed).
     #[serde(default, deserialize_with = "deserialize_ignored_any")]
     #[allow(dead_code)]
@@ -705,6 +767,7 @@ struct FileRoute {
 struct FileTunnel {
     auth_token: Option<String>,
     auto_listen_services: Option<bool>,
+    allow_unauthenticated: Option<bool>,
     endpoints: Option<Vec<FileTunnelEndpoint>>,
     connector: Option<FileTunnelConnector>,
     client: Option<FileTunnelClient>,
@@ -983,6 +1046,7 @@ impl Config {
         let mut cfg = Config {
             listeners: vec![],
             admin_addr: fc.admin_addr.trim().to_string(),
+            admin_allow_remote: fc.admin_allow_remote,
             logging: LoggingConfig {
                 level: "info".into(),
                 format: "json".into(),
@@ -990,7 +1054,7 @@ impl Config {
                 add_source: false,
             },
             routes: vec![],
-            max_header_bytes: fc.max_header_bytes as usize,
+            max_header_bytes: (fc.max_header_bytes).clamp(0, 1024 * 1024) as usize,
             reload: ReloadConfig {
                 enabled: fc.reload.as_ref().map(|r| r.enabled).unwrap_or(true),
                 poll_interval: Duration::from_millis(
@@ -1163,6 +1227,7 @@ impl Config {
         if let Some(t) = &fc.tunnel {
             cfg.tunnel.auth_token = t.auth_token.clone().unwrap_or_default().trim().to_string();
             cfg.tunnel.auto_listen_services = t.auto_listen_services.unwrap_or(true);
+            cfg.tunnel.allow_unauthenticated = t.allow_unauthenticated.unwrap_or(false);
 
             if let Some(eps) = &t.endpoints {
                 for ep in eps {
@@ -1504,6 +1569,16 @@ impl Config {
                 auto_renew: fa.auto_renew.unwrap_or(true),
                 cloudflare: cf_cfg,
             });
+        }
+
+        if !cfg.tunnel.endpoints.is_empty()
+            && cfg.tunnel.auth_token.is_empty()
+            && !cfg.auth.is_auth_configured()
+            && !cfg.tunnel.allow_unauthenticated
+        {
+            anyhow::bail!(
+                "config: tunnel endpoints configured without authentication; specify tunnel.auth_token, configure [auth], or explicitly set tunnel.allow_unauthenticated = true to allow open access"
+            );
         }
 
         Ok(cfg)

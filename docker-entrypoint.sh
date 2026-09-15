@@ -99,8 +99,16 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
   fi
 
-  # Fallback: run as root to avoid permission errors on bind mounts.
-  exec "$PRISM_BIN" "$@"
+  # Fallback: check if running as root is explicitly permitted.
+  if [ "${PRISM_ALLOW_ROOT:-0}" = "1" ]; then
+    echo "WARNING: Prism container is running as root because dropping privileges to $uidgid failed." >&2
+    echo "         Running as root is not recommended for production environments." >&2
+    exec "$PRISM_BIN" "$@"
+  else
+    echo "ERROR: Prism container cannot drop privileges to non-root user ($uidgid) because $CONFIG_DIR or $WORKDIR_PATH is not writable by $uidgid." >&2
+    echo "       Please fix permissions on your host bind mount, or set PRISM_ALLOW_ROOT=1 to explicitly allow running as root." >&2
+    exit 1
+  fi
 fi
 
 # Not root: just run Prism as-is.

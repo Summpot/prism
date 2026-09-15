@@ -197,18 +197,26 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, Json(HealthResponse { ok: true }))
 }
 
-async fn conns(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+async fn conns(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let snap = st.sessions.snapshot();
-    (StatusCode::OK, Json(snap))
+    Ok((StatusCode::OK, Json(snap)))
 }
 
-async fn tunnel_services(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+async fn tunnel_services(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let snap = if let Some(mgr) = &st.tunnel {
         mgr.snapshot_services().await
     } else {
         Vec::new()
     };
-    (StatusCode::OK, Json(snap))
+    Ok((StatusCode::OK, Json(snap)))
 }
 
 #[derive(Debug, Serialize)]
@@ -217,12 +225,16 @@ pub struct OptimizerOverviewResponse {
     pub services: std::collections::HashMap<String, tunnel::optimizer::OptimizerStatsSnapshot>,
 }
 
-async fn stats_optimizer(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
+async fn stats_optimizer(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let (global, services) = st.optimizer.snapshot();
-    (
+    Ok((
         StatusCode::OK,
         Json(OptimizerOverviewResponse { global, services }),
-    )
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,12 +347,17 @@ pub(crate) async fn do_client_start(
         persist_started_client(storage, &payload);
     }
 
+    let normalized_mw = match payload.middleware.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(m) => Some(crate::prism::config::normalize_middleware_ref(m).map_err(|e| e.to_string())?),
+        None => None,
+    };
+
     let cfg = crate::prism::config::TunnelClientConfig {
         server_addr: payload.server_addr,
         transport: payload.transport,
         auth_token: payload.auth_token,
         listen_addr: payload.listen_addr,
-        middleware: payload.middleware,
+        middleware: normalized_mw,
         fake_lan_broadcast: payload.fake_lan_broadcast,
         motd_prefix: payload.motd_prefix,
         optimizer: payload.optimizer,
@@ -661,15 +678,16 @@ pub(crate) async fn do_admin_request(
     if let Some(host) = parsed_url.host_str() {
         let clean_host = host.trim_start_matches('[').trim_end_matches(']');
         if let Ok(ip) = clean_host.parse::<std::net::IpAddr>() {
-            match ip {
-                std::net::IpAddr::V4(v4) => {
-                    if v4.is_link_local() || v4.octets()[0] == 0 {
-                        return Err(format!("requests to address '{ip}' are forbidden"));
-                    }
-                }
-                std::net::IpAddr::V6(v6) => {
-                    if (v6.segments()[0] & 0xffc0) == 0xfe80 {
-                        return Err(format!("requests to address '{ip}' are forbidden"));
+            if crate::prism::net::is_forbidden_ssrf_ip(ip) {
+                return Err(format!("requests to address '{ip}' are forbidden"));
+            }
+        } else {
+            let port = parsed_url.port_or_known_default().unwrap_or(80);
+            let target = format!("{host}:{port}");
+            if let Ok(addrs) = tokio::net::lookup_host(&target).await {
+                for sa in addrs {
+                    if crate::prism::net::is_forbidden_ssrf_ip(sa.ip()) {
+                        return Err(format!("host '{host}' resolved to forbidden address '{}'", sa.ip()));
                     }
                 }
             }
@@ -677,6 +695,7 @@ pub(crate) async fn do_admin_request(
     }
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|err| err.to_string())?;
     let parsed_method: reqwest::Method = method.parse().map_err(|err| format!("{err}"))?;
@@ -724,7 +743,7 @@ pub(crate) async fn do_admin_rpc(
 // HTTP Axum Route Handlers
 // ---------------------------------------------------------------------------
 
-fn mask_token(t: &str) -> String {
+pub(crate) fn mask_token(t: &str) -> String {
     let t = t.trim();
     if t.is_empty() {
         String::new()
@@ -876,13 +895,17 @@ struct ConfigResponse {
     path: String,
 }
 
-async fn config(State(st): State<Arc<AdminState>>) -> impl IntoResponse {
-    (
+async fn config(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
+    Ok((
         StatusCode::OK,
         Json(ConfigResponse {
             path: st.config_path.display().to_string(),
         }),
-    )
+    ))
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -934,8 +957,10 @@ pub struct MiddlewareItemResponse {
 }
 
 async fn list_middlewares(
-    State(_st): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
 ) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let mut items = Vec::new();
     let engine = wasmtime::Engine::default();
 
@@ -967,8 +992,11 @@ async fn list_middlewares(
 }
 
 async fn get_middleware_schema(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
     AxumPath(name): AxumPath<String>,
 ) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim();
     let wat = crate::prism::middleware::get_default_middleware_wat(base_name)
         .ok_or_else(|| ApiError::not_found(&format!("middleware '{name}' not found")))?;
@@ -985,8 +1013,11 @@ async fn get_middleware_schema(
 }
 
 async fn get_middleware_config(
+    headers: HeaderMap,
+    State(st): State<Arc<AdminState>>,
     AxumPath(name): AxumPath<String>,
 ) -> Result<impl IntoResponse, ApiError> {
+    require_panel_auth(&headers, &st).await?;
     let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim();
     let wat = crate::prism::middleware::get_default_middleware_wat(base_name)
         .ok_or_else(|| ApiError::not_found(&format!("middleware '{name}' not found")))?;
@@ -1211,9 +1242,16 @@ pub struct GitHubLoginResponse {
     pub url: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct GitHubLoginQuery {
+    #[serde(default)]
+    pub state: Option<String>,
+}
+
 async fn auth_github_login(
     headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
+    Query(query): Query<GitHubLoginQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let am = st
         .auth_manager
@@ -1223,9 +1261,18 @@ async fn auth_github_login(
         .github_config()
         .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("GitHub OAuth not enabled")))?;
 
+    let state_param = query
+        .state
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(crate::prism::auth::generate_random_state);
+    am.register_oauth_state(state_param.clone()).await;
+
+    let encoded_state: String =
+        url::form_urlencoded::byte_serialize(state_param.as_bytes()).collect();
     let mut url = format!(
-        "https://github.com/login/oauth/authorize?client_id={}&scope=read:user",
-        gh.client_id
+        "https://github.com/login/oauth/authorize?client_id={}&scope=read:user&state={}",
+        gh.client_id,
+        encoded_state
     );
     if let Some(ref r) = gh.redirect_uri {
         url.push_str(&format!("&redirect_uri={r}"));
@@ -1453,6 +1500,8 @@ pub struct GitHubExchangeRequest {
     pub code: String,
     #[serde(default)]
     pub device_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1471,6 +1520,14 @@ async fn auth_github_exchange(
         .auth_manager
         .as_ref()
         .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
+
+    if let Some(ref s) = payload.state {
+        if !am.verify_and_consume_oauth_state(s).await {
+            return Err(ApiError::bad_request(anyhow::anyhow!(
+                "invalid or expired OAuth state parameter (CSRF protection)"
+            )));
+        }
+    }
 
     let (user, raw_token, token_record) = am
         .exchange_code(&payload.code, payload.device_id.as_deref())
@@ -1695,9 +1752,6 @@ impl AdminControl for AdminState {
         if let Some(expected) = self.auth.panel_token.as_ref()
             && token == expected.trim()
         {
-            return Ok(panel_admin_identity());
-        }
-        if !self.auth_enabled() {
             return Ok(panel_admin_identity());
         }
         Err(AdminError::unauthorized("invalid bearer token"))
@@ -2557,9 +2611,18 @@ mod tests {
 
         let http = reqwest::Client::new();
 
-        // 1. GET /middlewares
+        // 0. Unauthenticated GET /middlewares should be 401
+        let unauth_resp = http
+            .get(format!("http://{addr}/middlewares"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauth_resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // 1. GET /middlewares with auth
         let resp = http
             .get(format!("http://{addr}/middlewares"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2568,9 +2631,10 @@ mod tests {
         let mc = items.iter().find(|i| i["name"] == "minecraft").unwrap();
         assert!(mc["schema"].get("fields").is_some());
 
-        // 2. GET /middlewares/minecraft/schema
+        // 2. GET /middlewares/minecraft/schema with auth
         let resp = http
             .get(format!("http://{addr}/middlewares/minecraft/schema"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2578,9 +2642,10 @@ mod tests {
         let schema: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(schema["name"], "minecraft");
 
-        // 3. GET /middlewares/minecraft/config
+        // 3. GET /middlewares/minecraft/config with auth
         let resp = http
             .get(format!("http://{addr}/middlewares/minecraft/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2605,6 +2670,7 @@ mod tests {
         // Verify effective config is updated
         let resp = http
             .get(format!("http://{addr}/middlewares/minecraft/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();
@@ -2640,6 +2706,7 @@ mod tests {
         );
         let resp = http
             .get(format!("http://{addr}/middlewares/minecraft/config"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();

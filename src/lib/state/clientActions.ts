@@ -196,11 +196,16 @@ export async function startGitHubAuthWithUrl(
 		if (targetServerAddr) {
 			patchActiveConfig({ server_addr: targetServerAddr });
 		}
+		const state =
+			typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+				? crypto.randomUUID()
+				: Math.random().toString(36).substring(2) + Date.now().toString(36);
 		if (typeof window !== "undefined") {
 			window.localStorage.removeItem("prism_pending_auth_url");
 			window.sessionStorage.removeItem("prism_pending_auth_url");
+			window.sessionStorage.setItem("prism_oauth_state", state);
 		}
-		const res = await getGitHubLoginUrl(TUNNEL_ADMIN_CONNECTION);
+		const res = await getGitHubLoginUrl(TUNNEL_ADMIN_CONNECTION, state);
 		if (res.url) {
 			ui.setOauthWaitingCallback(true);
 			await openExternalUrl(res.url);

@@ -175,6 +175,14 @@ pub async fn run(
             .parse()
             .with_context(|| format!("invalid admin_addr: {}", cfg.admin_addr))?;
 
+        if addr.ip().is_unspecified() && !cfg.admin_allow_remote {
+            anyhow::bail!(
+                "admin_addr binds to unspecified address '{}' ({}) which exposes admin interface to all network interfaces; set admin_allow_remote = true in configuration to allow remote administrative access",
+                cfg.admin_addr,
+                addr
+            );
+        }
+
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let state = admin_state
             .as_ref()
@@ -299,6 +307,7 @@ pub async fn run(
                 listen_addr: ep.listen_addr.clone(),
                 transport: ep.transport.clone(),
                 auth_token: cfg.tunnel.auth_token.clone(),
+                allow_unauthenticated: cfg.tunnel.allow_unauthenticated,
                 quic: tunnel::server::QuicServerOptions {
                     cert_file: quic_cert.clone(),
                     key_file: quic_key.clone(),
@@ -368,6 +377,7 @@ pub async fn run(
                     optimizer: Some(optimizer.clone()),
                     sessions: Some(sessions.clone()),
                     middleware_dir: Some(paths.middleware_dir.clone()),
+                    bind_ip: None,
                 },
             );
             let shutdown = shutdown_rx.clone();

@@ -24,6 +24,13 @@ node_modules
 prism.toml
 prism.yaml
 prism.yml
+prism.db
+prism.db-wal
+prism.db-shm
+auth-state.json
+*.pem
+*.key
+*.crt
 
 # build output
 /bin

@@ -653,6 +653,7 @@ mod tests {
             listen_addr: srv_addr.clone(),
             transport: "websocket".into(),
             auth_token: "ws-secret".into(),
+            allow_unauthenticated: false,
             quic: Default::default(),
             websocket: Default::default(),
             webtransport: Default::default(),

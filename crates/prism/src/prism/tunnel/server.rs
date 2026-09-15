@@ -34,6 +34,7 @@ pub struct ServerOptions {
     pub listen_addr: String,
     pub transport: String,
     pub auth_token: String,
+    pub allow_unauthenticated: bool,
     pub quic: QuicServerOptions,
     pub websocket: WebSocketServerOptions,
     pub webtransport: WebTransportServerOptions,
@@ -103,8 +104,9 @@ impl Server {
                     let token = self.opts.auth_token.clone();
                     let auth_mgr = self.opts.auth_manager.clone();
                     let admin = self.opts.admin.clone();
+                    let allow_unauth = self.opts.allow_unauthenticated;
                     tokio::spawn(async move {
-                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr, admin).await {
+                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr, admin, allow_unauth).await {
                             tracing::warn!(err=%err, "tunnel: session ended with error");
                         }
                     });
@@ -121,6 +123,7 @@ async fn catalog_for_identity(
     mgr: &Manager,
     auth_mgr: &Option<Arc<AuthManager>>,
     identity: &Option<AuthIdentity>,
+    allow_unauthenticated: bool,
 ) -> Vec<protocol::RegisteredService> {
     let auth_enabled = match auth_mgr {
         Some(am) => am.is_auth_enabled().await,
@@ -131,8 +134,10 @@ async fn catalog_for_identity(
         am.filter_services(id, &all)
     } else if auth_enabled {
         Vec::new()
-    } else {
+    } else if allow_unauthenticated {
         mgr.active_services().await
+    } else {
+        Vec::new()
     }
 }
 
@@ -142,6 +147,7 @@ async fn handle_session(
     auth_token: String,
     auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
     admin: Option<Arc<dyn AdminControl>>,
+    allow_unauthenticated: bool,
 ) -> anyhow::Result<()> {
     let remote = sess
         .remote_addr()
@@ -179,7 +185,13 @@ async fn handle_session(
                             is_admin: false,
                         })
                     } else if auth_token.trim().is_empty() && !am.is_auth_enabled().await {
-                        None
+                        if allow_unauthenticated {
+                            None
+                        } else {
+                            tracing::warn!(connector=%remote, "tunnel: unauthenticated connector rejected");
+                            sess.close().await;
+                            return Ok(());
+                        }
                     } else {
                         tracing::warn!(connector=%remote, "tunnel: bad token for connector");
                         sess.close().await;
@@ -194,8 +206,12 @@ async fn handle_session(
                 return Ok(());
             }
             None
-        } else {
+        } else if allow_unauthenticated {
             None
+        } else {
+            tracing::warn!(connector=%remote, "tunnel: unauthenticated connector rejected");
+            sess.close().await;
+            return Ok(());
         }
     };
 
@@ -223,7 +239,7 @@ async fn handle_session(
         let broadcast_task = tokio::spawn(async move {
             let mut sub = mgr_broadcast.subscribe();
             let ident = identity_broadcast.lock().await.clone();
-            let initial = catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident).await;
+            let initial = catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident, allow_unauthenticated).await;
             if protocol::write_service_catalog(&mut reg, &initial)
                 .await
                 .is_err()
@@ -245,7 +261,7 @@ async fn handle_session(
                 }
                 let ident = identity_broadcast.lock().await.clone();
                 let services =
-                    catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident).await;
+                    catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident, allow_unauthenticated).await;
                 if protocol::write_service_catalog(&mut reg, &services)
                     .await
                     .is_err()
@@ -473,7 +489,7 @@ mod tests {
         let mgr_clone = mgr.clone();
         let sess_clone = sess.clone();
         let handle = tokio::spawn(async move {
-            let _ = handle_session(mgr_clone, sess_clone, "secret".into(), None, None).await;
+            let _ = handle_session(mgr_clone, sess_clone, "secret".into(), None, None, false).await;
         });
 
         // Wait briefly for registration
@@ -522,7 +538,7 @@ mod tests {
         let mgr_clone = mgr.clone();
         let sess_clone = sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_clone, sess_clone, "".into(), None, None).await;
+            let _ = handle_session(mgr_clone, sess_clone, "".into(), None, None, true).await;
         });
 
         // Initially empty
@@ -553,7 +569,7 @@ mod tests {
         let mgr_c = mgr.clone();
         let conn_sess_clone = conn_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None, None).await;
+            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None, None, true).await;
         });
 
         let (c1, c2) = w_handle.await.unwrap();
@@ -596,7 +612,7 @@ mod tests {
         let mgr_c = mgr.clone();
         let conn_sess_clone = conn_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None, None).await;
+            let _ = handle_session(mgr_c, conn_sess_clone, "".into(), None, None, true).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -620,7 +636,7 @@ mod tests {
         let mgr_cs = mgr.clone();
         let client_sess_clone = client_sess.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_clone, "".into(), None, None).await;
+            let _ = handle_session(mgr_cs, client_sess_clone, "".into(), None, None, true).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -733,7 +749,7 @@ mod tests {
         let auth_c = auth.clone();
         tokio::spawn(async move {
             let _ =
-                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None).await;
+                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None, false).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -764,7 +780,7 @@ mod tests {
         let client_sess_c = client_sess.clone();
         let auth_cs = auth.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None).await;
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None, false).await;
         });
 
         // 3. Verify that Alice ONLY sees mc-survival in catalog (secret-database filtered out)
@@ -857,6 +873,7 @@ mod tests {
                 "admin_token".into(),
                 None,
                 Some(admin),
+                false,
             )
             .await;
         });
@@ -945,6 +962,7 @@ mod tests {
                 "".into(),
                 Some(auth_clone),
                 Some(admin),
+                false,
             )
             .await;
         });
@@ -1072,7 +1090,7 @@ mod tests {
         let auth_c = auth.clone();
         tokio::spawn(async move {
             let _ =
-                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None).await;
+                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None, false).await;
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert_eq!(mgr.active_services().await.len(), 1);
@@ -1106,7 +1124,7 @@ mod tests {
         let auth_cs = auth.clone();
         let admin: Arc<dyn AdminControl> = Arc::new(TokenControl { auth: auth.clone() });
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), Some(admin))
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), Some(admin), false)
                 .await;
         });
 
@@ -1190,7 +1208,7 @@ mod tests {
         let conn_sess_c = conn_sess.clone();
         let auth_c = auth.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_c, conn_sess_c, "".into(), Some(auth_c), None).await;
+            let _ = handle_session(mgr_c, conn_sess_c, "".into(), Some(auth_c), None, true).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1220,7 +1238,7 @@ mod tests {
         let client_sess_c = client_sess.clone();
         let auth_cs = auth.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None).await;
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None, true).await;
         });
 
         let catalog = cat_handle.await.unwrap();
@@ -1277,7 +1295,7 @@ mod tests {
         let auth_c = auth.clone();
         tokio::spawn(async move {
             let _ =
-                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None).await;
+                handle_session(mgr_c, conn_sess_c, "conn_secret".into(), Some(auth_c), None, false).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1308,7 +1326,7 @@ mod tests {
         let client_sess_c = client_sess.clone();
         let auth_cs = auth.clone();
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None).await;
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), None, false).await;
         });
 
         // 3. Verify unauthenticated client receives EMPTY service catalog

@@ -238,33 +238,34 @@ impl Client {
             return Ok(None);
         }
 
-        // 1. Direct file path
-        let path = Path::new(name);
-        if path.is_file() {
-            let bytes = std::fs::read(path)?;
-            let (module, _) = compile_module_from_wat(engine, name, &bytes)?;
-            return Ok(Some(Arc::new(module)));
-        }
+        let clean_name = match crate::prism::config::normalize_middleware_ref(name) {
+            Ok(n) => n,
+            Err(err) => anyhow::bail!("invalid middleware reference: {err}"),
+        };
+        let name = &clean_name;
 
-        // 2. Lookup in middleware_dir
+        // 1. Lookup in middleware_dir
         if let Some(dir) = middleware_dir {
             let direct = dir.join(name);
             if direct.is_file() {
                 let bytes = std::fs::read(&direct)?;
-                let (module, _) = compile_module_from_wat(engine, name, &bytes)?;
+                let (module, _) = compile_module_from_wat(engine, name, &bytes)
+                    .map_err(|_| anyhow::anyhow!("failed to compile middleware module '{name}'"))?;
                 return Ok(Some(Arc::new(module)));
             }
             let with_ext = dir.join(format!("{name}.wat"));
             if with_ext.is_file() {
                 let bytes = std::fs::read(&with_ext)?;
-                let (module, _) = compile_module_from_wat(engine, name, &bytes)?;
+                let (module, _) = compile_module_from_wat(engine, name, &bytes)
+                    .map_err(|_| anyhow::anyhow!("failed to compile middleware module '{name}'"))?;
                 return Ok(Some(Arc::new(module)));
             }
         }
 
-        // 3. Built-in default middlewares (e.g. "minecraft", "tls_sni")
+        // 2. Built-in default middlewares (e.g. "minecraft", "tls_sni")
         if let Some(wat) = get_default_middleware_wat(name) {
-            let (module, _) = compile_module_from_wat(engine, name, wat.as_bytes())?;
+            let (module, _) = compile_module_from_wat(engine, name, wat.as_bytes())
+                .map_err(|_| anyhow::anyhow!("failed to compile built-in middleware '{name}'"))?;
             return Ok(Some(Arc::new(module)));
         }
 
@@ -1369,6 +1370,7 @@ mod tests {
             listen_addr: server_addr.clone(),
             transport: "tcp".into(),
             auth_token: "secret".into(),
+            allow_unauthenticated: false,
             quic: QuicServerOptions {
                 cert_file: "".into(),
                 key_file: "".into(),
@@ -1587,6 +1589,7 @@ mod tests {
             listen_addr: server_addr.clone(),
             transport: "tcp".into(),
             auth_token: "secret".into(),
+            allow_unauthenticated: false,
             quic: QuicServerOptions {
                 cert_file: "".into(),
                 key_file: "".into(),
@@ -1852,6 +1855,7 @@ mod tests {
             listen_addr: server_addr.clone(),
             transport: "tcp".into(),
             auth_token: "secret".into(),
+            allow_unauthenticated: false,
             quic: QuicServerOptions::default(),
             websocket: Default::default(),
             webtransport: Default::default(),

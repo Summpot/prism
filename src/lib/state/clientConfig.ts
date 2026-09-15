@@ -14,6 +14,8 @@ export const EMPTY_CLIENT_CONFIG: ClientConfigResponse = {
 		fake_lan_broadcast: true,
 		auto_connect_panel: true,
 		auto_connect: true,
+		auto_check_update: true,
+		update_channel: "release",
 	},
 	profiles: [],
 	cumulative_stats: {

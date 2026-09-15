@@ -1,7 +1,19 @@
-import { Check, Download, Plus, Share2, Trash2 } from "lucide-react";
+import {
+	AlertCircle,
+	Check,
+	CheckCircle2,
+	Download,
+	Plus,
+	RefreshCw,
+	Share2,
+	Sparkles,
+	Trash2,
+} from "lucide-react";
+import { useState } from "react";
 
 import { useClientConfig } from "@/hooks/useClientConfig";
 import { useClientLink } from "@/hooks/useClientLink";
+import { checkForUpdate, installUpdate } from "@/lib/client/clientIpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
+import type { UpdateCheckResult } from "@/types/client";
 
 export function ClientSettings() {
 	const {
@@ -29,6 +42,10 @@ export function ClientSettings() {
 		setAutoConnectPanel,
 		autoConnect,
 		setAutoConnect,
+		updateChannel,
+		setUpdateChannel,
+		autoCheckUpdate,
+		setAutoCheckUpdate,
 		managementUrl,
 		handleSaveProfile,
 		handleDeleteProfile,
@@ -278,6 +295,14 @@ export function ClientSettings() {
 								<Switch checked={autoConnectPanel} onCheckedChange={setAutoConnectPanel} />
 							</div>
 						</div>
+
+						{/* Software Updates & Channels */}
+						<ClientUpdateSection
+							updateChannel={updateChannel}
+							setUpdateChannel={setUpdateChannel}
+							autoCheckUpdate={autoCheckUpdate}
+							setAutoCheckUpdate={setAutoCheckUpdate}
+						/>
 					</div>
 
 					{/* Footer Controls */}
@@ -306,6 +331,154 @@ export function ClientSettings() {
 					</div>
 				</div>
 			</div>
+		</div>
+	);
+}
+
+function ClientUpdateSection({
+	updateChannel,
+	setUpdateChannel,
+	autoCheckUpdate,
+	setAutoCheckUpdate,
+}: {
+	updateChannel: string;
+	setUpdateChannel: (val: string) => void;
+	autoCheckUpdate: boolean;
+	setAutoCheckUpdate: (val: boolean) => void;
+}) {
+	const [status, setStatus] = useState<
+		"idle" | "checking" | "up-to-date" | "available" | "installing" | "error"
+	>("idle");
+	const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+	const handleCheck = async () => {
+		setStatus("checking");
+		setErrorMessage(null);
+		try {
+			const res = await checkForUpdate(updateChannel);
+			setUpdateResult(res);
+			if (res.available) {
+				setStatus("available");
+			} else {
+				setStatus("up-to-date");
+			}
+		} catch (err) {
+			setStatus("error");
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	const handleInstall = async () => {
+		setStatus("installing");
+		setErrorMessage(null);
+		try {
+			await installUpdate(updateChannel);
+		} catch (err) {
+			setStatus("error");
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	return (
+		<div className="rounded-lg border border-border/60 p-2.5 text-xs space-y-2 pt-2">
+			<div className="flex items-center justify-between pb-1 border-b border-border/40">
+				<div className="flex items-center gap-1.5 font-medium text-foreground">
+					<Sparkles className="h-3.5 w-3.5 text-primary" />
+					<span>{m.client_update_section()}</span>
+				</div>
+				<span className="text-[10px] text-muted-foreground">{m.client_update_section_desc()}</span>
+			</div>
+
+			<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+				<div className="space-y-1">
+					<label className="text-[10px] uppercase font-bold text-muted-foreground">
+						{m.client_update_channel()}
+					</label>
+					<select
+						aria-label={m.client_update_channel()}
+						value={updateChannel}
+						onChange={(e) => {
+							setUpdateChannel(e.target.value);
+							setStatus("idle");
+							setUpdateResult(null);
+						}}
+						className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
+					>
+						<option value="release">{m.client_update_channel_release()}</option>
+						<option value="dev">{m.client_update_channel_dev()}</option>
+					</select>
+				</div>
+
+				<div className="flex items-end">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={handleCheck}
+						disabled={status === "checking" || status === "installing"}
+						className="h-8 w-full text-xs gap-1.5 cursor-pointer"
+					>
+						<RefreshCw className={cn("h-3.5 w-3.5", status === "checking" && "animate-spin")} />
+						<span>
+							{status === "checking" ? m.client_update_checking() : m.client_update_check_btn()}
+						</span>
+					</Button>
+				</div>
+			</div>
+
+			<div className="flex items-center justify-between rounded-lg border border-border/40 p-2 text-xs">
+				<div>
+					<div className="font-medium text-xs text-foreground">{m.client_update_auto_check()}</div>
+					<div className="text-[10px] text-muted-foreground">
+						{m.client_update_auto_check_hint()}
+					</div>
+				</div>
+				<Switch checked={autoCheckUpdate} onCheckedChange={setAutoCheckUpdate} />
+			</div>
+
+			{/* Status Feedback */}
+			{status === "up-to-date" && updateResult && (
+				<div className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-600 dark:text-emerald-400 text-xs">
+					<CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+					<span>{m.client_update_up_to_date({ version: updateResult.current_version })}</span>
+				</div>
+			)}
+
+			{status === "error" && errorMessage && (
+				<div className="flex items-center gap-1.5 rounded-md bg-destructive/10 border border-destructive/20 p-2 text-destructive text-xs">
+					<AlertCircle className="h-3.5 w-3.5 shrink-0" />
+					<span className="truncate">{m.client_update_failed({ error: errorMessage })}</span>
+				</div>
+			)}
+
+			{status === "available" && updateResult && (
+				<div className="space-y-1.5 rounded-md bg-primary/10 border border-primary/25 p-2 text-xs">
+					<div className="flex items-center justify-between">
+						<div className="flex items-center gap-1.5 font-semibold text-foreground">
+							<Sparkles className="h-3.5 w-3.5 text-primary" />
+							<span>{m.client_update_found({ version: updateResult.version || "latest" })}</span>
+						</div>
+						<Button
+							size="xs"
+							onClick={handleInstall}
+							disabled={status === "installing"}
+							className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
+						>
+							<Download className="h-3 w-3" />
+							<span>
+								{status === "installing"
+									? m.client_update_installing()
+									: m.client_update_install_btn()}
+							</span>
+						</Button>
+					</div>
+					{updateResult.body ? (
+						<div className="max-h-24 overflow-y-auto rounded bg-background/60 p-2 text-[10px] text-muted-foreground whitespace-pre-wrap font-mono">
+							{updateResult.body}
+						</div>
+					) : null}
+				</div>
+			)}
 		</div>
 	);
 }

@@ -18,6 +18,8 @@ desktop = [
 	"dep:tauri-build",
 	"dep:tauri-plugin-deep-link",
 	"dep:tauri-plugin-single-instance",
+	"dep:tauri-plugin-updater",
+	"dep:tauri-plugin-process",
 ]
 # Production desktop builds must enable this so the webview loads
 # embedded frontendDist instead of build.devUrl (http://localhost:3000).
@@ -30,6 +32,8 @@ tauri-build = { version = "2", default-features = false, optional = true, featur
 tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"], optional = true }
 tauri-plugin-deep-link = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
 anyhow = "1.0"
 arc-swap = "1.9"
 async-trait = "0.1"

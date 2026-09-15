@@ -106,7 +106,11 @@ describe("desktopWindow", () => {
 	it("falls back to window.open in non-desktop environment", async () => {
 		const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 		await openExternalUrl("https://github.com/login/oauth/authorize");
-		expect(openSpy).toHaveBeenCalledWith("https://github.com/login/oauth/authorize", "_blank");
+		expect(openSpy).toHaveBeenCalledWith(
+			"https://github.com/login/oauth/authorize",
+			"_blank",
+			"noopener,noreferrer",
+		);
 	});
 
 	it("calls invokeTauri successfully in desktop environment", async () => {

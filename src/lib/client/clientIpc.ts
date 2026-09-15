@@ -7,6 +7,7 @@ import type {
 	ClientProfile,
 	ClientStatusResponse,
 	StartClientPayload,
+	UpdateCheckResult,
 } from "@/types/client";
 
 export function getClientStatus(): Promise<ClientStatusResponse> {
@@ -73,4 +74,12 @@ export function resetLocalMiddlewareConfig(
 	name: string,
 ): Promise<{ status: string; name: string; reset: boolean }> {
 	return invokeTauri("client_reset_middleware_config", { name });
+}
+
+export function checkForUpdate(channel?: string): Promise<UpdateCheckResult> {
+	return invokeTauri<UpdateCheckResult>("client_check_update", { channel });
+}
+
+export function installUpdate(channel?: string): Promise<void> {
+	return invokeTauri<void>("client_install_update", { channel });
 }

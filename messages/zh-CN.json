@@ -565,5 +565,20 @@
 	"topology_inspector_sessions": "活跃会话",
 	"topology_inspector_no_sessions": "暂无活跃会话",
 	"topology_inspector_open_node": "打开节点配置",
-	"topology_inspector_open_connector": "查看连接器"
+	"topology_inspector_open_connector": "查看连接器",
+	"client_update_section": "软件更新与分发渠道",
+	"client_update_section_desc": "管理应用分发渠道并检查更新。",
+	"client_update_channel": "分发渠道",
+	"client_update_channel_release": "Release (正式稳定渠道)",
+	"client_update_channel_dev": "Dev (开发预览渠道)",
+	"client_update_auto_check": "启动时自动检查更新",
+	"client_update_auto_check_hint": "开启后将在客户端启动时在后台静默检查是否有新版本。",
+	"client_update_check_btn": "检查更新",
+	"client_update_checking": "正在检查更新…",
+	"client_update_up_to_date": "当前已是最新版本 ({version})",
+	"client_update_found": "发现新版本: {version}",
+	"client_update_install_btn": "立即下载并重启更新",
+	"client_update_installing": "正在下载并安装更新…",
+	"client_update_failed": "检查或更新失败: {error}",
+	"client_update_notes": "更新说明"
 }

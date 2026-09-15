@@ -565,5 +565,20 @@
 	"topology_inspector_sessions": "Active Sessions",
 	"topology_inspector_no_sessions": "No active sessions",
 	"topology_inspector_open_node": "Open Node Config",
-	"topology_inspector_open_connector": "View Connector"
+	"topology_inspector_open_connector": "View Connector",
+	"client_update_section": "Software Updates & Channel",
+	"client_update_section_desc": "Manage distribution channel and check for updates.",
+	"client_update_channel": "Update Channel",
+	"client_update_channel_release": "Release (Stable)",
+	"client_update_channel_dev": "Dev (Preview)",
+	"client_update_auto_check": "Automatically check on startup",
+	"client_update_auto_check_hint": "Silently check for new versions in the background when the app starts.",
+	"client_update_check_btn": "Check for Updates",
+	"client_update_checking": "Checking for updates…",
+	"client_update_up_to_date": "Prism is up to date ({version})",
+	"client_update_found": "Update available: {version}",
+	"client_update_install_btn": "Download & Restart",
+	"client_update_installing": "Downloading and installing update…",
+	"client_update_failed": "Update check or installation failed: {error}",
+	"client_update_notes": "Release Notes"
 }

@@ -116,6 +116,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     let client_ctrl_for_tray = client_controller.clone();
     let storage_for_tray = storage.clone();
+    let storage_for_updater = storage.clone();
 
     let desktop_client_state = DesktopClientState {
         client: client_controller.clone(),
@@ -283,10 +284,122 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         crate::prism::admin::do_admin_rpc(&state.client, payload).await
     }
 
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct UpdateCheckResponse {
+        pub available: bool,
+        pub current_version: String,
+        pub version: Option<String>,
+        pub date: Option<String>,
+        pub body: Option<String>,
+        pub channel: String,
+    }
+
+    #[tauri::command]
+    async fn client_check_update(
+        app: tauri::AppHandle,
+        state: tauri::State<'_, DesktopClientState>,
+        channel: Option<String>,
+    ) -> Result<UpdateCheckResponse, String> {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let resolved_channel = channel.unwrap_or_else(|| {
+            state
+                .storage
+                .as_ref()
+                .and_then(|s| s.load_active_config().ok())
+                .map(|c| c.update_channel)
+                .unwrap_or_else(|| "release".to_string())
+        });
+
+        let endpoint = match resolved_channel.as_str() {
+            "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
+            _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
+        };
+
+        let current_version = app.package_info().version.to_string();
+
+        let updater = app
+            .updater_builder()
+            .endpoints(vec![url::Url::parse(endpoint).map_err(|e| e.to_string())?])
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        match updater.check().await {
+            Ok(Some(update)) => Ok(UpdateCheckResponse {
+                available: true,
+                current_version,
+                version: Some(update.version.clone()),
+                date: update.date.map(|d| d.to_string()),
+                body: update.body.clone(),
+                channel: resolved_channel,
+            }),
+            Ok(None) => Ok(UpdateCheckResponse {
+                available: false,
+                current_version,
+                version: None,
+                date: None,
+                body: None,
+                channel: resolved_channel,
+            }),
+            Err(err) => {
+                tracing::warn!(error = %err, endpoint = %endpoint, "failed to check for updates");
+                Err(format!(
+                    "Failed to check for updates from {resolved_channel} channel: {err}"
+                ))
+            }
+        }
+    }
+
+    #[tauri::command]
+    async fn client_install_update(
+        app: tauri::AppHandle,
+        state: tauri::State<'_, DesktopClientState>,
+        channel: Option<String>,
+    ) -> Result<(), String> {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let resolved_channel = channel.unwrap_or_else(|| {
+            state
+                .storage
+                .as_ref()
+                .and_then(|s| s.load_active_config().ok())
+                .map(|c| c.update_channel)
+                .unwrap_or_else(|| "release".to_string())
+        });
+
+        let endpoint = match resolved_channel.as_str() {
+            "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
+            _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
+        };
+
+        let updater = app
+            .updater_builder()
+            .endpoints(vec![url::Url::parse(endpoint).map_err(|e| e.to_string())?])
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
+            tracing::info!(version = %update.version, "downloading and installing update");
+            update
+                .download_and_install(|_, _| {}, || {})
+                .await
+                .map_err(|e| format!("failed to download/install update: {e}"))?;
+
+            tracing::info!("update installed, restarting application");
+            app.restart();
+        }
+
+        Err("No update available to install".to_string())
+    }
+
     // 2. Run Tauri desktop application
     let event_client = desktop_client_state.client.clone();
     tauri::Builder::default()
         .manage(desktop_client_state)
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -321,6 +434,8 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             client_list_middlewares,
             client_update_middleware_config,
             client_reset_middleware_config,
+            client_check_update,
+            client_install_update,
             admin_request,
             admin_rpc,
         ])
@@ -358,6 +473,45 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                             "admin://event",
                             serde_json::json!({ "topic": topic, "payload": payload }),
                         );
+                    }
+                }
+            });
+
+            let handle_for_updater = app.handle().clone();
+            let storage_updater_clone = storage_for_updater.clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Emitter;
+                use tauri_plugin_updater::UpdaterExt;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let (auto_check, channel) = storage_updater_clone
+                    .as_ref()
+                    .and_then(|s| s.load_active_config().ok())
+                    .map(|c| (c.auto_check_update, c.update_channel))
+                    .unwrap_or((true, "release".to_string()));
+
+                if !auto_check {
+                    return;
+                }
+
+                let endpoint = match channel.as_str() {
+                    "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
+                    _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
+                };
+                if let Ok(url) = url::Url::parse(endpoint) {
+                    if let Ok(builder) = handle_for_updater.updater_builder().endpoints(vec![url]) {
+                        if let Ok(updater) = builder.build() {
+                            if let Ok(Some(update)) = updater.check().await {
+                                let _ = handle_for_updater.emit(
+                                    "client://update-available",
+                                    serde_json::json!({
+                                        "version": update.version,
+                                        "date": update.date.map(|d| d.to_string()),
+                                        "body": update.body,
+                                        "channel": channel,
+                                    }),
+                                );
+                            }
+                        }
                     }
                 }
             });

@@ -32,6 +32,8 @@ pub struct ClientConfigState {
     pub user_id: String,
     pub username: String,
     pub expires_at: Option<u64>,
+    pub auto_check_update: bool,
+    pub update_channel: String,
 }
 
 impl Default for ClientConfigState {
@@ -51,6 +53,8 @@ impl Default for ClientConfigState {
             user_id: String::new(),
             username: String::new(),
             expires_at: None,
+            auto_check_update: true,
+            update_channel: "release".into(),
         }
     }
 }
@@ -87,6 +91,10 @@ pub struct ClientConfigPatch {
     pub username: Option<String>,
     #[serde(default)]
     pub expires_at: Option<u64>,
+    #[serde(default)]
+    pub auto_check_update: Option<bool>,
+    #[serde(default)]
+    pub update_channel: Option<String>,
 }
 
 impl ClientConfigPatch {
@@ -105,6 +113,8 @@ impl ClientConfigPatch {
             && self.user_id.is_none()
             && self.username.is_none()
             && self.expires_at.is_none()
+            && self.auto_check_update.is_none()
+            && self.update_channel.is_none()
     }
 }
 
@@ -153,6 +163,12 @@ impl ClientConfigState {
         }
         if patch.expires_at.is_some() {
             self.expires_at = patch.expires_at;
+        }
+        if let Some(v) = patch.auto_check_update {
+            self.auto_check_update = v;
+        }
+        if let Some(v) = patch.update_channel.as_ref().filter(|s| !s.trim().is_empty()) {
+            self.update_channel = v.clone();
         }
     }
 }

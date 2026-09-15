@@ -6,6 +6,15 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel (dev or release)"
+        required: false
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - release
 
 permissions:
   contents: read
@@ -167,10 +176,12 @@ jobs:
         if: matrix.desktop
         env:
           PKG_CONFIG_ALLOW_CROSS: "1"
-        run: pnpm exec tauri build --no-bundle --ci --target ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || 'dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V5ClJXUlRZMEl5WlFqR3NnRFkyaXhSaHZZYlhSZWNVNkZienUzRWhpMmxJUE1CNmtFZjI4QUFBQkFBQUFBQUFBQUFBQUlBQUFBQWdaeGhhTUNidnNxTitKaGRuY3d1V1piMUh3aGNtcUo0enNBeXFJeFYxazVvN2pnUFkvWXh4VGJwd2ltUU51bmcxbnRJU3puQTgzVmtZUFRxZlRaVFdleE15THJBWmhsVTN6ekZJWW1NU24vd25CM0toWUswdG5YNngxVzAreEhpVzBKRVdKdlNOTjg9Cg==' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: pnpm exec tauri build --ci --target ${{ matrix.target }}
 
       - name: Compress binary with UPX
-        if: matrix.upx
+        if: matrix.upx && !matrix.desktop
         uses: crazy-max/ghaction-upx@v4
         with:
           version: latest
@@ -178,25 +189,39 @@ jobs:
             target/${{ matrix.target }}/release/prism${{ matrix.os == 'windows' && '.exe' || '' }}
           args: --best
 
-      - name: Prepare binary (unix)
+      - name: Prepare artifacts (unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME}"
           else
             VERSION="dev-${GITHUB_SHA:0:7}"
           fi
 
-          OUTDIR="binaries"
+          OUTDIR="artifacts"
           mkdir -p "${OUTDIR}"
 
           TARGET="${{ matrix.target }}"
-          cp -v "target/${TARGET}/release/prism" "${OUTDIR}/prism_${VERSION}_${TARGET}"
+          if [[ -f "target/${TARGET}/release/prism" ]]; then
+            cp -v "target/${TARGET}/release/prism" "${OUTDIR}/prism_${VERSION}_${TARGET}"
+          fi
 
-      - name: Prepare binary (windows)
+          if [[ -d "target/${TARGET}/release/bundle" ]]; then
+            find "target/${TARGET}/release/bundle" -type f \( \
+              -name "*.AppImage" -o \
+              -name "*.AppImage.tar.gz" -o \
+              -name "*.AppImage.tar.gz.sig" -o \
+              -name "*.deb" -o \
+              -name "*.dmg" -o \
+              -name "*.app.tar.gz" -o \
+              -name "*.app.tar.gz.sig" \
+            \) -exec cp -v {} "${OUTDIR}/" \;
+          fi
+
+      - name: Prepare artifacts (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -206,49 +231,164 @@ jobs:
             $version = "dev-$($env:GITHUB_SHA.Substring(0,7))"
           }
 
-          $outdir = "binaries"
+          $outdir = "artifacts"
           New-Item -ItemType Directory -Force -Path $outdir | Out-Null
 
           $target = "${{ matrix.target }}"
-          Copy-Item -Force -Path "target/$target/release/prism.exe" -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
+          if (Test-Path "target/$target/release/prism.exe") {
+            Copy-Item -Force -Path "target/$target/release/prism.exe" -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
+          }
+
+          $bundleDir = "target/$target/release/bundle"
+          if (Test-Path $bundleDir) {
+            Get-ChildItem -Path $bundleDir -Recurse -File -Include *.exe, *.msi, *.zip, *.sig | ForEach-Object {
+              Copy-Item -Force -Path $_.FullName -Destination $outdir
+            }
+          }
 
       - name: upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: prism-rust-binaries-${{ matrix.target }}
-          path: binaries/*
+          name: prism-artifacts-${{ matrix.target }}
+          path: artifacts/*
           compression-level: ${{ matrix.artifact_compression }}
 
   release:
     runs-on: ubuntu-latest
     needs: rust-binaries
-    if: github.ref_type == 'tag'
+    if: github.event_name != 'pull_request'
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: download artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: prism-rust-binaries-*
+          pattern: prism-artifacts-*
           path: dist
           merge-multiple: true
 
-      - name: checksums
+      - name: Determine channel and release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            CHANNEL="release"
+            TAG_NAME="${GITHUB_REF_NAME}"
+            RELEASE_NAME="Prism ${GITHUB_REF_NAME}"
+            PRERELEASE="false"
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [[ "${{ github.event.inputs.channel }}" == "release" ]]; then
+            CHANNEL="release"
+            TAG_NAME="release"
+            RELEASE_NAME="Prism Release"
+            PRERELEASE="false"
+            VERSION="0.1.0"
+          else
+            CHANNEL="dev"
+            TAG_NAME="dev"
+            RELEASE_NAME="Prism Development Build"
+            PRERELEASE="true"
+            VERSION="0.1.0-dev.${GITHUB_SHA:0:7}"
+          fi
+
+          echo "channel=${CHANNEL}" >> $GITHUB_ENV
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_ENV
+          echo "release_name=${RELEASE_NAME}" >> $GITHUB_ENV
+          echo "prerelease=${PRERELEASE}" >> $GITHUB_ENV
+          echo "version=${VERSION}" >> $GITHUB_ENV
+
+      - name: Update dev git tag
+        if: env.channel == 'dev'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f dev "${GITHUB_SHA}"
+          git push -f origin dev || true
+
+      - name: Generate updater manifest (latest.json)
+        shell: bash
+        run: |
+          node -e '
+          const fs = require("fs");
+          const path = require("path");
+
+          const distDir = "dist";
+          const tag = process.env.tag_name;
+          const repo = process.env.GITHUB_REPOSITORY;
+          const version = process.env.version || "0.1.0";
+
+          const files = fs.readdirSync(distDir);
+          console.log("Files in dist:", files);
+
+          const manifest = {
+            version: version,
+            notes: `Prism ${process.env.channel} build (${process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 7) : ""})`,
+            pub_date: new Date().toISOString(),
+            platforms: {}
+          };
+
+          function addPlatform(key, assetMatch, sigMatch) {
+            const asset = files.find(f => assetMatch.test(f));
+            const sigFile = files.find(f => sigMatch.test(f));
+            if (asset && sigFile) {
+              const signature = fs.readFileSync(path.join(distDir, sigFile), "utf8").trim();
+              manifest.platforms[key] = {
+                signature: signature,
+                url: `https://github.com/${repo}/releases/download/${tag}/${asset}`
+              };
+              console.log(`Added platform ${key}: asset=${asset}`);
+            }
+          }
+
+          // Windows x86_64
+          addPlatform("windows-x86_64", /\.nsis\.zip$/i, /\.nsis\.zip\.sig$/i);
+          if (!manifest.platforms["windows-x86_64"]) {
+            addPlatform("windows-x86_64", /\.zip$/i, /\.zip\.sig$/i);
+          }
+
+          // Linux x86_64
+          addPlatform("linux-x86_64", /(amd64|x86_64).*AppImage\.tar\.gz$/i, /(amd64|x86_64).*AppImage\.tar\.gz\.sig$/i);
+
+          // Linux aarch64
+          addPlatform("linux-aarch64", /(arm64|aarch64).*AppImage\.tar\.gz$/i, /(arm64|aarch64).*AppImage\.tar\.gz\.sig$/i);
+
+          // Darwin x86_64
+          addPlatform("darwin-x86_64", /(x64|x86_64).*app\.tar\.gz$/i, /(x64|x86_64).*app\.tar\.gz\.sig$/i);
+
+          // Darwin aarch64
+          addPlatform("darwin-aarch64", /(aarch64|arm64).*app\.tar\.gz$/i, /(aarch64|arm64).*app\.tar\.gz\.sig$/i);
+
+          fs.writeFileSync(path.join(distDir, "latest.json"), JSON.stringify(manifest, null, 2));
+          console.log("Generated latest.json:");
+          console.log(JSON.stringify(manifest, null, 2));
+          '
+
+      - name: Generate Checksums
         shell: bash
         run: |
           set -euo pipefail
           cd dist
           shopt -s nullglob
-          files=( prism_* )
+          files=( * )
           if (( ${#files[@]} == 0 )); then
-            echo "no release binaries found in dist/" >&2
+            echo "no release artifacts found in dist/" >&2
             exit 1
           fi
           sha256sum "${files[@]}" > checksums.txt
 
-      - name: GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.tag_name }}
+          name: ${{ env.release_name }}
+          prerelease: ${{ env.prerelease == 'true' }}
           files: |
             dist/*
 

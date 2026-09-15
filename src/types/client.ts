@@ -53,6 +53,17 @@ export interface ClientConfigState {
 	user_id?: string;
 	username?: string;
 	expires_at?: number | null;
+	auto_check_update?: boolean;
+	update_channel?: "release" | "dev" | string;
+}
+
+export interface UpdateCheckResult {
+	available: boolean;
+	current_version: string;
+	version?: string | null;
+	date?: string | null;
+	body?: string | null;
+	channel: string;
 }
 
 export interface ClientConfigResponse {

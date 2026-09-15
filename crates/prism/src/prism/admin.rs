@@ -389,6 +389,8 @@ fn persist_started_client(
         user_id: existing.user_id.clone(),
         username: existing.username.clone(),
         expires_at: existing.expires_at,
+        auto_check_update: existing.auto_check_update,
+        update_channel: existing.update_channel.clone(),
     };
 
     let _ = storage.save_active_profile_id(&profile_id);

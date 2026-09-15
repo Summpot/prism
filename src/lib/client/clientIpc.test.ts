@@ -15,6 +15,8 @@ import {
 	startClient,
 	stopClient,
 	updateLocalMiddlewareConfig,
+	checkForUpdate,
+	installUpdate,
 } from "./clientIpc";
 
 describe("clientIpc (Native Tauri IPC)", () => {
@@ -205,5 +207,34 @@ describe("clientIpc (Native Tauri IPC)", () => {
 		const res = await clearClientLogs();
 		expect(invokeMock).toHaveBeenCalledWith("client_clear_logs", undefined);
 		expect(res).toEqual({ ok: true });
+	});
+
+	it("checkForUpdate invokes client_check_update with channel", async () => {
+		const mockResult = {
+			available: true,
+			current_version: "0.1.0",
+			version: "0.2.0",
+			date: "2026-09-15",
+			body: "New release",
+			channel: "release",
+		};
+		const invokeMock = vi.fn().mockResolvedValue(mockResult);
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		const res = await checkForUpdate("release");
+		expect(invokeMock).toHaveBeenCalledWith("client_check_update", { channel: "release" });
+		expect(res).toEqual(mockResult);
+	});
+
+	it("installUpdate invokes client_install_update with channel", async () => {
+		const invokeMock = vi.fn().mockResolvedValue(undefined);
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+
+		await installUpdate("dev");
+		expect(invokeMock).toHaveBeenCalledWith("client_install_update", { channel: "dev" });
 	});
 });

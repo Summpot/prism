@@ -146,7 +146,11 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libxdo-dev
+            libxdo-dev \
+            xdg-utils \
+            file \
+            squashfs-tools
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
 
       - name: Setup Node
         if: matrix.desktop

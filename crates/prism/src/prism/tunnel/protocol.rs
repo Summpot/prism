@@ -189,7 +189,7 @@ pub async fn write_proxy_stream_header_with_flags<W: AsyncWrite + Unpin>(
     }
     w.write_u8(PROTOCOL_V1).await?;
     w.write_u8(flags).await?;
-    write_mc_string(w, service).await?;
+    write_varint_string(w, service).await?;
     // QUIC/WebTransport buffer small writes until flush; FLAG_RAW streams
     // (including `$admin`) never send optimizer params, so this flush is the only push.
     w.flush().await?;
@@ -345,7 +345,7 @@ pub async fn read_proxy_stream_header_with_flags<R: AsyncRead + Unpin>(
 
     let flags = r.read_u8().await?;
 
-    let s = read_mc_string(r).await?;
+    let s = read_varint_string(r).await?;
     let s = s.trim().to_string();
     if s.is_empty() {
         return Err(ProtocolError::EmptyService);
@@ -406,16 +406,16 @@ pub async fn read_service_catalog<R: AsyncRead + Unpin>(
     Ok(normalized)
 }
 
-async fn write_mc_string<W: AsyncWrite + Unpin>(w: &mut W, s: &str) -> Result<(), ProtocolError> {
+async fn write_varint_string<W: AsyncWrite + Unpin>(w: &mut W, s: &str) -> Result<(), ProtocolError> {
     let b = s.as_bytes();
     write_varint(w, b.len() as i32).await?;
     w.write_all(b).await?;
     Ok(())
 }
 
-pub const MAX_MC_STRING_BYTES: usize = 32768;
+pub const MAX_STRING_BYTES: usize = 32768;
 
-async fn read_mc_string<R: AsyncRead + Unpin>(
+async fn read_varint_string<R: AsyncRead + Unpin>(
     r: &mut R,
 ) -> Result<Cow<'static, str>, ProtocolError> {
     let len = read_varint(r).await?;
@@ -423,7 +423,7 @@ async fn read_mc_string<R: AsyncRead + Unpin>(
         return Err(ProtocolError::BadMagic);
     }
     let len: usize = len as usize;
-    if len > MAX_MC_STRING_BYTES {
+    if len > MAX_STRING_BYTES {
         return Err(ProtocolError::PayloadTooLarge(len as u32));
     }
     let mut buf = vec![0u8; len];
@@ -689,19 +689,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_read_mc_string_oversized_rejected() {
+    async fn test_read_varint_string_oversized_rejected() {
         let (mut a, mut b) = tokio::io::duplex(1024);
         tokio::spawn(async move {
-            // Write a varint length exceeding MAX_MC_STRING_BYTES
-            write_varint(&mut a, (MAX_MC_STRING_BYTES + 100) as i32)
+            // Write a varint length exceeding MAX_STRING_BYTES
+            write_varint(&mut a, (MAX_STRING_BYTES + 100) as i32)
                 .await
                 .unwrap();
         });
 
-        let res = read_mc_string(&mut b).await;
+        let res = read_varint_string(&mut b).await;
         match res {
             Err(ProtocolError::PayloadTooLarge(n)) => {
-                assert_eq!(n as usize, MAX_MC_STRING_BYTES + 100);
+                assert_eq!(n as usize, MAX_STRING_BYTES + 100);
             }
             other => panic!("expected PayloadTooLarge, got {:?}", other),
         }

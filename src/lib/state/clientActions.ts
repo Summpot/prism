@@ -207,8 +207,23 @@ export async function startGitHubAuthWithUrl(
 		}
 		const res = await getGitHubLoginUrl(TUNNEL_ADMIN_CONNECTION, state);
 		if (res.url) {
+			let targetUrl = res.url;
+			try {
+				const parsed = new URL(targetUrl);
+				const urlState = parsed.searchParams.get("state");
+				if (urlState) {
+					if (typeof window !== "undefined") {
+						window.sessionStorage.setItem("prism_oauth_state", urlState);
+					}
+				} else if (state) {
+					parsed.searchParams.set("state", state);
+					targetUrl = parsed.toString();
+				}
+			} catch {
+				// ignore
+			}
 			ui.setOauthWaitingCallback(true);
-			await openExternalUrl(res.url);
+			await openExternalUrl(targetUrl);
 		}
 	} catch (err) {
 		ui.setAuthError(err instanceof Error ? err.message : String(err));

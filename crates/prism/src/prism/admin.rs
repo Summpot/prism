@@ -1810,7 +1810,9 @@ impl AdminState {
                 Ok(AdminPayload::Reload { seq })
             }
             AdminMethod::AuthProviders => Ok(self.rpc_auth_providers()),
-            AdminMethod::AuthGithubLogin => self.rpc_github_login(),
+            AdminMethod::AuthGithubLogin { state } => {
+                self.rpc_github_login(state.as_deref()).await
+            }
             AdminMethod::AuthGithubExchange { code, device_id } => {
                 self.rpc_github_exchange(&code, device_id.as_deref()).await
             }
@@ -1943,7 +1945,7 @@ impl AdminState {
         }
     }
 
-    fn rpc_github_login(&self) -> Result<AdminPayload, AdminError> {
+    async fn rpc_github_login(&self, state: Option<&str>) -> Result<AdminPayload, AdminError> {
         let am = self
             .auth_manager
             .as_ref()
@@ -1951,9 +1953,18 @@ impl AdminState {
         let gh = am
             .github_config()
             .ok_or_else(|| AdminError::bad_request("GitHub OAuth not enabled"))?;
+        let state_param = state
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(crate::prism::auth::generate_random_state);
+        am.register_oauth_state(state_param.clone()).await;
+
+        let encoded_state: String =
+            url::form_urlencoded::byte_serialize(state_param.as_bytes()).collect();
         let mut url = format!(
-            "https://github.com/login/oauth/authorize?client_id={}&scope=read:user",
-            gh.client_id
+            "https://github.com/login/oauth/authorize?client_id={}&scope=read:user&state={}",
+            gh.client_id,
+            encoded_state
         );
         if let Some(ref r) = gh.redirect_uri {
             url.push_str(&format!("&redirect_uri={r}"));

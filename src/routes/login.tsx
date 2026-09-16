@@ -110,7 +110,22 @@ function LoginPage() {
 			}
 			const res = await getGitHubLoginUrl({ baseUrl: norm, token: "" }, state);
 			if (res.url) {
-				await openExternalUrl(res.url);
+				let targetUrl = res.url;
+				try {
+					const parsed = new URL(targetUrl);
+					const urlState = parsed.searchParams.get("state");
+					if (urlState) {
+						if (typeof window !== "undefined") {
+							window.sessionStorage.setItem("prism_oauth_state", urlState);
+						}
+					} else if (state) {
+						parsed.searchParams.set("state", state);
+						targetUrl = parsed.toString();
+					}
+				} catch {
+					// ignore
+				}
+				await openExternalUrl(targetUrl);
 			}
 		} catch (nextError) {
 			setError(nextError instanceof Error ? nextError.message : String(nextError));

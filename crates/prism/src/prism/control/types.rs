@@ -76,7 +76,9 @@ pub enum AdminMethod {
     OptimizerStats,
     Reload,
     AuthProviders,
-    AuthGithubLogin,
+    AuthGithubLogin {
+        state: Option<String>,
+    },
     AuthGithubExchange {
         code: String,
         device_id: Option<String>,
@@ -130,7 +132,7 @@ impl AdminMethod {
             | Self::OptimizerStats
             | Self::Reload => FEATURE_PANEL,
             Self::AuthProviders
-            | Self::AuthGithubLogin
+            | Self::AuthGithubLogin { .. }
             | Self::AuthGithubExchange { .. }
             | Self::AuthSession
             | Self::AuthListTokens
@@ -152,7 +154,7 @@ impl AdminMethod {
             self,
             Self::Health
                 | Self::AuthProviders
-                | Self::AuthGithubLogin
+                | Self::AuthGithubLogin { .. }
                 | Self::AuthGithubExchange { .. }
                 | Self::AuthSession
                 | Self::Authenticate { .. }
@@ -176,7 +178,12 @@ impl AdminMethod {
             "optimizer_stats" => Ok(Self::OptimizerStats),
             "reload" => Ok(Self::Reload),
             "auth.providers" => Ok(Self::AuthProviders),
-            "auth.github.login" => Ok(Self::AuthGithubLogin),
+            "auth.github.login" => Ok(Self::AuthGithubLogin {
+                state: obj()
+                    .and_then(|o| o.get("state"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            }),
             "auth.github.exchange" => Ok(Self::AuthGithubExchange {
                 code: str_field("code")?,
                 device_id: obj()

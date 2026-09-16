@@ -166,5 +166,42 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 			method: "auth.user.put",
 			payload: { user_id: "u1", role: "admin", service_rules: ["*"] },
 		});
+		expect(
+			httpToAdminRpc("/auth/github/login?state=2fb337f6-9a76-4c05-8c3c-5f87fa1af10a", "GET"),
+		).toEqual({
+			method: "auth.github.login",
+			payload: { state: "2fb337f6-9a76-4c05-8c3c-5f87fa1af10a" },
+		});
+	});
+
+	it("fetches the GitHub login URL with state parameter over $admin RPC", async () => {
+		const invokeMock = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			body: { url: "https://github.com/login/oauth/authorize?client_id=abc&state=test-state" },
+		});
+		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: invokeMock,
+		};
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await adminRequest<{ url: string }>(
+			{ baseUrl: "", token: "", kind: "tunnel-admin" },
+			"/auth/github/login?state=test-state",
+		);
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(invokeMock).toHaveBeenCalledTimes(1);
+		expect(invokeMock).toHaveBeenCalledWith(
+			"admin_rpc",
+			expect.objectContaining({
+				payload: expect.objectContaining({
+					method: "auth.github.login",
+					payload: { state: "test-state" },
+				}),
+			}),
+		);
+		expect(result.url).toContain("state=test-state");
 	});
 });

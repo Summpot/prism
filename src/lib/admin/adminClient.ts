@@ -65,10 +65,18 @@ function parseBody<T>(status: number, text: string): T {
 	return JSON.parse(text) as T;
 }
 
-function decodePath(path: string): { params: string[] } {
+function decodePath(path: string): { params: string[]; query: Record<string, string> } {
 	const trimmed = path.startsWith("/") ? path : `/${path}`;
-	const params = trimmed.split("/").filter(Boolean).map(decodeURIComponent);
-	return { params };
+	const [pathname, search] = trimmed.split("?", 2);
+	const params = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+	const query: Record<string, string> = {};
+	if (search) {
+		const searchParams = new URLSearchParams(search);
+		searchParams.forEach((val, key) => {
+			query[key] = val;
+		});
+	}
+	return { params, query };
 }
 
 /** Map leftover HTTP paths onto `$admin` RPC method names. Local adapter only. */
@@ -78,7 +86,7 @@ export function httpToAdminRpc(
 	body?: string,
 ): { method: string; payload: Record<string, unknown> } {
 	const verb = method.toUpperCase();
-	const { params } = decodePath(path);
+	const { params, query } = decodePath(path);
 	const json = (): Record<string, unknown> => {
 		if (!body) return {};
 		try {
@@ -107,10 +115,10 @@ export function httpToAdminRpc(
 		return { method: "auth.providers", payload: {} };
 	}
 	if (params[0] === "auth" && params[1] === "github" && params[2] === "login") {
-		return { method: "auth.github.login", payload: {} };
+		return { method: "auth.github.login", payload: { ...query, ...json() } };
 	}
 	if (params[0] === "auth" && params[1] === "github" && params[2] === "exchange") {
-		return { method: "auth.github.exchange", payload: json() };
+		return { method: "auth.github.exchange", payload: { ...query, ...json() } };
 	}
 	if (params[0] === "auth" && params[1] === "session") {
 		return { method: "auth.session", payload: {} };

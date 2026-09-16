@@ -18,6 +18,8 @@ import type {
 	UserRecord,
 } from "@/types/admin";
 
+export type { ServiceSnapshot, SessionInfo, TokenRecord, UserRecord } from "@/types/admin";
+
 export function getConnections(connection: PanelConnection) {
 	return adminRequest<SessionInfo[]>(connection, "/conns");
 }

@@ -11,7 +11,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
+use subtle::ConstantTimeEq;
 use crate::prism::tunnel::protocol::RegisteredService;
+
+/// Compares two secret strings in constant time by comparing their SHA-256 digests.
+pub fn constant_time_eq_str(a: &str, b: &str) -> bool {
+    let hash_a = Sha256::digest(a.as_bytes());
+    let hash_b = Sha256::digest(b.as_bytes());
+    hash_a.ct_eq(&hash_b).into()
+}
 
 /// Default lifetime for GitHub-issued desktop session tokens.
 pub const DEFAULT_OAUTH_TOKEN_TTL_DAYS: u64 = 90;
@@ -204,6 +212,8 @@ pub struct AuthConfig {
     #[serde(default)]
     pub legacy_token: Option<String>,
     #[serde(default)]
+    pub panel_token: Option<String>,
+    #[serde(default)]
     pub github: Option<GitHubOAuthConfig>,
 }
 
@@ -212,6 +222,7 @@ impl std::fmt::Debug for AuthConfig {
         f.debug_struct("AuthConfig")
             .field("mode", &self.mode)
             .field("legacy_token", &self.legacy_token.as_ref().map(|_| "***"))
+            .field("panel_token", &self.panel_token.as_ref().map(|_| "***"))
             .field("github", &self.github)
             .finish()
     }
@@ -220,6 +231,7 @@ impl std::fmt::Debug for AuthConfig {
 impl AuthConfig {
     pub fn is_auth_configured(&self) -> bool {
         self.legacy_token.as_ref().is_some_and(|t| !t.trim().is_empty())
+            || self.panel_token.as_ref().is_some_and(|t| !t.trim().is_empty())
             || self.github.as_ref().is_some_and(|g| g.enabled && !g.client_id.trim().is_empty())
     }
 }
@@ -253,6 +265,13 @@ fn open_auth_db(path: &Path) -> anyhow::Result<Connection> {
     }
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open auth sqlite at {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA busy_timeout = 5000;
@@ -502,10 +521,23 @@ impl AuthManager {
 
         // 1. Check legacy token fallback if configured
         if let Some(ref legacy) = self.config.legacy_token {
-            if !legacy.trim().is_empty() && raw_token == legacy.trim() {
+            if !legacy.trim().is_empty() && constant_time_eq_str(raw_token, legacy.trim()) {
                 return Some(AuthIdentity {
                     user_id: "legacy_admin".to_string(),
                     username: "Legacy Admin".to_string(),
+                    role: UserRole::Admin,
+                    service_rules: vec!["*".to_string()],
+                    is_admin: true,
+                });
+            }
+        }
+
+        // 1b. Check panel token fallback if configured
+        if let Some(ref panel) = self.config.panel_token {
+            if !panel.trim().is_empty() && constant_time_eq_str(raw_token, panel.trim()) {
+                return Some(AuthIdentity {
+                    user_id: "panel_admin".to_string(),
+                    username: "Panel Admin".to_string(),
                     role: UserRole::Admin,
                     service_rules: vec!["*".to_string()],
                     is_admin: true,
@@ -639,6 +671,24 @@ impl AuthManager {
             .github
             .as_ref()
             .map(|g| g.enabled)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        if self
+            .config
+            .legacy_token
+            .as_ref()
+            .map(|t| !t.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        if self
+            .config
+            .panel_token
+            .as_ref()
+            .map(|t| !t.trim().is_empty())
             .unwrap_or(false)
         {
             return true;

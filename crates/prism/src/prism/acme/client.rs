@@ -140,6 +140,14 @@ impl AcmeClient {
         std::fs::write(&account_file, serialized)
             .context("save ACME account credentials")?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = std::fs::set_permissions(&account_file, std::fs::Permissions::from_mode(0o600)) {
+                tracing::warn!(err = %e, path = %account_file.display(), "ACME: failed to restrict account file permissions");
+            }
+        }
+
         tracing::info!(
             path = %account_file.display(),
             "ACME: created and saved new account credentials"

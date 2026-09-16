@@ -1161,7 +1161,7 @@ async fn require_mutation_auth(headers: &HeaderMap, st: &AdminState) -> Result<(
             }
         }
         if let Some(expected) = st.auth.panel_token.as_ref() {
-            if token.trim() == expected.trim() {
+            if crate::prism::auth::constant_time_eq_str(token.trim(), expected.trim()) {
                 return Ok(());
             }
         }
@@ -1184,7 +1184,7 @@ async fn require_panel_auth(headers: &HeaderMap, st: &AdminState) -> Result<(), 
     }
 
     if let Some(expected) = st.auth.panel_token.as_ref() {
-        if token.trim() == expected.trim() {
+        if crate::prism::auth::constant_time_eq_str(token.trim(), expected.trim()) {
             return Ok(());
         }
     }
@@ -1251,7 +1251,7 @@ pub struct GitHubLoginQuery {
 async fn auth_github_login(
     headers: HeaderMap,
     State(st): State<Arc<AdminState>>,
-    Query(query): Query<GitHubLoginQuery>,
+    Query(_query): Query<GitHubLoginQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let am = st
         .auth_manager
@@ -1261,10 +1261,7 @@ async fn auth_github_login(
         .github_config()
         .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("GitHub OAuth not enabled")))?;
 
-    let state_param = query
-        .state
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(crate::prism::auth::generate_random_state);
+    let state_param = crate::prism::auth::generate_random_state();
     am.register_oauth_state(state_param.clone()).await;
 
     let encoded_state: String =
@@ -1521,12 +1518,14 @@ async fn auth_github_exchange(
         .as_ref()
         .ok_or_else(|| ApiError::bad_request(anyhow::anyhow!("auth manager not configured")))?;
 
-    if let Some(ref s) = payload.state {
-        if !am.verify_and_consume_oauth_state(s).await {
-            return Err(ApiError::bad_request(anyhow::anyhow!(
-                "invalid or expired OAuth state parameter (CSRF protection)"
-            )));
-        }
+    let state_valid = match payload.state.as_deref() {
+        Some(s) if !s.trim().is_empty() => am.verify_and_consume_oauth_state(s.trim()).await,
+        _ => false,
+    };
+    if !state_valid {
+        return Err(ApiError::bad_request(anyhow::anyhow!(
+            "missing, invalid, or expired OAuth state parameter (CSRF protection)"
+        )));
     }
 
     let (user, raw_token, token_record) = am
@@ -1578,7 +1577,7 @@ async fn auth_session(headers: HeaderMap, State(st): State<Arc<AdminState>>) -> 
             }
         }
         if let Some(ref panel_token) = st.auth.panel_token {
-            if token.trim() == panel_token.trim() {
+            if crate::prism::auth::constant_time_eq_str(token.trim(), panel_token.trim()) {
                 return (
                     StatusCode::OK,
                     Json(AuthSessionResponse {
@@ -1750,7 +1749,7 @@ impl AdminControl for AdminState {
             return Ok(ident);
         }
         if let Some(expected) = self.auth.panel_token.as_ref()
-            && token == expected.trim()
+            && crate::prism::auth::constant_time_eq_str(token, expected.trim())
         {
             return Ok(panel_admin_identity());
         }

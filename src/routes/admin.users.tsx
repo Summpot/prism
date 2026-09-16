@@ -155,7 +155,7 @@ function AdminUsersPage() {
 			(u) =>
 				u.username.toLowerCase().includes(needle) ||
 				(u.display_name && u.display_name.toLowerCase().includes(needle)) ||
-				u.service_rules.some((r) => r.toLowerCase().includes(needle)),
+				u.service_rules.some((r: string) => r.toLowerCase().includes(needle)),
 		);
 	}, [query, users]);
 
@@ -326,7 +326,7 @@ function AdminUsersPage() {
 													{m.users_no_rules()}
 												</span>
 											) : (
-												user.service_rules.map((rule) => (
+												user.service_rules.map((rule: string) => (
 													<Badge key={rule} tone="info" className="font-mono normal-case">
 														{rule}
 													</Badge>

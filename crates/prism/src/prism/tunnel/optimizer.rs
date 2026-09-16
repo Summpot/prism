@@ -1774,7 +1774,9 @@ impl<R: AsyncRead> AsyncRead for OptimizedReader<R> {
                         }
                     }
                 } else {
-                    this.pending_control.push(payload.clone());
+                    if this.pending_control.len() < 64 {
+                        this.pending_control.push(payload.clone());
+                    }
                     if let Some(tx) = this.control_tx.as_ref() {
                         let _ = tx.send(payload);
                     }

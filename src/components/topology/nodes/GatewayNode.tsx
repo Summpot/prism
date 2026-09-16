@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { CheckCircle2, Server, Zap } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui";
 import { formatBytes, formatPercentage } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { GatewayNodeData } from "../types";

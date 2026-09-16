@@ -156,7 +156,7 @@ pub async fn read_register_request<R: AsyncRead + Unpin>(
     r.read_exact(&mut buf).await?;
     let mut req: RegisterRequest = serde_json::from_slice(&buf)?;
 
-    let mut services = Vec::with_capacity(req.services.len());
+    let mut services = Vec::with_capacity(req.services.len().min(64));
     for s in req.services.drain(..) {
         if let Some(ns) = s.normalize() {
             services.push(ns);
@@ -207,7 +207,7 @@ pub struct OptimizerStreamParams {
 
 impl OptimizerStreamParams {
     pub fn agreed_decode_window(&self, peer_encode_window: u8) -> u32 {
-        (self.decode_window_log as u32).min(peer_encode_window as u32).max(10)
+        (self.decode_window_log as u32).min(peer_encode_window as u32).clamp(10, 22)
     }
 }
 
@@ -450,15 +450,14 @@ async fn read_varint<R: AsyncRead + Unpin>(r: &mut R) -> Result<i32, ProtocolErr
     let mut num_read = 0;
     let mut result: i32 = 0;
     loop {
+        if num_read >= 5 {
+            return Err(ProtocolError::BadMagic);
+        }
         let read = r.read_u8().await?;
         let value = (read & 0x7F) as i32;
         result |= value << (7 * num_read);
 
         num_read += 1;
-        if num_read > 5 {
-            return Err(ProtocolError::BadMagic);
-        }
-
         if (read & 0x80) == 0 {
             break;
         }

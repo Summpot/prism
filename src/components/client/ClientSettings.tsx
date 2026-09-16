@@ -451,7 +451,7 @@ function ClientUpdateSection({
 				</div>
 			)}
 
-			{status === "available" && updateResult && (
+			{(status === "available" || status === "installing") && updateResult && (
 				<div className="space-y-1.5 rounded-md bg-primary/10 border border-primary/25 p-2 text-xs">
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-1.5 font-semibold text-foreground">

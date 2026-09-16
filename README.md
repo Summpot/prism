@@ -66,7 +66,7 @@ Prism supports **TOML** and **YAML** configuration (`prism.toml`, `prism.yaml`).
 Route connections on port `25565` to different backend servers based on the incoming hostname:
 
 ```toml
-admin_addr = ":8080"
+admin_addr = "127.0.0.1:8080"
 buffer_size = 32768
 upstream_dial_timeout_ms = 5000
 
@@ -101,7 +101,7 @@ middlewares = ["tls_sni"]
 Listen for incoming tunnel connections over QUIC and TCP, and auto-expose registered service ports:
 
 ```toml
-admin_addr = ":8080"
+admin_addr = "127.0.0.1:8080"
 
 [tunnel]
 auth_token = "your-secret-token"
@@ -115,6 +115,8 @@ transport = "tcp"
 listen_addr = ":7001"
 transport = "quic"
 ```
+
+> **Note:** To expose the admin server on all network interfaces (e.g. `admin_addr = "0.0.0.0:8080"`), you must explicitly set `admin_allow_remote = true` and configure an admin credential (`panel_token`, `legacy_token`, or GitHub OAuth).
 
 #### Private Host / Connector (`prism-connector.toml`)
 
@@ -138,32 +140,30 @@ enabled = true
 adaptive_flush = true
 ```
 
-### 3. Managed Cluster Mode
+### 3. Web Admin Panel & Authentication
 
-#### Management Node (`management.toml`)
+Prism includes a web administration panel and API. You can secure access using a static bearer token (`panel_token`) or GitHub OAuth.
+
+#### Admin Panel with Token (`prism.toml`)
 
 ```toml
-role = "management"
-admin_addr = ":8080"
+admin_addr = "127.0.0.1:8080"
 
-[managed.management]
-state_file = "managed-state.json"
-panel_token = "panel-secret"
-worker_token = "worker-secret"
+[auth]
+panel_token = "your-admin-panel-secret"
 ```
 
-#### Worker Node (`worker.toml`)
+#### Admin Panel with GitHub OAuth
 
 ```toml
-role = "worker"
-admin_addr = ":8081"
+admin_addr = "127.0.0.1:8080"
 
-[managed.worker]
-node_id = "edge-node-1"
-management_url = "http://management-ip:8080"
-auth_token = "worker-secret"
-connection_mode = "active"
-sync_interval_ms = 5000
+[auth.github]
+enabled = true
+client_id = "your-github-client-id"
+client_secret = "your-github-client-secret"
+redirect_uri = "http://127.0.0.1:8080/api/auth/github/callback"
+admin_users = ["your-github-username"]
 ```
 
 ---

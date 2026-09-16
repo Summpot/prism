@@ -91,6 +91,7 @@ impl Server {
         );
 
         let mut shutdown = ctx.clone();
+        let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(1024));
         loop {
             tokio::select! {
                 _ = shutdown.changed() => {
@@ -100,12 +101,18 @@ impl Server {
                 }
                 sess = ln.accept() => {
                     let sess = sess?;
+                    let Ok(permit) = conn_semaphore.clone().try_acquire_owned() else {
+                        tracing::warn!("tunnel: max concurrent sessions (1024) reached, rejecting new session");
+                        let _ = sess.close().await;
+                        continue;
+                    };
                     let mgr = self.opts.manager.clone();
                     let token = self.opts.auth_token.clone();
                     let auth_mgr = self.opts.auth_manager.clone();
                     let admin = self.opts.admin.clone();
                     let allow_unauth = self.opts.allow_unauthenticated;
                     tokio::spawn(async move {
+                        let _permit = permit;
                         if let Err(err) = handle_session(mgr, sess, token, auth_mgr, admin, allow_unauth).await {
                             tracing::warn!(err=%err, "tunnel: session ended with error");
                         }
@@ -124,14 +131,18 @@ async fn catalog_for_identity(
     auth_mgr: &Option<Arc<AuthManager>>,
     identity: &Option<AuthIdentity>,
     allow_unauthenticated: bool,
+    auth_token: &str,
 ) -> Vec<protocol::RegisteredService> {
-    let auth_enabled = match auth_mgr {
-        Some(am) => am.is_auth_enabled().await,
-        None => false,
-    };
+    let auth_enabled = !auth_token.trim().is_empty()
+        || match auth_mgr {
+            Some(am) => am.is_auth_enabled().await,
+            None => false,
+        };
     if let (Some(am), Some(id)) = (auth_mgr, identity) {
         let all = mgr.active_services().await;
         am.filter_services(id, &all)
+    } else if identity.is_some() {
+        mgr.active_services().await
     } else if auth_enabled {
         Vec::new()
     } else if allow_unauthenticated {
@@ -154,29 +165,41 @@ async fn handle_session(
         .map(|a| a.to_string())
         .unwrap_or_default();
 
-    // First stream must be register.
-    let mut reg = sess.accept_stream().await?;
-    let req = protocol::read_register_request(&mut reg).await?;
+    // First stream must be register within REGISTER_TIMEOUT.
+    const REGISTER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    let mut reg = tokio::time::timeout(REGISTER_TIMEOUT, sess.accept_stream())
+        .await
+        .map_err(|_| anyhow::anyhow!("tunnel: register stream accept timeout"))??;
+    let req = tokio::time::timeout(REGISTER_TIMEOUT, protocol::read_register_request(&mut reg))
+        .await
+        .map_err(|_| anyhow::anyhow!("tunnel: register request read timeout"))??;
 
     let identity = if req.is_client() {
-        // Client mode: allow all to connect by default.
-        // Static auth_token connections are removed. Only verified tokens (e.g. GitHub OAuth) provide identity.
+        let mut id = None;
         if let Some(ref am) = auth_mgr {
             if !req.token.trim().is_empty() {
-                am.verify_token(&req.token).await
-            } else {
-                None
+                id = am.verify_token(&req.token).await;
             }
-        } else {
-            None
         }
+        if id.is_none() && !auth_token.trim().is_empty() {
+            if crate::prism::auth::constant_time_eq_str(&req.token, &auth_token) {
+                id = Some(crate::prism::auth::AuthIdentity {
+                    user_id: "client".to_string(),
+                    username: "Tunnel Client".to_string(),
+                    role: crate::prism::auth::UserRole::Member,
+                    service_rules: vec!["*".to_string()],
+                    is_admin: false,
+                });
+            }
+        }
+        id
     } else {
         // Connector mode: connectors publish services, verify against connector token if configured
         if let Some(ref am) = auth_mgr {
             match am.verify_token(&req.token).await {
                 Some(ident) => Some(ident),
                 None => {
-                    if !auth_token.trim().is_empty() && req.token == auth_token {
+                    if !auth_token.trim().is_empty() && crate::prism::auth::constant_time_eq_str(&req.token, &auth_token) {
                         Some(crate::prism::auth::AuthIdentity {
                             user_id: "connector".to_string(),
                             username: "Tunnel Connector".to_string(),
@@ -200,12 +223,18 @@ async fn handle_session(
                 }
             }
         } else if !auth_token.trim().is_empty() {
-            if req.token != auth_token {
+            if !crate::prism::auth::constant_time_eq_str(&req.token, &auth_token) {
                 tracing::warn!(connector=%remote, "tunnel: bad token for connector");
                 sess.close().await;
                 return Ok(());
             }
-            None
+            Some(crate::prism::auth::AuthIdentity {
+                user_id: "connector".to_string(),
+                username: "Tunnel Connector".to_string(),
+                role: crate::prism::auth::UserRole::Member,
+                service_rules: vec!["*".to_string()],
+                is_admin: false,
+            })
         } else if allow_unauthenticated {
             None
         } else {
@@ -236,10 +265,11 @@ async fn handle_session(
         let identity_broadcast = session_identity.clone();
         let mut ident_rx = ident_tx.subscribe();
 
+        let auth_token_broadcast = auth_token.clone();
         let broadcast_task = tokio::spawn(async move {
             let mut sub = mgr_broadcast.subscribe();
             let ident = identity_broadcast.lock().await.clone();
-            let initial = catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident, allow_unauthenticated).await;
+            let initial = catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident, allow_unauthenticated, &auth_token_broadcast).await;
             if protocol::write_service_catalog(&mut reg, &initial)
                 .await
                 .is_err()
@@ -261,7 +291,7 @@ async fn handle_session(
                 }
                 let ident = identity_broadcast.lock().await.clone();
                 let services =
-                    catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident, allow_unauthenticated).await;
+                    catalog_for_identity(&mgr_broadcast, &auth_mgr_broadcast, &ident, allow_unauthenticated, &auth_token_broadcast).await;
                 if protocol::write_service_catalog(&mut reg, &services)
                     .await
                     .is_err()
@@ -278,6 +308,7 @@ async fn handle_session(
             let identity = session_identity.clone();
             let ident_tx = ident_tx.clone();
             let admin = admin.clone();
+            let auth_token = auth_token.clone();
             tokio::spawn(async move {
                 if let Err(err) = handle_client_stream(
                     mgr,
@@ -286,6 +317,8 @@ async fn handle_session(
                     identity,
                     ident_tx,
                     admin,
+                    auth_token,
+                    allow_unauthenticated,
                 )
                 .await
                 {
@@ -322,6 +355,8 @@ async fn handle_client_stream(
     identity: Arc<Mutex<Option<AuthIdentity>>>,
     ident_tx: watch::Sender<u64>,
     admin: Option<Arc<dyn AdminControl>>,
+    auth_token: String,
+    allow_unauthenticated: bool,
 ) -> anyhow::Result<()> {
     let (kind, service_name, flags) =
         protocol::read_proxy_stream_header_with_flags(&mut client_stream).await?;
@@ -346,9 +381,14 @@ async fn handle_client_stream(
         return Ok(());
     }
 
-    if let Some(ref am) = auth_mgr
-        && am.is_auth_enabled().await
-    {
+    let auth_configured = !auth_token.trim().is_empty()
+        || if let Some(ref am) = auth_mgr {
+            am.is_auth_enabled().await
+        } else {
+            false
+        };
+
+    if auth_configured && !allow_unauthenticated {
         let ident = identity.lock().await.clone();
         let Some(ref id) = ident else {
             tracing::warn!(
@@ -358,13 +398,15 @@ async fn handle_client_stream(
             return Ok(());
         };
 
-        if !am.can_access_service(id, &service_name) {
-            tracing::warn!(
-                user = %id.username,
-                service = %service_name,
-                "tunnel: unauthorized client stream blocked by ACL"
-            );
-            return Ok(());
+        if let Some(ref am) = auth_mgr {
+            if !am.can_access_service(id, &service_name) {
+                tracing::warn!(
+                    user = %id.username,
+                    service = %service_name,
+                    "tunnel: unauthorized client stream blocked by ACL"
+                );
+                return Ok(());
+            }
         }
     }
 

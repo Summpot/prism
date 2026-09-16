@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Globe, Radio, Server, Unplug, X, Zap } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatDuration, formatPercentage } from "@/lib/format";
 import { m } from "@/paraglide/messages";

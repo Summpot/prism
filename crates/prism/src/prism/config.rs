@@ -164,7 +164,10 @@ pub fn ensure_config_file(path: &Path) -> anyhow::Result<bool> {
         .open(path)
         .with_context(|| format!("config: create {}", path.display()))?;
     use std::io::Write;
-    f.write_all(tmpl.as_bytes())
+    let token = crate::prism::auth::generate_random_state();
+    let content = tmpl.replace("auth_token = \"prism-tunnel-secret\"", &format!("auth_token = \"{token}\""))
+                      .replace("auth_token: \"prism-tunnel-secret\"", &format!("auth_token: \"{token}\""));
+    f.write_all(content.as_bytes())
         .with_context(|| format!("config: write {}", path.display()))?;
 
     #[cfg(unix)]
@@ -641,6 +644,9 @@ struct FileConfig {
     #[serde(default)]
     admin_allow_remote: bool,
 
+    #[serde(default)]
+    panel_token: Option<String>,
+
     /// Accepted and ignored for backward compatibility (metrics support removed).
     #[serde(default, deserialize_with = "deserialize_ignored_any")]
     #[allow(dead_code)]
@@ -977,6 +983,8 @@ struct FileAuthConfig {
     mode: Option<String>,
     #[serde(default)]
     legacy_token: Option<String>,
+    #[serde(default)]
+    panel_token: Option<String>,
     github: Option<FileGitHubOAuthConfig>,
 }
 
@@ -985,6 +993,7 @@ impl std::fmt::Debug for FileAuthConfig {
         f.debug_struct("FileAuthConfig")
             .field("mode", &self.mode)
             .field("legacy_token", &self.legacy_token.as_ref().map(|_| "***"))
+            .field("panel_token", &self.panel_token.as_ref().map(|_| "***"))
             .field("github", &self.github)
             .finish()
     }
@@ -1493,6 +1502,10 @@ impl Config {
                 .legacy_token
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
+            auth_cfg.panel_token = fa
+                .panel_token
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
             if let Some(fg) = fa.github {
                 auth_cfg.github = Some(crate::prism::auth::GitHubOAuthConfig {
                     enabled: fg.enabled,
@@ -1513,6 +1526,13 @@ impl Config {
                         .to_string(),
                 });
             }
+        }
+        if auth_cfg.panel_token.is_none() {
+            auth_cfg.panel_token = fc
+                .panel_token
+                .take()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
         }
         cfg.auth = auth_cfg;
 
@@ -1577,7 +1597,17 @@ impl Config {
             && !cfg.tunnel.allow_unauthenticated
         {
             anyhow::bail!(
-                "config: tunnel endpoints configured without authentication; specify tunnel.auth_token, configure [auth], or explicitly set tunnel.allow_unauthenticated = true to allow open access"
+                "config: tunnel endpoints configured without authentication; specify tunnel.auth_token or configure [auth] to secure tunnel access"
+            );
+        }
+
+        if cfg.admin_allow_remote
+            && !cfg.admin_addr.trim().is_empty()
+            && !cfg.auth.is_auth_configured()
+        {
+            anyhow::bail!(
+                "config: admin_allow_remote is enabled with admin_addr '{}' but no administrative authentication is configured; please configure auth.panel_token, auth.legacy_token, or [auth.github] to prevent unauthenticated remote admin access",
+                cfg.admin_addr
             );
         }
 
@@ -1664,7 +1694,7 @@ const DEFAULT_CONFIG_TEMPLATE_TOML: &str = r#"# $schema=https://raw.githubuserco
 admin_addr = "127.0.0.1:8080"
 
 [tunnel]
-auth_token = ""
+auth_token = "prism-tunnel-secret"
 auto_listen_services = true
 
 [[tunnel.endpoints]]
@@ -1704,7 +1734,7 @@ const DEFAULT_CONFIG_TEMPLATE_YAML: &str = r#"# yaml-language-server: $schema=ht
 admin_addr: "127.0.0.1:8080"
 
 tunnel:
-  auth_token: ""
+  auth_token: "prism-tunnel-secret"
   auto_listen_services: true
   endpoints:
     - listen_addr: ":7000"

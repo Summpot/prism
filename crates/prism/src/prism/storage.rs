@@ -471,6 +471,11 @@ impl StorageEngine {
         let mut keyring_ok = false;
         if self.use_keyring && secrets::store_tunnel_token(&cred.profile_id, token) {
             keyring_ok = true;
+        } else if self.use_keyring {
+            tracing::warn!(
+                profile_id = %cred.profile_id,
+                "storage: system keyring unavailable; storing tunnel token in local SQLite database"
+            );
         }
         // Do not store plaintext token in sqlite when the keyring successfully stores it.
         let token_blob = if keyring_ok {

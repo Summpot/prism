@@ -160,7 +160,9 @@ pub async fn run(
             config_path: resolved.path.clone(),
             reload_tx: reload_tx.clone(),
             tunnel: Some(tunnel_manager.clone()),
-            auth: admin::AdminAuth::default(),
+            auth: admin::AdminAuth {
+                panel_token: cfg.auth.panel_token.clone(),
+            },
             client: Some(client_controller.clone()),
             auth_manager: Some(auth_manager.clone()),
             storage: storage.clone(),

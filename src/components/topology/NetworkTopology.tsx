@@ -286,7 +286,7 @@ export function NetworkTopology({ connection }: { connection: PanelConnection })
 			initialNodes: rawNodes,
 			initialEdges: rawEdges,
 		};
-	}, [connsData, nodesData, optimizerData, servicesData]);
+	}, [connsData, optimizerData, servicesData]);
 
 	// Filter nodes based on user filter controls
 	const filteredElements = useMemo(() => {

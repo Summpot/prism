@@ -697,12 +697,29 @@ impl Default for DynamicSymbolTable {
 /// cannot clobber driver structs, scratch, or injected key material in pages 0-15.
 pub const WASM_INPUT_OFFSET: usize = 0x100000;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct HostEnv {
     pub sym_table_from_client: Arc<Mutex<DynamicSymbolTable>>,
     pub sym_table_from_server: Arc<Mutex<DynamicSymbolTable>>,
     pub flow_from_server: bool,
     pub announced: Vec<Vec<u8>>,
+    pub limits: wasmtime::StoreLimits,
+}
+
+impl Clone for HostEnv {
+    fn clone(&self) -> Self {
+        Self {
+            sym_table_from_client: self.sym_table_from_client.clone(),
+            sym_table_from_server: self.sym_table_from_server.clone(),
+            flow_from_server: self.flow_from_server,
+            announced: self.announced.clone(),
+            limits: wasmtime::StoreLimitsBuilder::new()
+                .memory_size(MAX_WASM_MEMORY_BYTES)
+                .instances(1)
+                .memories(1)
+                .build(),
+        }
+    }
 }
 
 impl Default for HostEnv {
@@ -712,6 +729,11 @@ impl Default for HostEnv {
             sym_table_from_server: Arc::new(Mutex::new(DynamicSymbolTable::default())),
             flow_from_server: false,
             announced: Vec::new(),
+            limits: wasmtime::StoreLimitsBuilder::new()
+                .memory_size(MAX_WASM_MEMORY_BYTES)
+                .instances(1)
+                .memories(1)
+                .build(),
         }
     }
 }
@@ -1010,6 +1032,9 @@ pub fn host_crypto_rsa_decrypt(
     if key_ptr < 0 || key_len <= 0 || in_ptr < 0 || in_len <= 0 || out_ptr < 0 {
         return -3;
     }
+    if (key_len as usize) > 8192 || (in_len as usize) > 8192 {
+        return -3;
+    }
     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -3,
@@ -1072,6 +1097,9 @@ pub fn host_crypto_aes_cfb8(
     if data_len == 0 {
         return 0;
     }
+    if (data_len as usize) > 2 * 1024 * 1024 {
+        return -1;
+    }
     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
         None => return -1,
@@ -1128,6 +1156,9 @@ pub fn host_deflate_decompress(
     }
     if in_len == 0 {
         return 0;
+    }
+    if (in_len as usize) > MAX_DECOMPRESSED_BYTES {
+        return -1;
     }
     let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
         Some(m) => m,
@@ -1204,7 +1235,7 @@ pub fn host_deflate_compress(
     let mem_size = memory.data_size(&caller);
 
     let in_end = (in_ptr as usize).saturating_add(in_len as usize);
-    if in_end > mem_size {
+    if in_end > mem_size || (in_len as usize) > MAX_DECOMPRESSED_BYTES {
         return -1;
     }
 
@@ -1260,7 +1291,7 @@ pub fn host_lz4_decompress(
     let mem_size = memory.data_size(&caller);
 
     let in_end = (in_ptr as usize).saturating_add(in_len as usize);
-    if in_end > mem_size {
+    if in_end > mem_size || (in_len as usize) > MAX_DECOMPRESSED_BYTES {
         return -1;
     }
 
@@ -1328,7 +1359,7 @@ pub fn host_lz4_compress(
     let mem_size = memory.data_size(&caller);
 
     let in_end = (in_ptr as usize).saturating_add(in_len as usize);
-    if in_end > mem_size {
+    if in_end > mem_size || (in_len as usize) > MAX_DECOMPRESSED_BYTES {
         return -1;
     }
 
@@ -1395,7 +1426,7 @@ pub fn host_sym_intern(mut caller: Caller<'_, HostEnv>, str_ptr: i32, str_len: i
     let mem_size = memory.data_size(&caller);
 
     let end = (str_ptr as usize).saturating_add(str_len as usize);
-    if end > mem_size {
+    if end > mem_size || (str_len as usize) > 4096 {
         return -1;
     }
 
@@ -1558,6 +1589,7 @@ pub struct WasmProtocolSession {
 impl WasmProtocolSession {
     pub fn new(engine: &Engine, module: &Module) -> anyhow::Result<Self> {
         let mut store = Store::new(engine, HostEnv::default());
+        store.limiter(|env| &mut env.limits);
         let _ = store.set_fuel(10_000_000);
         store.set_epoch_deadline(20);
         let linker = create_prism_linker(engine)?;

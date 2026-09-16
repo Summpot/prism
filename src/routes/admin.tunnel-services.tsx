@@ -110,18 +110,18 @@ function AdminTunnelServicesPage() {
 							key={`${snapshot.service.name}-${snapshot.client_id}-${index}`}
 							className="shadow-xs"
 						>
-							<CardHeader className="flex flex-row items-start justify-between gap-4">
+							<CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
 								<div>
 									<CardTitle className="flex items-center gap-2">
 										<Unplug className="h-4 w-4 text-muted-foreground" />
 										{snapshot.service.name}
 									</CardTitle>
-									<div className="mt-1.5 text-sm text-muted-foreground">
+									<div className="mt-1.5 text-sm text-muted-foreground truncate">
 										{m.services_client()}{" "}
 										<span className="font-mono text-foreground">{snapshot.client_id}</span>
 									</div>
 								</div>
-								<div className="flex flex-wrap items-center justify-end gap-2">
+								<div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
 									<Badge tone={snapshot.primary ? "ok" : "neutral"}>
 										{snapshot.primary ? m.services_primary() : m.services_secondary()}
 									</Badge>
@@ -131,7 +131,7 @@ function AdminTunnelServicesPage() {
 								</div>
 							</CardHeader>
 							<CardContent>
-								<div className="grid gap-3 sm:grid-cols-2">
+								<div className="grid gap-2.5 sm:gap-3 grid-cols-1 sm:grid-cols-2">
 									<InfoValue label={m.services_protocol()} value={snapshot.service.proto} />
 									<InfoValue
 										label={m.services_local_addr()}

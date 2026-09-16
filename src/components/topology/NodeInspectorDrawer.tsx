@@ -23,7 +23,7 @@ export function NodeInspectorDrawer({ node, onClose }: NodeInspectorDrawerProps)
 	const data = node.data;
 
 	return (
-		<div className="absolute right-0 top-0 bottom-0 z-20 w-80 sm:w-96 border-l border-border bg-card/95 backdrop-blur-md shadow-2xl flex flex-col transition-all duration-300 animate-in slide-in-from-right-10">
+		<div className="absolute right-0 top-0 bottom-0 z-20 w-full sm:w-96 max-w-full border-l border-border bg-card/95 backdrop-blur-md shadow-2xl flex flex-col transition-all duration-300 animate-in slide-in-from-right-10">
 			{/* Drawer Header */}
 			<div className="flex items-center justify-between p-4 border-b border-border/60">
 				<div className="flex items-center gap-2 min-w-0">

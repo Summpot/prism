@@ -35,7 +35,7 @@ export function ClientTraffic() {
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
-			<div className="flex flex-none select-none items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
+			<div className="flex flex-none select-none flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
 				<div className="flex items-center gap-2 min-w-0">
 					<ArrowDownUp className="h-4 w-4 text-primary flex-none" />
 					<div className="min-w-0">
@@ -47,7 +47,7 @@ export function ClientTraffic() {
 						</p>
 					</div>
 				</div>
-				<div className="flex items-center gap-1.5 flex-none">
+				<div className="flex items-center gap-1.5 flex-none self-end sm:self-auto">
 					<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
 						<button
 							type="button"
@@ -97,7 +97,7 @@ export function ClientTraffic() {
 				</div>
 			) : (
 				<>
-					<div className="grid grid-cols-4 gap-1.5 text-center font-mono">
+					<div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center font-mono">
 						<div className="rounded-lg border border-border bg-card px-1.5 py-2 shadow-xs">
 							<div className="text-[9px] uppercase text-muted-foreground">
 								{statsViewMode === "session" ? m.client_uptime() : m.client_sessions()}
@@ -164,7 +164,7 @@ export function ClientTraffic() {
 						{statsViewMode === "session" ? (
 							<OptimizerStatsView stats={status?.stats} />
 						) : (
-							<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+							<div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
 								<div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
 									<div className="text-[10px] uppercase text-muted-foreground">
 										{m.client_raw()}

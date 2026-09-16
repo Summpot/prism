@@ -7,6 +7,7 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PanelLeft } from "lucide-react";
 
 import Header from "@/components/Header";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
@@ -24,6 +25,7 @@ import {
 } from "@/lib/desktopWindow";
 import { TUNNEL_ADMIN_CONNECTION, tunnelAdminConnection } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
+import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
 import { getLocale } from "@/paraglide/runtime";
 
@@ -90,7 +92,18 @@ function DesktopTitleBar() {
 			data-tauri-drag-region
 			className="h-8 flex-none select-none border-b border-border/80 bg-card/80 px-2.5 flex items-center justify-between cursor-default z-50 backdrop-blur"
 		>
-			<div className="flex items-center gap-2" data-tauri-drag-region>
+			<div className="flex items-center gap-1.5" data-tauri-drag-region>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-xs"
+					onClick={() => window.dispatchEvent(new CustomEvent("prism:toggle-sidebar"))}
+					className="h-6 w-6 text-muted-foreground hover:bg-accent hover:text-foreground rounded cursor-pointer"
+					title="Toggle Sidebar"
+					aria-label="Toggle Sidebar"
+				>
+					<PanelLeft className="h-3.5 w-3.5" />
+				</Button>
 				<img
 					src="/logo192.png"
 					alt="Prism"
@@ -203,6 +216,7 @@ function RootContent() {
 	});
 
 	useEffect(() => {
+		return setupDeepLinkListener((payload) => {
 			if (payload.kind === "auth") {
 				// H-3: Prevent unsolicited raw token deep link from silently overwriting active credentials.
 				const isCurrentlyLoggingIn = locationRef.current.pathname === "/login";
@@ -224,9 +238,7 @@ function RootContent() {
 			} else if (payload.kind === "auth-code") {
 				// M-6: Verify OAuth state to prevent CSRF / session fixation
 				const expectedState =
-					typeof window !== "undefined"
-						? window.sessionStorage.getItem("prism_oauth_state")
-						: null;
+					typeof window !== "undefined" ? window.sessionStorage.getItem("prism_oauth_state") : null;
 				if (expectedState && payload.state && expectedState !== payload.state) {
 					console.error("OAuth state mismatch! Rejecting unverified callback.");
 					window.dispatchEvent(
@@ -326,7 +338,12 @@ function RootContent() {
 			{/* Sidebar + Main Viewport */}
 			<div className="flex-1 min-h-0 flex overflow-hidden">
 				<Header />
-				<main className="flex-1 min-w-0 h-full overflow-hidden bg-background md:pt-0 pt-12 flex flex-col">
+				<main
+					className={cn(
+						"flex-1 min-w-0 h-full overflow-hidden bg-background flex flex-col",
+						!isDesktop && "md:pt-0 pt-12",
+					)}
+				>
 					<Outlet />
 				</main>
 			</div>

@@ -121,7 +121,7 @@ function AdminConnectionsPage() {
 
 			{filtered.length > 0 ? (
 				<div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
-					<div className="hidden md:block">
+					<div className="hidden md:block overflow-x-auto">
 						<Table>
 							<TableHeader>
 								<TableRow>
@@ -136,16 +136,20 @@ function AdminConnectionsPage() {
 							<TableBody>
 								{filtered.map((conn) => (
 									<TableRow key={conn.id}>
-										<TableCell className="font-mono text-xs">{conn.client}</TableCell>
-										<TableCell>{conn.host || "—"}</TableCell>
-										<TableCell className="font-mono text-xs">{conn.upstream}</TableCell>
-										<TableCell className="font-mono text-xs whitespace-normal">
+										<TableCell className="font-mono text-xs whitespace-nowrap">
+											{conn.client}
+										</TableCell>
+										<TableCell className="whitespace-nowrap">{conn.host || "—"}</TableCell>
+										<TableCell className="font-mono text-xs whitespace-nowrap">
+											{conn.upstream}
+										</TableCell>
+										<TableCell className="font-mono text-xs whitespace-normal min-w-40">
 											<OptimizerCell conn={conn} />
 										</TableCell>
-										<TableCell className="text-muted-foreground">
+										<TableCell className="text-muted-foreground whitespace-nowrap">
 											{formatTime(conn.started_at_unix_ms)}
 										</TableCell>
-										<TableCell className="text-muted-foreground">
+										<TableCell className="text-muted-foreground whitespace-nowrap">
 											{formatDuration(conn.started_at_unix_ms)}
 										</TableCell>
 									</TableRow>
@@ -160,7 +164,7 @@ function AdminConnectionsPage() {
 									<Wifi className="h-4 w-4 text-muted-foreground" />
 									<span className="font-mono text-sm">{conn.client}</span>
 								</div>
-								<div className="grid grid-cols-2 gap-3">
+								<div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
 									<MiniValue label={m.admin_host()} value={conn.host || "—"} />
 									<MiniValue label={m.admin_upstream()} value={conn.upstream} />
 									<MiniValue

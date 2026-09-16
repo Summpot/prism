@@ -174,7 +174,7 @@ export function ClientOverview() {
 
 			{/* 极简连接远端卡片 (Connect to Remote Hero) */}
 			{showLoggedInCard && authSession ? (
-				<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs flex items-center justify-between gap-3">
+				<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 					<div className="flex items-center gap-2.5 min-w-0">
 						{authSession.avatar_url ? (
 							<img
@@ -188,7 +188,7 @@ export function ClientOverview() {
 							</div>
 						)}
 						<div className="min-w-0">
-							<div className="flex items-center gap-1.5">
+							<div className="flex items-center gap-1.5 flex-wrap">
 								<span className="text-xs font-bold text-foreground truncate">
 									{authSession.display_name || authSession.username || m.session_logged_in()}
 								</span>
@@ -208,7 +208,7 @@ export function ClientOverview() {
 						</div>
 					</div>
 
-					<div className="flex items-center gap-2 flex-none">
+					<div className="flex items-center gap-2 flex-none self-end sm:self-auto">
 						{showAdminConsole ? (
 							<Link to="/admin" className="text-[11px] font-bold text-primary hover:underline">
 								{m.client_admin_console()}
@@ -493,7 +493,7 @@ export function ClientOverview() {
 
 			{/* 隧道连接与实时状态卡片 (Active Tunnel Status) - 架构上保留支持未来多服务器/多隧道并行连接的扩展能力 */}
 			<div className="flex-none rounded-lg border border-border bg-card p-3 shadow-xs space-y-2.5">
-				<div className="flex items-center justify-between gap-2">
+				<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
 					<div className="flex items-center gap-2 min-w-0 flex-1">
 						<div
 							className={cn(
@@ -512,7 +512,7 @@ export function ClientOverview() {
 							)}
 						</div>
 						<div className="min-w-0 flex-1">
-							<div className="flex items-center gap-1.5">
+							<div className="flex items-center gap-1.5 flex-wrap">
 								<span className="font-bold text-xs sm:text-sm text-foreground truncate">
 									{profileName || m.client_default_profile()}
 								</span>
@@ -529,51 +529,53 @@ export function ClientOverview() {
 										: status?.transport || transport}
 								</Badge>
 							</div>
-							<div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground truncate">
-								<span className="truncate">
+							<div className="flex flex-wrap items-center gap-1 text-[11px] font-mono text-muted-foreground min-w-0">
+								<span className="truncate max-w-full">
 									{serverAddr || status?.server_addr || m.client_no_server()}
 								</span>
-								<span>&rarr;</span>
-								<span className="truncate">{listenAddr || status?.listen_addr}</span>
+								<span className="shrink-0">&rarr;</span>
+								<span className="truncate max-w-full">{listenAddr || status?.listen_addr}</span>
 							</div>
 						</div>
 					</div>
 
-					{tunnelAction === "disconnect" ? (
-						<Button
-							size="sm"
-							variant="outline"
-							disabled={actionLoading}
-							onClick={handleDisconnect}
-							className="h-7 px-2.5 text-xs font-semibold gap-1 rounded-md flex-none shadow-xs text-destructive hover:bg-destructive/10 cursor-pointer"
-						>
-							{actionLoading ? (
-								<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Power className="h-3.5 w-3.5" />
-							)}
-							<span>{m.client_disconnect_tunnel()}</span>
-						</Button>
-					) : tunnelAction === "start" ? (
-						<Button
-							size="sm"
-							variant="default"
-							disabled={actionLoading}
-							onClick={handleConnect}
-							className="h-7 px-3 text-xs font-bold gap-1 rounded-md flex-none shadow-xs bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-						>
-							{actionLoading ? (
-								<RotateCcw className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Power className="h-3.5 w-3.5" />
-							)}
-							<span>{m.client_start_connection()}</span>
-						</Button>
-					) : (
-						<span className="text-[11px] font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-							{m.client_waiting_for_login()}
-						</span>
-					)}
+					<div className="flex items-center self-end sm:self-auto flex-none">
+						{tunnelAction === "disconnect" ? (
+							<Button
+								size="sm"
+								variant="outline"
+								disabled={actionLoading}
+								onClick={handleDisconnect}
+								className="h-7 px-2.5 text-xs font-semibold gap-1 rounded-md shadow-xs text-destructive hover:bg-destructive/10 cursor-pointer"
+							>
+								{actionLoading ? (
+									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<Power className="h-3.5 w-3.5" />
+								)}
+								<span>{m.client_disconnect_tunnel()}</span>
+							</Button>
+						) : tunnelAction === "start" ? (
+							<Button
+								size="sm"
+								variant="default"
+								disabled={actionLoading}
+								onClick={handleConnect}
+								className="h-7 px-3 text-xs font-bold gap-1 rounded-md shadow-xs bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+							>
+								{actionLoading ? (
+									<RotateCcw className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<Power className="h-3.5 w-3.5" />
+								)}
+								<span>{m.client_start_connection()}</span>
+							</Button>
+						) : (
+							<span className="text-[11px] font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+								{m.client_waiting_for_login()}
+							</span>
+						)}
+					</div>
 				</div>
 
 				{/* Connected Metrics Strip */}
@@ -622,8 +624,8 @@ export function ClientOverview() {
 							</div>
 						</div>
 
-						{/* 4-col compact stats */}
-						<div className="grid grid-cols-4 gap-1.5 text-center font-mono">
+						{/* 4-col compact stats (2-col on small screens, 4-col on sm+) */}
+						<div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center font-mono">
 							<div className="rounded bg-muted/40 px-1.5 py-1">
 								<div className="text-[9px] uppercase text-muted-foreground">
 									{statsViewMode === "session" ? m.client_uptime() : m.client_sessions()}
@@ -670,7 +672,7 @@ export function ClientOverview() {
 						</div>
 
 						{/* Optimizer Directional & Accounting Breakdown */}
-						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+						<div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
 								title={directionTooltip(m.client_up(), status?.stats.uplink)}
@@ -722,7 +724,7 @@ export function ClientOverview() {
 						</div>
 
 						{/* Optimizer gain vs. batching/compression costs */}
-						<div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+						<div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
 								title={linkRateText}
@@ -769,8 +771,8 @@ export function ClientOverview() {
 						</div>
 
 						{/* Throughput and LAN bar */}
-						<div className="flex items-center justify-between gap-2 px-0.5 text-[10px] text-muted-foreground">
-							<div className="flex items-center gap-1.5 flex-1 min-w-0">
+						<div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-[10px] text-muted-foreground">
+							<div className="flex items-center gap-1.5 flex-1 min-w-44">
 								<Activity className="h-3 w-3 text-emerald-500 flex-none" />
 								<span className="font-mono text-emerald-500 font-semibold flex-none text-[10px]">
 									{formatBytes(throughputSamples[throughputSamples.length - 1] || 0)}/s
@@ -803,7 +805,7 @@ export function ClientOverview() {
 				) : null}
 
 				{!isConnected && cumulativeStats && cumulativeStats.raw_bytes > 0 ? (
-					<div className="border-t border-border/60 pt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+					<div className="border-t border-border/60 pt-1.5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
 						<div className="flex items-center gap-1.5 truncate">
 							<span className="font-semibold uppercase tracking-wider text-[9px] text-primary">
 								{m.client_history_stats()}

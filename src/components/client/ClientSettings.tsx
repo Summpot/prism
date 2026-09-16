@@ -53,9 +53,9 @@ export function ClientSettings() {
 	const { setLinkProtocol, setImportModalOpen, handleShareLink, copied } = useClientLink();
 
 	return (
-		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-hidden">
+		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto md:overflow-hidden">
 			{/* Header Bar */}
-			<div className="flex flex-none select-none items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
+			<div className="flex flex-none select-none flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-border bg-card p-2.5 shadow-xs">
 				<div className="flex items-center gap-2 min-w-0">
 					<div className="min-w-0">
 						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
@@ -68,7 +68,7 @@ export function ClientSettings() {
 				</div>
 
 				{/* Top Actions */}
-				<div className="flex items-center gap-1.5 flex-none">
+				<div className="flex items-center gap-1.5 flex-wrap self-end sm:self-auto">
 					<Button
 						variant="outline"
 						size="xs"
@@ -81,7 +81,7 @@ export function ClientSettings() {
 							setFakeLanBroadcast(true);
 							handleSelectProfile(id);
 						}}
-						className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
+						className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
 					>
 						<Plus className="h-3.5 w-3.5" />
 						<span>{m.client_new_profile()}</span>
@@ -91,7 +91,7 @@ export function ClientSettings() {
 						variant="outline"
 						size="xs"
 						onClick={() => setImportModalOpen(true)}
-						className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
+						className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
 					>
 						<Download className="h-3.5 w-3.5 text-primary" />
 						<span>{m.client_import_link()}</span>
@@ -101,7 +101,7 @@ export function ClientSettings() {
 						variant="outline"
 						size="xs"
 						onClick={handleShareLink}
-						className="h-7 gap-1 text-xs px-2.5 cursor-pointer"
+						className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
 					>
 						{copied === "share" ? (
 							<Check className="h-3.5 w-3.5 text-emerald-500" />
@@ -114,9 +114,9 @@ export function ClientSettings() {
 			</div>
 
 			{/* 2-Column Master-Detail Layout */}
-			<div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 min-h-0 overflow-hidden">
+			<div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 min-h-0 md:overflow-hidden">
 				{/* Left Column: Saved Profiles List */}
-				<div className="md:col-span-5 flex flex-col min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs space-y-2">
+				<div className="md:col-span-5 flex flex-col min-h-60 md:min-h-0 rounded-lg border border-border bg-card p-3 shadow-xs space-y-2">
 					<div className="flex items-center justify-between pb-1.5 border-b border-border/50 flex-none">
 						<span className="text-xs font-semibold text-foreground">
 							{m.client_saved_profiles()}

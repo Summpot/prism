@@ -150,7 +150,7 @@ function AdminDashboardPage() {
 
 			{error ? <ErrorBanner message={error} onRetry={fetchData} /> : null}
 
-			<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+			<section className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
 				<MetricCard
 					label={m.dashboard_active_connections()}
 					value={connectionCount}
@@ -183,7 +183,7 @@ function AdminDashboardPage() {
 			</section>
 
 			<Card className="shadow-xs">
-				<CardHeader className="flex flex-row items-start justify-between gap-4">
+				<CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
 					<div>
 						<CardTitle>{m.dashboard_gateway_overview()}</CardTitle>
 						<CardDescription className="mt-1.5">

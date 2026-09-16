@@ -72,14 +72,16 @@ function StatTile({
 
 function QuantileRow({ label, q }: { label: string; q: Quantiles }) {
 	return (
-		<div className="grid grid-cols-5 gap-1 text-center font-mono text-[10px]">
-			<div className="text-left text-[10px] font-sans font-medium text-muted-foreground self-center">
+		<div className="flex flex-col sm:grid sm:grid-cols-5 gap-1 text-center font-mono text-[10px]">
+			<div className="text-left text-[10px] font-sans font-medium text-muted-foreground self-start sm:self-center">
 				{label}
 			</div>
-			<MiniQ label={m.traffic_p50()} value={`${q.p50_us.toFixed(0)}µs`} />
-			<MiniQ label={m.traffic_p90()} value={`${q.p90_us.toFixed(0)}µs`} />
-			<MiniQ label={m.traffic_p99()} value={`${q.p99_us.toFixed(0)}µs`} />
-			<MiniQ label={m.traffic_max()} value={`${q.max_us.toFixed(0)}µs`} />
+			<div className="grid grid-cols-4 gap-1 sm:contents">
+				<MiniQ label={m.traffic_p50()} value={`${q.p50_us.toFixed(0)}µs`} />
+				<MiniQ label={m.traffic_p90()} value={`${q.p90_us.toFixed(0)}µs`} />
+				<MiniQ label={m.traffic_p99()} value={`${q.p99_us.toFixed(0)}µs`} />
+				<MiniQ label={m.traffic_max()} value={`${q.max_us.toFixed(0)}µs`} />
+			</div>
 		</div>
 	);
 }
@@ -104,7 +106,7 @@ function DirectionCard({
 }) {
 	return (
 		<NestedPanel className="space-y-3 p-3">
-			<div className="flex items-center justify-between gap-2">
+			<div className="flex flex-wrap items-center justify-between gap-2">
 				<div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
 					<span className="font-bold text-primary">{arrow}</span>
 					{title}
@@ -113,7 +115,7 @@ function DirectionCard({
 					{formatBytes(dir?.raw_bytes ?? 0)} → {formatBytes(dir?.wire_bytes ?? 0)}
 				</span>
 			</div>
-			<div className="grid grid-cols-3 gap-1.5">
+			<div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
 				<StatTile label={m.client_saved()} value={formatPercentage(dir?.saved_ratio)} tone="good" />
 				<StatTile
 					label={m.client_gain()}
@@ -199,7 +201,7 @@ export function OptimizerStatsView({
 				/>
 			</div>
 
-			<div className="grid grid-cols-3 gap-2">
+			<div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
 				<StatTile label={m.traffic_batches_urgent()} value={String(stats.urgent_batches)} />
 				<StatTile label={m.traffic_batches_timer()} value={String(stats.timer_batches)} />
 				<StatTile label={m.traffic_batches_threshold()} value={String(stats.threshold_batches)} />
@@ -228,7 +230,7 @@ export function OptimizerStatsView({
 				</NestedPanel>
 			) : null}
 
-			<div className="grid gap-3 lg:grid-cols-2">
+			<div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
 				<DirectionCard title={m.traffic_uplink()} arrow="↑" dir={stats.uplink} />
 				<DirectionCard title={m.traffic_downlink()} arrow="↓" dir={stats.downlink} />
 			</div>

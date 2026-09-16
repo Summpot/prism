@@ -425,7 +425,7 @@ export function NetworkTopology({ connection }: { connection: PanelConnection })
 
 			{/* Filter & Canvas Controls Bar */}
 			<div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-card p-2.5 shadow-xs">
-				<div className="flex flex-1 items-center gap-2 min-w-64 max-w-md">
+				<div className="flex flex-1 items-center gap-2 min-w-0 w-full sm:w-auto sm:min-w-64 max-w-md">
 					<SearchInput
 						value={query}
 						onChange={setQuery}
@@ -469,7 +469,7 @@ export function NetworkTopology({ connection }: { connection: PanelConnection })
 			</div>
 
 			{/* Main Canvas Area */}
-			<div className="relative flex-1 min-h-[500px] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+			<div className="relative flex-1 min-h-[380px] sm:min-h-[500px] w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
 				{nodes.length === 0 && !loading ? (
 					<div className="flex h-full items-center justify-center p-8">
 						<EmptyState
@@ -517,7 +517,7 @@ export function NetworkTopology({ connection }: { connection: PanelConnection })
 										return "#64748b";
 								}
 							}}
-							className="!m-3 !border-border !bg-card"
+							className="!m-3 !border-border !bg-card hidden sm:block"
 							maskColor="rgba(0, 0, 0, 0.2)"
 						/>
 					</ReactFlow>

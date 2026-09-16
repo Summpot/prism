@@ -65,7 +65,9 @@ export async function getAuthProviders(
 }
 
 export function getGitHubLoginUrl(connection: PanelConnection, state?: string) {
-	const path = state ? `/auth/github/login?state=${encodeURIComponent(state)}` : "/auth/github/login";
+	const path = state
+		? `/auth/github/login?state=${encodeURIComponent(state)}`
+		: "/auth/github/login";
 	return adminRequest<GitHubLoginUrlResponse>(connection, path);
 }
 

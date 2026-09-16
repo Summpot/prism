@@ -196,14 +196,14 @@ export function MiddlewareConfigEditor({ connection, local = false }: Middleware
 						{field.description && (
 							<p className="text-xs text-muted-foreground">{field.description}</p>
 						)}
-						<div className="flex items-center gap-3 pt-1">
+						<div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1">
 							<Input
 								type="number"
 								min={min}
 								max={max}
 								value={numVal}
 								onChange={(e) => handleFieldChange(field.key, Number(e.target.value))}
-								className="font-mono text-sm max-w-[200px]"
+								className="font-mono text-sm w-36 max-w-full"
 							/>
 							<span className="text-xs text-muted-foreground font-mono">
 								{m.middleware_default({ value: JSON.stringify(field.default_value) })}
@@ -292,7 +292,7 @@ export function MiddlewareConfigEditor({ connection, local = false }: Middleware
 	};
 
 	return (
-		<div className="rounded-xl border border-border bg-card p-5 shadow-xs space-y-5">
+		<div className="rounded-xl border border-border bg-card p-3.5 sm:p-5 shadow-xs space-y-4 sm:space-y-5">
 			<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
 				<div className="flex items-center gap-2.5">
 					<div className="p-2 rounded-lg bg-primary/10 text-primary">
@@ -374,11 +374,11 @@ export function MiddlewareConfigEditor({ connection, local = false }: Middleware
 			{/* Dynamic Field Controls */}
 			{schema && schema.fields.length > 0 ? (
 				<div className="space-y-3 pt-1">
-					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+					<div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
 						{schema.fields.map(renderFieldControl)}
 					</div>
 
-					<div className="flex items-center justify-between pt-4 border-t border-border">
+					<div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-border">
 						<Button
 							variant="outline"
 							size="sm"

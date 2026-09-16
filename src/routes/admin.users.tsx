@@ -206,9 +206,9 @@ function AdminUsersPage() {
 
 			{session?.authenticated ? (
 				<Card className="shadow-xs">
-					<CardContent className="flex items-center justify-between gap-4 py-4">
-						<div className="flex items-center gap-3">
-							<Avatar>
+					<CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4">
+						<div className="flex items-center gap-3 min-w-0">
+							<Avatar className="flex-none">
 								{session.avatar_url ? (
 									<AvatarImage
 										src={session.avatar_url}
@@ -219,21 +219,21 @@ function AdminUsersPage() {
 									<UserCheck className="h-4 w-4" />
 								</AvatarFallback>
 							</Avatar>
-							<div>
-								<div className="flex items-center gap-2">
-									<span className="font-semibold">
+							<div className="min-w-0">
+								<div className="flex items-center gap-2 flex-wrap">
+									<span className="font-semibold truncate">
 										{session.display_name || session.username || m.users_authenticated_admin()}
 									</span>
 									<Badge variant={session.is_admin ? "success" : "default"}>
 										{session.role ?? "admin"}
 									</Badge>
 								</div>
-								<span className="text-xs text-muted-foreground">
+								<span className="text-xs text-muted-foreground truncate block">
 									{session.username ? `@${session.username}` : m.users_connected_via_token()}
 								</span>
 							</div>
 						</div>
-						<div className="text-xs text-muted-foreground">
+						<div className="text-xs text-muted-foreground flex-none">
 							{session.is_admin ? m.users_full_privileges() : m.users_standard_member()}
 						</div>
 					</CardContent>
@@ -273,17 +273,19 @@ function AdminUsersPage() {
 						{filteredUsers.map((user) => (
 							<Card key={user.id} className="shadow-xs">
 								<CardContent className="space-y-4 pt-0">
-									<div className="flex items-start justify-between">
-										<div className="flex items-center gap-3">
-											<Avatar>
+									<div className="flex items-start justify-between gap-2">
+										<div className="flex items-center gap-3 min-w-0">
+											<Avatar className="flex-none">
 												{user.avatar_url ? (
 													<AvatarImage src={user.avatar_url} alt={user.username} />
 												) : null}
 												<AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
 											</Avatar>
-											<div>
-												<div className="flex items-center gap-2">
-													<span className="font-medium">{user.display_name || user.username}</span>
+											<div className="min-w-0">
+												<div className="flex items-center gap-2 flex-wrap">
+													<span className="font-medium truncate">
+														{user.display_name || user.username}
+													</span>
 													<Badge
 														variant={
 															user.role === "admin"
@@ -296,12 +298,15 @@ function AdminUsersPage() {
 														{user.role}
 													</Badge>
 												</div>
-												<span className="text-xs text-muted-foreground">@{user.username}</span>
+												<span className="text-xs text-muted-foreground truncate block">
+													@{user.username}
+												</span>
 											</div>
 										</div>
 										<Button
 											variant="outline"
 											size="xs"
+											className="flex-none"
 											onClick={() => {
 												setEditingUser(user);
 												setEditRole(user.role);
@@ -347,10 +352,10 @@ function AdminUsersPage() {
 					<div className="space-y-3">
 						{filteredTokens.map((token) => (
 							<Card key={token.id} className="shadow-xs">
-								<CardContent className="flex items-center justify-between gap-4 py-4">
-									<div className="space-y-1">
+								<CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3.5 sm:py-4">
+									<div className="space-y-1 min-w-0">
 										<div className="flex flex-wrap items-center gap-2">
-											<span className="font-semibold">{token.name}</span>
+											<span className="font-semibold truncate">{token.name}</span>
 											<Badge
 												variant={
 													token.token_type === "admin"
@@ -362,7 +367,9 @@ function AdminUsersPage() {
 											>
 												{token.token_type}
 											</Badge>
-											<span className="font-mono text-xs text-muted-foreground">{token.id}</span>
+											<span className="font-mono text-xs text-muted-foreground truncate">
+												{token.id}
+											</span>
 										</div>
 										<div className="text-xs text-muted-foreground">
 											{m.users_created({
@@ -378,6 +385,7 @@ function AdminUsersPage() {
 									<Button
 										variant="destructive"
 										size="xs"
+										className="self-end sm:self-auto flex-none"
 										onClick={() => void handleRevokeToken(token.id)}
 									>
 										<Trash2 className="h-3.5 w-3.5" />
@@ -399,7 +407,7 @@ function AdminUsersPage() {
 					}
 				}}
 			>
-				<DialogContent className="sm:max-w-lg" showCloseButton>
+				<DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" showCloseButton>
 					<DialogHeader>
 						<DialogTitle>{m.users_token_modal_title()}</DialogTitle>
 						<DialogDescription>{m.users_token_modal_description()}</DialogDescription>
@@ -498,7 +506,7 @@ function AdminUsersPage() {
 			</Dialog>
 
 			<Dialog open={Boolean(editingUser)} onOpenChange={(open) => !open && setEditingUser(null)}>
-				<DialogContent className="sm:max-w-lg" showCloseButton>
+				<DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" showCloseButton>
 					<DialogHeader>
 						<DialogTitle>
 							{editingUser

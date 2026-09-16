@@ -1,21 +1,38 @@
-import { Menu, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AppSidebarContent } from "@/components/AppSidebar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { isDesktopApp } from "@/lib/desktopWindow";
+import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
 
 export { AppSidebarContent };
 
 export default function Header() {
 	const [mobileOpen, setMobileOpen] = useState(false);
+	const [collapsed, setCollapsed] = useState(false);
 	const isDesktop = useMemo(() => isDesktopApp(), []);
+
+	useEffect(() => {
+		const handleToggle = () => setCollapsed((prev) => !prev);
+		window.addEventListener("prism:toggle-sidebar", handleToggle);
+		return () => {
+			window.removeEventListener("prism:toggle-sidebar", handleToggle);
+		};
+	}, []);
+
+	// Auto-collapse sidebar on narrower tablet/desktop viewports on initial load
+	useEffect(() => {
+		if (typeof window !== "undefined" && window.innerWidth < 960) {
+			setCollapsed(true);
+		}
+	}, []);
 
 	return (
 		<>
-			{/* Mobile top bar (only in non-desktop browser mode when screen is narrow) */}
+			{/* Mobile top bar (in browser or ultra-narrow desktop view) */}
 			{!isDesktop ? (
 				<div className="fixed top-0 right-0 left-0 z-40 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:hidden">
 					<div className="flex items-center gap-2.5">
@@ -34,7 +51,7 @@ export default function Header() {
 				</div>
 			) : null}
 
-			{/* Mobile Drawer (browser mode only) */}
+			{/* Mobile Drawer (browser mode) */}
 			{!isDesktop && mobileOpen ? (
 				<div className="fixed inset-0 z-50 md:hidden">
 					<button
@@ -57,18 +74,48 @@ export default function Header() {
 						>
 							<X className="h-4 w-4" />
 						</Button>
-						<AppSidebarContent onNavigate={() => setMobileOpen(false)} />
+						<AppSidebarContent onNavigate={() => setMobileOpen(false)} collapsed={false} />
 					</aside>
 				</div>
 			) : null}
 
-			{/* Desktop / Tablet Sidebar: Always flex in desktop app, md:flex in browser */}
+			{/* Desktop / Tablet Sidebar: flex in desktop app, md:flex in browser */}
 			<aside
-				className={`${
-					isDesktop ? "flex" : "hidden md:flex"
-				} w-60 sm:w-64 flex-none flex-col border-r border-border bg-card/60 h-full overflow-hidden`}
+				className={cn(
+					isDesktop ? "flex" : "hidden md:flex",
+					collapsed ? "w-14" : "w-60 sm:w-64",
+					"flex-none flex-col border-r border-border bg-card/60 h-full overflow-hidden transition-[width] duration-200 ease-in-out",
+				)}
 			>
-				<AppSidebarContent />
+				<div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+					<AppSidebarContent collapsed={collapsed} />
+				</div>
+
+				{/* Collapse Toggle Footer */}
+				<div
+					className={cn(
+						"flex-none border-t border-border/50 p-2 flex items-center transition-all",
+						collapsed ? "justify-center" : "justify-between",
+					)}
+				>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						onClick={() => setCollapsed((prev) => !prev)}
+						className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer rounded"
+						title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+						aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+					>
+						{collapsed ? (
+							<PanelLeftOpen className="h-4 w-4" />
+						) : (
+							<PanelLeftClose className="h-4 w-4" />
+						)}
+					</Button>
+
+					{!collapsed && !isDesktop ? <LanguageSwitcher /> : null}
+				</div>
 			</aside>
 		</>
 	);

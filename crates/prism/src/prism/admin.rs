@@ -2151,7 +2151,9 @@ mod tests {
             config_path: PathBuf::from("prism.toml"),
             reload_tx,
             tunnel: None,
-            auth: AdminAuth::default(),
+            auth: AdminAuth {
+                panel_token: Some("secret123".to_string()),
+            },
             client: None,
             auth_manager: None,
             storage: None,
@@ -2171,6 +2173,7 @@ mod tests {
         let client = reqwest::Client::new();
         let resp = client
             .get(format!("http://{addr}/stats/optimizer"))
+            .header("Authorization", "Bearer secret123")
             .send()
             .await
             .unwrap();

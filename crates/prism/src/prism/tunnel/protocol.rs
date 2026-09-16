@@ -207,7 +207,7 @@ pub struct OptimizerStreamParams {
 
 impl OptimizerStreamParams {
     pub fn agreed_decode_window(&self, peer_encode_window: u8) -> u32 {
-        (self.decode_window_log as u32).min(peer_encode_window as u32).clamp(10, 22)
+        (self.decode_window_log as u32).min(peer_encode_window as u32).clamp(10, 30)
     }
 }
 

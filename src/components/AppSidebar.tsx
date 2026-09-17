@@ -81,11 +81,9 @@ function SidebarNavItem({ to, label, icon, badge, onClick, exact, collapsed }: N
 export function AppSidebarContent({
 	onNavigate,
 	collapsed = false,
-	footerAction,
 }: {
 	onNavigate?: () => void;
 	collapsed?: boolean;
-	footerAction?: React.ReactNode;
 }) {
 	const { isAdmin } = usePanelSession();
 
@@ -229,12 +227,7 @@ export function AppSidebarContent({
 			</div>
 
 			{/* Sidebar Footer Section */}
-			<div
-				className={cn(
-					"flex-none border-t border-border/50 p-2 flex flex-col gap-1",
-					collapsed ? "px-1.5" : "px-2",
-				)}
-			>
+			<div className={cn("flex-none border-t border-border/50 p-2", collapsed ? "px-1.5" : "px-2")}>
 				<SidebarNavItem
 					to="/settings"
 					exact
@@ -243,7 +236,6 @@ export function AppSidebarContent({
 					onClick={onNavigate}
 					collapsed={collapsed}
 				/>
-				{footerAction}
 			</div>
 		</div>
 	);

@@ -1,4 +1,4 @@
-import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppSidebarContent } from "@/components/AppSidebar";
@@ -87,35 +87,7 @@ export default function Header() {
 					"flex-none flex-col border-r border-border bg-card/60 h-full overflow-hidden transition-[width] duration-200 ease-in-out",
 				)}
 			>
-				<AppSidebarContent
-					collapsed={collapsed}
-					footerAction={
-						<div
-							className={cn(
-								"flex items-center pt-1 border-t border-border/40",
-								collapsed ? "justify-center" : "justify-between",
-							)}
-						>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								onClick={() => setCollapsed((prev) => !prev)}
-								className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer rounded"
-								title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-								aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-							>
-								{collapsed ? (
-									<PanelLeftOpen className="h-4 w-4" />
-								) : (
-									<PanelLeftClose className="h-4 w-4" />
-								)}
-							</Button>
-
-							{!collapsed && !isDesktop ? <LanguageSwitcher /> : null}
-						</div>
-					}
-				/>
+				<AppSidebarContent collapsed={collapsed} />
 			</aside>
 		</>
 	);

@@ -87,35 +87,35 @@ export default function Header() {
 					"flex-none flex-col border-r border-border bg-card/60 h-full overflow-hidden transition-[width] duration-200 ease-in-out",
 				)}
 			>
-				<div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-					<AppSidebarContent collapsed={collapsed} />
-				</div>
+				<AppSidebarContent
+					collapsed={collapsed}
+					footerAction={
+						<div
+							className={cn(
+								"flex items-center pt-1 border-t border-border/40",
+								collapsed ? "justify-center" : "justify-between",
+							)}
+						>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								onClick={() => setCollapsed((prev) => !prev)}
+								className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer rounded"
+								title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+								aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+							>
+								{collapsed ? (
+									<PanelLeftOpen className="h-4 w-4" />
+								) : (
+									<PanelLeftClose className="h-4 w-4" />
+								)}
+							</Button>
 
-				{/* Collapse Toggle Footer */}
-				<div
-					className={cn(
-						"flex-none border-t border-border/50 p-2 flex items-center transition-all",
-						collapsed ? "justify-center" : "justify-between",
-					)}
-				>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-xs"
-						onClick={() => setCollapsed((prev) => !prev)}
-						className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer rounded"
-						title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-						aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-					>
-						{collapsed ? (
-							<PanelLeftOpen className="h-4 w-4" />
-						) : (
-							<PanelLeftClose className="h-4 w-4" />
-						)}
-					</Button>
-
-					{!collapsed && !isDesktop ? <LanguageSwitcher /> : null}
-				</div>
+							{!collapsed && !isDesktop ? <LanguageSwitcher /> : null}
+						</div>
+					}
+				/>
 			</aside>
 		</>
 	);

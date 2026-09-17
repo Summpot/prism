@@ -6,7 +6,10 @@ export const Route = createFileRoute("/client")({
 		if (tab === "logs") {
 			throw redirect({ to: "/logs" });
 		}
-		if (tab === "settings" || tab === "profiles") {
+		if (tab === "profiles") {
+			throw redirect({ to: "/profiles" });
+		}
+		if (tab === "settings") {
 			throw redirect({ to: "/settings" });
 		}
 		if (tab === "traffic") {

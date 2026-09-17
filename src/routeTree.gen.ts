@@ -16,6 +16,7 @@ import { Route as ConnectionsRouteImport } from './routes/connections'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MiddlewareRouteImport } from './routes/middleware'
+import { Route as ProfilesRouteImport } from './routes/profiles'
 import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TrafficRouteImport } from './routes/traffic'
@@ -64,6 +65,11 @@ const LogsRoute = LogsRouteImport.update({
 const MiddlewareRoute = MiddlewareRouteImport.update({
   id: '/middleware',
   path: '/middleware',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfilesRoute = ProfilesRouteImport.update({
+  id: '/profiles',
+  path: '/profiles',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RuntimeRoute = RuntimeRouteImport.update({
@@ -145,6 +151,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
+  '/profiles': typeof ProfilesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
   '/traffic': typeof TrafficRoute
@@ -167,6 +174,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
+  '/profiles': typeof ProfilesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
   '/traffic': typeof TrafficRoute
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
+  '/profiles': typeof ProfilesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
   '/traffic': typeof TrafficRoute
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
+    | '/profiles'
     | '/runtime'
     | '/settings'
     | '/traffic'
@@ -238,6 +248,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
+    | '/profiles'
     | '/runtime'
     | '/settings'
     | '/traffic'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
+    | '/profiles'
     | '/runtime'
     | '/settings'
     | '/traffic'
@@ -285,6 +297,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   LogsRoute: typeof LogsRoute
   MiddlewareRoute: typeof MiddlewareRoute
+  ProfilesRoute: typeof ProfilesRoute
   RuntimeRoute: typeof RuntimeRoute
   SettingsRoute: typeof SettingsRoute
   TrafficRoute: typeof TrafficRoute
@@ -341,6 +354,13 @@ declare module '@tanstack/react-router' {
       path: '/middleware'
       fullPath: '/middleware'
       preLoaderRoute: typeof MiddlewareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profiles': {
+      id: '/profiles'
+      path: '/profiles'
+      fullPath: '/profiles'
+      preLoaderRoute: typeof ProfilesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/runtime': {
@@ -478,6 +498,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   LogsRoute: LogsRoute,
   MiddlewareRoute: MiddlewareRoute,
+  ProfilesRoute: ProfilesRoute,
   RuntimeRoute: RuntimeRoute,
   SettingsRoute: SettingsRoute,
   TrafficRoute: TrafficRoute,

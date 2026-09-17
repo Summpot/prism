@@ -8,15 +8,14 @@ import {
 	Network,
 	Radio,
 	Server,
-	Settings2,
+	Settings,
 	Sliders,
+	SlidersHorizontal,
 	Terminal,
 	Unplug,
 	Users,
 } from "lucide-react";
 
-import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { isDesktopApp } from "@/lib/desktopWindow";
 import { usePanelSession } from "@/lib/panelSession";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
@@ -82,9 +81,11 @@ function SidebarNavItem({ to, label, icon, badge, onClick, exact, collapsed }: N
 export function AppSidebarContent({
 	onNavigate,
 	collapsed = false,
+	footerAction,
 }: {
 	onNavigate?: () => void;
 	collapsed?: boolean;
+	footerAction?: React.ReactNode;
 }) {
 	const { isAdmin } = usePanelSession();
 
@@ -131,10 +132,10 @@ export function AppSidebarContent({
 						collapsed={collapsed}
 					/>
 					<SidebarNavItem
-						to="/settings"
+						to="/profiles"
 						exact
 						label={m.nav_tunnel_config()}
-						icon={<Settings2 className="h-4 w-4" />}
+						icon={<SlidersHorizontal className="h-4 w-4" />}
 						onClick={onNavigate}
 						collapsed={collapsed}
 					/>
@@ -227,17 +228,23 @@ export function AppSidebarContent({
 				) : null}
 			</div>
 
-			{/* Non-desktop browser fallback for language switcher */}
-			{!isDesktopApp() ? (
-				<div
-					className={cn(
-						"flex-none border-t border-border/50 p-2 flex",
-						collapsed ? "justify-center" : "justify-end",
-					)}
-				>
-					<LanguageSwitcher />
-				</div>
-			) : null}
+			{/* Sidebar Footer Section */}
+			<div
+				className={cn(
+					"flex-none border-t border-border/50 p-2 flex flex-col gap-1",
+					collapsed ? "px-1.5" : "px-2",
+				)}
+			>
+				<SidebarNavItem
+					to="/settings"
+					exact
+					label={m.nav_settings()}
+					icon={<Settings className="h-4 w-4" />}
+					onClick={onNavigate}
+					collapsed={collapsed}
+				/>
+				{footerAction}
+			</div>
 		</div>
 	);
 }

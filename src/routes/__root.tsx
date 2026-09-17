@@ -25,6 +25,7 @@ import {
 } from "@/lib/desktopWindow";
 import { TUNNEL_ADMIN_CONNECTION, tunnelAdminConnection } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
 import { getLocale } from "@/paraglide/runtime";
@@ -352,8 +353,10 @@ function RootContent() {
 }
 
 function RootDocument() {
+	const { isDark } = useTheme();
+
 	return (
-		<html lang={getLocale()} className="dark">
+		<html lang={getLocale()} className={isDark ? "dark" : ""}>
 			<head>
 				<HeadContent />
 			</head>

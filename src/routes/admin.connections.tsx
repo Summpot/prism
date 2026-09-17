@@ -74,7 +74,7 @@ function AdminConnectionsPage() {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-5">
 			<PageHeader
 				eyebrow={m.admin_proxy_plane()}
 				title={m.admin_active_connections()}
@@ -85,26 +85,30 @@ function AdminConnectionsPage() {
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchConns} loading={loading} />
-						<Link
-							to="/admin/topology"
-							className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium hover:bg-muted/70 text-foreground"
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1.5"
+							render={<Link to="/admin/topology" />}
 						>
-							<Network className="h-4 w-4 text-primary" />
+							<Network className="h-3.5 w-3.5 text-primary" />
 							{m.topology_view_button()}
-						</Link>
+						</Button>
 						{optimizerStats?.global && optimizerStats.global.raw_bytes > 0 ? (
-							<Link
-								to="/admin/traffic"
-								className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400 hover:bg-muted/70"
+							<Button
+								variant="outline"
+								size="xs"
+								className="h-7 text-xs gap-1.5 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/15"
+								render={<Link to="/admin/traffic" />}
 							>
-								<Zap className="h-4 w-4" />
+								<Zap className="h-3.5 w-3.5" />
 								{m.admin_optimizer_saved({
 									bytes: formatBytes(optimizerStats.global.saved_bytes),
 									percentage: formatPercentage(optimizerStats.global.saved_ratio),
 								})}
-							</Link>
+							</Button>
 						) : null}
-						<CountChip icon={<Cable className="h-4 w-4" />}>
+						<CountChip icon={<Cable className="h-3.5 w-3.5" />}>
 							{loading
 								? m.common_loading()
 								: conns.length === 1

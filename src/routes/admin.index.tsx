@@ -119,7 +119,7 @@ function AdminDashboardPage() {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-5">
 			<PageHeader
 				eyebrow={m.dashboard_eyebrow()}
 				title={m.dashboard_title()}
@@ -127,19 +127,17 @@ function AdminDashboardPage() {
 				actions={
 					<>
 						<CountChip>
-							<div>
-								<div className="text-xs font-medium text-foreground">{m.dashboard_endpoint()}</div>
-								<div className="mt-0.5 max-w-56 truncate font-mono text-xs">
-									{connection.baseUrl}
-								</div>
-							</div>
+							<span className="text-muted-foreground">{m.dashboard_endpoint()}:</span>
+							<span className="font-mono text-foreground truncate max-w-48">
+								{connection.baseUrl}
+							</span>
 						</CountChip>
 						<ToggleChip active={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchData} loading={loading} />
 						<SecondaryButton onClick={handleReload} disabled={reloading}>
-							<RotateCcw className={`h-4 w-4 ${reloading ? "animate-spin" : ""}`} />
+							<RotateCcw className={`h-3.5 w-3.5 ${reloading ? "animate-spin" : ""}`} />
 							{m.admin_reload()}
 						</SecondaryButton>
 					</>
@@ -183,32 +181,57 @@ function AdminDashboardPage() {
 			</section>
 
 			<Card className="shadow-xs">
-				<CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+				<CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3">
 					<div>
-						<CardTitle>{m.dashboard_gateway_overview()}</CardTitle>
-						<CardDescription className="mt-1.5">
+						<CardTitle className="text-base">{m.dashboard_gateway_overview()}</CardTitle>
+						<CardDescription className="mt-0.5 text-xs">
 							{m.dashboard_gateway_overview_description()}
 						</CardDescription>
 					</div>
-					<div className="flex flex-wrap gap-2">
-						<Button variant="outline" size="sm" render={<Link to="/admin/topology" />}>
-							<Network className="h-4 w-4" />
+					<div className="flex flex-wrap gap-1.5">
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1"
+							render={<Link to="/admin/topology" />}
+						>
+							<Network className="h-3.5 w-3.5" />
 							{m.topology_view_button()}
 						</Button>
-						<Button variant="outline" size="sm" render={<Link to="/admin/connections" />}>
-							<Activity className="h-4 w-4" />
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1"
+							render={<Link to="/admin/connections" />}
+						>
+							<Activity className="h-3.5 w-3.5" />
 							{m.nav_connections()}
 						</Button>
-						<Button variant="outline" size="sm" render={<Link to="/admin/tunnel-services" />}>
-							<Unplug className="h-4 w-4" />
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1"
+							render={<Link to="/admin/tunnel-services" />}
+						>
+							<Unplug className="h-3.5 w-3.5" />
 							{m.nav_services()}
 						</Button>
-						<Button variant="outline" size="sm" render={<Link to="/admin/traffic" />}>
-							<Server className="h-4 w-4" />
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1"
+							render={<Link to="/admin/traffic" />}
+						>
+							<Server className="h-3.5 w-3.5" />
 							{m.nav_server_traffic()}
 						</Button>
-						<Button variant="outline" size="sm" render={<Link to="/admin/connectors" />}>
-							<Radio className="h-4 w-4" />
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1"
+							render={<Link to="/admin/connectors" />}
+						>
+							<Radio className="h-3.5 w-3.5" />
 							{m.nav_connector_traffic()}
 						</Button>
 					</div>

@@ -89,7 +89,7 @@ function AdminRuntimeBody({ connection }: { connection: PanelConnection }) {
 						</ToggleChip>
 						<RefreshButton onClick={fetchData} loading={loading} />
 						<SecondaryButton onClick={handleReload} disabled={reloading}>
-							<RotateCcw className={`h-4 w-4 ${reloading ? "animate-spin" : ""}`} />
+							<RotateCcw className={`h-3.5 w-3.5 ${reloading ? "animate-spin" : ""}`} />
 							{m.admin_reload()}
 						</SecondaryButton>
 					</>

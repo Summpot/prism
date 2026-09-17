@@ -4,6 +4,7 @@ import { OptimizerStatsView } from "@/components/traffic/OptimizerStatsView";
 import { ThroughputSparkline } from "@/components/traffic/ThroughputSparkline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui";
 import { useClientActions } from "@/hooks/useClientActions";
 import { useClientRuntime } from "@/hooks/useClientRuntime";
 import { formatBytes } from "@/lib/format";
@@ -34,58 +35,53 @@ export function ClientTraffic() {
 			: 0;
 
 	return (
-		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
-			<div className="flex flex-none select-none flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-border bg-card px-3 py-2 shadow-xs">
-				<div className="flex items-center gap-2 min-w-0">
-					<ArrowDownUp className="h-4 w-4 text-primary flex-none" />
-					<div className="min-w-0">
-						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-							{m.client_traffic_title()}
-						</h1>
-						<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
-							{m.client_traffic_description()}
-						</p>
-					</div>
-				</div>
-				<div className="flex items-center gap-1.5 flex-none self-end sm:self-auto">
-					<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
-						<button
-							type="button"
-							onClick={() => setStatsViewMode("session")}
-							className={cn(
-								"rounded px-1.5 py-0.5 font-medium transition cursor-pointer",
-								statsViewMode === "session"
-									? "bg-primary text-primary-foreground font-semibold"
-									: "text-muted-foreground hover:text-foreground",
-							)}
+		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2 p-3 sm:p-4 overflow-y-auto">
+			<PageHeader
+				icon={<ArrowDownUp className="h-4 w-4 text-primary" />}
+				title={m.client_traffic_title()}
+				description={m.client_traffic_description()}
+				actions={
+					<div className="flex items-center gap-1.5 flex-none">
+						<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
+							<button
+								type="button"
+								onClick={() => setStatsViewMode("session")}
+								className={cn(
+									"rounded px-1.5 py-0.5 font-medium transition cursor-pointer",
+									statsViewMode === "session"
+										? "bg-primary text-primary-foreground font-semibold"
+										: "text-muted-foreground hover:text-foreground",
+								)}
+							>
+								{m.client_session()}
+							</button>
+							<button
+								type="button"
+								onClick={() => setStatsViewMode("lifetime")}
+								className={cn(
+									"rounded px-1.5 py-0.5 font-medium transition cursor-pointer",
+									statsViewMode === "lifetime"
+										? "bg-primary text-primary-foreground font-semibold"
+										: "text-muted-foreground hover:text-foreground",
+								)}
+							>
+								{m.client_lifetime()}
+							</button>
+						</div>
+						<Button
+							variant="ghost"
+							size="xs"
+							onClick={() => void handleResetStats()}
+							className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive cursor-pointer gap-1"
+							title={m.client_reset_stats()}
 						>
-							{m.client_session()}
-						</button>
-						<button
-							type="button"
-							onClick={() => setStatsViewMode("lifetime")}
-							className={cn(
-								"rounded px-1.5 py-0.5 font-medium transition cursor-pointer",
-								statsViewMode === "lifetime"
-									? "bg-primary text-primary-foreground font-semibold"
-									: "text-muted-foreground hover:text-foreground",
-							)}
-						>
-							{m.client_lifetime()}
-						</button>
+							<RotateCcw className="h-3 w-3" />
+							{m.client_reset()}
+						</Button>
 					</div>
-					<Button
-						variant="ghost"
-						size="xs"
-						onClick={() => void handleResetStats()}
-						className="h-7 px-2 text-[10px] text-muted-foreground hover:text-destructive cursor-pointer"
-						title={m.client_reset_stats()}
-					>
-						<RotateCcw className="h-3 w-3" />
-						{m.client_reset()}
-					</Button>
-				</div>
-			</div>
+				}
+				className="pb-2.5 mb-1"
+			/>
 
 			{!isConnected && !(cumulativeStats && cumulativeStats.raw_bytes > 0) ? (
 				<div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-border bg-card p-8 text-center text-muted-foreground shadow-xs">

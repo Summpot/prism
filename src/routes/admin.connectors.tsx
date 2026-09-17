@@ -100,7 +100,7 @@ function AdminConnectorsBody({ connection }: { connection: PanelConnection }) {
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchData} loading={loading} />
-						<CountChip icon={<Radio className="h-4 w-4" />}>
+						<CountChip icon={<Radio className="h-3.5 w-3.5" />}>
 							{loading
 								? m.common_loading()
 								: m.admin_connectors_count({

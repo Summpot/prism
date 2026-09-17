@@ -58,7 +58,7 @@ function AdminTrafficBody({ connection }: { connection: PanelConnection }) {
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchData} loading={loading} />
-						<CountChip icon={<Server className="h-4 w-4" />}>
+						<CountChip icon={<Server className="h-3.5 w-3.5" />}>
 							{stats?.global
 								? m.admin_optimizer_saved({
 										bytes: formatBytes(stats.global.saved_bytes),
@@ -66,9 +66,14 @@ function AdminTrafficBody({ connection }: { connection: PanelConnection }) {
 									})
 								: m.common_loading()}
 						</CountChip>
-						<Button variant="outline" size="sm" render={<Link to="/admin/connectors" />}>
+						<Button
+							variant="outline"
+							size="xs"
+							className="h-7 text-xs gap-1.5"
+							render={<Link to="/admin/connectors" />}
+						>
 							{m.nav_connector_traffic()}
-							<ArrowRight className="h-4 w-4" />
+							<ArrowRight className="h-3.5 w-3.5" />
 						</Button>
 					</>
 				}

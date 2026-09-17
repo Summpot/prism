@@ -74,7 +74,7 @@ function AdminTunnelServicesPage() {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-5">
 			<PageHeader
 				eyebrow={m.services_eyebrow()}
 				title={m.services_title()}
@@ -88,7 +88,7 @@ function AdminTunnelServicesPage() {
 							{m.services_primary_only()}
 						</ToggleChip>
 						<RefreshButton onClick={fetchServices} loading={loading} />
-						<CountChip icon={<Unplug className="h-4 w-4" />}>
+						<CountChip icon={<Unplug className="h-3.5 w-3.5" />}>
 							{loading
 								? m.common_loading()
 								: services.length === 1

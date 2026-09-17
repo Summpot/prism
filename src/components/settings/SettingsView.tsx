@@ -23,6 +23,7 @@ import {
 import { useState } from "react";
 
 import { Github } from "@/components/icons/Github";
+import { PageHeader } from "@/components/ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -75,28 +76,17 @@ export function SettingsView() {
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-3 p-3 sm:p-4 overflow-y-auto">
-			{/* Header Card */}
-			<div className="flex flex-none select-none items-center justify-between gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
-				<div className="flex items-center gap-2.5 min-w-0">
-					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary flex-none">
-						<Settings className="h-4 w-4" />
-					</div>
-					<div className="min-w-0">
-						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-							{m.settings_title()}
-						</h1>
-						<p className="truncate text-[10px] sm:text-xs text-muted-foreground">
-							{m.settings_description()}
-						</p>
-					</div>
-				</div>
-
-				<div className="flex items-center gap-1.5 flex-none">
+			<PageHeader
+				icon={<Settings className="h-4 w-4 text-primary" />}
+				title={m.settings_title()}
+				badge={
 					<Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0.5">
 						{isDesktop ? m.settings_env_desktop() : m.settings_env_web()}
 					</Badge>
-				</div>
-			</div>
+				}
+				description={m.settings_description()}
+				className="pb-2.5 mb-0"
+			/>
 
 			{/* Navigation Tabs */}
 			<div className="flex flex-none gap-1 border-b border-border/60 pb-1 overflow-x-auto scrollbar-none">

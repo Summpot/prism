@@ -179,22 +179,24 @@ function AdminUsersPage() {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-5">
 			<PageHeader
 				eyebrow={m.users_eyebrow()}
 				title={m.users_title()}
 				description={m.users_description()}
 				actions={
-					<div className="flex items-center gap-3">
+					<div className="flex items-center gap-2">
 						<RefreshButton onClick={fetchData} loading={loading} />
 						{activeTab === "tokens" ? (
 							<Button
+								size="xs"
+								className="h-7 text-xs gap-1.5"
 								onClick={() => {
 									setCreatedRawToken(null);
 									setCreateTokenOpen(true);
 								}}
 							>
-								<Plus className="h-4 w-4" />
+								<Plus className="h-3.5 w-3.5" />
 								{m.users_generate_token()}
 							</Button>
 						) : null}

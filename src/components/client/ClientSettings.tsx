@@ -5,6 +5,7 @@ import { useClientLink } from "@/hooks/useClientLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui";
 import { Switch } from "@/components/ui/switch";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
@@ -36,65 +37,57 @@ export function ClientSettings() {
 	const { setLinkProtocol, setImportModalOpen, handleShareLink, copied } = useClientLink();
 
 	return (
-		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto md:overflow-hidden">
-			{/* Header Bar */}
-			<div className="flex flex-none select-none flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-lg border border-border bg-card p-2.5 shadow-xs">
-				<div className="flex items-center gap-2 min-w-0">
-					<div className="min-w-0">
-						<h1 className="truncate text-xs sm:text-sm font-bold tracking-tight text-foreground">
-							{m.client_settings_title()}
-						</h1>
-						<p className="truncate text-[10px] text-muted-foreground hidden sm:block">
-							{m.client_settings_description()}
-						</p>
+		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2 p-3 sm:p-4 overflow-y-auto md:overflow-hidden">
+			<PageHeader
+				title={m.client_settings_title()}
+				description={m.client_settings_description()}
+				actions={
+					<div className="flex items-center gap-1.5 flex-wrap">
+						<Button
+							variant="outline"
+							size="xs"
+							onClick={() => {
+								const id = `profile-${Date.now()}`;
+								setProfileName(m.client_new_profile_name());
+								setServerAddr("relay.example.com");
+								setTransport("auto");
+								setListenAddr("127.0.0.1:25565");
+								setFakeLanBroadcast(true);
+								handleSelectProfile(id);
+							}}
+							className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
+						>
+							<Plus className="h-3.5 w-3.5" />
+							<span>{m.client_new_profile()}</span>
+						</Button>
+
+						<Button
+							variant="outline"
+							size="xs"
+							onClick={() => setImportModalOpen(true)}
+							className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
+						>
+							<Download className="h-3.5 w-3.5 text-primary" />
+							<span>{m.client_import_link()}</span>
+						</Button>
+
+						<Button
+							variant="outline"
+							size="xs"
+							onClick={handleShareLink}
+							className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
+						>
+							{copied === "share" ? (
+								<Check className="h-3.5 w-3.5 text-emerald-500" />
+							) : (
+								<Share2 className="h-3.5 w-3.5 text-primary" />
+							)}
+							<span>{copied === "share" ? m.common_copied() : m.client_share_config()}</span>
+						</Button>
 					</div>
-				</div>
-
-				{/* Top Actions */}
-				<div className="flex items-center gap-1.5 flex-wrap self-end sm:self-auto">
-					<Button
-						variant="outline"
-						size="xs"
-						onClick={() => {
-							const id = `profile-${Date.now()}`;
-							setProfileName(m.client_new_profile_name());
-							setServerAddr("relay.example.com");
-							setTransport("auto");
-							setListenAddr("127.0.0.1:25565");
-							setFakeLanBroadcast(true);
-							handleSelectProfile(id);
-						}}
-						className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
-					>
-						<Plus className="h-3.5 w-3.5" />
-						<span>{m.client_new_profile()}</span>
-					</Button>
-
-					<Button
-						variant="outline"
-						size="xs"
-						onClick={() => setImportModalOpen(true)}
-						className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
-					>
-						<Download className="h-3.5 w-3.5 text-primary" />
-						<span>{m.client_import_link()}</span>
-					</Button>
-
-					<Button
-						variant="outline"
-						size="xs"
-						onClick={handleShareLink}
-						className="h-7 gap-1 text-xs px-2 sm:px-2.5 cursor-pointer"
-					>
-						{copied === "share" ? (
-							<Check className="h-3.5 w-3.5 text-emerald-500" />
-						) : (
-							<Share2 className="h-3.5 w-3.5 text-primary" />
-						)}
-						<span>{copied === "share" ? m.common_copied() : m.client_share_config()}</span>
-					</Button>
-				</div>
-			</div>
+				}
+				className="pb-2.5 mb-1"
+			/>
 
 			{/* 2-Column Master-Detail Layout */}
 			<div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 min-h-0 md:overflow-hidden">

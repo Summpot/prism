@@ -21,29 +21,50 @@ export function PageHeader({
 	eyebrow,
 	title,
 	description,
+	icon,
+	badge,
 	actions,
+	className,
 }: {
-	eyebrow: string;
-	title: string;
-	description?: string;
+	eyebrow?: ReactNode;
+	title: ReactNode;
+	description?: ReactNode;
+	icon?: ReactNode;
+	badge?: ReactNode;
 	actions?: ReactNode;
+	className?: string;
 }) {
 	return (
-		<div className="relative mb-4 rounded-lg border border-border bg-card px-4 py-3 shadow-xs">
-			<div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-				<div className="max-w-3xl min-w-0">
-					<div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+		<div
+			className={cn(
+				"flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between pb-3 mb-4 border-b border-border/50 select-none",
+				className,
+			)}
+		>
+			<div className="min-w-0 flex-1">
+				{eyebrow ? (
+					<div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 mb-0.5">
 						{eyebrow}
 					</div>
-					<h1 className="mt-1 text-lg font-bold tracking-tight text-foreground md:text-xl">
+				) : null}
+				<div className="flex items-center gap-2 min-w-0 flex-wrap">
+					{icon ? <div className="text-primary flex-none">{icon}</div> : null}
+					<h1 className="text-sm sm:text-base font-bold tracking-tight text-foreground truncate">
 						{title}
 					</h1>
-					{description ? (
-						<p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
-					) : null}
+					{badge}
 				</div>
-				{actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+				{description ? (
+					<p className="mt-0.5 text-xs text-muted-foreground leading-normal line-clamp-1 sm:line-clamp-none">
+						{description}
+					</p>
+				) : null}
 			</div>
+			{actions ? (
+				<div className="flex flex-wrap items-center gap-1.5 sm:gap-2 flex-none self-start sm:self-center">
+					{actions}
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -154,7 +175,7 @@ export function SwitchRow({
 
 export function CountChip({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
 	return (
-		<div className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+		<div className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-2.5 py-1 text-xs font-medium text-muted-foreground">
 			{icon}
 			{children}
 		</div>
@@ -264,14 +285,25 @@ export function SecondaryButton({
 	onClick,
 	disabled,
 	type = "button",
+	size = "xs",
+	className,
 }: {
 	children: ReactNode;
 	onClick?: () => void;
 	disabled?: boolean;
 	type?: "button" | "submit";
+	size?: "xs" | "sm" | "default" | "lg" | "icon" | "icon-xs" | "icon-sm" | "icon-lg";
+	className?: string;
 }) {
 	return (
-		<Button type={type} variant="outline" onClick={onClick} disabled={disabled}>
+		<Button
+			type={type}
+			variant="outline"
+			size={size}
+			onClick={onClick}
+			disabled={disabled}
+			className={cn(size === "xs" && "h-7 text-xs gap-1.5", className)}
+		>
 			{children}
 		</Button>
 	);
@@ -281,13 +313,24 @@ export function DangerButton({
 	children,
 	onClick,
 	disabled,
+	size = "xs",
+	className,
 }: {
 	children: ReactNode;
 	onClick?: () => void;
 	disabled?: boolean;
+	size?: "xs" | "sm" | "default" | "lg" | "icon" | "icon-xs" | "icon-sm" | "icon-lg";
+	className?: string;
 }) {
 	return (
-		<Button type="button" variant="destructive" onClick={onClick} disabled={disabled}>
+		<Button
+			type="button"
+			variant="destructive"
+			size={size}
+			onClick={onClick}
+			disabled={disabled}
+			className={cn(size === "xs" && "h-7 text-xs gap-1.5", className)}
+		>
 			{children}
 		</Button>
 	);
@@ -298,14 +341,25 @@ export function PrimaryButton({
 	onClick,
 	disabled,
 	type = "button",
+	size = "xs",
+	className,
 }: {
 	children: ReactNode;
 	onClick?: () => void;
 	disabled?: boolean;
 	type?: "button" | "submit";
+	size?: "xs" | "sm" | "default" | "lg" | "icon" | "icon-xs" | "icon-sm" | "icon-lg";
+	className?: string;
 }) {
 	return (
-		<Button type={type} variant="default" onClick={onClick} disabled={disabled}>
+		<Button
+			type={type}
+			variant="default"
+			size={size}
+			onClick={onClick}
+			disabled={disabled}
+			className={cn(size === "xs" && "h-7 text-xs gap-1.5", className)}
+		>
 			{children}
 		</Button>
 	);
@@ -321,7 +375,13 @@ export function RefreshButton({
 	label?: string;
 }) {
 	return (
-		<Button variant="outline" onClick={onClick} disabled={loading} className="gap-2">
+		<Button
+			variant="outline"
+			size="xs"
+			onClick={onClick}
+			disabled={loading}
+			className="h-7 text-xs gap-1.5"
+		>
 			<RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
 			{label}
 		</Button>
@@ -360,7 +420,13 @@ export function ToggleChip({
 	children: ReactNode;
 }) {
 	return (
-		<Button type="button" variant={active ? "default" : "outline"} size="sm" onClick={onClick}>
+		<Button
+			type="button"
+			variant={active ? "default" : "outline"}
+			size="xs"
+			onClick={onClick}
+			className="h-7 text-xs font-medium"
+		>
 			{children}
 		</Button>
 	);

@@ -412,7 +412,7 @@ export function NetworkTopology({ connection }: { connection: PanelConnection })
 							{m.admin_auto_refresh({ state: autoRefresh ? m.admin_on() : m.admin_off() })}
 						</ToggleChip>
 						<RefreshButton onClick={fetchData} loading={loading} />
-						<CountChip icon={<Network className="h-4 w-4" />}>
+						<CountChip icon={<Network className="h-3.5 w-3.5" />}>
 							{loading
 								? m.common_loading()
 								: m.topology_sessions_count({ count: connsData.length })}

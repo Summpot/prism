@@ -299,14 +299,90 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         pub channel: String,
     }
 
+    fn extract_commit_identifier(version: &str, notes: Option<&str>) -> Option<String> {
+        if let Some(notes) = notes {
+            if let Some(start) = notes.rfind('(') {
+                if let Some(end) = notes[start..].find(')') {
+                    let candidate = notes[start + 1..start + end].trim();
+                    if candidate.len() >= 7 && candidate.chars().all(|c| c.is_ascii_hexdigit()) {
+                        return Some(candidate.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+        for part in version.split(|c| c == '.' || c == '-' || c == '+') {
+            if part.len() >= 7 && part.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Some(part.to_ascii_lowercase());
+            }
+        }
+        None
+    }
+
+    fn build_client_updater(
+        app: &tauri::AppHandle,
+        channel: &str,
+    ) -> Result<tauri_plugin_updater::Updater, String> {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let endpoint = match channel {
+            "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
+            _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
+        };
+
+        let is_dev = channel == "dev";
+        let local_commit = env!("PRISM_COMMIT_HASH").trim().to_ascii_lowercase();
+        let local_build_time: u64 = env!("PRISM_BUILD_TIME").parse().unwrap_or(0);
+
+        let updater_builder = app
+            .updater_builder()
+            .endpoints(vec![url::Url::parse(endpoint).map_err(|e| e.to_string())?])
+            .map_err(|e| e.to_string())?
+            .version_comparator(move |current_ver, remote| {
+                if !is_dev {
+                    return remote.version > current_ver;
+                }
+
+                // Dev channel checking mechanism:
+                // 1. If remote commit hash can be extracted and we know local commit hash:
+                let remote_ver_str = remote.version.to_string();
+                if let Some(remote_commit) = extract_commit_identifier(&remote_ver_str, remote.notes.as_deref()) {
+                    if !local_commit.is_empty() && local_commit != "unknown" {
+                        // Same commit means same build -> no update
+                        if remote_commit.starts_with(&local_commit) || local_commit.starts_with(&remote_commit) {
+                            return false;
+                        }
+                        // If pub_date is available and local_build_time is valid, ensure remote is newer
+                        if let Some(pub_date) = remote.pub_date {
+                            let remote_ts = pub_date.unix_timestamp();
+                            if remote_ts > 0 && local_build_time > 0 {
+                                return (remote_ts as u64) > local_build_time;
+                            }
+                        }
+                        return true;
+                    }
+                }
+
+                // 2. If publication timestamp is available, compare with local build timestamp
+                if let Some(pub_date) = remote.pub_date {
+                    let remote_ts = pub_date.unix_timestamp();
+                    if remote_ts > 0 && local_build_time > 0 {
+                        return (remote_ts as u64) > local_build_time;
+                    }
+                }
+
+                // 3. Fallback: if remote version differs from current_ver (e.g. 0.1.0-dev.* vs 0.1.0)
+                remote.version != current_ver
+            });
+
+        updater_builder.build().map_err(|e| e.to_string())
+    }
+
     #[tauri::command]
     async fn client_check_update(
         app: tauri::AppHandle,
         state: tauri::State<'_, DesktopClientState>,
         channel: Option<String>,
     ) -> Result<UpdateCheckResponse, String> {
-        use tauri_plugin_updater::UpdaterExt;
-
         let resolved_channel = channel.unwrap_or_else(|| {
             state
                 .storage
@@ -316,19 +392,18 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                 .unwrap_or_else(|| "release".to_string())
         });
 
-        let endpoint = match resolved_channel.as_str() {
-            "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
-            _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
+        let current_version = if resolved_channel == "dev" {
+            let commit = env!("PRISM_COMMIT_HASH");
+            if commit != "unknown" && !commit.is_empty() {
+                format!("{}-dev.{}", app.package_info().version, commit)
+            } else {
+                app.package_info().version.to_string()
+            }
+        } else {
+            app.package_info().version.to_string()
         };
 
-        let current_version = app.package_info().version.to_string();
-
-        let updater = app
-            .updater_builder()
-            .endpoints(vec![url::Url::parse(endpoint).map_err(|e| e.to_string())?])
-            .map_err(|e| e.to_string())?
-            .build()
-            .map_err(|e| e.to_string())?;
+        let updater = build_client_updater(&app, &resolved_channel)?;
 
         match updater.check().await {
             Ok(Some(update)) => Ok(UpdateCheckResponse {
@@ -348,6 +423,10 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                 channel: resolved_channel,
             }),
             Err(err) => {
+                let endpoint = match resolved_channel.as_str() {
+                    "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
+                    _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
+                };
                 tracing::warn!(error = %err, endpoint = %endpoint, "failed to check for updates");
                 Err(format!(
                     "Failed to check for updates from {resolved_channel} channel: {err}"
@@ -362,8 +441,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         state: tauri::State<'_, DesktopClientState>,
         channel: Option<String>,
     ) -> Result<(), String> {
-        use tauri_plugin_updater::UpdaterExt;
-
         let resolved_channel = channel.unwrap_or_else(|| {
             state
                 .storage
@@ -373,17 +450,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                 .unwrap_or_else(|| "release".to_string())
         });
 
-        let endpoint = match resolved_channel.as_str() {
-            "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
-            _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
-        };
-
-        let updater = app
-            .updater_builder()
-            .endpoints(vec![url::Url::parse(endpoint).map_err(|e| e.to_string())?])
-            .map_err(|e| e.to_string())?
-            .build()
-            .map_err(|e| e.to_string())?;
+        let updater = build_client_updater(&app, &resolved_channel)?;
 
         if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
             tracing::info!(version = %update.version, "downloading and installing update");
@@ -498,25 +565,17 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
                     return;
                 }
 
-                let endpoint = match channel.as_str() {
-                    "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
-                    _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
-                };
-                if let Ok(url) = url::Url::parse(endpoint) {
-                    if let Ok(builder) = handle_for_updater.updater_builder().endpoints(vec![url]) {
-                        if let Ok(updater) = builder.build() {
-                            if let Ok(Some(update)) = updater.check().await {
-                                let _ = handle_for_updater.emit(
-                                    "client://update-available",
-                                    serde_json::json!({
-                                        "version": update.version,
-                                        "date": update.date.map(|d| d.to_string()),
-                                        "body": update.body,
-                                        "channel": channel,
-                                    }),
-                                );
-                            }
-                        }
+                if let Ok(updater) = build_client_updater(&handle_for_updater, &channel) {
+                    if let Ok(Some(update)) = updater.check().await {
+                        let _ = handle_for_updater.emit(
+                            "client://update-available",
+                            serde_json::json!({
+                                "version": update.version,
+                                "date": update.date.map(|d| d.to_string()),
+                                "body": update.body,
+                                "channel": channel,
+                            }),
+                        );
                     }
                 }
             });

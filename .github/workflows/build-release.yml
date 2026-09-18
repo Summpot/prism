@@ -216,13 +216,34 @@ jobs:
           if [[ -d "target/${TARGET}/release/bundle" ]]; then
             find "target/${TARGET}/release/bundle" -type f \( \
               -name "*.AppImage" -o \
+              -name "*.AppImage.sig" -o \
               -name "*.AppImage.tar.gz" -o \
               -name "*.AppImage.tar.gz.sig" -o \
               -name "*.deb" -o \
+              -name "*.deb.sig" -o \
+              -name "*.rpm" -o \
+              -name "*.rpm.sig" -o \
               -name "*.dmg" -o \
+              -name "*.dmg.sig" -o \
               -name "*.app.tar.gz" -o \
               -name "*.app.tar.gz.sig" \
             \) -exec cp -v {} "${OUTDIR}/" \;
+          fi
+
+          if [[ "${TARGET}" == "x86_64-apple-darwin" ]]; then
+            if [[ -f "${OUTDIR}/Prism.app.tar.gz" ]]; then
+              mv -v "${OUTDIR}/Prism.app.tar.gz" "${OUTDIR}/Prism_${VERSION}_x64.app.tar.gz"
+            fi
+            if [[ -f "${OUTDIR}/Prism.app.tar.gz.sig" ]]; then
+              mv -v "${OUTDIR}/Prism.app.tar.gz.sig" "${OUTDIR}/Prism_${VERSION}_x64.app.tar.gz.sig"
+            fi
+          elif [[ "${TARGET}" == "aarch64-apple-darwin" ]]; then
+            if [[ -f "${OUTDIR}/Prism.app.tar.gz" ]]; then
+              mv -v "${OUTDIR}/Prism.app.tar.gz" "${OUTDIR}/Prism_${VERSION}_aarch64.app.tar.gz"
+            fi
+            if [[ -f "${OUTDIR}/Prism.app.tar.gz.sig" ]]; then
+              mv -v "${OUTDIR}/Prism.app.tar.gz.sig" "${OUTDIR}/Prism_${VERSION}_aarch64.app.tar.gz.sig"
+            fi
           fi
 
       - name: Prepare artifacts (windows)
@@ -245,7 +266,7 @@ jobs:
 
           $bundleDir = "target/$target/release/bundle"
           if (Test-Path $bundleDir) {
-            Get-ChildItem -Path $bundleDir -Recurse -File -Include *.exe, *.msi, *.zip, *.sig | ForEach-Object {
+            Get-ChildItem -Path "$bundleDir\*" -Recurse -File -Include *.exe, *.msi, *.zip, *.sig | ForEach-Object {
               Copy-Item -Force -Path $_.FullName -Destination $outdir
             }
           }
@@ -338,36 +359,50 @@ jobs:
             platforms: {}
           };
 
-          function addPlatform(key, assetMatch, sigMatch) {
-            const asset = files.find(f => assetMatch.test(f));
-            const sigFile = files.find(f => sigMatch.test(f));
-            if (asset && sigFile) {
-              const signature = fs.readFileSync(path.join(distDir, sigFile), "utf8").trim();
-              manifest.platforms[key] = {
-                signature: signature,
-                url: `https://github.com/${repo}/releases/download/${tag}/${asset}`
-              };
+          function findSignedAsset(pattern) {
+            const candidates = files.filter(f => pattern.test(f) && !f.endsWith(".sig"));
+            for (const asset of candidates) {
+              if (files.includes(asset + ".sig")) {
+                return asset;
+              }
+            }
+            return null;
+          }
+
+          function registerPlatform(keys, pattern) {
+            const asset = findSignedAsset(pattern);
+            if (!asset) return false;
+            const signature = fs.readFileSync(path.join(distDir, asset + ".sig"), "utf8").trim();
+            const entry = {
+              signature: signature,
+              url: `https://github.com/${repo}/releases/download/${tag}/${asset}`
+            };
+            for (const key of (Array.isArray(keys) ? keys : [keys])) {
+              manifest.platforms[key] = entry;
               console.log(`Added platform ${key}: asset=${asset}`);
             }
+            return true;
           }
 
-          // Windows x86_64
-          addPlatform("windows-x86_64", /\.nsis\.zip$/i, /\.nsis\.zip\.sig$/i);
-          if (!manifest.platforms["windows-x86_64"]) {
-            addPlatform("windows-x86_64", /\.zip$/i, /\.zip\.sig$/i);
-          }
+          // Windows x86_64 (NSIS & generic)
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*(setup\.exe|\.nsis\.zip|\.zip)$/i) ||
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(setup\.exe|\.nsis\.zip|\.zip)$/i);
+
+          // Windows x86_64 MSI
+          registerPlatform("windows-x86_64-msi", /(x64|x86_64).*\.msi$/i);
 
           // Linux x86_64
-          addPlatform("linux-x86_64", /(amd64|x86_64).*AppImage\.tar\.gz$/i, /(amd64|x86_64).*AppImage\.tar\.gz\.sig$/i);
+          registerPlatform(["linux-x86_64", "linux-x86_64-appimage"], /(amd64|x86_64).*AppImage(\.tar\.gz)?$/i);
 
           // Linux aarch64
-          addPlatform("linux-aarch64", /(arm64|aarch64).*AppImage\.tar\.gz$/i, /(arm64|aarch64).*AppImage\.tar\.gz\.sig$/i);
+          registerPlatform(["linux-aarch64", "linux-aarch64-appimage"], /(arm64|aarch64).*AppImage(\.tar\.gz)?$/i);
 
           // Darwin x86_64
-          addPlatform("darwin-x86_64", /(x64|x86_64).*app\.tar\.gz$/i, /(x64|x86_64).*app\.tar\.gz\.sig$/i);
+          registerPlatform("darwin-x86_64", /(x64|x86_64).*app\.tar\.gz$/i) ||
+          registerPlatform("darwin-x86_64", /^Prism\.app\.tar\.gz$/i);
 
           // Darwin aarch64
-          addPlatform("darwin-aarch64", /(aarch64|arm64).*app\.tar\.gz$/i, /(aarch64|arm64).*app\.tar\.gz\.sig$/i);
+          registerPlatform("darwin-aarch64", /(aarch64|arm64).*app\.tar\.gz$/i);
 
           fs.writeFileSync(path.join(distDir, "latest.json"), JSON.stringify(manifest, null, 2));
           console.log("Generated latest.json:");

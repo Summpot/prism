@@ -786,6 +786,12 @@ pub const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum allowed memory bytes (32 MiB) for WASM runtime linear memory.
 pub const MAX_WASM_MEMORY_BYTES: usize = 32 * 1024 * 1024;
 
+/// Maximum fuel allocated per WASM middleware function invocation (10M instructions).
+pub const WASM_INVOCATION_FUEL: u64 = 10_000_000;
+
+/// Epoch deadline ticks allowed per WASM invocation (20 ticks * 50ms = 1,000ms timeout).
+pub const WASM_EPOCH_DEADLINE_TICKS: u64 = 20;
+
 /// Create a Wasmtime Engine configured with fuel metering and epoch interruption.
 pub fn create_wasm_engine() -> anyhow::Result<Engine> {
     let mut config = wasmtime::Config::new();
@@ -1590,8 +1596,8 @@ impl WasmProtocolSession {
     pub fn new(engine: &Engine, module: &Module) -> anyhow::Result<Self> {
         let mut store = Store::new(engine, HostEnv::default());
         store.limiter(|env| &mut env.limits);
-        let _ = store.set_fuel(10_000_000);
-        store.set_epoch_deadline(20);
+        let _ = store.set_fuel(WASM_INVOCATION_FUEL);
+        store.set_epoch_deadline(WASM_EPOCH_DEADLINE_TICKS);
         let linker = create_prism_linker(engine)?;
         let instance = linker
             .instantiate(&mut store, module)
@@ -1608,7 +1614,7 @@ impl WasmProtocolSession {
             .get_typed_func::<(i32, i32), i32>(&mut store, "set_data")
             .ok();
 
-        Ok(Self {
+        let mut session = Self {
             store,
             instance,
             memory,
@@ -1619,7 +1625,16 @@ impl WasmProtocolSession {
             last_consumed: 0,
             input_head: [0u8; 8],
             input_head_len: 0,
-        })
+        };
+        session.reset_invocation_budget();
+        Ok(session)
+    }
+
+    /// Reset both fuel and epoch deadline for an upcoming invocation to prevent
+    /// false expiration after long-running sessions or inter-packet pauses.
+    pub fn reset_invocation_budget(&mut self) {
+        let _ = self.store.set_fuel(WASM_INVOCATION_FUEL);
+        self.store.set_epoch_deadline(WASM_EPOCH_DEADLINE_TICKS);
     }
 
     pub fn from_wat(wat: impl AsRef<[u8]>) -> anyhow::Result<Self> {
@@ -1700,7 +1715,7 @@ impl WasmProtocolSession {
     }
 
     pub fn set_conn_state(&mut self, state: i32) {
-        let _ = self.store.set_fuel(10_000_000);
+        self.reset_invocation_budget();
         if let Ok(func) = self
             .instance
             .get_typed_func::<(i32,), ()>(&mut self.store, "set_conn_state")
@@ -1711,7 +1726,7 @@ impl WasmProtocolSession {
 
     /// `from_server = true` means the buffer is origin→client (clientbound).
     pub fn set_flow_direction(&mut self, from_server: bool) {
-        let _ = self.store.set_fuel(10_000_000);
+        self.reset_invocation_budget();
         self.store.data_mut().flow_from_server = from_server;
         let dir = if from_server { 1i32 } else { 0i32 };
         if let Ok(func) = self
@@ -1728,7 +1743,7 @@ impl WasmProtocolSession {
     }
 
     pub fn set_session_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
-        let _ = self.store.set_fuel(10_000_000);
+        self.reset_invocation_budget();
         let func = match self
             .instance
             .get_typed_func::<(i32, i32), i32>(&mut self.store, "set_session_data")
@@ -1758,11 +1773,11 @@ impl WasmProtocolSession {
             &mut self.store,
             (WASM_INPUT_OFFSET as i32, data.len() as i32),
         )
-        .map_err(|e| MiddlewareError::Fatal(format!("wasm set_session_data call failed: {e}")))
+        .map_err(|e| MiddlewareError::Fatal(format!("wasm set_session_data call failed: {e:#}")))
     }
 
     pub fn set_data(&mut self, data: &[u8]) -> Result<i32, MiddlewareError> {
-        let _ = self.store.set_fuel(10_000_000);
+        self.reset_invocation_budget();
         let set_data_fn = match &self.set_data_fn {
             Some(f) => f.clone(),
             None => {
@@ -1793,7 +1808,7 @@ impl WasmProtocolSession {
 
         let code = set_data_fn
             .call(&mut self.store, (0, data.len() as i32))
-            .map_err(|e| MiddlewareError::Fatal(format!("wasm set_data call failed: {e}")))?;
+            .map_err(|e| MiddlewareError::Fatal(format!("wasm set_data call failed: {e:#}")))?;
 
         Ok(code)
     }
@@ -1812,7 +1827,7 @@ impl WasmProtocolSession {
         &mut self,
         config: &HashMap<String, serde_json::Value>,
     ) -> Result<(), MiddlewareError> {
-        let _ = self.store.set_fuel(10_000_000);
+        self.reset_invocation_budget();
         for (key, val) in config {
             let norm_key = key.replace('-', "_");
             let func_name = format!("set_{norm_key}");
@@ -1930,7 +1945,7 @@ impl WasmProtocolSession {
     }
 
     pub fn poll(&mut self, buf: &[u8]) -> Result<PollResult, MiddlewareError> {
-        let _ = self.store.set_fuel(10_000_000);
+        self.reset_invocation_budget();
         let poll_fn = match &self.poll_fn {
             Some(f) => f.clone(),
             None => {
@@ -1951,7 +1966,7 @@ impl WasmProtocolSession {
                     self.state as i32,
                 ),
             )
-            .map_err(|e| MiddlewareError::Fatal(format!("wasm poll call failed: {e}")))?;
+            .map_err(|e| MiddlewareError::Fatal(format!("wasm poll call failed: {e:#}")))?;
 
         let action = ((res as u64) >> 32) as u32;
         let value = (res as u64 & 0xffff_ffff) as u32;
@@ -4215,5 +4230,31 @@ mod tests {
         }
 
         reset_dynamic_middleware_config("minecraft");
+    }
+
+    #[test]
+    fn test_wasm_session_long_running_epoch_deadline() {
+        let wat = r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "poll") (param i32 i32 i32) (result i64)
+                    (i64.const 0)
+                )
+            )
+        "#;
+        let mut session = WasmProtocolSession::from_wat(wat).expect("session from wat");
+
+        let res1 = session.poll(&[1, 2, 3]);
+        assert!(res1.is_ok(), "first poll should succeed: {:?}", res1);
+
+        // Sleep long enough to surpass the initial 20 ticks (20 * 50ms = 1000ms)
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        let res2 = session.poll(&[4, 5, 6]);
+        assert!(
+            res2.is_ok(),
+            "poll after 1.1s should succeed due to refreshed epoch deadline: {:?}",
+            res2
+        );
     }
 }

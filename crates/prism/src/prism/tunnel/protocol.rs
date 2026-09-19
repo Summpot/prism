@@ -19,6 +19,16 @@ pub const OPTIMIZER_PARAMS_VERSION: u8 = 1;
 /// Optimizer param flag: dictionary bytes follow the fixed header.
 pub const OPTIMIZER_PARAM_FLAG_DICT: u8 = 0x01;
 const MAX_OPTIMIZER_DICT_BYTES: u32 = 128 * 1024;
+/// Minimum zstd window log advertised/agreed on an optimizer stream (1 KiB).
+pub const MIN_OPTIMIZER_WINDOW_LOG: u32 = 10;
+/// Maximum zstd window log advertised/agreed on an optimizer stream (1 GiB).
+/// Must stay >= the default window log (23 = 8 MiB); a 22 cap halves downlink history.
+pub const MAX_OPTIMIZER_WINDOW_LOG: u32 = 30;
+
+/// Clamp a negotiated or configured zstd window log to the wire-safe range.
+pub fn clamp_window_log(log: u32) -> u32 {
+    log.clamp(MIN_OPTIMIZER_WINDOW_LOG, MAX_OPTIMIZER_WINDOW_LOG)
+}
 
 pub const MAX_REGISTER_JSON_BYTES: u32 = 1 << 20; // 1 MiB
 pub const MAX_DATAGRAM_BYTES: u32 = 1 << 20; // 1 MiB
@@ -206,8 +216,15 @@ pub struct OptimizerStreamParams {
 }
 
 impl OptimizerStreamParams {
+    /// Window this side may decode: min(local decode, peer encode), bounded.
     pub fn agreed_decode_window(&self, peer_encode_window: u8) -> u32 {
-        (self.decode_window_log as u32).min(peer_encode_window as u32).clamp(10, 30)
+        clamp_window_log((self.decode_window_log as u32).min(peer_encode_window as u32))
+    }
+
+    /// Window this side may encode: min(local encode, peer decode), bounded.
+    /// Encoding larger than the peer's decoder window makes zstd reject the stream.
+    pub fn agreed_encode_window(&self, peer_decode_window: u8) -> u32 {
+        clamp_window_log((self.encode_window_log as u32).min(peer_decode_window as u32))
     }
 }
 
@@ -216,8 +233,8 @@ pub async fn write_optimizer_stream_params<W: AsyncWrite + Unpin>(
     params: &OptimizerStreamParams,
 ) -> Result<(), ProtocolError> {
     w.write_u8(OPTIMIZER_PARAMS_VERSION).await?;
-    w.write_u8(params.encode_window_log.max(10)).await?;
-    w.write_u8(params.decode_window_log.max(10)).await?;
+    w.write_u8(clamp_window_log(params.encode_window_log as u32) as u8).await?;
+    w.write_u8(clamp_window_log(params.decode_window_log as u32) as u8).await?;
     let dict = params
         .dictionary
         .as_deref()
@@ -266,8 +283,8 @@ pub async fn read_optimizer_stream_params<R: AsyncRead + Unpin>(
         None
     };
     Ok(OptimizerStreamParams {
-        encode_window_log,
-        decode_window_log,
+        encode_window_log: clamp_window_log(encode_window_log as u32) as u8,
+        decode_window_log: clamp_window_log(decode_window_log as u32) as u8,
         dict_id,
         dictionary,
     })
@@ -637,6 +654,55 @@ mod tests {
         );
         assert_eq!(decoded_peer.as_deref(), Some(peer_only.as_slice()));
         assert_eq!(encode_dictionary(Some(&dict)).as_deref(), Some(dict.as_slice()));
+    }
+
+    #[test]
+    fn agreed_windows_keep_default_8mb_and_never_exceed_peer_decode() {
+        let local = OptimizerStreamParams {
+            encode_window_log: 23,
+            decode_window_log: 23,
+            dict_id: 0,
+            dictionary: None,
+        };
+        // Default downlink is window log 23 (8 MiB). Clamping to 22 was the
+        // savings regression: it halved history and made a 23-encoder unreadable.
+        assert_eq!(local.agreed_decode_window(23), 23);
+        assert_eq!(local.agreed_encode_window(23), 23);
+        assert!(local.agreed_decode_window(23) > 22);
+
+        // Honest peer with a smaller decoder: we must encode at 22, not 23.
+        assert_eq!(local.agreed_encode_window(22), 22);
+        assert_eq!(local.agreed_decode_window(22), 22);
+
+        // Floor and ceiling.
+        assert_eq!(local.agreed_decode_window(5), MIN_OPTIMIZER_WINDOW_LOG);
+        let huge = OptimizerStreamParams {
+            encode_window_log: 255,
+            decode_window_log: 255,
+            dict_id: 0,
+            dictionary: None,
+        };
+        assert_eq!(huge.agreed_decode_window(255), MAX_OPTIMIZER_WINDOW_LOG);
+        assert_eq!(huge.agreed_encode_window(255), MAX_OPTIMIZER_WINDOW_LOG);
+        // Local default vs a hostile advertisement stays at local 23.
+        assert_eq!(local.agreed_decode_window(255), 23);
+    }
+
+    #[tokio::test]
+    async fn optimizer_stream_params_clamp_window_log_on_the_wire() {
+        let (mut a, mut b) = tokio::io::duplex(64);
+        let local = OptimizerStreamParams {
+            encode_window_log: 255,
+            decode_window_log: 1,
+            dict_id: 0,
+            dictionary: None,
+        };
+        tokio::spawn(async move {
+            write_optimizer_stream_params(&mut a, &local).await.unwrap();
+        });
+        let got = read_optimizer_stream_params(&mut b).await.unwrap();
+        assert_eq!(got.encode_window_log as u32, MAX_OPTIMIZER_WINDOW_LOG);
+        assert_eq!(got.decode_window_log as u32, MIN_OPTIMIZER_WINDOW_LOG);
     }
 
     #[tokio::test]

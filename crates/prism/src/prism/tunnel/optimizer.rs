@@ -129,10 +129,11 @@ impl Default for OptimizerConfig {
 
 impl OptimizerConfig {
     pub fn window_log_for(&self, direction: TrafficDirection) -> u32 {
-        match direction {
+        let raw = match direction {
             TrafficDirection::Uplink => self.zstd_window_log_uplink,
             TrafficDirection::Downlink => self.zstd_window_log_downlink,
-        }
+        };
+        crate::prism::tunnel::protocol::clamp_window_log(raw)
     }
 
     pub fn buffer_threshold_for(&self, direction: TrafficDirection) -> usize {
@@ -2135,6 +2136,42 @@ mod tests {
         let mut buf = vec![0u8; b"deferred piece".len()];
         reader.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf, b"deferred piece");
+    }
+
+    #[test]
+    fn test_encoder_window_larger_than_decoder_is_rejected() {
+        let payload = vec![0xABu8; 64 * 1024];
+
+        let mut enc23 = ZstdStreamCompressor::new(CompressorConfig {
+            compression_level: 3,
+            window_log: 23,
+            dictionary: None,
+        })
+        .unwrap();
+        let mut dec22 = ZstdStreamDecompressor::new(DecompressorConfig {
+            window_log: 22,
+            dictionary: None,
+        })
+        .unwrap();
+        let compressed = enc23.compress_batch(&payload).unwrap();
+        assert!(
+            dec22.decompress_chunk(&compressed).is_err(),
+            "window-log 22 decoder must reject a window-log 23 frame (M-8 clamp regression)"
+        );
+
+        let mut enc22 = ZstdStreamCompressor::new(CompressorConfig {
+            compression_level: 3,
+            window_log: 22,
+            dictionary: None,
+        })
+        .unwrap();
+        let mut dec22_ok = ZstdStreamDecompressor::new(DecompressorConfig {
+            window_log: 22,
+            dictionary: None,
+        })
+        .unwrap();
+        let compressed = enc22.compress_batch(&payload).unwrap();
+        assert_eq!(dec22_ok.decompress_chunk(&compressed).unwrap(), payload);
     }
 
     #[test]

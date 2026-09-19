@@ -68,6 +68,19 @@ impl LocalRole {
     }
 }
 
+/// Port used to look up injected middleware data (e.g. Minecraft RSA keys).
+///
+/// Player-facing sockets are accepted on the listen port; origin-facing sockets
+/// are outbound, so the *peer* port is the service port (not the ephemeral local port).
+fn middleware_lookup_port(local: &tokio::net::TcpStream, role: LocalRole) -> Option<u16> {
+    let local_port = local.local_addr().ok().map(|a| a.port());
+    let peer_port = local.peer_addr().ok().map(|a| a.port());
+    match role {
+        LocalRole::Player => local_port.or(peer_port),
+        LocalRole::Upstream => peer_port.or(local_port),
+    }
+}
+
 pub struct PipelineOptions {
     pub optimizer: optimizer::OptimizerConfig,
     pub middleware: Option<String>,
@@ -126,7 +139,7 @@ pub async fn run(
 
     let encode_dict = encode_dictionary(optimizer.dictionary.as_deref());
     let decode_dict = decode_dictionary(optimizer.dictionary.as_deref(), local_id, &peer);
-    let encode_window = local_params.encode_window_log as u32;
+    let encode_window = local_params.agreed_encode_window(peer.decode_window_log);
     let decode_window = local_params.agreed_decode_window(peer.encode_window_log);
 
     let defer_flush = optimizer.flush_interval_for(outbound_dir);
@@ -142,7 +155,7 @@ pub async fn run(
         dictionary: encode_dict,
     };
     let decompressor_config = DecompressorConfig {
-        window_log: decode_window.max(encode_window),
+        window_log: decode_window,
         dictionary: decode_dict,
     };
 
@@ -151,11 +164,7 @@ pub async fn run(
         .map(|addr| addr.ip().is_loopback())
         .unwrap_or(false);
 
-    let port = local
-        .local_addr()
-        .ok()
-        .map(|a| a.port())
-        .or_else(|| local.peer_addr().ok().map(|a| a.port()));
+    let port = middleware_lookup_port(&local, opts.local_role);
 
     let (st_read, st_write) = tokio::io::split(tunnel);
     let (local_read, local_write) = local.into_split();
@@ -638,4 +647,34 @@ pub async fn run_upstream_facing(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn middleware_lookup_port_prefers_peer_on_upstream() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listen_port = listener.local_addr().unwrap().port();
+        let client = tokio::net::TcpStream::connect(("127.0.0.1", listen_port))
+            .await
+            .unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+
+        assert_eq!(
+            middleware_lookup_port(&server, LocalRole::Player),
+            Some(listen_port)
+        );
+        assert_eq!(
+            middleware_lookup_port(&client, LocalRole::Upstream),
+            Some(listen_port)
+        );
+        let ephemeral = client.local_addr().unwrap().port();
+        assert_ne!(ephemeral, listen_port);
+        assert_ne!(
+            middleware_lookup_port(&client, LocalRole::Upstream),
+            Some(ephemeral)
+        );
+    }
 }

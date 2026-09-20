@@ -34,7 +34,12 @@
 		"active": true,
 		"targets": "all",
 		"icon": ["icons/icon.ico", "icons/icon.png"],
-		"createUpdaterArtifacts": true
+		"createUpdaterArtifacts": true,
+		"windows": {
+			"nsis": {
+				"installMode": "currentUser"
+			}
+		}
 	},
 	"plugins": {
 		"deep-link": {
@@ -44,7 +49,10 @@
 		},
 		"updater": {
 			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyQkZCRDc2OEM4QjQxNzQKUldSMFFZdU1kcjIvWW81cTdBZU9MTkZ6T2QvazhFWWM2RTU1T2tJUUVIOFYwSlgwYmQwUmk1Z0kK",
-			"endpoints": ["https://github.com/Summpot/prism/releases/latest/download/latest.json"]
+			"endpoints": ["https://github.com/Summpot/prism/releases/latest/download/latest.json"],
+			"windows": {
+				"installMode": "quiet"
+			}
 		}
 	}
 }

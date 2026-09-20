@@ -454,6 +454,10 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
         if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
             tracing::info!(version = %update.version, "downloading and installing update");
+
+            // Gracefully stop active tunnel client to release connections, ports, and file locks
+            let _ = crate::prism::admin::do_client_stop(&state.client, state.storage.as_deref()).await;
+
             update
                 .download_and_install(|_, _| {}, || {})
                 .await

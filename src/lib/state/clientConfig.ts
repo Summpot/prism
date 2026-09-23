@@ -16,6 +16,8 @@ export const EMPTY_CLIENT_CONFIG: ClientConfigResponse = {
 		auto_connect: true,
 		auto_check_update: true,
 		update_channel: "release",
+		autostart: false,
+		silent_autostart: true,
 	},
 	profiles: [],
 	cumulative_stats: {
@@ -102,6 +104,8 @@ function persistPayload(data: ClientConfigResponse) {
 			fake_lan_broadcast: data.active_config.fake_lan_broadcast,
 			auto_connect_panel: data.active_config.auto_connect_panel,
 			auto_connect: data.active_config.auto_connect,
+			autostart: data.active_config.autostart,
+			silent_autostart: data.active_config.silent_autostart,
 			token_id: data.active_config.token_id,
 			user_id: data.active_config.user_id,
 			username: data.active_config.username,

@@ -408,6 +408,8 @@ fn persist_started_client(
         expires_at: existing.expires_at,
         auto_check_update: existing.auto_check_update,
         update_channel: existing.update_channel.clone(),
+        autostart: existing.autostart,
+        silent_autostart: existing.silent_autostart,
     };
 
     let _ = storage.save_active_profile_id(&profile_id);

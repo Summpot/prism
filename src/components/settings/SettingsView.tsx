@@ -48,6 +48,10 @@ export function SettingsView() {
 	const {
 		autoConnect,
 		setAutoConnect,
+		autostart,
+		setAutostart,
+		silentAutostart,
+		setSilentAutostart,
 		autoConnectPanel,
 		setAutoConnectPanel,
 		fakeLanBroadcast,
@@ -255,6 +259,43 @@ export function SettingsView() {
 								</div>
 								<Switch checked={autoConnect} onCheckedChange={setAutoConnect} />
 							</div>
+
+							{isDesktop && (
+								<>
+									<div className="flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs">
+										<div className="space-y-0.5">
+											<div className="font-medium text-xs text-foreground">
+												{m.client_autostart()}
+											</div>
+											<div className="text-[10px] text-muted-foreground">
+												{m.client_autostart_hint()}
+											</div>
+										</div>
+										<Switch checked={autostart} onCheckedChange={setAutostart} />
+									</div>
+
+									<div
+										className={cn(
+											"flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs transition-opacity",
+											!autostart && "opacity-60",
+										)}
+									>
+										<div className="space-y-0.5">
+											<div className="font-medium text-xs text-foreground">
+												{m.client_silent_autostart()}
+											</div>
+											<div className="text-[10px] text-muted-foreground">
+												{m.client_silent_autostart_hint()}
+											</div>
+										</div>
+										<Switch
+											checked={silentAutostart}
+											onCheckedChange={setSilentAutostart}
+											disabled={!autostart}
+										/>
+									</div>
+								</>
+							)}
 
 							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs">
 								<div className="space-y-0.5">

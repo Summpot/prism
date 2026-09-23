@@ -31,6 +31,18 @@ struct Cli {
     #[arg(long)]
     gui: bool,
 
+    /// Started automatically at system boot / startup.
+    #[arg(long)]
+    autostart: bool,
+
+    /// Start silently in the background / minimized to system tray.
+    #[arg(long)]
+    silent: bool,
+
+    /// Alias for --silent: start minimized to system tray.
+    #[arg(long)]
+    minimized: bool,
+
     /// Deep link URL or extra positional arguments (e.g. prism://...)
     #[arg(trailing_var_arg = true)]
     extra_args: Vec<String>,
@@ -71,7 +83,12 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
-        let should_launch_gui = cli.gui || (cli.config.is_none() && !cli.headless && has_display);
+        let is_autostart = cli.autostart;
+        let is_silent = cli.silent || cli.minimized;
+        let should_launch_gui = cli.gui
+            || is_autostart
+            || is_silent
+            || (cli.config.is_none() && !cli.headless && has_display);
         if should_launch_gui {
             #[cfg(target_os = "windows")]
             unsafe {
@@ -89,13 +106,13 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            return prism::desktop::run(cli.config).await;
+            return prism::desktop::run(cli.config, is_autostart, is_silent).await;
         }
     }
 
     #[cfg(not(feature = "desktop"))]
     {
-        if cli.gui {
+        if cli.gui || cli.autostart || cli.silent || cli.minimized {
             anyhow::bail!("Prism was compiled without desktop GUI support");
         }
     }
@@ -112,6 +129,19 @@ mod tests {
         let args = ["prism", "prism://auth/callback?code=test12345"];
         let cli = Cli::try_parse_from(args).expect("Cli must accept deep link url");
         assert_eq!(cli.extra_args, vec!["prism://auth/callback?code=test12345"]);
+    }
+
+    #[test]
+    fn test_cli_accepts_autostart_and_silent_flags() {
+        let args = ["prism", "--autostart", "--silent"];
+        let cli = Cli::try_parse_from(args).expect("Cli must accept autostart and silent flags");
+        assert!(cli.autostart);
+        assert!(cli.silent);
+        assert!(!cli.minimized);
+
+        let args2 = ["prism", "--minimized"];
+        let cli2 = Cli::try_parse_from(args2).expect("Cli must accept minimized flag");
+        assert!(cli2.minimized);
     }
 }
 

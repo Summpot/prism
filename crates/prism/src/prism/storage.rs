@@ -34,6 +34,8 @@ pub struct ClientConfigState {
     pub expires_at: Option<u64>,
     pub auto_check_update: bool,
     pub update_channel: String,
+    pub autostart: bool,
+    pub silent_autostart: bool,
 }
 
 impl Default for ClientConfigState {
@@ -55,6 +57,8 @@ impl Default for ClientConfigState {
             expires_at: None,
             auto_check_update: true,
             update_channel: "release".into(),
+            autostart: false,
+            silent_autostart: true,
         }
     }
 }
@@ -95,6 +99,10 @@ pub struct ClientConfigPatch {
     pub auto_check_update: Option<bool>,
     #[serde(default)]
     pub update_channel: Option<String>,
+    #[serde(default)]
+    pub autostart: Option<bool>,
+    #[serde(default)]
+    pub silent_autostart: Option<bool>,
 }
 
 impl ClientConfigPatch {
@@ -115,6 +123,8 @@ impl ClientConfigPatch {
             && self.expires_at.is_none()
             && self.auto_check_update.is_none()
             && self.update_channel.is_none()
+            && self.autostart.is_none()
+            && self.silent_autostart.is_none()
     }
 }
 
@@ -169,6 +179,12 @@ impl ClientConfigState {
         }
         if let Some(v) = patch.update_channel.as_ref().filter(|s| !s.trim().is_empty()) {
             self.update_channel = v.clone();
+        }
+        if let Some(v) = patch.autostart {
+            self.autostart = v;
+        }
+        if let Some(v) = patch.silent_autostart {
+            self.silent_autostart = v;
         }
     }
 }
@@ -1553,5 +1569,22 @@ mod tests {
         assert_eq!(snap.active_config.auth_token, "prism_cl_saved");
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_autostart_and_silent_autostart_patch() {
+        let mut state = ClientConfigState::default();
+        assert!(!state.autostart);
+        assert!(state.silent_autostart);
+
+        let patch = ClientConfigPatch {
+            autostart: Some(true),
+            silent_autostart: Some(false),
+            ..Default::default()
+        };
+        assert!(!patch.is_empty());
+        state.apply_patch(&patch);
+        assert!(state.autostart);
+        assert!(!state.silent_autostart);
     }
 }

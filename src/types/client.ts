@@ -55,6 +55,8 @@ export interface ClientConfigState {
 	expires_at?: number | null;
 	auto_check_update?: boolean;
 	update_channel?: "release" | "dev" | string;
+	autostart?: boolean;
+	silent_autostart?: boolean;
 }
 
 export interface UpdateCheckResult {

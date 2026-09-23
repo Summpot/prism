@@ -14,9 +14,13 @@ pub struct DesktopClientState {
     pub storage: Option<Arc<crate::prism::storage::StorageEngine>>,
 }
 
-pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
+pub async fn run(
+    config_path: Option<PathBuf>,
+    is_autostart: bool,
+    is_silent: bool,
+) -> anyhow::Result<()> {
     crate::prism::logging::init_desktop_or_test_subscriber();
-    tracing::info!("prism: starting desktop GUI mode");
+    tracing::info!(is_autostart, is_silent, "prism: starting desktop GUI mode");
 
     // 1. Prepare Prism client controller and background Admin/Client API
     let (reload_tx, _) = tokio::sync::watch::channel(crate::prism::telemetry::ReloadSignal::new());
@@ -117,6 +121,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let client_ctrl_for_tray = client_controller.clone();
     let storage_for_tray = storage.clone();
     let storage_for_updater = storage.clone();
+    let storage_for_setup = storage.clone();
 
     let desktop_client_state = DesktopClientState {
         client: client_controller.clone(),
@@ -197,11 +202,16 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     #[tauri::command]
     fn client_get_config(
+        app: tauri::AppHandle,
         state: tauri::State<'_, DesktopClientState>,
     ) -> Result<crate::prism::storage::ClientConfigResponse, String> {
         let mut cfg = crate::prism::admin::do_client_get_config(
             state.storage.as_deref(),
         );
+        use tauri_plugin_autostart::ManagerExt;
+        if let Ok(enabled) = app.autolaunch().is_enabled() {
+            cfg.active_config.autostart = enabled;
+        }
         cfg.active_config.auth_token = crate::prism::admin::mask_token(&cfg.active_config.auth_token);
         for p in &mut cfg.profiles {
             p.auth_token = crate::prism::admin::mask_token(&p.auth_token);
@@ -211,9 +221,25 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     #[tauri::command]
     fn client_save_config(
+        app: tauri::AppHandle,
         state: tauri::State<'_, DesktopClientState>,
         payload: crate::prism::admin::SaveConfigRequest,
     ) -> Result<(), String> {
+        if let Some(ref active) = payload.active_config {
+            if let Some(autostart_enable) = active.autostart {
+                use tauri_plugin_autostart::ManagerExt;
+                let manager = app.autolaunch();
+                if autostart_enable {
+                    if let Err(err) = manager.enable() {
+                        tracing::warn!(err = %err, "desktop: failed to enable autostart");
+                    }
+                } else {
+                    if let Err(err) = manager.disable() {
+                        tracing::warn!(err = %err, "desktop: failed to disable autostart");
+                    }
+                }
+            }
+        }
         crate::prism::admin::do_client_save_config(state.storage.as_deref(), payload)
     }
 
@@ -475,12 +501,21 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     tauri::Builder::default()
         .manage(desktop_client_state)
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+            let is_silent_arg = args
+                .iter()
+                .any(|a| a == "--silent" || a == "--minimized" || a == "--autostart");
+            if !is_silent_arg {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
             }
             #[cfg(desktop)]
             {
@@ -526,7 +561,19 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
 
             let main_window = app.get_webview_window("main").expect("main window exists");
             let _ = main_window.center();
-            let _ = main_window.show();
+
+            let silent_configured = storage_for_setup
+                .as_ref()
+                .and_then(|s| s.load_active_config().ok())
+                .map(|c| c.silent_autostart)
+                .unwrap_or(true);
+
+            let start_silently = is_silent || (is_autostart && silent_configured);
+            if !start_silently {
+                let _ = main_window.show();
+            } else {
+                tracing::info!("prism: launched in silent / minimized mode");
+            }
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -557,7 +604,6 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
             let storage_updater_clone = storage_for_updater.clone();
             tauri::async_runtime::spawn(async move {
                 use tauri::Emitter;
-                use tauri_plugin_updater::UpdaterExt;
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 let (auto_check, channel) = storage_updater_clone
                     .as_ref()

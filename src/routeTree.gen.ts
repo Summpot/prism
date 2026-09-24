@@ -16,6 +16,7 @@ import { Route as ConnectionsRouteImport } from './routes/connections'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MiddlewareRouteImport } from './routes/middleware'
+import { Route as OptimizerRouteImport } from './routes/optimizer'
 import { Route as ProfilesRouteImport } from './routes/profiles'
 import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -65,6 +66,11 @@ const LogsRoute = LogsRouteImport.update({
 const MiddlewareRoute = MiddlewareRouteImport.update({
   id: '/middleware',
   path: '/middleware',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OptimizerRoute = OptimizerRouteImport.update({
+  id: '/optimizer',
+  path: '/optimizer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfilesRoute = ProfilesRouteImport.update({
@@ -151,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
+  '/optimizer': typeof OptimizerRoute
   '/profiles': typeof ProfilesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
@@ -174,6 +181,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
+  '/optimizer': typeof OptimizerRoute
   '/profiles': typeof ProfilesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
@@ -199,6 +207,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/middleware': typeof MiddlewareRoute
+  '/optimizer': typeof OptimizerRoute
   '/profiles': typeof ProfilesRoute
   '/runtime': typeof RuntimeRoute
   '/settings': typeof SettingsRoute
@@ -225,6 +234,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
+    | '/optimizer'
     | '/profiles'
     | '/runtime'
     | '/settings'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
+    | '/optimizer'
     | '/profiles'
     | '/runtime'
     | '/settings'
@@ -272,6 +283,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/logs'
     | '/middleware'
+    | '/optimizer'
     | '/profiles'
     | '/runtime'
     | '/settings'
@@ -297,6 +309,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   LogsRoute: typeof LogsRoute
   MiddlewareRoute: typeof MiddlewareRoute
+  OptimizerRoute: typeof OptimizerRoute
   ProfilesRoute: typeof ProfilesRoute
   RuntimeRoute: typeof RuntimeRoute
   SettingsRoute: typeof SettingsRoute
@@ -354,6 +367,13 @@ declare module '@tanstack/react-router' {
       path: '/middleware'
       fullPath: '/middleware'
       preLoaderRoute: typeof MiddlewareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/optimizer': {
+      id: '/optimizer'
+      path: '/optimizer'
+      fullPath: '/optimizer'
+      preLoaderRoute: typeof OptimizerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profiles': {
@@ -498,6 +518,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   LogsRoute: LogsRoute,
   MiddlewareRoute: MiddlewareRoute,
+  OptimizerRoute: OptimizerRoute,
   ProfilesRoute: ProfilesRoute,
   RuntimeRoute: RuntimeRoute,
   SettingsRoute: SettingsRoute,

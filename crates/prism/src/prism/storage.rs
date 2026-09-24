@@ -36,6 +36,11 @@ pub struct ClientConfigState {
     pub update_channel: String,
     pub autostart: bool,
     pub silent_autostart: bool,
+    pub optimizer_enabled: bool,
+    pub optimizer_zstd_level: i32,
+    pub optimizer_adaptive_flush: bool,
+    pub optimizer_flush_interval_ms: u64,
+    pub optimizer_buffer_threshold: usize,
 }
 
 impl Default for ClientConfigState {
@@ -59,6 +64,11 @@ impl Default for ClientConfigState {
             update_channel: "release".into(),
             autostart: false,
             silent_autostart: true,
+            optimizer_enabled: true,
+            optimizer_zstd_level: 3,
+            optimizer_adaptive_flush: true,
+            optimizer_flush_interval_ms: 20,
+            optimizer_buffer_threshold: 64 * 1024,
         }
     }
 }
@@ -103,6 +113,16 @@ pub struct ClientConfigPatch {
     pub autostart: Option<bool>,
     #[serde(default)]
     pub silent_autostart: Option<bool>,
+    #[serde(default)]
+    pub optimizer_enabled: Option<bool>,
+    #[serde(default)]
+    pub optimizer_zstd_level: Option<i32>,
+    #[serde(default)]
+    pub optimizer_adaptive_flush: Option<bool>,
+    #[serde(default)]
+    pub optimizer_flush_interval_ms: Option<u64>,
+    #[serde(default)]
+    pub optimizer_buffer_threshold: Option<usize>,
 }
 
 impl ClientConfigPatch {
@@ -125,6 +145,11 @@ impl ClientConfigPatch {
             && self.update_channel.is_none()
             && self.autostart.is_none()
             && self.silent_autostart.is_none()
+            && self.optimizer_enabled.is_none()
+            && self.optimizer_zstd_level.is_none()
+            && self.optimizer_adaptive_flush.is_none()
+            && self.optimizer_flush_interval_ms.is_none()
+            && self.optimizer_buffer_threshold.is_none()
     }
 }
 
@@ -185,6 +210,21 @@ impl ClientConfigState {
         }
         if let Some(v) = patch.silent_autostart {
             self.silent_autostart = v;
+        }
+        if let Some(v) = patch.optimizer_enabled {
+            self.optimizer_enabled = v;
+        }
+        if let Some(v) = patch.optimizer_zstd_level {
+            self.optimizer_zstd_level = v.clamp(1, 22);
+        }
+        if let Some(v) = patch.optimizer_adaptive_flush {
+            self.optimizer_adaptive_flush = v;
+        }
+        if let Some(v) = patch.optimizer_flush_interval_ms {
+            self.optimizer_flush_interval_ms = v.clamp(1, 1000);
+        }
+        if let Some(v) = patch.optimizer_buffer_threshold {
+            self.optimizer_buffer_threshold = v.clamp(1024, 16 * 1024 * 1024);
         }
     }
 }

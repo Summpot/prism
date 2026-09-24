@@ -452,6 +452,14 @@ pub fn extract_component_schema(
                         wasmtime::component::Type::U32 => {
                             if key.contains("threshold") {
                                 (ConfigFieldType::U32, serde_json::json!(256))
+                            } else if key.contains("urgent") {
+                                (ConfigFieldType::U32, serde_json::json!(14))
+                            } else if key.contains("high") {
+                                (ConfigFieldType::U32, serde_json::json!(18))
+                            } else if key.contains("defer") {
+                                (ConfigFieldType::U32, serde_json::json!(22))
+                            } else if key.contains("bulk") {
+                                (ConfigFieldType::U32, serde_json::json!(23))
                             } else {
                                 (ConfigFieldType::U32, serde_json::json!(0))
                             }
@@ -509,6 +517,10 @@ pub fn extract_component_schema(
                         "deflate-level" | "deflate_level" => "Deflate compression level (1 = fastest/low-latency, 9 = max compression)",
                         "discovery-targets" | "discovery_targets" => "Comma-separated target broadcast/multicast IP:port list",
                         "motd-template" | "motd_template" => "LAN broadcast discovery payload template string",
+                        "window-log-urgent" | "window_log_urgent" => "Zstd sliding window log (10-30, 2^N) for Urgent priority packets (Ping/KeepAlive)",
+                        "window-log-high" | "window_log_high" => "Zstd sliding window log (10-30, 2^N) for High priority packets (Movement/Combat)",
+                        "window-log-defer" | "window_log_defer" => "Zstd sliding window log (10-30, 2^N) for standard Defer game packets",
+                        "window-log-bulk" | "window_log_bulk" => "Zstd sliding window log (10-30, 2^N) for Bulk packets (Chunk/Light data)",
                         _ => "",
                     }.to_string();
 
@@ -4194,7 +4206,7 @@ mod tests {
             WasmMiddleware::from_wat("minecraft", mc_wat).expect("compile minecraft component");
         let schema = mw.schema().expect("schema extracted");
         assert_eq!(schema.name, "minecraft");
-        assert_eq!(schema.fields.len(), 4);
+        assert_eq!(schema.fields.len(), 8);
 
         let threshold_field = schema
             .fields
@@ -4202,6 +4214,14 @@ mod tests {
             .find(|f| f.key == "recompress-threshold")
             .unwrap();
         assert_eq!(threshold_field.field_type, ConfigFieldType::U32);
+
+        let urgent_field = schema
+            .fields
+            .iter()
+            .find(|f| f.key == "window-log-urgent")
+            .unwrap();
+        assert_eq!(urgent_field.field_type, ConfigFieldType::U32);
+        assert_eq!(urgent_field.default_value, serde_json::json!(14));
 
         // Create shared active session
         let session_handle = mw.create_shared_session().expect("create shared session");

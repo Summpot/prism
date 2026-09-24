@@ -142,6 +142,34 @@ pub async fn run(
     let encode_window = local_params.agreed_encode_window(peer.decode_window_log);
     let decode_window = local_params.agreed_decode_window(peer.encode_window_log);
 
+    let lane_encode_windows = if let Some(ref mw_name) = opts.middleware {
+        let base_name = mw_name.strip_suffix(".wat").unwrap_or(mw_name).trim();
+        let dyn_cfg = crate::prism::middleware::get_dynamic_middleware_config(base_name);
+        let parse_log = |cfg: Option<&std::collections::HashMap<String, serde_json::Value>>, key1: &str, key2: &str, default: u32| -> u32 {
+            if let Some(c) = cfg {
+                if let Some(v) = c.get(key1).or_else(|| c.get(key2)) {
+                    if let Some(n) = v.as_u64() {
+                        return n as u32;
+                    }
+                }
+            }
+            default
+        };
+        let urgent_raw = parse_log(dyn_cfg.as_ref(), "window-log-urgent", "window_log_urgent", 14);
+        let high_raw = parse_log(dyn_cfg.as_ref(), "window-log-high", "window_log_high", 18);
+        let defer_raw = parse_log(dyn_cfg.as_ref(), "window-log-defer", "window_log_defer", 22);
+        let bulk_raw = parse_log(dyn_cfg.as_ref(), "window-log-bulk", "window_log_bulk", 23);
+
+        Some([
+            urgent_raw.clamp(protocol::MIN_OPTIMIZER_WINDOW_LOG, encode_window),
+            high_raw.clamp(protocol::MIN_OPTIMIZER_WINDOW_LOG, encode_window),
+            defer_raw.clamp(protocol::MIN_OPTIMIZER_WINDOW_LOG, encode_window),
+            bulk_raw.clamp(protocol::MIN_OPTIMIZER_WINDOW_LOG, encode_window),
+        ])
+    } else {
+        None
+    };
+
     let defer_flush = optimizer.flush_interval_for(outbound_dir);
     let batcher_config = BatcherConfig {
         flush_interval: defer_flush,
@@ -152,10 +180,12 @@ pub async fn run(
     let compressor_config = CompressorConfig {
         compression_level: optimizer.zstd_level,
         window_log: encode_window,
+        lane_window_logs: lane_encode_windows,
         dictionary: encode_dict,
     };
     let decompressor_config = DecompressorConfig {
         window_log: decode_window,
+        lane_window_logs: None,
         dictionary: decode_dict,
     };
 

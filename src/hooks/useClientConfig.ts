@@ -49,6 +49,19 @@ export function useClientConfig() {
 		setAutoCheckUpdate: (val: boolean) => patchActiveConfig({ auto_check_update: val }),
 		updateChannel: cfg.update_channel ?? "release",
 		setUpdateChannel: (val: string) => patchActiveConfig({ update_channel: val }),
+		optimizerEnabled: cfg.optimizer_enabled ?? true,
+		setOptimizerEnabled: (val: boolean) => patchActiveConfig({ optimizer_enabled: val }),
+		optimizerZstdLevel: cfg.optimizer_zstd_level ?? 3,
+		setOptimizerZstdLevel: (val: number) => patchActiveConfig({ optimizer_zstd_level: val }),
+		optimizerAdaptiveFlush: cfg.optimizer_adaptive_flush ?? true,
+		setOptimizerAdaptiveFlush: (val: boolean) =>
+			patchActiveConfig({ optimizer_adaptive_flush: val }),
+		optimizerFlushIntervalMs: cfg.optimizer_flush_interval_ms ?? 20,
+		setOptimizerFlushIntervalMs: (val: number) =>
+			patchActiveConfig({ optimizer_flush_interval_ms: val }),
+		optimizerBufferThreshold: cfg.optimizer_buffer_threshold ?? 65536,
+		setOptimizerBufferThreshold: (val: number) =>
+			patchActiveConfig({ optimizer_buffer_threshold: val }),
 		managementUrl,
 		deviceId: data.device_id ?? "",
 		cumulativeStats: data.cumulative_stats,

@@ -57,6 +57,11 @@ export interface ClientConfigState {
 	update_channel?: "release" | "dev" | string;
 	autostart?: boolean;
 	silent_autostart?: boolean;
+	optimizer_enabled?: boolean;
+	optimizer_zstd_level?: number;
+	optimizer_adaptive_flush?: boolean;
+	optimizer_flush_interval_ms?: number;
+	optimizer_buffer_threshold?: number;
 }
 
 export interface UpdateCheckResult {

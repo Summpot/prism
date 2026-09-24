@@ -29,6 +29,10 @@
     (field "deflate-level" u8)
     (field "discovery-targets" string)
     (field "motd-template" string)
+    (field "window-log-urgent" u32)
+    (field "window-log-high" u32)
+    (field "window-log-defer" u32)
+    (field "window-log-bulk" u32)
   ))
   (export "config" (type $Config))
 
@@ -139,6 +143,10 @@
   (global $targets_len (mut i32) (i32.const 51))
   (global $template_ptr (mut i32) (i32.const 65660))
   (global $template_len (mut i32) (i32.const 42))
+  (global $window_log_urgent (mut i32) (i32.const 14))
+  (global $window_log_high (mut i32) (i32.const 18))
+  (global $window_log_defer (mut i32) (i32.const 22))
+  (global $window_log_bulk (mut i32) (i32.const 23))
 
   ;; Connection / crypto state (protocol driver internals, not host knowledge)
   (global $proto_version (mut i32) (i32.const 0))
@@ -200,6 +208,22 @@
         (global.set $template_len (local.get $len))
       )
     )
+  )
+
+  (func $set_window_log_urgent (export "set_window_log_urgent") (param $val i32)
+    (global.set $window_log_urgent (local.get $val))
+  )
+
+  (func $set_window_log_high (export "set_window_log_high") (param $val i32)
+    (global.set $window_log_high (local.get $val))
+  )
+
+  (func $set_window_log_defer (export "set_window_log_defer") (param $val i32)
+    (global.set $window_log_defer (local.get $val))
+  )
+
+  (func $set_window_log_bulk (export "set_window_log_bulk") (param $val i32)
+    (global.set $window_log_bulk (local.get $val))
   )
 
   (func (export "update_config")

@@ -352,6 +352,22 @@ pub(crate) async fn do_client_start(
         None => None,
     };
 
+    let optimizer = if let Some(opt) = payload.optimizer {
+        Some(opt)
+    } else if let Some(storage) = storage {
+        let active = storage.load_active_config().unwrap_or_default();
+        Some(crate::prism::config::OptimizerClientConfig {
+            enabled: active.optimizer_enabled,
+            zstd_level: Some(active.optimizer_zstd_level),
+            adaptive_flush: Some(active.optimizer_adaptive_flush),
+            flush_interval_ms: Some(active.optimizer_flush_interval_ms),
+            buffer_threshold: Some(active.optimizer_buffer_threshold),
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
     let cfg = crate::prism::config::TunnelClientConfig {
         server_addr: payload.server_addr,
         transport: payload.transport,
@@ -360,7 +376,7 @@ pub(crate) async fn do_client_start(
         middleware: normalized_mw,
         fake_lan_broadcast: payload.fake_lan_broadcast,
         motd_prefix: payload.motd_prefix,
-        optimizer: payload.optimizer,
+        optimizer,
         websocket: None,
         doh_servers: Vec::new(),
     };
@@ -410,6 +426,11 @@ fn persist_started_client(
         update_channel: existing.update_channel.clone(),
         autostart: existing.autostart,
         silent_autostart: existing.silent_autostart,
+        optimizer_enabled: existing.optimizer_enabled,
+        optimizer_zstd_level: existing.optimizer_zstd_level,
+        optimizer_adaptive_flush: existing.optimizer_adaptive_flush,
+        optimizer_flush_interval_ms: existing.optimizer_flush_interval_ms,
+        optimizer_buffer_threshold: existing.optimizer_buffer_threshold,
     };
 
     let _ = storage.save_active_profile_id(&profile_id);

@@ -188,14 +188,27 @@ impl From<&PrismOptimizerConfig> for OptimizerConfig {
 impl From<&OptimizerClientConfig> for OptimizerConfig {
     fn from(cfg: &OptimizerClientConfig) -> Self {
         let window = cfg.zstd_window_log();
-        Self {
+        let mut opt = Self {
             enabled: cfg.enabled,
             zstd_window_log: window,
             zstd_window_log_uplink: cfg.zstd_window_log_uplink(),
             zstd_window_log_downlink: cfg.zstd_window_log_downlink(),
             dictionary: resolve_dictionary(cfg.zstd_dictionary.as_deref(), ""),
             ..Self::default()
+        };
+        if let Some(lvl) = cfg.zstd_level {
+            opt.zstd_level = lvl;
         }
+        if let Some(flush) = cfg.flush_interval_ms {
+            opt.flush_interval = Duration::from_millis(flush);
+        }
+        if let Some(adapt) = cfg.adaptive_flush {
+            opt.adaptive_flush = adapt;
+        }
+        if let Some(thresh) = cfg.buffer_threshold {
+            opt.buffer_threshold = thresh;
+        }
+        opt
     }
 }
 
@@ -574,11 +587,11 @@ impl LaneQueue {
 // Component 2: ZstdStreamCompressor
 // ============================================================================
 
-/// Configuration for [`ZstdStreamCompressor`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompressorConfig {
     pub compression_level: i32,
     pub window_log: u32,
+    pub lane_window_logs: Option<[u32; LANE_COUNT]>,
     pub dictionary: Option<Vec<u8>>,
 }
 
@@ -587,6 +600,7 @@ impl Default for CompressorConfig {
         Self {
             compression_level: DEFAULT_ZSTD_LEVEL,
             window_log: DEFAULT_ZSTD_WINDOW_LOG,
+            lane_window_logs: None,
             dictionary: None,
         }
     }
@@ -682,10 +696,10 @@ impl ZstdStreamCompressor {
 // Component 3: ZstdStreamDecompressor
 // ============================================================================
 
-/// Configuration for [`ZstdStreamDecompressor`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecompressorConfig {
     pub window_log: u32,
+    pub lane_window_logs: Option<[u32; LANE_COUNT]>,
     pub dictionary: Option<Vec<u8>>,
 }
 
@@ -693,6 +707,7 @@ impl Default for DecompressorConfig {
     fn default() -> Self {
         Self {
             window_log: DEFAULT_ZSTD_WINDOW_LOG,
+            lane_window_logs: None,
             dictionary: None,
         }
     }
@@ -947,22 +962,56 @@ pub fn decode_stream(
 }
 
 fn lane_compressors(config: &CompressorConfig) -> io::Result<[ZstdStreamCompressor; LANE_COUNT]> {
+    let lane_windows = config.lane_window_logs.unwrap_or([config.window_log; LANE_COUNT]);
     Ok([
-        ZstdStreamCompressor::new(config.clone())?,
-        ZstdStreamCompressor::new(config.clone())?,
-        ZstdStreamCompressor::new(config.clone())?,
-        ZstdStreamCompressor::new(config.clone())?,
+        ZstdStreamCompressor::new(CompressorConfig {
+            window_log: lane_windows[LANE_URGENT as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
+        ZstdStreamCompressor::new(CompressorConfig {
+            window_log: lane_windows[LANE_HIGH as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
+        ZstdStreamCompressor::new(CompressorConfig {
+            window_log: lane_windows[LANE_DEFER as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
+        ZstdStreamCompressor::new(CompressorConfig {
+            window_log: lane_windows[LANE_BULK as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
     ])
 }
 
 fn lane_decompressors(
     config: &DecompressorConfig,
 ) -> io::Result<[ZstdStreamDecompressor; LANE_COUNT]> {
+    let lane_windows = config.lane_window_logs.unwrap_or([config.window_log; LANE_COUNT]);
     Ok([
-        ZstdStreamDecompressor::new(config.clone())?,
-        ZstdStreamDecompressor::new(config.clone())?,
-        ZstdStreamDecompressor::new(config.clone())?,
-        ZstdStreamDecompressor::new(config.clone())?,
+        ZstdStreamDecompressor::new(DecompressorConfig {
+            window_log: lane_windows[LANE_URGENT as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
+        ZstdStreamDecompressor::new(DecompressorConfig {
+            window_log: lane_windows[LANE_HIGH as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
+        ZstdStreamDecompressor::new(DecompressorConfig {
+            window_log: lane_windows[LANE_DEFER as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
+        ZstdStreamDecompressor::new(DecompressorConfig {
+            window_log: lane_windows[LANE_BULK as usize],
+            lane_window_logs: None,
+            ..config.clone()
+        })?,
     ])
 }
 
@@ -2145,11 +2194,13 @@ mod tests {
         let mut enc23 = ZstdStreamCompressor::new(CompressorConfig {
             compression_level: 3,
             window_log: 23,
+            lane_window_logs: None,
             dictionary: None,
         })
         .unwrap();
         let mut dec22 = ZstdStreamDecompressor::new(DecompressorConfig {
             window_log: 22,
+            lane_window_logs: None,
             dictionary: None,
         })
         .unwrap();
@@ -2162,11 +2213,13 @@ mod tests {
         let mut enc22 = ZstdStreamCompressor::new(CompressorConfig {
             compression_level: 3,
             window_log: 22,
+            lane_window_logs: None,
             dictionary: None,
         })
         .unwrap();
         let mut dec22_ok = ZstdStreamDecompressor::new(DecompressorConfig {
             window_log: 22,
+            lane_window_logs: None,
             dictionary: None,
         })
         .unwrap();
@@ -2774,5 +2827,31 @@ mod tests {
         let mut rec_chunk2 = vec![0u8; chunk2.len()];
         reader.read_exact(&mut rec_chunk2).await.unwrap();
         assert_eq!(rec_chunk2, chunk2);
+    }
+
+    #[test]
+    fn test_lane_compressors_per_lane_window_logs() {
+        let cfg = CompressorConfig {
+            compression_level: 3,
+            window_log: 23,
+            lane_window_logs: Some([14, 18, 22, 23]),
+            dictionary: None,
+        };
+        let compressors = lane_compressors(&cfg).unwrap();
+        assert_eq!(compressors[LANE_URGENT as usize].config().window_log, 14);
+        assert_eq!(compressors[LANE_HIGH as usize].config().window_log, 18);
+        assert_eq!(compressors[LANE_DEFER as usize].config().window_log, 22);
+        assert_eq!(compressors[LANE_BULK as usize].config().window_log, 23);
+
+        let dcfg = DecompressorConfig {
+            window_log: 23,
+            lane_window_logs: Some([14, 18, 22, 23]),
+            dictionary: None,
+        };
+        let decompressors = lane_decompressors(&dcfg).unwrap();
+        assert_eq!(decompressors[LANE_URGENT as usize].config().window_log, 14);
+        assert_eq!(decompressors[LANE_HIGH as usize].config().window_log, 18);
+        assert_eq!(decompressors[LANE_DEFER as usize].config().window_log, 22);
+        assert_eq!(decompressors[LANE_BULK as usize].config().window_log, 23);
     }
 }

@@ -389,6 +389,10 @@ pub struct OptimizerClientConfig {
     pub zstd_window_log_uplink: Option<u32>,
     pub zstd_window_log_downlink: Option<u32>,
     pub zstd_dictionary: Option<String>,
+    pub zstd_level: Option<i32>,
+    pub flush_interval_ms: Option<u64>,
+    pub adaptive_flush: Option<bool>,
+    pub buffer_threshold: Option<usize>,
 }
 
 impl Default for OptimizerClientConfig {
@@ -399,6 +403,10 @@ impl Default for OptimizerClientConfig {
             zstd_window_log_uplink: Some(18),
             zstd_window_log_downlink: Some(23),
             zstd_dictionary: None,
+            zstd_level: Some(3),
+            flush_interval_ms: Some(20),
+            adaptive_flush: Some(true),
+            buffer_threshold: Some(64 * 1024),
         }
     }
 }
@@ -909,6 +917,10 @@ struct FileOptimizerClient {
     zstd_window_log_uplink: Option<u32>,
     zstd_window_log_downlink: Option<u32>,
     zstd_dictionary: Option<String>,
+    zstd_level: Option<i32>,
+    flush_interval_ms: Option<u64>,
+    adaptive_flush: Option<bool>,
+    buffer_threshold: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1343,6 +1355,10 @@ impl Config {
                     zstd_window_log_uplink: to.zstd_window_log_uplink,
                     zstd_window_log_downlink: to.zstd_window_log_downlink,
                     zstd_dictionary: to.zstd_dictionary.clone(),
+                    zstd_level: to.zstd_level,
+                    flush_interval_ms: to.flush_interval_ms,
+                    adaptive_flush: to.adaptive_flush,
+                    buffer_threshold: to.buffer_threshold,
                 });
 
                 let (fake_lan_broadcast, motd_prefix) = if let Some(ref d) = c.discovery {

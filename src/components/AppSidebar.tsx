@@ -14,6 +14,7 @@ import {
 	Terminal,
 	Unplug,
 	Users,
+	Zap,
 } from "lucide-react";
 
 import { usePanelSession } from "@/lib/panelSession";
@@ -142,6 +143,14 @@ export function AppSidebarContent({
 						exact
 						label={m.nav_middleware()}
 						icon={<Sliders className="h-4 w-4" />}
+						onClick={onNavigate}
+						collapsed={collapsed}
+					/>
+					<SidebarNavItem
+						to="/optimizer"
+						exact
+						label={m.nav_optimizer()}
+						icon={<Zap className="h-4 w-4" />}
 						onClick={onNavigate}
 						collapsed={collapsed}
 					/>

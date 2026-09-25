@@ -32,7 +32,7 @@ export default function Header() {
 
 	return (
 		<>
-			{/* Mobile top bar (in browser or ultra-narrow desktop view) */}
+			{/* Mobile top bar (dev preview or ultra-narrow fallback) */}
 			{!isDesktop ? (
 				<div className="fixed top-0 right-0 left-0 z-40 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:hidden">
 					<div className="flex items-center gap-2.5">
@@ -51,7 +51,7 @@ export default function Header() {
 				</div>
 			) : null}
 
-			{/* Mobile Drawer (browser mode) */}
+			{/* Mobile Drawer (dev preview fallback) */}
 			{!isDesktop && mobileOpen ? (
 				<div className="fixed inset-0 z-50 md:hidden">
 					<button
@@ -79,7 +79,7 @@ export default function Header() {
 				</div>
 			) : null}
 
-			{/* Desktop / Tablet Sidebar: flex in desktop app, md:flex in browser */}
+			{/* Desktop / Tablet Sidebar */}
 			<aside
 				className={cn(
 					isDesktop ? "flex" : "hidden md:flex",

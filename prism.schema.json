@@ -29,7 +29,7 @@
 		},
 		"panel_token": {
 			"type": "string",
-			"description": "Root-level bearer token for admin web panel authentication. Alias for auth.panel_token."
+			"description": "Root-level bearer token for admin API authentication. Alias for auth.panel_token."
 		},
 		"logging": { "$ref": "#/$defs/logging" },
 		"routes": {
@@ -701,15 +701,15 @@
 				},
 				"legacy_token": {
 					"type": "string",
-					"description": "Legacy pre-shared bearer token for admin panel API access."
+					"description": "Legacy pre-shared bearer token for admin API access."
 				},
 				"panel_token": {
 					"type": "string",
-					"description": "Bearer token required for admin web panel access."
+					"description": "Bearer token required for admin API access."
 				},
 				"github": {
 					"type": "object",
-					"description": "GitHub OAuth configuration for web control panel and desktop deep link login.",
+					"description": "GitHub OAuth configuration for admin API and desktop deep link login.",
 					"additionalProperties": false,
 					"properties": {
 						"enabled": { "type": "boolean", "default": false },

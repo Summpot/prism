@@ -6,26 +6,7 @@
 ARG RUST_MUSL_IMAGE=x86_64-musl-stable
 ARG MUSL_TARGET=x86_64-unknown-linux-musl
 
-# ---------- Stage 1: build frontend as static SPA ----------
-FROM node:22-slim AS frontend
-
-WORKDIR /app
-
-# Pin pnpm so Docker CI does not pick up breaking "latest" policy changes
-# (e.g. ignored dependency build scripts / approve-builds).
-RUN corepack enable \
-    && corepack prepare pnpm@10.28.0 --activate
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml* .npmrc* ./
-# package.json and pnpm-workspace.yaml declare build and dependency policies
-# (e.g. allowBuilds, minimumReleaseAge) needed under pnpm 10.
-RUN --mount=type=cache,target=/root/.pnpm-store \
-    pnpm install --frozen-lockfile
-
-COPY . ./
-RUN pnpm build
-
-# ---------- Stage 2: build Rust binary with embedded frontend ----------
+# ---------- Stage 1: build Rust binary ----------
 FROM docker.io/blackdex/rust-musl:${RUST_MUSL_IMAGE} AS build
 
 WORKDIR /home/rust/src
@@ -49,9 +30,6 @@ RUN --mount=type=cache,target=/home/rust/.cargo/registry \
 # Copy the rest and build.
 COPY . ./
 
-# Copy frontend SPA output (dist/client/) into dist/client/ for rust-embed.
-COPY --from=frontend /app/dist/client/ dist/client/
-
 ARG MUSL_TARGET
 # Docker containers run as headless servers and do not need desktop GUI (Tauri/GTK).
 RUN --mount=type=cache,target=/home/rust/.cargo/registry \
@@ -59,7 +37,7 @@ RUN --mount=type=cache,target=/home/rust/.cargo/registry \
     cargo build --release -p prism --no-default-features --target ${MUSL_TARGET} \
     && cp -f /home/rust/src/target/${MUSL_TARGET}/release/prism /home/rust/prism
 
-# ---------- Stage 3: minimal runtime image ----------
+# ---------- Stage 2: minimal runtime image ----------
 FROM alpine:3.20
 
 ARG MUSL_TARGET

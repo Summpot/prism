@@ -2,7 +2,7 @@
 
 High-performance, lightweight L4 reverse proxy and multiplexed tunneling engine written in Rust.
 
-Prism combines the speed and memory safety of Rust with a WebAssembly-powered routing pipeline and modern multiplexed reverse tunneling. It routes arbitrary TCP/UDP traffic dynamically, exposes private services across firewalls without public IPs, and provides centralized management through an embedded web dashboard and desktop GUI.
+Prism combines the speed and memory safety of Rust with a WebAssembly-powered routing pipeline and modern multiplexed reverse tunneling. It routes arbitrary TCP/UDP traffic dynamically, exposes private services across firewalls without public IPs, and provides centralized management through an administrative REST API and cross-platform desktop GUI.
 
 ---
 
@@ -15,7 +15,7 @@ Prism combines the speed and memory safety of Rust with a WebAssembly-powered ro
 - **Local Service Discovery**: Automatic mDNS advertisement (`*.prism.local`) and Minecraft LAN multicast broadcast reflection (`224.0.2.60:4445`) for zero-config client connections.
 - **Automated TLS & DNS**: Built-in ACME (RFC 8555 / Let's Encrypt / ZeroSSL) with Cloudflare DNS-01 challenge and automatic RFC 9460 HTTPS/SVCB record publication.
 - **Managed Clustering**: Deploy as `standalone`, `management` (control plane), or `worker` (edge agent) with real-time config synchronization.
-- **Web Dashboard & Desktop App**: Built-in administrative dashboard and Tauri v2 cross-platform desktop client with GitHub OAuth and deep linking (`prism://`).
+- **Admin API & Desktop App**: Built-in administrative management API and Tauri v2 cross-platform desktop client with GitHub OAuth and deep linking (`prism://`).
 
 ---
 
@@ -38,7 +38,7 @@ services:
       - ./prism.toml:/etc/prism/prism.toml:ro
       - prism-data:/var/lib/prism
     ports:
-      - "8080:8080" # Admin dashboard & API
+      - "8080:8080" # Admin API
       - "7000:7000" # Tunnel endpoint
       - "25565:25565" # Public proxy listener
 volumes:
@@ -140,11 +140,11 @@ enabled = true
 adaptive_flush = true
 ```
 
-### 3. Web Admin Panel & Authentication
+### 3. Admin API & Authentication
 
-Prism includes a web administration panel and API. You can secure access using a static bearer token (`panel_token`) or GitHub OAuth.
+Prism includes an administrative management API. You can secure access using a static bearer token (`panel_token`) or GitHub OAuth.
 
-#### Admin Panel with Token (`prism.toml`)
+#### Admin API with Token (`prism.toml`)
 
 ```toml
 admin_addr = "127.0.0.1:8080"
@@ -153,7 +153,7 @@ admin_addr = "127.0.0.1:8080"
 panel_token = "your-admin-panel-secret"
 ```
 
-#### Admin Panel with GitHub OAuth
+#### Admin API with GitHub OAuth
 
 ```toml
 admin_addr = "127.0.0.1:8080"

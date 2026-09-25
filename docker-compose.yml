@@ -8,5 +8,5 @@ services:
     volumes:
       - ./path/to/prism.toml:/etc/prism/prism.toml:ro
     ports:
-      - "8080:8080" # admin plane + frontend
+      - "8080:8080" # Admin API
       - "7000:7000" # tunnel endpoint

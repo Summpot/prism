@@ -1,7 +1,7 @@
 import { exchangeGitHubCode, getAuthProviders, getGitHubLoginUrl } from "@/lib/admin/adminApi";
 import { resetClientStats, startClient, stopClient } from "@/lib/client/clientIpc";
 import { parseDeepLink } from "@/lib/deepLink";
-import { openExternalUrl } from "@/lib/desktopWindow";
+import { openExternalUrl } from "@/lib/appWindow";
 import {
 	TUNNEL_ADMIN_CONNECTION,
 	isTunnelAdminConnection,

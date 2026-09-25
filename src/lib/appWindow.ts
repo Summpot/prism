@@ -1,8 +1,8 @@
 /**
- * Desktop Window management utilities for Tauri frameless application.
+ * Window management utilities for Tauri frameless application.
  */
 
-export function isDesktopApp(): boolean {
+export function isTauriContext(): boolean {
 	if (typeof window === "undefined") return false;
 	return Boolean(
 		(window as unknown as { __TAURI__?: unknown }).__TAURI__ ||
@@ -31,7 +31,7 @@ function getTauriInvoke():
 }
 
 /**
- * Minimize desktop application window to taskbar.
+ * Minimize application window to taskbar.
  */
 export async function minimizeWindow(): Promise<void> {
 	const invoke = getTauriInvoke();
@@ -44,7 +44,7 @@ export async function minimizeWindow(): Promise<void> {
 }
 
 /**
- * Toggle maximize / restore desktop application window.
+ * Toggle maximize / restore application window.
  */
 export async function toggleMaximizeWindow(): Promise<void> {
 	const invoke = getTauriInvoke();
@@ -57,7 +57,7 @@ export async function toggleMaximizeWindow(): Promise<void> {
 }
 
 /**
- * Check if desktop application window is currently maximized.
+ * Check if application window is currently maximized.
  */
 export async function isWindowMaximized(): Promise<boolean> {
 	const invoke = getTauriInvoke();
@@ -71,7 +71,7 @@ export async function isWindowMaximized(): Promise<boolean> {
 }
 
 /**
- * Close desktop application window (hides to system tray).
+ * Close application window (hides to system tray).
  */
 export async function closeWindow(): Promise<void> {
 	const invoke = getTauriInvoke();
@@ -108,7 +108,7 @@ export async function openExternalUrl(url: string): Promise<void> {
 
 /**
  * Generic invoke wrapper for Tauri commands.
- * Throws an error if invoked outside of a Tauri desktop context.
+ * Throws an error if invoked outside of a Tauri runtime context.
  */
 export async function invokeTauri<T = unknown>(
 	cmd: string,

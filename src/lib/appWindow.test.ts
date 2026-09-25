@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	closeWindow,
 	invokeTauri,
-	isDesktopApp,
+	isTauriContext,
 	isWindowMaximized,
 	minimizeWindow,
 	openExternalUrl,
 	toggleMaximizeWindow,
-} from "./desktopWindow";
+} from "./appWindow";
 
-describe("desktopWindow", () => {
+describe("appWindow", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
@@ -23,23 +23,23 @@ describe("desktopWindow", () => {
 		delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 	});
 
-	it("detects non-desktop environment correctly", () => {
-		expect(isDesktopApp()).toBe(false);
+	it("detects non-Tauri environment correctly", () => {
+		expect(isTauriContext()).toBe(false);
 	});
 
-	it("detects desktop environment when __TAURI_INTERNALS__ is present", () => {
+	it("detects Tauri environment when __TAURI_INTERNALS__ is present", () => {
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: vi.fn(),
 		};
-		expect(isDesktopApp()).toBe(true);
+		expect(isTauriContext()).toBe(true);
 	});
 
-	it("detects desktop environment when __TAURI__ is present", () => {
+	it("detects Tauri environment when __TAURI__ is present", () => {
 		(window as unknown as { __TAURI__?: unknown }).__TAURI__ = {};
-		expect(isDesktopApp()).toBe(true);
+		expect(isTauriContext()).toBe(true);
 	});
 
-	it("calls plugin:window|minimize when minimizing window in desktop app", async () => {
+	it("calls plugin:window|minimize when minimizing window", async () => {
 		const invokeMock = vi.fn().mockResolvedValue(undefined);
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -49,7 +49,7 @@ describe("desktopWindow", () => {
 		expect(invokeMock).toHaveBeenCalledWith("plugin:window|minimize");
 	});
 
-	it("calls plugin:window|toggle_maximize when toggling maximize in desktop app", async () => {
+	it("calls plugin:window|toggle_maximize when toggling maximize", async () => {
 		const invokeMock = vi.fn().mockResolvedValue(undefined);
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -59,7 +59,7 @@ describe("desktopWindow", () => {
 		expect(invokeMock).toHaveBeenCalledWith("plugin:window|toggle_maximize");
 	});
 
-	it("calls plugin:window|is_maximized and returns boolean in desktop app", async () => {
+	it("calls plugin:window|is_maximized and returns boolean", async () => {
 		const invokeMock = vi.fn().mockResolvedValue(true);
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -70,12 +70,12 @@ describe("desktopWindow", () => {
 		expect(res).toBe(true);
 	});
 
-	it("returns false from isWindowMaximized in non-desktop environment", async () => {
+	it("returns false from isWindowMaximized when not in Tauri environment", async () => {
 		const res = await isWindowMaximized();
 		expect(res).toBe(false);
 	});
 
-	it("calls plugin:window|close when closing window in desktop app", async () => {
+	it("calls plugin:window|close when closing window", async () => {
 		const invokeMock = vi.fn().mockResolvedValue(undefined);
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -85,13 +85,13 @@ describe("desktopWindow", () => {
 		expect(invokeMock).toHaveBeenCalledWith("plugin:window|close");
 	});
 
-	it("does nothing in browser environment when minimize, maximize, or close is invoked", async () => {
+	it("handles non-Tauri environment gracefully when minimize, maximize, or close is invoked", async () => {
 		await expect(minimizeWindow()).resolves.toBeUndefined();
 		await expect(toggleMaximizeWindow()).resolves.toBeUndefined();
 		await expect(closeWindow()).resolves.toBeUndefined();
 	});
 
-	it("calls open_external_url via Tauri invoke in desktop environment", async () => {
+	it("calls open_external_url via Tauri invoke in Tauri environment", async () => {
 		const invokeMock = vi.fn().mockResolvedValue(undefined);
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -103,7 +103,7 @@ describe("desktopWindow", () => {
 		});
 	});
 
-	it("falls back to window.open in non-desktop environment", async () => {
+	it("falls back to window.open when Tauri invoke is unavailable", async () => {
 		const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 		await openExternalUrl("https://github.com/login/oauth/authorize");
 		expect(openSpy).toHaveBeenCalledWith(
@@ -113,7 +113,7 @@ describe("desktopWindow", () => {
 		);
 	});
 
-	it("calls invokeTauri successfully in desktop environment", async () => {
+	it("calls invokeTauri successfully in Tauri environment", async () => {
 		const invokeMock = vi.fn().mockResolvedValue({ ok: true });
 		(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
 			invoke: invokeMock,
@@ -124,7 +124,7 @@ describe("desktopWindow", () => {
 		expect(res).toEqual({ ok: true });
 	});
 
-	it("throws error when invokeTauri is called in non-desktop environment", async () => {
+	it("throws error when invokeTauri is called outside Tauri environment", async () => {
 		await expect(invokeTauri("client_status")).rejects.toThrow("Tauri invoke is not available");
 	});
 });

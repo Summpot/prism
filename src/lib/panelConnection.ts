@@ -1,7 +1,7 @@
 export interface PanelConnection {
 	baseUrl: string;
 	token: string;
-	kind?: "bearer" | "desktop-token" | "console-cookie" | "tunnel-admin";
+	kind?: "bearer" | "console-cookie" | "tunnel-admin";
 }
 
 export interface StorageLike {
@@ -12,7 +12,7 @@ export interface StorageLike {
 
 export const PANEL_CONNECTION_STORAGE_KEY = "prism.panel.connection";
 
-/** Desktop client talks to the remote admin API over the in-band `$admin` stream. */
+/** Client talks to the remote admin API over the in-band `$admin` stream. */
 export const TUNNEL_ADMIN_CONNECTION: PanelConnection = {
 	baseUrl: "",
 	token: "",

@@ -43,31 +43,6 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 		expect(result).toEqual({ ok: true });
 	});
 
-	it("sends X-Prism-Desktop-Token header for desktop-token connection", async () => {
-		const desktopConn: PanelConnection = {
-			baseUrl: "https://remote-server.com",
-			token: "secret-desktop-tok",
-			kind: "desktop-token",
-		};
-		const fetchMock = vi.fn().mockResolvedValue({
-			ok: true,
-			status: 200,
-			text: async () => JSON.stringify({ status: "active" }),
-		});
-		vi.stubGlobal("fetch", fetchMock);
-
-		const result = await adminRequest<{ status: string }>(desktopConn, "/status");
-		expect(fetchMock).toHaveBeenCalledWith(
-			"https://remote-server.com/status",
-			expect.objectContaining({
-				headers: expect.objectContaining({
-					"X-Prism-Desktop-Token": "secret-desktop-tok",
-				}),
-			}),
-		);
-		expect(result).toEqual({ status: "active" });
-	});
-
 	it("throws AdminApiError on non-ok response with parsed message", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: false,
@@ -79,7 +54,7 @@ describe("adminClient (adminRequest & AdminApiError)", () => {
 		await expect(adminRequest(dummyConnection, "/admin")).rejects.toThrow(AdminApiError);
 	});
 
-	it("invokes the admin_rpc Tauri command for in-band $admin on desktop", async () => {
+	it("invokes the admin_rpc Tauri command for in-band $admin", async () => {
 		const invokeMock = vi.fn().mockResolvedValue({
 			ok: true,
 			status: 200,

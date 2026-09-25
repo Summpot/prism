@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ErrorBanner } from "@/components/ui";
-import { isDesktopApp, openExternalUrl } from "@/lib/desktopWindow";
+import { openExternalUrl } from "@/lib/appWindow";
 import { getAuthProviders, getGitHubLoginUrl, getHealth } from "@/lib/admin/adminApi";
 import { normalizeBaseUrl } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
@@ -190,11 +190,9 @@ function LoginPage() {
 								<Github className="size-4" />
 								{oauthLoading ? m.login_requesting() : m.login_sign_in()}
 							</Button>
-							{isDesktopApp() ? (
-								<p className="text-center text-xs text-muted-foreground">
-									{m.login_desktop_hint()}
-								</p>
-							) : null}
+							<p className="text-center text-xs text-muted-foreground">
+								{m.login_auth_hint()}
+							</p>
 						</div>
 
 						<div className="relative">

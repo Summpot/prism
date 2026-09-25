@@ -12,12 +12,10 @@ import {
 } from "@/components/ui/dialog";
 import { useClientConfig } from "@/hooks/useClientConfig";
 import { checkForUpdate, installUpdate } from "@/lib/client/clientIpc";
-import { isDesktopApp } from "@/lib/desktopWindow";
 import { m } from "@/paraglide/messages";
 import type { UpdateCheckResult } from "@/types/client";
 
 export function UpdatePromptModal() {
-	const isDesktop = isDesktopApp();
 	const { autoCheckUpdate, updateChannel, configLoaded } = useClientConfig();
 
 	const [open, setOpen] = useState(false);
@@ -26,7 +24,7 @@ export function UpdatePromptModal() {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (!isDesktop || !configLoaded || !autoCheckUpdate) {
+		if (!configLoaded || !autoCheckUpdate) {
 			return;
 		}
 
@@ -53,7 +51,7 @@ export function UpdatePromptModal() {
 			cancelled = true;
 			clearTimeout(timer);
 		};
-	}, [isDesktop, configLoaded, autoCheckUpdate, updateChannel]);
+	}, [configLoaded, autoCheckUpdate, updateChannel]);
 
 	const handleDismiss = () => {
 		if (updateInfo?.version) {
@@ -76,7 +74,7 @@ export function UpdatePromptModal() {
 		}
 	};
 
-	if (!isDesktop || !updateInfo) {
+	if (!updateInfo) {
 		return null;
 	}
 

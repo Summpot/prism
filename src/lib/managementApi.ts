@@ -1,6 +1,6 @@
 /**
  * @deprecated This module is maintained for backwards compatibility.
- * Use `@/lib/client/clientIpc` for desktop client IPC operations.
+ * Use `@/lib/client/clientIpc` for client IPC operations.
  * Use `@/lib/admin/adminApi` for remote management REST API operations.
  * Use `@/types/client`, `@/types/admin`, and `@/types/cluster` for type definitions.
  */
@@ -36,7 +36,7 @@ export {
 	updateMiddlewareConfig,
 } from "@/lib/admin/adminApi";
 
-// Re-export Desktop Client IPC APIs
+// Re-export Client IPC APIs
 export {
 	clearClientLogs,
 	getClientConfig,

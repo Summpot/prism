@@ -1,4 +1,4 @@
-import { isDesktopApp } from "./desktopWindow";
+import { isTauriContext } from "./appWindow";
 import { type ClientProfile, parsePrismLink } from "./prismLink";
 
 export type DeepLinkPayload =
@@ -140,10 +140,10 @@ export type DeepLinkHandler = (payload: DeepLinkPayload) => void;
 const consumedDeepLinks = new Set<string>();
 
 /**
- * Sets up listeners for Tauri deep link events in desktop mode.
+ * Sets up listeners for Tauri deep link events.
  */
 export function setupDeepLinkListener(onPayload: DeepLinkHandler): () => void {
-	if (!isDesktopApp() || typeof window === "undefined") {
+	if (!isTauriContext() || typeof window === "undefined") {
 		return () => {};
 	}
 

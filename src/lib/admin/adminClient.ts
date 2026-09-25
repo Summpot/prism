@@ -1,4 +1,4 @@
-import { invokeTauri, isDesktopApp } from "@/lib/desktopWindow";
+import { invokeTauri, isTauriContext } from "@/lib/appWindow";
 import { isTunnelAdminConnection, type PanelConnection } from "@/lib/panelConnection";
 
 export class AdminApiError extends Error {
@@ -30,11 +30,7 @@ interface AdminRpcIpcResponse {
 function authHeadersFor(connection: PanelConnection): Record<string, string> {
 	const kind = connection.kind ?? "bearer";
 	const headers: Record<string, string> = {};
-	if (kind === "desktop-token") {
-		if (connection.token?.trim()) {
-			headers["X-Prism-Desktop-Token"] = connection.token.trim();
-		}
-	} else if (kind === "console-cookie" || kind === "tunnel-admin") {
+	if (kind === "console-cookie" || kind === "tunnel-admin") {
 		if (kind === "tunnel-admin" && connection.token?.trim()) {
 			headers["Authorization"] = `Bearer ${connection.token.trim()}`;
 		}
@@ -196,7 +192,7 @@ export async function adminRequest<T>(
 		Object.assign(headers, init.headers);
 	}
 
-	if (isDesktopApp() && isTunnelAdminConnection(connection)) {
+	if (isTauriContext() && isTunnelAdminConnection(connection)) {
 		const rpc = httpToAdminRpc(path, method, body);
 		const result = await invokeTauri<AdminRpcIpcResponse>("admin_rpc", {
 			payload: {
@@ -216,7 +212,7 @@ export async function adminRequest<T>(
 		return result.body as T;
 	}
 
-	if (isDesktopApp()) {
+	if (isTauriContext()) {
 		const result = await invokeTauri<AdminIpcResponse>("admin_request", {
 			payload: {
 				base_url: connection.baseUrl || "",

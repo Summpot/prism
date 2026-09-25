@@ -1,4 +1,4 @@
-import { invokeTauri } from "@/lib/desktopWindow";
+import { invokeTauri } from "@/lib/appWindow";
 import type { MiddlewareItem } from "@/types/admin";
 import type {
 	ClientConfigResponse,

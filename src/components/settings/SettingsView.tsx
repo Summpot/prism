@@ -29,7 +29,6 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useClientConfig } from "@/hooks/useClientConfig";
 import { checkForUpdate, installUpdate } from "@/lib/client/clientIpc";
-import { isDesktopApp } from "@/lib/desktopWindow";
 import { usePanelSession } from "@/lib/panelSession";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -65,7 +64,6 @@ export function SettingsView() {
 	} = useClientConfig();
 
 	const [copiedDeviceId, setCopiedDeviceId] = useState(false);
-	const isDesktop = isDesktopApp();
 
 	const handleCopyDeviceId = async () => {
 		if (!deviceId) return;
@@ -85,7 +83,7 @@ export function SettingsView() {
 				title={m.settings_title()}
 				badge={
 					<Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0.5">
-						{isDesktop ? m.settings_env_desktop() : m.settings_env_web()}
+						v0.1.0
 					</Badge>
 				}
 				description={m.settings_description()}
@@ -260,42 +258,38 @@ export function SettingsView() {
 								<Switch checked={autoConnect} onCheckedChange={setAutoConnect} />
 							</div>
 
-							{isDesktop && (
-								<>
-									<div className="flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs">
-										<div className="space-y-0.5">
-											<div className="font-medium text-xs text-foreground">
-												{m.client_autostart()}
-											</div>
-											<div className="text-[10px] text-muted-foreground">
-												{m.client_autostart_hint()}
-											</div>
-										</div>
-										<Switch checked={autostart} onCheckedChange={setAutostart} />
+							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs">
+								<div className="space-y-0.5">
+									<div className="font-medium text-xs text-foreground">
+										{m.client_autostart()}
 									</div>
+									<div className="text-[10px] text-muted-foreground">
+										{m.client_autostart_hint()}
+									</div>
+								</div>
+								<Switch checked={autostart} onCheckedChange={setAutostart} />
+							</div>
 
-									<div
-										className={cn(
-											"flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs transition-opacity",
-											!autostart && "opacity-60",
-										)}
-									>
-										<div className="space-y-0.5">
-											<div className="font-medium text-xs text-foreground">
-												{m.client_silent_autostart()}
-											</div>
-											<div className="text-[10px] text-muted-foreground">
-												{m.client_silent_autostart_hint()}
-											</div>
-										</div>
-										<Switch
-											checked={silentAutostart}
-											onCheckedChange={setSilentAutostart}
-											disabled={!autostart}
-										/>
+							<div
+								className={cn(
+									"flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs transition-opacity",
+									!autostart && "opacity-60",
+								)}
+							>
+								<div className="space-y-0.5">
+									<div className="font-medium text-xs text-foreground">
+										{m.client_silent_autostart()}
 									</div>
-								</>
-							)}
+									<div className="text-[10px] text-muted-foreground">
+										{m.client_silent_autostart_hint()}
+									</div>
+								</div>
+								<Switch
+									checked={silentAutostart}
+									onCheckedChange={setSilentAutostart}
+									disabled={!autostart}
+								/>
+							</div>
 
 							<div className="flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs">
 								<div className="space-y-0.5">
@@ -416,13 +410,6 @@ export function SettingsView() {
 								</span>
 								<span className="font-mono text-foreground font-medium">
 									v0.1.0 ({updateChannel})
-								</span>
-							</div>
-
-							<div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border border-border/40">
-								<span className="text-muted-foreground text-[11px]">{m.settings_app_env()}</span>
-								<span className="font-medium text-foreground">
-									{isDesktop ? m.settings_env_desktop() : m.settings_env_web()}
 								</span>
 							</div>
 						</div>

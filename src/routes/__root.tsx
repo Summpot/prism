@@ -6,7 +6,7 @@ import {
 	useLocation,
 	useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PanelLeft } from "lucide-react";
 
 import Header from "@/components/Header";
@@ -18,15 +18,13 @@ import { setupDeepLinkListener } from "@/lib/deepLink";
 import { exchangeGitHubCode, getClientConfig } from "@/lib/managementApi";
 import {
 	closeWindow,
-	isDesktopApp,
 	isWindowMaximized,
 	minimizeWindow,
 	toggleMaximizeWindow,
-} from "@/lib/desktopWindow";
+} from "@/lib/appWindow";
 import { TUNNEL_ADMIN_CONNECTION, tunnelAdminConnection } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 import { useTheme } from "@/lib/theme";
-import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages";
 import { getLocale } from "@/paraglide/runtime";
 
@@ -64,7 +62,7 @@ export const Route = createRootRoute({
 	component: RootDocument,
 });
 
-function DesktopTitleBar() {
+function TitleBar() {
 	const [isMaximized, setIsMaximized] = useState(false);
 
 	useEffect(() => {
@@ -202,8 +200,6 @@ function RootContent() {
 	const navigate = useNavigate();
 	const { connection, saveConnection } = usePanelSession();
 
-	const isDesktop = useMemo(() => isDesktopApp(), []);
-
 	const locationRef = useRef(location);
 	const navigateRef = useRef(navigate);
 	const connectionRef = useRef(connection);
@@ -328,23 +324,14 @@ function RootContent() {
 	}, [location.pathname, navigate]);
 
 	return (
-		<div
-			className={`h-screen max-h-screen overflow-hidden flex flex-col bg-background text-foreground ${
-				isDesktop ? "border border-border/80" : ""
-			}`}
-		>
-			{/* Custom frameless titlebar in desktop app */}
-			{isDesktop ? <DesktopTitleBar /> : null}
+		<div className="h-screen max-h-screen overflow-hidden flex flex-col bg-background text-foreground border border-border/80">
+			{/* Custom frameless titlebar */}
+			<TitleBar />
 
 			{/* Sidebar + Main Viewport */}
 			<div className="flex-1 min-h-0 flex overflow-hidden">
 				<Header />
-				<main
-					className={cn(
-						"flex-1 min-w-0 h-full overflow-hidden bg-background flex flex-col",
-						!isDesktop && "md:pt-0 pt-12",
-					)}
-				>
+				<main className="flex-1 min-w-0 h-full overflow-hidden bg-background flex flex-col">
 					<Outlet />
 				</main>
 			</div>

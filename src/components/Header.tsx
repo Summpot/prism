@@ -1,19 +1,12 @@
-import { Menu, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppSidebarContent } from "@/components/AppSidebar";
-import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { Button } from "@/components/ui/button";
-import { isDesktopApp } from "@/lib/desktopWindow";
 import { cn } from "@/lib/utils";
-import { m } from "@/paraglide/messages";
 
 export { AppSidebarContent };
 
 export default function Header() {
-	const [mobileOpen, setMobileOpen] = useState(false);
 	const [collapsed, setCollapsed] = useState(false);
-	const isDesktop = useMemo(() => isDesktopApp(), []);
 
 	useEffect(() => {
 		const handleToggle = () => setCollapsed((prev) => !prev);
@@ -23,7 +16,7 @@ export default function Header() {
 		};
 	}, []);
 
-	// Auto-collapse sidebar on narrower tablet/desktop viewports on initial load
+	// Auto-collapse sidebar on narrower viewports on initial load
 	useEffect(() => {
 		if (typeof window !== "undefined" && window.innerWidth < 960) {
 			setCollapsed(true);
@@ -31,64 +24,14 @@ export default function Header() {
 	}, []);
 
 	return (
-		<>
-			{/* Mobile top bar (dev preview or ultra-narrow fallback) */}
-			{!isDesktop ? (
-				<div className="fixed top-0 right-0 left-0 z-40 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:hidden">
-					<div className="flex items-center gap-2.5">
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-sm"
-							onClick={() => setMobileOpen(true)}
-						>
-							<Menu className="h-5 w-5" />
-						</Button>
-						<img src="/logo192.png" alt="Prism" className="h-6 w-6 rounded-md object-contain" />
-						<span className="text-sm font-semibold text-foreground">Prism</span>
-					</div>
-					<LanguageSwitcher />
-				</div>
-			) : null}
-
-			{/* Mobile Drawer (dev preview fallback) */}
-			{!isDesktop && mobileOpen ? (
-				<div className="fixed inset-0 z-50 md:hidden">
-					<button
-						type="button"
-						aria-label={m.header_close_backdrop()}
-						tabIndex={-1}
-						className="absolute inset-0 bg-background/80 backdrop-blur-xs cursor-default"
-						onClick={() => setMobileOpen(false)}
-						onKeyDown={(e) => {
-							if (e.key === "Escape") setMobileOpen(false);
-						}}
-					/>
-					<aside className="relative flex h-full w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-card shadow-2xl">
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-sm"
-							onClick={() => setMobileOpen(false)}
-							className="absolute top-3 right-3 z-10 text-muted-foreground"
-						>
-							<X className="h-4 w-4" />
-						</Button>
-						<AppSidebarContent onNavigate={() => setMobileOpen(false)} collapsed={false} />
-					</aside>
-				</div>
-			) : null}
-
-			{/* Desktop / Tablet Sidebar */}
-			<aside
-				className={cn(
-					isDesktop ? "flex" : "hidden md:flex",
-					collapsed ? "w-14" : "w-60 sm:w-64",
-					"flex-none flex-col border-r border-border bg-card/60 h-full overflow-hidden transition-[width] duration-200 ease-in-out",
-				)}
-			>
-				<AppSidebarContent collapsed={collapsed} />
-			</aside>
-		</>
+		<aside
+			className={cn(
+				"flex flex-none flex-col border-r border-border bg-card/60 h-full overflow-hidden transition-[width] duration-200 ease-in-out",
+				collapsed ? "w-14" : "w-60 sm:w-64",
+			)}
+		>
+			<AppSidebarContent collapsed={collapsed} />
+		</aside>
 	);
 }
+

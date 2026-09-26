@@ -28,7 +28,6 @@ import { Route as AdminConnectionsRouteImport } from './routes/admin.connections
 import { Route as AdminConnectorsRouteImport } from './routes/admin.connectors'
 import { Route as AdminMiddlewareRouteImport } from './routes/admin.middleware'
 import { Route as AdminRuntimeRouteImport } from './routes/admin.runtime'
-import { Route as AdminTopologyRouteImport } from './routes/admin.topology'
 import { Route as AdminTrafficRouteImport } from './routes/admin.traffic'
 import { Route as AdminTunnelServicesRouteImport } from './routes/admin.tunnel-services'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
@@ -128,11 +127,6 @@ const AdminRuntimeRoute = AdminRuntimeRouteImport.update({
   path: '/runtime',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminTopologyRoute = AdminTopologyRouteImport.update({
-  id: '/topology',
-  path: '/topology',
-  getParentRoute: () => AdminRoute,
-} as any)
 const AdminTrafficRoute = AdminTrafficRouteImport.update({
   id: '/traffic',
   path: '/traffic',
@@ -168,7 +162,6 @@ export interface FileRoutesByFullPath {
   '/admin/connectors': typeof AdminConnectorsRoute
   '/admin/middleware': typeof AdminMiddlewareRoute
   '/admin/runtime': typeof AdminRuntimeRoute
-  '/admin/topology': typeof AdminTopologyRoute
   '/admin/traffic': typeof AdminTrafficRoute
   '/admin/tunnel-services': typeof AdminTunnelServicesRoute
   '/admin/users': typeof AdminUsersRoute
@@ -192,7 +185,6 @@ export interface FileRoutesByTo {
   '/admin/connectors': typeof AdminConnectorsRoute
   '/admin/middleware': typeof AdminMiddlewareRoute
   '/admin/runtime': typeof AdminRuntimeRoute
-  '/admin/topology': typeof AdminTopologyRoute
   '/admin/traffic': typeof AdminTrafficRoute
   '/admin/tunnel-services': typeof AdminTunnelServicesRoute
   '/admin/users': typeof AdminUsersRoute
@@ -218,7 +210,6 @@ export interface FileRoutesById {
   '/admin/connectors': typeof AdminConnectorsRoute
   '/admin/middleware': typeof AdminMiddlewareRoute
   '/admin/runtime': typeof AdminRuntimeRoute
-  '/admin/topology': typeof AdminTopologyRoute
   '/admin/traffic': typeof AdminTrafficRoute
   '/admin/tunnel-services': typeof AdminTunnelServicesRoute
   '/admin/users': typeof AdminUsersRoute
@@ -245,7 +236,6 @@ export interface FileRouteTypes {
     | '/admin/connectors'
     | '/admin/middleware'
     | '/admin/runtime'
-    | '/admin/topology'
     | '/admin/traffic'
     | '/admin/tunnel-services'
     | '/admin/users'
@@ -269,7 +259,6 @@ export interface FileRouteTypes {
     | '/admin/connectors'
     | '/admin/middleware'
     | '/admin/runtime'
-    | '/admin/topology'
     | '/admin/traffic'
     | '/admin/tunnel-services'
     | '/admin/users'
@@ -294,7 +283,6 @@ export interface FileRouteTypes {
     | '/admin/connectors'
     | '/admin/middleware'
     | '/admin/runtime'
-    | '/admin/topology'
     | '/admin/traffic'
     | '/admin/tunnel-services'
     | '/admin/users'
@@ -453,13 +441,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRuntimeRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/topology': {
-      id: '/admin/topology'
-      path: '/topology'
-      fullPath: '/admin/topology'
-      preLoaderRoute: typeof AdminTopologyRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/admin/traffic': {
       id: '/admin/traffic'
       path: '/traffic'
@@ -489,7 +470,6 @@ interface AdminRouteChildren {
   AdminConnectorsRoute: typeof AdminConnectorsRoute
   AdminMiddlewareRoute: typeof AdminMiddlewareRoute
   AdminRuntimeRoute: typeof AdminRuntimeRoute
-  AdminTopologyRoute: typeof AdminTopologyRoute
   AdminTrafficRoute: typeof AdminTrafficRoute
   AdminTunnelServicesRoute: typeof AdminTunnelServicesRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -501,7 +481,6 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminConnectorsRoute: AdminConnectorsRoute,
   AdminMiddlewareRoute: AdminMiddlewareRoute,
   AdminRuntimeRoute: AdminRuntimeRoute,
-  AdminTopologyRoute: AdminTopologyRoute,
   AdminTrafficRoute: AdminTrafficRoute,
   AdminTunnelServicesRoute: AdminTunnelServicesRoute,
   AdminUsersRoute: AdminUsersRoute,

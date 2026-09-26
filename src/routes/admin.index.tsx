@@ -3,7 +3,6 @@ import {
 	Activity,
 	ArrowRight,
 	FileCode,
-	Network,
 	Radio,
 	RotateCcw,
 	Server,
@@ -185,15 +184,6 @@ function AdminDashboardPage() {
 						</CardDescription>
 					</div>
 					<div className="flex flex-wrap gap-1.5">
-						<Button
-							variant="outline"
-							size="xs"
-							className="h-7 text-xs gap-1"
-							render={<Link to="/admin/topology" />}
-						>
-							<Network className="h-3.5 w-3.5" />
-							{m.topology_view_button()}
-						</Button>
 						<Button
 							variant="outline"
 							size="xs"

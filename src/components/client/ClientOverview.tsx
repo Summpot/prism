@@ -32,7 +32,7 @@ import {
 import { directionTooltip } from "@/components/traffic/OptimizerStatsView";
 import { ThroughputSparkline } from "@/components/traffic/ThroughputSparkline";
 import { selectClientAuthView } from "@/lib/client/clientAuthView";
-import { formatBytes, formatCostMs, formatGainMs } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { usePanelSession } from "@/lib/panelSession";
 import { SUPPORTED_LINK_PROTOCOLS } from "@/lib/prismLink";
 import { cn } from "@/lib/utils";
@@ -154,15 +154,6 @@ export function ClientOverview() {
 			oauthExchanging,
 			oauthWaitingCallback,
 		});
-
-	const transferGainMs = status?.stats.transfer_gain_ms ?? 0;
-	const netGainMs = status?.stats.net_gain_ms ?? 0;
-	const batchingCostMs = (status?.stats.batching_delay_us ?? 0) / 1000;
-	const compressionCostMs =
-		((status?.stats.compression_time_us ?? 0) + (status?.stats.decompression_time_us ?? 0)) / 1000;
-	const linkRateText = status?.stats.link_rate_measured
-		? m.client_link_rate_measured({ rate: ((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1) })
-		: m.client_link_rate_estimated({ rate: ((status?.stats.link_rate_bps ?? 0) / 1e6).toFixed(1) });
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
@@ -671,8 +662,8 @@ export function ClientOverview() {
 							</div>
 						</div>
 
-						{/* Optimizer Directional & Accounting Breakdown */}
-						<div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
+						{/* Optimizer Directional Breakdown */}
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-center font-mono text-[10px]">
 							<div
 								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
 								title={directionTooltip(m.client_up(), status?.stats.uplink)}
@@ -699,73 +690,6 @@ export function ClientOverview() {
 									<span className="text-muted-foreground font-normal text-[9px] ml-1">
 										({((status?.stats.downlink.saved_ratio ?? 0) * 100).toFixed(0)}%)
 									</span>
-								</span>
-							</div>
-							<div
-								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={m.client_link_rate_floor({ rate: linkRateText })}
-							>
-								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									{m.client_net()}
-								</span>
-								<span
-									className={cn(
-										"font-semibold text-[10px]",
-										netGainMs > 0
-											? "text-emerald-500"
-											: netGainMs < 0
-												? "text-amber-500"
-												: "text-muted-foreground",
-									)}
-								>
-									{formatGainMs(netGainMs)}
-								</span>
-							</div>
-						</div>
-
-						{/* Optimizer gain vs. batching/compression costs */}
-						<div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
-							<div
-								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={linkRateText}
-							>
-								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									{m.client_gain()}
-								</span>
-								<span className="font-semibold text-emerald-500 text-[10px]">
-									{formatGainMs(transferGainMs)}
-								</span>
-							</div>
-							<div
-								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={m.client_batching_tip({ ms: batchingCostMs.toFixed(1) })}
-							>
-								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									{m.client_batching()}
-								</span>
-								<span
-									className={cn(
-										"font-semibold text-[10px]",
-										batchingCostMs !== 0 ? "text-amber-500" : "text-muted-foreground",
-									)}
-								>
-									{formatCostMs(batchingCostMs)}
-								</span>
-							</div>
-							<div
-								className="rounded bg-muted/25 px-2 py-1 border border-border/40 flex items-center justify-between"
-								title={m.client_compression_tip({ ms: compressionCostMs.toFixed(1) })}
-							>
-								<span className="text-[9px] font-sans font-medium text-muted-foreground">
-									{m.client_compression()}
-								</span>
-								<span
-									className={cn(
-										"font-semibold text-[10px]",
-										compressionCostMs !== 0 ? "text-amber-500" : "text-muted-foreground",
-									)}
-								>
-									{formatCostMs(compressionCostMs)}
 								</span>
 							</div>
 						</div>

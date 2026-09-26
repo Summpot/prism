@@ -26,10 +26,6 @@ export interface DirectionWindowSnapshot {
 	saved_bytes: number;
 	saved_ratio: number;
 	batches: number;
-	transfer_gain_ms: number;
-	batching_penalty_ms: number;
-	compression_penalty_ms: number;
-	net_gain_ms: number;
 }
 
 export interface WindowSnapshot {
@@ -39,7 +35,6 @@ export interface WindowSnapshot {
 	saved_bytes: number;
 	saved_ratio: number;
 	batches: number;
-	transfer_gain_ms: number;
 }
 
 export interface DirectionStatsSnapshot {
@@ -52,10 +47,6 @@ export interface DirectionStatsSnapshot {
 	compression_time_us: number;
 	decompression_time_us: number;
 	link_rate_bps: number;
-	transfer_gain_ms: number;
-	batching_penalty_ms: number;
-	compression_penalty_ms: number;
-	net_gain_ms: number;
 	batching_delay: Quantiles;
 	compression_time: Quantiles;
 	window: DirectionWindowSnapshot;
@@ -73,8 +64,6 @@ export interface OptimizerStatsSnapshot {
 	link_rate_measured: boolean;
 	link_rate_bytes: number;
 	link_rate_busy_us: number;
-	transfer_gain_ms: number;
-	net_gain_ms: number;
 	batching_delay_us: number;
 	compression_time_us: number;
 	decompression_time_us: number;

@@ -2,29 +2,14 @@
 //!
 //! # Accounting model
 //!
-//! The optimizer reports three separate items per direction instead of one synthetic
-//! "latency" number:
+//! The optimizer tracks raw traffic, wire traffic, batch distributions and link throughput:
 //!
-//! 1. **Transfer gain** (`transfer_gain_ms`) — bytes kept off the wire (`saved_bytes`)
-//!    converted with the *measured* link rate of this tunnel link, not a hardcoded
-//!    bandwidth constant.
-//! 2. **Batching penalty** (`batching_penalty_ms`) — time-slice aggregation queuing the
-//!    flow paid before its bytes were compressed.
-//! 3. **Compression penalty** (`compression_penalty_ms`) — host-local CPU spent
-//!    compressing (writer side) or decompressing (reader side) this direction.
-//!
-//! `net_gain_ms` is `transfer_gain - batching_penalty - compression_penalty`.
-//!
-//! # Parallelism (no double counting)
-//!
-//! Uplink and downlink run as independent tasks, so their penalties are never summed:
-//! every derived value is reported per direction, and the aggregate `net_gain_ms` is
-//! the *minimum* net gain across directions that carry traffic.
-//!
-//! The peer's CPU cost is excluded on purpose: it runs on the other host, in parallel
-//! with this host's work, and charging it here would count the same data path twice.
-//! On a single host a given direction only ever performs one of compress/decompress,
-//! so `compression_penalty_ms` covers both cases without double counting.
+//! 1. **Traffic volume** (`raw_bytes`, `wire_bytes`, `saved_bytes`, `saved_ratio`) —
+//!    bytes before and after compression, tracked per direction and in aggregate.
+//! 2. **Batching & Compression resource metrics** — host-local queuing time and CPU time
+//!    spent compressing (writer) and decompressing (reader).
+//! 3. **Link rate** (`link_rate_bps`, `link_rate_measured`) — duration-weighted throughput
+//!    of observed socket drains to monitor link capacity.
 //!
 //! Byte counters (`raw_bytes`/`wire_bytes`/`saved_bytes`) stay additive across
 //! directions, because bytes really are additive even when the pipes are parallel.
@@ -58,14 +43,6 @@ pub fn unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
-}
-
-/// Milliseconds needed to move `bytes` at `link_rate_bps`.
-pub fn bytes_to_ms(bytes: u64, link_rate_bps: f64) -> f64 {
-    if !(link_rate_bps > 0.0) {
-        return 0.0;
-    }
-    bytes as f64 * 8000.0 / link_rate_bps
 }
 
 fn ratio(saved: u64, raw: u64) -> f64 {
@@ -263,7 +240,7 @@ impl WindowTotals {
     }
 
     /// Byte-only view of this window (safe to aggregate across parallel directions).
-    pub fn snapshot(&self, window_ms: u64, link_rate_bps: f64) -> WindowSnapshot {
+    pub fn snapshot(&self, window_ms: u64) -> WindowSnapshot {
         let saved = self.raw_bytes.saturating_sub(self.wire_bytes);
         WindowSnapshot {
             window_ms,
@@ -272,7 +249,6 @@ impl WindowTotals {
             saved_bytes: saved,
             saved_ratio: ratio(saved, self.raw_bytes),
             batches: self.batches,
-            transfer_gain_ms: bytes_to_ms(saved, link_rate_bps),
         }
     }
 }
@@ -286,10 +262,9 @@ pub struct WindowSnapshot {
     pub saved_bytes: u64,
     pub saved_ratio: f64,
     pub batches: u64,
-    pub transfer_gain_ms: f64,
 }
 
-/// Per-direction window snapshot, including that direction's own penalties.
+/// Per-direction window snapshot.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct DirectionWindowSnapshot {
     pub window_ms: u64,
@@ -298,10 +273,6 @@ pub struct DirectionWindowSnapshot {
     pub saved_bytes: u64,
     pub saved_ratio: f64,
     pub batches: u64,
-    pub transfer_gain_ms: f64,
-    pub batching_penalty_ms: f64,
-    pub compression_penalty_ms: f64,
-    pub net_gain_ms: f64,
 }
 
 /// Lock-free sliding window over epoch-indexed buckets.
@@ -563,10 +534,6 @@ impl LinkRateEstimator {
 // ============================================================================
 
 /// Statistics snapshot for a single traffic direction.
-///
-/// Every derived value is scoped to this direction only. Uplink and downlink run as
-/// independent tasks, so a consumer MUST NOT sum `*_penalty_ms` across directions;
-/// only byte counters are additive.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct DirectionStatsSnapshot {
     pub raw_bytes: u64,
@@ -585,12 +552,6 @@ pub struct DirectionStatsSnapshot {
     pub decompression_time_us: u64,
 
     pub link_rate_bps: f64,
-    pub transfer_gain_ms: f64,
-    pub batching_penalty_ms: f64,
-    pub compression_penalty_ms: f64,
-    /// Net of the three items above. Negative means this direction's bytes are worse
-    /// off than if they had been sent uncompressed over the same link.
-    pub net_gain_ms: f64,
 
     /// Per-sample batching queue delays, microseconds (lifetime).
     pub batching_delay: Quantiles,
@@ -603,9 +564,6 @@ pub struct DirectionStatsSnapshot {
 }
 
 /// Detailed snapshot of traffic, link accounting and distributions.
-///
-/// Byte counters are additive across directions; `net_gain_ms` is deliberately not.
-/// See [`DirectionStatsSnapshot`] and the module docs for the parallelism rules.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct OptimizerStatsSnapshot {
     pub raw_bytes: u64,
@@ -622,13 +580,7 @@ pub struct OptimizerStatsSnapshot {
     pub link_rate_bytes: u64,
     pub link_rate_busy_us: u64,
 
-    /// Bytes saved converted with the measured link rate (additive across directions).
-    pub transfer_gain_ms: f64,
-    /// Conservative floor: the smallest net gain across directions carrying traffic.
-    /// Directions run in parallel, so this is deliberately not a sum.
-    pub net_gain_ms: f64,
-
-    /// Informational resource totals; never used for cross-direction arithmetic.
+    /// Informational resource totals.
     pub batching_delay_us: u64,
     pub compression_time_us: u64,
     pub decompression_time_us: u64,
@@ -690,14 +642,7 @@ impl DirectionStats {
         let decomp_us = self.decompression_time_us.load(Ordering::Relaxed);
         let delay_us = self.batching_delay_us.load(Ordering::Relaxed);
 
-        let transfer_gain_ms = bytes_to_ms(saved, link_rate_bps);
-        let batching_penalty_ms = delay_us as f64 / 1000.0;
-        let compression_penalty_ms = (comp_us + decomp_us) as f64 / 1000.0;
-
-        let window_totals = totals.snapshot(window_ms, link_rate_bps);
-        let window_batching_penalty_ms = totals.batching_delay_us as f64 / 1000.0;
-        let window_compression_penalty_ms =
-            (totals.compression_time_us + totals.decompression_time_us) as f64 / 1000.0;
+        let window_totals = totals.snapshot(window_ms);
 
         DirectionStatsSnapshot {
             raw_bytes: raw,
@@ -709,10 +654,6 @@ impl DirectionStats {
             compression_time_us: comp_us,
             decompression_time_us: decomp_us,
             link_rate_bps,
-            transfer_gain_ms,
-            batching_penalty_ms,
-            compression_penalty_ms,
-            net_gain_ms: transfer_gain_ms - batching_penalty_ms - compression_penalty_ms,
             batching_delay: self.batching_hist.quantiles(),
             compression_time: self.compression_hist.quantiles(),
             window: DirectionWindowSnapshot {
@@ -722,12 +663,6 @@ impl DirectionStats {
                 saved_bytes: window_totals.saved_bytes,
                 saved_ratio: window_totals.saved_ratio,
                 batches: window_totals.batches,
-                transfer_gain_ms: window_totals.transfer_gain_ms,
-                batching_penalty_ms: window_batching_penalty_ms,
-                compression_penalty_ms: window_compression_penalty_ms,
-                net_gain_ms: window_totals.transfer_gain_ms
-                    - window_batching_penalty_ms
-                    - window_compression_penalty_ms,
             },
         }
     }
@@ -898,14 +833,6 @@ impl OptimizerStats {
         let wire = self.wire_bytes.load(Ordering::Relaxed);
         let saved = raw.saturating_sub(wire);
 
-        let net_gain_ms = [uplink.net_gain_ms, downlink.net_gain_ms]
-            .into_iter()
-            .zip([uplink.batches, downlink.batches])
-            .filter(|(_, batches)| *batches > 0)
-            .map(|(net, _)| net)
-            .fold(f64::INFINITY, f64::min);
-        let net_gain_ms = if net_gain_ms.is_finite() { net_gain_ms } else { 0.0 };
-
         OptimizerStatsSnapshot {
             raw_bytes: raw,
             wire_bytes: wire,
@@ -919,16 +846,12 @@ impl OptimizerStats {
             link_rate_measured: link.measured,
             link_rate_bytes: link.bytes,
             link_rate_busy_us: link.busy_us,
-            transfer_gain_ms: bytes_to_ms(saved, link.rate_bps),
-            net_gain_ms,
             batching_delay_us: self.batching_delay_us.load(Ordering::Relaxed),
             compression_time_us: self.compression_time_us.load(Ordering::Relaxed),
             decompression_time_us: self.decompression_time_us.load(Ordering::Relaxed),
             uplink,
             downlink,
-            window: up_totals
-                .merged(down_totals)
-                .snapshot(window_ms, link.rate_bps),
+            window: up_totals.merged(down_totals).snapshot(window_ms),
         }
     }
 }
@@ -1047,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn penalties_are_per_direction_and_net_never_sums_them() {
+    fn direction_stats_and_quantiles_tracked() {
         let stats = OptimizerStats::new();
         let now = 1_000;
 
@@ -1066,13 +989,10 @@ mod tests {
         assert!((snap.link_rate_bps - 16_000_000.0).abs() < 1.0);
         assert_eq!(up.raw_bytes, 8_000);
         assert_eq!(up.wire_bytes, 1_000);
-        assert_eq!(up.batching_penalty_ms, 20.0);
-        assert_eq!(up.compression_penalty_ms, 10.0);
-        assert_eq!(down.batching_penalty_ms, 1.0);
-        assert_eq!(down.compression_penalty_ms, 0.5);
-
-        assert!((up.net_gain_ms - (up.transfer_gain_ms - 30.0)).abs() < 1e-9);
-        assert!((down.net_gain_ms - (down.transfer_gain_ms - 1.5)).abs() < 1e-9);
+        assert_eq!(up.batching_delay_us, 20_000);
+        assert_eq!(up.compression_time_us, 10_000);
+        assert_eq!(down.batching_delay_us, 1_000);
+        assert_eq!(down.compression_time_us, 500);
 
         // Per-sample distributions are populated from the batch paths.
         assert!(
@@ -1088,26 +1008,10 @@ mod tests {
             down.batching_delay.max_us
         );
 
-        // The aggregate must not add the two parallel pipelines together.
-        let summed = up.net_gain_ms + down.net_gain_ms;
-        assert_eq!(snap.net_gain_ms, up.net_gain_ms.min(down.net_gain_ms));
-        assert_ne!(snap.net_gain_ms, summed, "aggregate net must not be a sum");
-
         // Bytes remain additive.
         assert_eq!(snap.raw_bytes, 10_000);
         assert_eq!(snap.wire_bytes, 2_000);
-        assert_eq!(snap.transfer_gain_ms, bytes_to_ms(8_000, snap.link_rate_bps));
-    }
-
-    #[test]
-    fn aggregate_net_ignores_idle_directions() {
-        let stats = OptimizerStats::new();
-        let now = 1_000;
-        stats.record_batch(TrafficDirection::Uplink, 1_000, 0, 0, now);
-        stats.add_direction_raw_bytes(TrafficDirection::Uplink, 4_000, now);
-        let snap = stats.snapshot_at(now);
-        assert_eq!(snap.downlink.batches, 0);
-        assert_eq!(snap.net_gain_ms, snap.uplink.net_gain_ms);
+        assert_eq!(snap.saved_bytes, 8_000);
     }
 
     #[test]
@@ -1122,9 +1026,7 @@ mod tests {
         let snap = stats.snapshot_at(now + 500);
         assert_eq!(snap.uplink.window.raw_bytes, 1_000);
         assert_eq!(snap.uplink.window.wire_bytes, 200);
-        assert_eq!(snap.uplink.window.batching_penalty_ms, 5.0);
         assert_eq!(snap.downlink.window.raw_bytes, 4_000);
-        assert_eq!(snap.downlink.window.compression_penalty_ms, 2.0);
         assert_eq!(snap.window.raw_bytes, 5_000);
         assert_eq!(snap.window.wire_bytes, 600);
         assert_eq!(snap.window.batches, 2);

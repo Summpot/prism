@@ -4,8 +4,6 @@ import { NestedPanel } from "@/components/ui";
 import {
 	formatBitsPerSecond,
 	formatBytes,
-	formatCostMs,
-	formatGainMs,
 	formatPercentage,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -16,11 +14,11 @@ export function directionTooltip(label: string, dir?: DirectionStatsSnapshot): s
 	if (!dir) return m.client_dir_tooltip_none({ label });
 	return m.client_dir_tooltip({
 		label,
-		net: dir.net_gain_ms.toFixed(1),
-		gain: dir.transfer_gain_ms.toFixed(1),
-		batching: dir.batching_penalty_ms.toFixed(1),
-		compression: dir.compression_penalty_ms.toFixed(1),
-		p99: dir.batching_delay.p99_us.toFixed(0),
+		raw: formatBytes(dir.raw_bytes),
+		wire: formatBytes(dir.wire_bytes),
+		saved: formatBytes(dir.saved_bytes),
+		ratio: formatPercentage(dir.saved_ratio),
+		batches: String(dir.batches),
 	});
 }
 
@@ -115,18 +113,9 @@ function DirectionCard({
 					{formatBytes(dir?.raw_bytes ?? 0)} → {formatBytes(dir?.wire_bytes ?? 0)}
 				</span>
 			</div>
-			<div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+			<div className="grid grid-cols-2 gap-1.5">
 				<StatTile label={m.client_saved()} value={formatPercentage(dir?.saved_ratio)} tone="good" />
-				<StatTile
-					label={m.client_gain()}
-					value={formatGainMs(dir?.transfer_gain_ms ?? 0)}
-					tone="good"
-				/>
-				<StatTile
-					label={m.client_net()}
-					value={formatGainMs(dir?.net_gain_ms ?? 0)}
-					tone={(dir?.net_gain_ms ?? 0) >= 0 ? "good" : "warn"}
-				/>
+				<StatTile label={m.traffic_batches()} value={String(dir?.batches ?? 0)} />
 			</div>
 			{dir ? (
 				<div className="space-y-1.5">
@@ -153,13 +142,6 @@ export function OptimizerStatsView({
 		);
 	}
 
-	const batchingCostMs = (stats.batching_delay_us ?? 0) / 1000;
-	const compressionCostMs =
-		((stats.compression_time_us ?? 0) + (stats.decompression_time_us ?? 0)) / 1000;
-	const linkRateText = stats.link_rate_measured
-		? m.client_link_rate_measured({ rate: ((stats.link_rate_bps ?? 0) / 1e6).toFixed(1) })
-		: m.client_link_rate_estimated({ rate: ((stats.link_rate_bps ?? 0) / 1e6).toFixed(1) });
-
 	return (
 		<div className="space-y-3">
 			<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -169,30 +151,6 @@ export function OptimizerStatsView({
 					label={m.client_saved()}
 					value={`${formatBytes(stats.saved_bytes)} (${formatPercentage(stats.saved_ratio)})`}
 					tone="good"
-				/>
-				<StatTile
-					label={m.client_net()}
-					value={formatGainMs(stats.net_gain_ms)}
-					hint={linkRateText}
-					tone={stats.net_gain_ms >= 0 ? "good" : "warn"}
-				/>
-			</div>
-
-			<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-				<StatTile
-					label={m.client_gain()}
-					value={formatGainMs(stats.transfer_gain_ms)}
-					tone="good"
-				/>
-				<StatTile
-					label={m.client_batching()}
-					value={formatCostMs(batchingCostMs)}
-					tone={batchingCostMs !== 0 ? "warn" : "default"}
-				/>
-				<StatTile
-					label={m.client_compression()}
-					value={formatCostMs(compressionCostMs)}
-					tone={compressionCostMs !== 0 ? "warn" : "default"}
 				/>
 				<StatTile
 					label={m.traffic_link_rate()}
@@ -222,9 +180,8 @@ export function OptimizerStatsView({
 							tone="good"
 						/>
 						<StatTile
-							label={m.client_gain()}
-							value={formatGainMs(stats.window.transfer_gain_ms)}
-							tone="good"
+							label={m.traffic_batches()}
+							value={String(stats.window.batches)}
 						/>
 					</div>
 				</NestedPanel>

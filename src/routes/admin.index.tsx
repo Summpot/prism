@@ -163,11 +163,7 @@ function AdminDashboardPage() {
 					label={m.dashboard_optimizer_savings()}
 					value={
 						optimizerStats?.global && optimizerStats.global.raw_bytes > 0
-							? `${formatBytes(optimizerStats.global.saved_bytes)} (${formatPercentage(optimizerStats.global.saved_ratio)})${
-									optimizerStats.global.net_gain_ms > 0
-										? ` · net -${optimizerStats.global.net_gain_ms.toFixed(1)}ms`
-										: ""
-								}`
+							? `${formatBytes(optimizerStats.global.saved_bytes)} (${formatPercentage(optimizerStats.global.saved_ratio)})`
 							: "0 B"
 					}
 					icon={<Zap className="h-5 w-5" />}

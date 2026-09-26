@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
 	formatBitsPerSecond,
 	formatBytes,
-	formatCostMs,
-	formatGainMs,
 	formatPercentage,
 	formatUptime,
 } from "@/lib/format";
@@ -35,16 +33,6 @@ describe("formatPercentage", () => {
 	});
 });
 
-describe("formatGainMs / formatCostMs", () => {
-	it("renders gains as reductions and costs as increases", () => {
-		expect(formatGainMs(12.34)).toBe("-12.3ms");
-		expect(formatGainMs(-4)).toBe("+4.0ms");
-		expect(formatGainMs(0)).toBe("0.0ms");
-		expect(formatCostMs(3.2)).toBe("+3.2ms");
-		expect(formatCostMs(-1.5)).toBe("-1.5ms");
-		expect(formatCostMs(0)).toBe("0.0ms");
-	});
-});
 
 describe("formatBitsPerSecond", () => {
 	it("formats zero and SI units", () => {

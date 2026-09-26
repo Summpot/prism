@@ -216,12 +216,6 @@ function GatewayInspectorDetails({ data }: { data: GatewayNodeData }) {
 							</span>
 						</div>
 						<div className="flex items-center justify-between">
-							<span className="text-muted-foreground">Net Gain:</span>
-							<span className="font-bold text-foreground">
-								{data.globalOptimizer.net_gain_ms.toFixed(1)}ms
-							</span>
-						</div>
-						<div className="flex items-center justify-between">
 							<span className="text-muted-foreground">Link Rate:</span>
 							<span className="font-bold text-foreground">
 								{(data.globalOptimizer.link_rate_bps / 1_000_000).toFixed(1)} Mbps

@@ -2396,13 +2396,6 @@ mod tests {
         assert!(snap.uplink.wire_bytes < 5000);
         assert!(snap.uplink.saved_bytes > 0);
         assert_eq!(snap.uplink.batches, 1);
-        assert!(snap.uplink.transfer_gain_ms > 0.0);
-        assert_eq!(
-            snap.uplink.net_gain_ms,
-            snap.uplink.transfer_gain_ms
-                - snap.uplink.batching_penalty_ms
-                - snap.uplink.compression_penalty_ms
-        );
         assert_eq!(snap.uplink.window.batches, 1);
         assert_eq!(snap.uplink.window.wire_bytes, snap.uplink.wire_bytes);
 
@@ -2412,7 +2405,6 @@ mod tests {
         assert!(snap.downlink.wire_bytes < 3000);
         assert!(snap.downlink.saved_bytes > 0);
         assert_eq!(snap.downlink.batches, 1);
-        assert!(snap.downlink.transfer_gain_ms > 0.0);
 
         // Total aggregate
         assert_eq!(snap.raw_bytes, 8000);
@@ -2424,7 +2416,6 @@ mod tests {
             snap.saved_bytes,
             snap.uplink.saved_bytes + snap.downlink.saved_bytes
         );
-        assert!(snap.transfer_gain_ms > 0.0);
     }
 
     /// Both ends of the same stream must account for exactly the same on-wire bytes:

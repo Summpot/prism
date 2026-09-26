@@ -85,20 +85,6 @@ export function formatPercentage(ratio: number | undefined | null): string {
 	return `${(ratio * 100).toFixed(1)}%`;
 }
 
-/** Positive values are latency gains, shown as a reduction (-X.Xms). */
-export function formatGainMs(value: number): string {
-	if (value > 0) return `-${value.toFixed(1)}ms`;
-	if (value < 0) return `+${Math.abs(value).toFixed(1)}ms`;
-	return "0.0ms";
-}
-
-/** Positive values are latency costs, shown as an increase (+X.Xms). */
-export function formatCostMs(value: number): string {
-	if (value > 0) return `+${value.toFixed(1)}ms`;
-	if (value < 0) return `-${Math.abs(value).toFixed(1)}ms`;
-	return "0.0ms";
-}
-
 export function formatBitsPerSecond(bps: number | undefined | null): string {
 	if (!bps || bps <= 0) {
 		return "0 bps";

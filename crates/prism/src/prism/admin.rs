@@ -2218,17 +2218,10 @@ mod tests {
         assert_eq!(resp_json["global"]["wire_bytes"], 200);
         assert_eq!(resp_json["global"]["saved_bytes"], 800);
         assert_eq!(resp_json["global"]["saved_ratio"], 0.8);
-        // Itemised accounting: measured link rate, per-direction penalties, net floor.
         assert!(resp_json["global"]["link_rate_bps"].is_number());
         let up = &resp_json["global"]["uplink"];
-        assert_eq!(up["batching_penalty_ms"], 15.0);
-        assert_eq!(up["compression_penalty_ms"], 5.0);
-        let (gain, net) = (
-            up["transfer_gain_ms"].as_f64().unwrap(),
-            up["net_gain_ms"].as_f64().unwrap(),
-        );
-        assert!((gain - net - 20.0).abs() < 1e-6, "gain {gain}, net {net}");
-        assert_eq!(resp_json["global"]["net_gain_ms"], up["net_gain_ms"]);
+        assert_eq!(up["batching_delay_us"], 15_000);
+        assert_eq!(up["compression_time_us"], 5_000);
         assert!(resp_json["global"]["window"].is_object());
         assert_eq!(resp_json["services"]["gto"]["raw_bytes"], 1000);
         assert_eq!(resp_json["services"]["gto"]["urgent_batches"], 1);

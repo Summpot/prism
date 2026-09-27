@@ -1,16 +1,4 @@
-import { Link } from "@tanstack/react-router";
-import {
-	Activity,
-	Check,
-	Copy,
-	Gamepad2,
-	Plug,
-	Power,
-	Radio,
-	RotateCcw,
-	WifiOff,
-	X,
-} from "lucide-react";
+import { Activity, Check, Copy, Plug, Power, Radio, RotateCcw, WifiOff, X } from "lucide-react";
 
 import { Github } from "@/components/icons/Github";
 
@@ -92,8 +80,7 @@ export function ClientOverview() {
 		wireBytes,
 		savedRatio,
 	} = useClientRuntime();
-	const { profileName, serverAddr, transport, authToken, listenAddr, fakeLanBroadcast } =
-		useClientConfig();
+	const { profileName, serverAddr, transport, authToken, listenAddr } = useClientConfig();
 	const {
 		copied,
 		copyText,
@@ -139,21 +126,20 @@ export function ClientOverview() {
 		(providersResult.github_enabled ||
 			(providersResult.providers && providersResult.providers.length > 0)),
 	);
-	const { showLoggedInCard, loginRequired, showLoginMethods, showAdminConsole, tunnelAction } =
-		selectClientAuthView({
-			isConnected,
-			isRunning,
-			authenticated: Boolean(authSession?.authenticated),
-			isAdmin,
-			loginAdminUnlocked,
-			authToken,
-			isLoadingSession,
-			knownServiceCount: status?.known_services.length ?? 0,
-			hasGithubProvider,
-			providersError: Boolean(providersError),
-			oauthExchanging,
-			oauthWaitingCallback,
-		});
+	const { showLoggedInCard, loginRequired, showLoginMethods, tunnelAction } = selectClientAuthView({
+		isConnected,
+		isRunning,
+		authenticated: Boolean(authSession?.authenticated),
+		isAdmin,
+		loginAdminUnlocked,
+		authToken,
+		isLoadingSession,
+		knownServiceCount: status?.known_services.length ?? 0,
+		hasGithubProvider,
+		providersError: Boolean(providersError),
+		oauthExchanging,
+		oauthWaitingCallback,
+	});
 
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-1 min-h-0 flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto">
@@ -200,11 +186,6 @@ export function ClientOverview() {
 					</div>
 
 					<div className="flex items-center gap-2 flex-none self-end sm:self-auto">
-						{showAdminConsole ? (
-							<Link to="/admin" className="text-[11px] font-bold text-primary hover:underline">
-								{m.client_admin_console()}
-							</Link>
-						) : null}
 						<Button
 							variant="outline"
 							size="xs"
@@ -580,12 +561,6 @@ export function ClientOverview() {
 										? m.client_current_session()
 										: m.client_cumulative_lifetime()}
 								</span>
-								<Link
-									to="/traffic"
-									className="truncate text-[10px] font-medium text-primary hover:underline"
-								>
-									{m.client_traffic_details()}
-								</Link>
 							</div>
 							<div className="flex items-center rounded border border-input p-0.5 text-[9px]">
 								<button
@@ -705,25 +680,6 @@ export function ClientOverview() {
 									<ThroughputSparkline samples={throughputSamples} />
 								</div>
 							</div>
-
-							{fakeLanBroadcast ? (
-								<div className="flex items-center gap-1 flex-none bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-medium">
-									<Gamepad2 className="h-3 w-3" />
-									<span>{m.client_lan_active()}</span>
-									<button
-										type="button"
-										onClick={() => copyText(status?.listen_addr || listenAddr, "lan-btn")}
-										className="ml-0.5 hover:opacity-80 cursor-pointer"
-										title={m.client_copy_lan_address()}
-									>
-										{copied === "lan-btn" ? (
-											<Check className="h-2.5 w-2.5 text-emerald-500" />
-										) : (
-											<Copy className="h-2.5 w-2.5" />
-										)}
-									</button>
-								</div>
-							) : null}
 						</div>
 					</div>
 				) : null}

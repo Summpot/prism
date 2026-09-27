@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Activity, ArrowRight, Check, Cpu, Gauge, Layers, RotateCcw, Zap } from "lucide-react";
+import { Activity, Check, Cpu, Gauge, RotateCcw, Zap } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/ui";
@@ -278,31 +278,6 @@ export function ClientOptimizer() {
 							</p>
 						</div>
 					</div>
-				</div>
-
-				{/* 4. Multi-Lane Middleware Integration Banner */}
-				<div className="md:col-span-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/5 p-3.5 shadow-xs">
-					<div className="flex items-start gap-2.5">
-						<Layers className="h-4 w-4 text-primary mt-0.5 flex-none" />
-						<div className="space-y-0.5">
-							<div className="text-xs font-semibold text-foreground">
-								{m.optimizer_middleware_lanes_card()}
-							</div>
-							<p className="text-[11px] text-muted-foreground">
-								{m.optimizer_middleware_lanes_desc()}
-							</p>
-						</div>
-					</div>
-					<Link to="/middleware">
-						<Button
-							size="xs"
-							variant="outline"
-							className="h-7 text-xs gap-1 flex-none cursor-pointer"
-						>
-							<span>{m.optimizer_go_to_middleware()}</span>
-							<ArrowRight className="h-3 w-3" />
-						</Button>
-					</Link>
 				</div>
 			</div>
 		</div>

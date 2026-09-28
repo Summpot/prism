@@ -285,18 +285,11 @@ pub async fn download_and_install_update(
                 .args(["-xf", temp_asset_path.to_str().unwrap(), "-C", unpack_dir.to_str().unwrap()])
                 .status();
 
-            let mut extracted_exe: Option<PathBuf> = None;
-            if status.map(|s| s.success()).unwrap_or(false) {
-                if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        if p.extension().map(|e| e == "exe").unwrap_or(false) {
-                            extracted_exe = Some(p);
-                            break;
-                        }
-                    }
-                }
-            }
+            let mut extracted_exe = if status.map(|s| s.success()).unwrap_or(false) {
+                find_best_executable(&unpack_dir)
+            } else {
+                None
+            };
 
             if extracted_exe.is_none() {
                 // Fallback to PowerShell Expand-Archive if tar is unavailable or fails
@@ -312,15 +305,7 @@ pub async fn download_and_install_update(
                     ])
                     .status();
 
-                if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        if p.extension().map(|e| e == "exe").unwrap_or(false) {
-                            extracted_exe = Some(p);
-                            break;
-                        }
-                    }
-                }
+                extracted_exe = find_best_executable(&unpack_dir);
             }
 
             if let Some(exe_path) = extracted_exe {
@@ -330,11 +315,8 @@ pub async fn download_and_install_update(
                     .to_string_lossy()
                     .to_ascii_lowercase();
                 if name.contains("setup") || name.contains("installer") {
-                    tracing::info!(path = ?exe_path, "spawning extracted NSIS installer");
-                    std::process::Command::new(&exe_path)
-                        .arg("/S")
-                        .spawn()?;
-                    std::process::exit(0);
+                    tracing::info!(path = ?exe_path, "spawning extracted NSIS installer helper");
+                    spawn_windows_installer_and_restart(&exe_path)?;
                 } else {
                     self_replace::self_replace(&exe_path)?;
                     restart_app()?;
@@ -345,11 +327,8 @@ pub async fn download_and_install_update(
         } else if filename.ends_with(".exe") {
             let name = filename.to_ascii_lowercase();
             if name.contains("setup") || name.contains("installer") {
-                tracing::info!(path = ?temp_asset_path, "spawning NSIS installer");
-                std::process::Command::new(&temp_asset_path)
-                    .arg("/S")
-                    .spawn()?;
-                std::process::exit(0);
+                tracing::info!(path = ?temp_asset_path, "spawning NSIS installer helper");
+                spawn_windows_installer_and_restart(&temp_asset_path)?;
             } else {
                 self_replace::self_replace(&temp_asset_path)?;
                 restart_app()?;
@@ -399,8 +378,10 @@ pub async fn download_and_install_update(
             tracing::info!(source = ?target_path, target = ?appimage_path, "replacing running AppImage");
             std::fs::copy(&target_path, &appimage_path)?;
             let args: Vec<String> = std::env::args().skip(1).collect();
+            let pid = std::process::id();
             std::process::Command::new(&appimage_path)
                 .args(args)
+                .env("PRISM_RESTART_PID", pid.to_string())
                 .spawn()?;
             std::process::exit(0);
         } else {
@@ -469,12 +450,106 @@ pub async fn download_and_install_update(
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn find_best_executable(dir: &std::path::Path) -> Option<PathBuf> {
+    let mut exe_candidates = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() && p.extension().map(|e| e == "exe").unwrap_or(false) {
+                exe_candidates.push(p);
+            }
+        }
+    }
+    let mut installer_candidate = None;
+    for cand in exe_candidates {
+        let name = cand
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        if name.contains("uninstall") {
+            continue;
+        }
+        if name.contains("setup") || name.contains("installer") {
+            installer_candidate = Some(cand);
+        } else {
+            return Some(cand);
+        }
+    }
+    installer_candidate
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyhow::Result<()> {
+    let current_exe = std::env::current_exe()?;
+    let install_dir = current_exe
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let pid = std::process::id();
+    let current_args: Vec<String> = std::env::args().skip(1).collect();
+
+    tracing::info!(
+        installer = ?installer_path,
+        target_dir = ?install_dir,
+        current_exe = ?current_exe,
+        pid,
+        "spawning Windows installer helper to replace binary and restart"
+    );
+
+    let ps_installer = installer_path.display().to_string().replace('\'', "''");
+    let ps_target_exe = current_exe.display().to_string().replace('\'', "''");
+    let ps_install_dir = install_dir.display().to_string().replace('\'', "''");
+
+    let args_clause = if current_args.is_empty() {
+        String::new()
+    } else {
+        let quoted: Vec<String> = current_args
+            .iter()
+            .map(|a| format!("'{}'", a.replace('\'', "''")))
+            .collect();
+        format!("-ArgumentList {}", quoted.join(","))
+    };
+
+    let ps_script = format!(
+        "Wait-Process -Id {pid} -Timeout 20 -ErrorAction SilentlyContinue; \
+         Start-Sleep -Milliseconds 600; \
+         $p = Start-Process -FilePath '{ps_installer}' -ArgumentList '/S', \"/D={ps_install_dir}\" -Wait -PassThru; \
+         Start-Sleep -Milliseconds 500; \
+         if (Test-Path -LiteralPath '{ps_target_exe}') {{ \
+             Start-Process -FilePath '{ps_target_exe}' {args_clause}; \
+         }} \
+         Remove-Item -LiteralPath '{ps_installer}' -Force -ErrorAction SilentlyContinue;"
+    );
+
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    const DETACHED_PROCESS: u32 = 0x00000008;
+
+    std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &ps_script,
+        ])
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn()?;
+
+    std::process::exit(0);
+}
+
 pub fn restart_app() -> anyhow::Result<()> {
     let current_exe = std::env::current_exe()?;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    tracing::info!(exe = ?current_exe, "restarting Prism client");
+    let pid = std::process::id();
+    tracing::info!(exe = ?current_exe, pid, "restarting Prism client");
     std::process::Command::new(current_exe)
         .args(args)
+        .env("PRISM_RESTART_PID", pid.to_string())
         .spawn()?;
     std::process::exit(0);
 }

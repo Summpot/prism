@@ -10,9 +10,49 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const SINGLE_INSTANCE_SOCKET_NAME: &str = "prism-desktop-single-instance";
 
+#[cfg(target_os = "windows")]
+fn wait_for_parent_exit(pid: u32, timeout_ms: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !handle.is_null() {
+            WaitForSingleObject(handle, timeout_ms);
+            CloseHandle(handle);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_parent_exit(pid: u32, timeout_ms: u32) {
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_millis(timeout_ms as u64);
+    while start.elapsed() < timeout {
+        let res = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if res != 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[cfg(not(any(target_os = "windows", unix)))]
+fn wait_for_parent_exit(_pid: u32, timeout_ms: u32) {
+    std::thread::sleep(std::time::Duration::from_millis(timeout_ms.min(1000) as u64));
+}
+
 pub async fn check_single_instance_or_forward(
     args: &[String],
 ) -> anyhow::Result<Option<Listener>> {
+    // If this process was spawned by an auto-update restart, wait for the old instance to completely terminate
+    if let Ok(pid_str) = std::env::var("PRISM_RESTART_PID") {
+        if let Ok(pid) = pid_str.parse::<u32>() {
+            tracing::info!(old_pid = pid, "waiting for previous Prism process to terminate before checking single instance");
+            wait_for_parent_exit(pid, 5000);
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+    }
+
     let ns_name = SINGLE_INSTANCE_SOCKET_NAME.to_ns_name::<GenericNamespaced>()?;
 
     // 1. Try to connect to an existing running instance first

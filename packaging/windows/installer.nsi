@@ -68,6 +68,9 @@ SetCompressor /SOLID lzma
 
 Section "Install" SecInstall
     SetOutPath "$INSTDIR"
+    ; Ensure existing running instances are terminated so files can be overwritten without sharing violations
+    nsExec::Exec 'taskkill /F /IM prism.exe'
+    Sleep 500
     File "/oname=prism.exe" "${BIN_PATH}"
     
     ; Create uninstaller
@@ -100,6 +103,14 @@ Section "Install" SecInstall
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "NoModify" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "NoRepair" 1
 SectionEnd
+
+Function .onInstSuccess
+    ${GetOptions} $CMDLINE "/R" $R0
+    ${IfNot} ${Errors}
+        ${GetOptions} $CMDLINE "/ARGS" $R1
+        Exec '"$INSTDIR\prism.exe" $R1'
+    ${EndIf}
+FunctionEnd
 
 Section "Uninstall"
     ; Remove shortcuts

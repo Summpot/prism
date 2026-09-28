@@ -115,3 +115,12 @@ hickory-resolver = { version = "0.26.2", default-features = false, features = [
 	"tokio",
 ] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+	"Win32_Foundation",
+	"Win32_System_Threading",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+

@@ -252,7 +252,7 @@ jobs:
             Write-Warning "WiX Toolset not found; skipping MSI build"
           }
 
-          # 3. Updater Zip archive
+          # 3. Updater Zip archive (contains NSIS installer for full compatibility with both old Tauri and new clients)
           $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
           Compress-Archive -Path $nsisOut -DestinationPath $zipOut -CompressionLevel NoCompression -Force
 

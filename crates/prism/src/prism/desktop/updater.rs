@@ -3,7 +3,6 @@
 #![cfg(feature = "desktop")]
 
 use std::collections::HashMap;
-#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};
@@ -254,15 +253,59 @@ pub async fn download_and_install_update(
 
     #[cfg(target_os = "windows")]
     {
-        if filename.ends_with(".exe") {
-            // Run NSIS setup installer silently
-            tracing::info!(path = ?temp_asset_path, "spawning NSIS installer");
-            std::process::Command::new(&temp_asset_path)
-                .arg("/S")
-                .spawn()?;
-            std::process::exit(0);
+        if filename.ends_with(".zip") {
+            let unpack_dir = temp_dir.join(format!("prism-unpack-{}", version));
+            let _ = std::fs::create_dir_all(&unpack_dir);
+            // bsdtar is built into Windows 10/11
+            let status = std::process::Command::new("tar")
+                .args(["-xf", temp_asset_path.to_str().unwrap(), "-C", unpack_dir.to_str().unwrap()])
+                .status();
+
+            let mut extracted_exe: Option<PathBuf> = None;
+            if status.map(|s| s.success()).unwrap_or(false) {
+                if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.extension().map(|e| e == "exe").unwrap_or(false) {
+                            extracted_exe = Some(p);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(exe_path) = extracted_exe {
+                let name = exe_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
+                if name.contains("setup") || name.contains("installer") {
+                    tracing::info!(path = ?exe_path, "spawning extracted NSIS installer");
+                    std::process::Command::new(&exe_path)
+                        .arg("/S")
+                        .spawn()?;
+                    std::process::exit(0);
+                } else {
+                    self_replace::self_replace(&exe_path)?;
+                    restart_app()?;
+                }
+            } else {
+                anyhow::bail!("failed to extract or locate executable in downloaded Windows update archive");
+            }
+        } else if filename.ends_with(".exe") {
+            let name = filename.to_ascii_lowercase();
+            if name.contains("setup") || name.contains("installer") {
+                tracing::info!(path = ?temp_asset_path, "spawning NSIS installer");
+                std::process::Command::new(&temp_asset_path)
+                    .arg("/S")
+                    .spawn()?;
+                std::process::exit(0);
+            } else {
+                self_replace::self_replace(&temp_asset_path)?;
+                restart_app()?;
+            }
         } else {
-            // Standalone binary replacement
             self_replace::self_replace(&temp_asset_path)?;
             restart_app()?;
         }
@@ -271,12 +314,50 @@ pub async fn download_and_install_update(
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&temp_asset_path)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&temp_asset_path, perms)?;
 
-        self_replace::self_replace(&temp_asset_path)?;
-        restart_app()?;
+        let target_path = if filename.ends_with(".tar.gz") {
+            let unpack_dir = temp_dir.join(format!("prism-unpack-{}", version));
+            let _ = std::fs::create_dir_all(&unpack_dir);
+            let status = std::process::Command::new("tar")
+                .args(["-xzf", temp_asset_path.to_str().unwrap(), "-C", unpack_dir.to_str().unwrap()])
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("failed to extract Linux update tarball");
+            }
+
+            let mut extracted: Option<PathBuf> = None;
+            if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().map(|e| e == "AppImage").unwrap_or(false)
+                        || p.file_name().map(|n| n.to_string_lossy().contains("AppImage")).unwrap_or(false)
+                    {
+                        extracted = Some(p);
+                        break;
+                    }
+                }
+            }
+            extracted.ok_or_else(|| anyhow::anyhow!("no AppImage found in downloaded update archive"))?
+        } else {
+            temp_asset_path
+        };
+
+        let mut perms = std::fs::metadata(&target_path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&target_path, perms)?;
+
+        if let Ok(appimage_path) = std::env::var("APPIMAGE") {
+            tracing::info!(source = ?target_path, target = ?appimage_path, "replacing running AppImage");
+            std::fs::copy(&target_path, &appimage_path)?;
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            std::process::Command::new(&appimage_path)
+                .args(args)
+                .spawn()?;
+            std::process::exit(0);
+        } else {
+            self_replace::self_replace(&target_path)?;
+            restart_app()?;
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -347,4 +428,33 @@ pub fn restart_app() -> anyhow::Result<()> {
         .args(args)
         .spawn()?;
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_minisign_pubkey() {
+        assert!(parse_minisign_pubkey(DEFAULT_PUBKEY).is_ok());
+        let raw = "RWR0QYuMdr2/Yo5q7AeOLNFzOd/k8EYc6E55OkIQEH8V0JX0bd0Ri5gI";
+        assert!(parse_minisign_pubkey(raw).is_ok());
+        assert!(parse_minisign_pubkey("invalid-key").is_err());
+    }
+
+    #[test]
+    fn test_extract_commit_identifier() {
+        assert_eq!(
+            extract_commit_identifier("0.1.0-dev.b6b85c5", Some("Prism dev build (b6b85c5)")),
+            Some("b6b85c5".to_string())
+        );
+        assert_eq!(
+            extract_commit_identifier("0.1.0-dev.1234567", None),
+            Some("1234567".to_string())
+        );
+        assert_eq!(
+            extract_commit_identifier("0.1.0", None),
+            None
+        );
+    }
 }

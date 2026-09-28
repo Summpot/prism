@@ -150,7 +150,6 @@ jobs:
             xdg-utils \
             file \
             squashfs-tools \
-            minisign \
             rpm \
             dpkg
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
@@ -222,9 +221,9 @@ jobs:
 
           Copy-Item -Force -Path $binPath -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
 
-          # Install packaging tools (NSIS and Minisign) via Chocolatey
-          choco install nsis minisign --no-progress -y
-          $env:PATH += ";C:\Program Files (x86)\NSIS;C:\ProgramData\chocolatey\bin"
+          # Install packaging tools (NSIS) via Chocolatey
+          choco install nsis --no-progress -y
+          $env:PATH += ";C:\Program Files (x86)\NSIS"
 
           # 1. NSIS Installer (.exe)
           $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
@@ -257,20 +256,11 @@ jobs:
           $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
           Compress-Archive -Path $nsisOut -DestinationPath $zipOut -Force
 
-          # 4. Signatures with Minisign
+          # 4. Sign updater artifacts with Tauri CLI signer
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-            $minisign = (Get-Command minisign.exe -ErrorAction SilentlyContinue).Source
-            if (-not $minisign -and (Test-Path "C:\ProgramData\chocolatey\bin\minisign.exe")) {
-              $minisign = "C:\ProgramData\chocolatey\bin\minisign.exe"
-            }
-            if ($minisign) {
-              $keyPath = Join-Path $env:TEMP "minisign.key"
-              [System.IO.File]::WriteAllText($keyPath, ($env:TAURI_SIGNING_PRIVATE_KEY.Trim() + "`n"))
-              $pw = if ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD } else { "" }
-              Get-ChildItem -Path $outdir -File -Include *.exe, *.msi, *.zip | ForEach-Object {
-                $pw | & $minisign -S -s $keyPath -m $_.FullName -x ($_.FullName + ".sig")
-              }
-              Remove-Item -Force $keyPath -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $outdir -File -Include *.exe, *.msi, *.zip | ForEach-Object {
+              Write-Host "Signing $($_.Name)..."
+              pnpm exec tauri signer sign $_.FullName
             }
           }
 
@@ -334,16 +324,14 @@ jobs:
           # 3. Package App tarball for updater
           tar -czf "${OUTDIR}/Prism_${VERSION}_${DMG_ARCH}.app.tar.gz" Prism.app
 
-          # 4. Minisign signatures
+          # 4. Sign updater artifacts with Tauri CLI signer
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-            brew install minisign || true
-            echo "${TAURI_SIGNING_PRIVATE_KEY}" > /tmp/minisign.key
             for f in "${OUTDIR}"/*.dmg "${OUTDIR}"/*.tar.gz; do
               if [[ -f "$f" ]]; then
-                echo "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig" || true
+                echo "Signing $f..."
+                pnpm exec tauri signer sign "$f"
               fi
             done
-            rm -f /tmp/minisign.key
           fi
 
       - name: Package desktop (linux)
@@ -437,15 +425,14 @@ jobs:
             tar -czf "${OUTDIR}/Prism_${VERSION}_${ARCH}.AppImage.tar.gz" -C "${OUTDIR}" "Prism_${VERSION}_${ARCH}.AppImage"
           fi
 
-          # 4. Minisign signatures
+          # 4. Sign updater artifacts with Tauri CLI signer
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-            echo "${TAURI_SIGNING_PRIVATE_KEY}" > /tmp/minisign.key
             for f in "${OUTDIR}"/*.AppImage "${OUTDIR}"/*.tar.gz "${OUTDIR}"/*.deb "${OUTDIR}"/*.rpm; do
               if [[ -f "$f" ]]; then
-                echo "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig" || true
+                echo "Signing $f..."
+                pnpm exec tauri signer sign "$f"
               fi
             done
-            rm -f /tmp/minisign.key
           fi
 
       - name: Prepare artifacts (headless unix)
@@ -574,43 +561,51 @@ jobs:
             platforms: {}
           };
 
-          function findSignedAsset(pattern) {
+          function findAsset(pattern) {
             const candidates = files.filter(f => pattern.test(f) && !f.endsWith(".sig"));
+            // First check if there is a signed candidate
             for (const asset of candidates) {
               if (files.includes(asset + ".sig")) {
                 return asset;
               }
             }
-            return null;
+            // Fallback to first matching candidate
+            return candidates[0] || null;
           }
 
           function registerPlatform(keys, pattern) {
-            const asset = findSignedAsset(pattern);
+            const asset = findAsset(pattern);
             if (!asset) return false;
-            const signature = fs.readFileSync(path.join(distDir, asset + ".sig"), "utf8").trim();
+            let signature = "";
+            if (files.includes(asset + ".sig")) {
+              signature = fs.readFileSync(path.join(distDir, asset + ".sig"), "utf8").trim();
+            }
             const entry = {
               signature: signature,
               url: `https://github.com/${repo}/releases/download/${tag}/${asset}`
             };
             for (const key of (Array.isArray(keys) ? keys : [keys])) {
               manifest.platforms[key] = entry;
-              console.log(`Added platform ${key}: asset=${asset}`);
+              console.log(`Added platform ${key}: asset=${asset} (signed: ${Boolean(signature)})`);
             }
             return true;
           }
 
-          // Windows x86_64 (NSIS & generic)
-          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*(setup\.exe|\.nsis\.zip|\.zip)$/i) ||
+          // Windows x86_64 (prefer NSIS zip for Tauri updater compatibility, then setup.exe)
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*\.nsis\.zip$/i) ||
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*(setup\.exe|\.zip)$/i) ||
           registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(setup\.exe|\.nsis\.zip|\.zip)$/i);
 
           // Windows x86_64 MSI
           registerPlatform("windows-x86_64-msi", /(x64|x86_64).*\.msi$/i);
 
-          // Linux x86_64
-          registerPlatform(["linux-x86_64", "linux-x86_64-appimage"], /(amd64|x86_64).*AppImage(\.tar\.gz)?$/i);
+          // Linux x86_64 (prefer AppImage tar.gz for Tauri updater compatibility, then AppImage)
+          registerPlatform(["linux-x86_64", "linux-x86_64-appimage"], /(amd64|x86_64).*AppImage\.tar\.gz$/i) ||
+          registerPlatform(["linux-x86_64", "linux-x86_64-appimage"], /(amd64|x86_64).*AppImage$/i);
 
-          // Linux aarch64
-          registerPlatform(["linux-aarch64", "linux-aarch64-appimage"], /(arm64|aarch64).*AppImage(\.tar\.gz)?$/i);
+          // Linux aarch64 (prefer AppImage tar.gz for Tauri updater compatibility, then AppImage)
+          registerPlatform(["linux-aarch64", "linux-aarch64-appimage"], /(arm64|aarch64).*AppImage\.tar\.gz$/i) ||
+          registerPlatform(["linux-aarch64", "linux-aarch64-appimage"], /(arm64|aarch64).*AppImage$/i);
 
           // Darwin x86_64
           registerPlatform("darwin-x86_64", /(x64|x86_64).*app\.tar\.gz$/i) ||

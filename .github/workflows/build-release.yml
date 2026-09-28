@@ -222,10 +222,19 @@ jobs:
 
           Copy-Item -Force -Path $binPath -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
 
+          # Install packaging tools (NSIS and Minisign) via Chocolatey
+          choco install nsis minisign --no-progress -y
+          $env:PATH += ";C:\Program Files (x86)\NSIS;C:\ProgramData\chocolatey\bin"
+
           # 1. NSIS Installer (.exe)
-          $env:PATH += ";C:\Program Files (x86)\NSIS"
           $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
-          if (-not $makensis) { $makensis = "makensis.exe" }
+          if (-not $makensis) {
+            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") {
+              $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+            } else {
+              $makensis = "makensis.exe"
+            }
+          }
           $nsisOut = Join-Path $outdir "Prism_${version}_x64-setup.exe"
           & $makensis /DVERSION="$version" /DARCH="x64" /DOUTFILE="$nsisOut" /DBIN_PATH="$binPath" /DICON_PATH="$iconPath" packaging/windows/installer.nsi
 
@@ -248,8 +257,10 @@ jobs:
 
           # 4. Signatures with Minisign
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-            choco install minisign --no-progress -y || true
             $minisign = (Get-Command minisign.exe -ErrorAction SilentlyContinue).Source
+            if (-not $minisign -and (Test-Path "C:\ProgramData\chocolatey\bin\minisign.exe")) {
+              $minisign = "C:\ProgramData\chocolatey\bin\minisign.exe"
+            }
             if ($minisign) {
               $keyPath = Join-Path $env:TEMP "minisign.key"
               [System.IO.File]::WriteAllText($keyPath, ($env:TAURI_SIGNING_PRIVATE_KEY.Trim() + "`n"))

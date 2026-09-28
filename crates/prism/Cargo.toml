@@ -6,6 +6,7 @@ edition = "2024"
 [lib]
 name = "prism"
 path = "src/lib.rs"
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
 name = "prism"
@@ -28,6 +29,7 @@ custom-protocol = ["desktop", "tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2", default-features = false, optional = true, features = [] }
+uniffi = { version = "0.32", features = ["build", "bindgen"] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"], optional = true }
@@ -36,6 +38,7 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"], option
 tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 tauri-plugin-autostart = { version = "2", optional = true }
+uniffi = { version = "0.32", features = ["tokio"] }
 anyhow = "1.0"
 arc-swap = "1.9"
 async-trait = "0.1"

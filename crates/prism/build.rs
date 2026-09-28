@@ -20,6 +20,7 @@ fn main() {
 
     println!("cargo:rustc-env=PRISM_COMMIT_HASH={short_commit}");
     println!("cargo:rustc-env=PRISM_BUILD_TIME={build_time}");
+    println!("cargo:rerun-if-changed=src/ffi.rs");
 
     #[cfg(feature = "desktop")]
     tauri_build::build();

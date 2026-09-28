@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+#[cfg(not(target_os = "linux"))]
 use directories::ProjectDirs;
 use serde::{Deserialize, Deserializer, Serialize};
 

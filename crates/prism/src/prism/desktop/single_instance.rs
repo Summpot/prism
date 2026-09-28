@@ -25,22 +25,10 @@ pub async fn check_single_instance_or_forward(
     }
 
     // 2. If connection failed, attempt to become the primary instance listener
-    let opts = ListenerOptions::new().name(ns_name.clone());
+    let opts = ListenerOptions::new().name(ns_name).try_overwrite(true);
     match opts.create_tokio() {
         Ok(listener) => Ok(Some(listener)),
         Err(err) => {
-            // On Unix, a crashed previous instance might leave a stale socket file
-            #[cfg(unix)]
-            {
-                if let interprocess::local_socket::Name::Path(ref path) = ns_name {
-                    if path.exists() {
-                        let _ = std::fs::remove_file(path);
-                        if let Ok(listener) = opts.create_tokio() {
-                            return Ok(Some(listener));
-                        }
-                    }
-                }
-            }
             tracing::warn!(error = %err, "failed to create single instance listener; continuing as primary");
             Ok(None)
         }

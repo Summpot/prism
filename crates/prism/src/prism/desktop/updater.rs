@@ -298,6 +298,31 @@ pub async fn download_and_install_update(
                 }
             }
 
+            if extracted_exe.is_none() {
+                // Fallback to PowerShell Expand-Archive if tar is unavailable or fails
+                let _ = std::process::Command::new("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-Command",
+                        &format!(
+                            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+                            temp_asset_path.display(),
+                            unpack_dir.display()
+                        ),
+                    ])
+                    .status();
+
+                if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.extension().map(|e| e == "exe").unwrap_or(false) {
+                            extracted_exe = Some(p);
+                            break;
+                        }
+                    }
+                }
+            }
+
             if let Some(exe_path) = extracted_exe {
                 let name = exe_path
                     .file_name()

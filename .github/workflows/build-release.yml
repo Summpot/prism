@@ -254,7 +254,7 @@ jobs:
 
           # 3. Updater Zip archive
           $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
-          Compress-Archive -Path $nsisOut -DestinationPath $zipOut -Force
+          Compress-Archive -Path $nsisOut -DestinationPath $zipOut -CompressionLevel NoCompression -Force
 
           # 4. Sign updater artifacts with Tauri CLI signer
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
@@ -628,6 +628,14 @@ jobs:
             exit 1
           fi
           sha256sum "${files[@]}" > checksums.txt
+
+      - name: Clean dev release
+        if: env.channel == 'dev'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete dev --yes --repo "${{ github.repository }}" || true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

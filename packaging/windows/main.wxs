@@ -51,8 +51,12 @@
                 <RegistryKey Root="HKCU" Key="Software\Classes\prism">
                     <RegistryValue Type="string" Value="URL:Prism Protocol" />
                     <RegistryValue Type="string" Name="URL Protocol" Value="" />
-                    <RegistryValue Root="HKCU" Key="Software\Classes\prism\DefaultIcon" Type="string" Value="[INSTALLFOLDER]prism.exe,0" />
-                    <RegistryValue Root="HKCU" Key="Software\Classes\prism\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]prism.exe&quot; &quot;%1&quot;" />
+                </RegistryKey>
+                <RegistryKey Root="HKCU" Key="Software\Classes\prism\DefaultIcon">
+                    <RegistryValue Type="string" Value="[INSTALLFOLDER]prism.exe,0" />
+                </RegistryKey>
+                <RegistryKey Root="HKCU" Key="Software\Classes\prism\shell\open\command">
+                    <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]prism.exe&quot; &quot;%1&quot;" />
                 </RegistryKey>
                 <RegistryValue Root="HKCU" Key="Software\Prism" Name="installed" Type="integer" Value="1" />
             </Component>

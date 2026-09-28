@@ -217,8 +217,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $outdir | Out-Null
 
           $target = "${{ matrix.target }}"
-          $binPath = "target/$target/release/prism.exe"
-          $iconPath = "crates/prism/icons/icon.ico"
+          $binPath = (Resolve-Path "target/$target/release/prism.exe").Path
+          $iconPath = (Resolve-Path "crates/prism/icons/icon.ico").Path
 
           Copy-Item -Force -Path $binPath -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
 
@@ -235,16 +235,18 @@ jobs:
               $makensis = "makensis.exe"
             }
           }
-          $nsisOut = Join-Path $outdir "Prism_${version}_x64-setup.exe"
-          & $makensis /DVERSION="$version" /DARCH="x64" /DOUTFILE="$nsisOut" /DBIN_PATH="$binPath" /DICON_PATH="$iconPath" packaging/windows/installer.nsi
+          $nsisOut = [System.IO.Path]::GetFullPath((Join-Path $outdir "Prism_${version}_x64-setup.exe"))
+          $installerNsi = (Resolve-Path "packaging/windows/installer.nsi").Path
+          & $makensis /DVERSION="$version" /DARCH="x64" /DOUTFILE="$nsisOut" /DBIN_PATH="$binPath" /DICON_PATH="$iconPath" "$installerNsi"
 
           # 2. WiX Toolset MSI (.msi)
           $env:PATH += ";C:\Program Files (x86)\WiX Toolset v3.11\bin"
           $candle = (Get-Command candle.exe -ErrorAction SilentlyContinue).Source
           $light = (Get-Command light.exe -ErrorAction SilentlyContinue).Source
           if ($candle -and $light) {
-            $msiOut = Join-Path $outdir "Prism_${version}_x64_en-US.msi"
-            & $candle -dVersion="$cleanVersion" -dBinPath="$binPath" -dIconPath="$iconPath" packaging/windows/main.wxs -out main.wixobj
+            $msiOut = [System.IO.Path]::GetFullPath((Join-Path $outdir "Prism_${version}_x64_en-US.msi"))
+            $mainWxs = (Resolve-Path "packaging/windows/main.wxs").Path
+            & $candle -dVersion="$cleanVersion" -dBinPath="$binPath" -dIconPath="$iconPath" "$mainWxs" -out main.wixobj
             & $light -ext WixUIExtension -sval main.wixobj -out "$msiOut"
             Remove-Item -Force main.wixobj, main.wixpdb -ErrorAction SilentlyContinue
           } else {

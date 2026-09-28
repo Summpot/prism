@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Prism
+Exec=prism %u
+Icon=prism
+Type=Application
+Terminal=false
+Categories=Network;Utility;
+MimeType=x-scheme-handler/prism;
+Comment=Prism client

@@ -149,7 +149,10 @@ jobs:
             libxdo-dev \
             xdg-utils \
             file \
-            squashfs-tools
+            squashfs-tools \
+            minisign \
+            rpm \
+            dpkg
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
 
       - name: Setup Node
@@ -176,13 +179,16 @@ jobs:
           set -euo pipefail
           cargo build --release -p prism --no-default-features --target "${{ matrix.target }}"
 
-      - name: Build (release) (desktop)
+      - name: Build frontend
         if: matrix.desktop
-        env:
-          PKG_CONFIG_ALLOW_CROSS: "1"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm exec tauri build --ci --target ${{ matrix.target }}
+        run: pnpm build
+
+      - name: Build (release) (desktop binary)
+        if: matrix.desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p prism --features desktop,custom-protocol --target "${{ matrix.target }}"
 
       - name: Compress binary with UPX
         if: matrix.upx && !matrix.desktop
@@ -193,8 +199,244 @@ jobs:
             target/${{ matrix.target }}/release/prism${{ matrix.os == 'windows' && '.exe' || '' }}
           args: --best
 
-      - name: Prepare artifacts (unix)
-        if: runner.os != 'Windows'
+      - name: Package desktop (windows)
+        if: matrix.desktop && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $version = "0.1.0-dev.$($env:GITHUB_SHA.Substring(0,7))"
+          }
+          $cleanVersion = if ($version -match '^\d+(\.\d+){1,3}') { $matches[0] } else { "0.1.0" }
+
+          $outdir = "artifacts"
+          New-Item -ItemType Directory -Force -Path $outdir | Out-Null
+
+          $target = "${{ matrix.target }}"
+          $binPath = "target/$target/release/prism.exe"
+          $iconPath = "crates/prism/icons/icon.ico"
+
+          Copy-Item -Force -Path $binPath -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
+
+          # 1. NSIS Installer (.exe)
+          $env:PATH += ";C:\Program Files (x86)\NSIS"
+          $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) { $makensis = "makensis.exe" }
+          $nsisOut = Join-Path $outdir "Prism_${version}_x64-setup.exe"
+          & $makensis /DVERSION="$version" /DARCH="x64" /DOUTFILE="$nsisOut" /DBIN_PATH="$binPath" /DICON_PATH="$iconPath" packaging/windows/installer.nsi
+
+          # 2. WiX Toolset MSI (.msi)
+          $env:PATH += ";C:\Program Files (x86)\WiX Toolset v3.11\bin"
+          $candle = (Get-Command candle.exe -ErrorAction SilentlyContinue).Source
+          $light = (Get-Command light.exe -ErrorAction SilentlyContinue).Source
+          if ($candle -and $light) {
+            $msiOut = Join-Path $outdir "Prism_${version}_x64_en-US.msi"
+            & $candle -dVersion="$cleanVersion" -dBinPath="$binPath" -dIconPath="$iconPath" packaging/windows/main.wxs -out main.wixobj
+            & $light -ext WixUIExtension -sval main.wixobj -out "$msiOut"
+            Remove-Item -Force main.wixobj, main.wixpdb -ErrorAction SilentlyContinue
+          } else {
+            Write-Warning "WiX Toolset not found; skipping MSI build"
+          }
+
+          # 3. Updater Zip archive
+          $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
+          Compress-Archive -Path $nsisOut -DestinationPath $zipOut -Force
+
+          # 4. Signatures with Minisign
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            choco install minisign --no-progress -y || true
+            $minisign = (Get-Command minisign.exe -ErrorAction SilentlyContinue).Source
+            if ($minisign) {
+              $keyPath = Join-Path $env:TEMP "minisign.key"
+              [System.IO.File]::WriteAllText($keyPath, ($env:TAURI_SIGNING_PRIVATE_KEY.Trim() + "`n"))
+              $pw = if ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD } else { "" }
+              Get-ChildItem -Path $outdir -File -Include *.exe, *.msi, *.zip | ForEach-Object {
+                $pw | & $minisign -S -s $keyPath -m $_.FullName -x ($_.FullName + ".sig")
+              }
+              Remove-Item -Force $keyPath -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Package desktop (macos)
+        if: matrix.desktop && runner.os == 'macOS'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.1.0-dev.${GITHUB_SHA:0:7}"
+          fi
+
+          OUTDIR="artifacts"
+          mkdir -p "${OUTDIR}"
+
+          TARGET="${{ matrix.target }}"
+          BIN_PATH="target/${TARGET}/release/prism"
+          cp -v "${BIN_PATH}" "${OUTDIR}/prism_${VERSION}_${TARGET}"
+
+          DMG_ARCH="x64"
+          if [[ "${TARGET}" == "aarch64-apple-darwin" ]]; then
+            DMG_ARCH="aarch64"
+          fi
+
+          # 1. Assemble Prism.app
+          rm -rf Prism.app
+          mkdir -p Prism.app/Contents/MacOS
+          mkdir -p Prism.app/Contents/Resources
+          cp -v "${BIN_PATH}" Prism.app/Contents/MacOS/prism
+          chmod +x Prism.app/Contents/MacOS/prism
+
+          # Generate icon.icns from icon.png
+          mkdir -p Prism.iconset
+          sips -z 16 16     crates/prism/icons/icon.png --out Prism.iconset/icon_16x16.png
+          sips -z 32 32     crates/prism/icons/icon.png --out Prism.iconset/icon_16x16@2x.png
+          sips -z 32 32     crates/prism/icons/icon.png --out Prism.iconset/icon_32x32.png
+          sips -z 64 64     crates/prism/icons/icon.png --out Prism.iconset/icon_32x32@2x.png
+          sips -z 128 128   crates/prism/icons/icon.png --out Prism.iconset/icon_128x128.png
+          sips -z 256 256   crates/prism/icons/icon.png --out Prism.iconset/icon_128x128@2x.png
+          sips -z 256 256   crates/prism/icons/icon.png --out Prism.iconset/icon_256x256.png
+          sips -z 512 512   crates/prism/icons/icon.png --out Prism.iconset/icon_256x256@2x.png
+          sips -z 512 512   crates/prism/icons/icon.png --out Prism.iconset/icon_512x512.png
+          sips -z 1024 1024 crates/prism/icons/icon.png --out Prism.iconset/icon_512x512@2x.png
+          iconutil -c icns Prism.iconset -o Prism.app/Contents/Resources/icon.icns
+          rm -rf Prism.iconset
+
+          sed "s/{{VERSION}}/${VERSION}/g" packaging/macos/Info.plist > Prism.app/Contents/Info.plist
+
+          # Ad-hoc code sign
+          codesign --force --deep -s - Prism.app
+
+          # 2. Package DMG
+          hdiutil create -volname "Prism" -srcfolder Prism.app -ov -format UDZO "${OUTDIR}/Prism_${VERSION}_${DMG_ARCH}.dmg"
+
+          # 3. Package App tarball for updater
+          tar -czf "${OUTDIR}/Prism_${VERSION}_${DMG_ARCH}.app.tar.gz" Prism.app
+
+          # 4. Minisign signatures
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            brew install minisign || true
+            echo "${TAURI_SIGNING_PRIVATE_KEY}" > /tmp/minisign.key
+            for f in "${OUTDIR}"/*.dmg "${OUTDIR}"/*.tar.gz; do
+              if [[ -f "$f" ]]; then
+                echo "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig" || true
+              fi
+            done
+            rm -f /tmp/minisign.key
+          fi
+
+      - name: Package desktop (linux)
+        if: matrix.desktop && runner.os == 'Linux'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.1.0-dev.${GITHUB_SHA:0:7}"
+          fi
+          CLEAN_VERSION="${VERSION%%-*}"
+
+          OUTDIR="artifacts"
+          mkdir -p "${OUTDIR}"
+
+          TARGET="${{ matrix.target }}"
+          BIN_PATH="target/${TARGET}/release/prism"
+          cp -v "${BIN_PATH}" "${OUTDIR}/prism_${VERSION}_${TARGET}"
+
+          ARCH="amd64"
+          RPM_ARCH="x86_64"
+          APPIMAGE_ARCH="x86_64"
+          if [[ "${TARGET}" == "aarch64-unknown-linux-gnu" ]]; then
+            ARCH="arm64"
+            RPM_ARCH="aarch64"
+            APPIMAGE_ARCH="aarch64"
+          fi
+
+          # 1. Debian Package (.deb)
+          DEBDIR="deb_package"
+          rm -rf "${DEBDIR}"
+          mkdir -p "${DEBDIR}/DEBIAN"
+          mkdir -p "${DEBDIR}/usr/bin"
+          mkdir -p "${DEBDIR}/usr/share/applications"
+          mkdir -p "${DEBDIR}/usr/share/icons/hicolor/512x512/apps"
+
+          cp "${BIN_PATH}" "${DEBDIR}/usr/bin/prism"
+          chmod 755 "${DEBDIR}/usr/bin/prism"
+          cp "packaging/linux/prism.desktop" "${DEBDIR}/usr/share/applications/prism.desktop"
+          cp "crates/prism/icons/icon.png" "${DEBDIR}/usr/share/icons/hicolor/512x512/apps/prism.png"
+
+          printf "Package: prism\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: %s\nMaintainer: Prism <support@prism.com>\nDescription: Prism lightweight client\n" "${CLEAN_VERSION}" "${ARCH}" > "${DEBDIR}/DEBIAN/control"
+          dpkg-deb --build "${DEBDIR}" "${OUTDIR}/prism_${VERSION}_${ARCH}.deb"
+
+          # 2. RPM Package (.rpm)
+          RPM_ROOT="rpm_root"
+          rm -rf "${RPM_ROOT}"
+          mkdir -p "${RPM_ROOT}/BUILD" "${RPM_ROOT}/RPMS" "${RPM_ROOT}/SOURCES" "${RPM_ROOT}/SPECS" "${RPM_ROOT}/SRPMS"
+          mkdir -p "${RPM_ROOT}/BUILDROOT/prism-${CLEAN_VERSION}-1.${RPM_ARCH}/usr/bin"
+          mkdir -p "${RPM_ROOT}/BUILDROOT/prism-${CLEAN_VERSION}-1.${RPM_ARCH}/usr/share/applications"
+          mkdir -p "${RPM_ROOT}/BUILDROOT/prism-${CLEAN_VERSION}-1.${RPM_ARCH}/usr/share/icons/hicolor/512x512/apps"
+
+          cp "${BIN_PATH}" "${RPM_ROOT}/BUILDROOT/prism-${CLEAN_VERSION}-1.${RPM_ARCH}/usr/bin/prism"
+          cp "packaging/linux/prism.desktop" "${RPM_ROOT}/BUILDROOT/prism-${CLEAN_VERSION}-1.${RPM_ARCH}/usr/share/applications/prism.desktop"
+          cp "crates/prism/icons/icon.png" "${RPM_ROOT}/BUILDROOT/prism-${CLEAN_VERSION}-1.${RPM_ARCH}/usr/share/icons/hicolor/512x512/apps/prism.png"
+
+          printf "Name: prism\nVersion: %s\nRelease: 1\nSummary: Prism lightweight client\nLicense: MIT\n\n%%description\nPrism lightweight client\n\n%%files\n/usr/bin/prism\n/usr/share/applications/prism.desktop\n/usr/share/icons/hicolor/512x512/apps/prism.png\n" "${CLEAN_VERSION}" > "${RPM_ROOT}/SPECS/prism.spec"
+          rpmbuild -bb --target "${RPM_ARCH}" --define "_topdir $(pwd)/${RPM_ROOT}" "${RPM_ROOT}/SPECS/prism.spec" || true
+          if ls "${RPM_ROOT}/RPMS/${RPM_ARCH}/"*.rpm 1> /dev/null 2>&1; then
+            cp "${RPM_ROOT}/RPMS/${RPM_ARCH}/"*.rpm "${OUTDIR}/prism_${VERSION}_${ARCH}.rpm"
+          fi
+
+          # 3. AppImage
+          APPDIR="AppDir"
+          rm -rf "${APPDIR}"
+          mkdir -p "${APPDIR}/usr/bin"
+          mkdir -p "${APPDIR}/usr/share/icons/hicolor/512x512/apps"
+          cp "${BIN_PATH}" "${APPDIR}/usr/bin/prism"
+          chmod 755 "${APPDIR}/usr/bin/prism"
+          cp "packaging/linux/prism.desktop" "${APPDIR}/prism.desktop"
+          cp "crates/prism/icons/icon.png" "${APPDIR}/prism.png"
+          cp "crates/prism/icons/icon.png" "${APPDIR}/usr/share/icons/hicolor/512x512/apps/prism.png"
+
+          printf '#!/bin/sh\nSELF=$(readlink -f "$0")\nHERE=${SELF%%/*}\nexport PATH="${HERE}/usr/bin:${PATH}"\nexec "${HERE}/usr/bin/prism" "$@"\n' > "${APPDIR}/AppRun"
+          chmod +x "${APPDIR}/AppRun"
+
+          APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGE_ARCH}.AppImage"
+          curl -sSL -o appimagetool "${APPIMAGETOOL_URL}"
+          chmod +x appimagetool
+          ARCH="${APPIMAGE_ARCH}" ./appimagetool --appimage-extract-and-run "${APPDIR}" "${OUTDIR}/Prism_${VERSION}_${ARCH}.AppImage" || true
+          rm -f appimagetool
+
+          # Package AppImage tarball for updater
+          if [[ -f "${OUTDIR}/Prism_${VERSION}_${ARCH}.AppImage" ]]; then
+            tar -czf "${OUTDIR}/Prism_${VERSION}_${ARCH}.AppImage.tar.gz" -C "${OUTDIR}" "Prism_${VERSION}_${ARCH}.AppImage"
+          fi
+
+          # 4. Minisign signatures
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            echo "${TAURI_SIGNING_PRIVATE_KEY}" > /tmp/minisign.key
+            for f in "${OUTDIR}"/*.AppImage "${OUTDIR}"/*.tar.gz "${OUTDIR}"/*.deb "${OUTDIR}"/*.rpm; do
+              if [[ -f "$f" ]]; then
+                echo "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig" || true
+              fi
+            done
+            rm -f /tmp/minisign.key
+          fi
+
+      - name: Prepare artifacts (headless unix)
+        if: ${{ !matrix.desktop && runner.os != 'Windows' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -213,41 +455,8 @@ jobs:
             cp -v "target/${TARGET}/release/prism" "${OUTDIR}/prism_${VERSION}_${TARGET}"
           fi
 
-          if [[ -d "target/${TARGET}/release/bundle" ]]; then
-            find "target/${TARGET}/release/bundle" -type f \( \
-              -name "*.AppImage" -o \
-              -name "*.AppImage.sig" -o \
-              -name "*.AppImage.tar.gz" -o \
-              -name "*.AppImage.tar.gz.sig" -o \
-              -name "*.deb" -o \
-              -name "*.deb.sig" -o \
-              -name "*.rpm" -o \
-              -name "*.rpm.sig" -o \
-              -name "*.dmg" -o \
-              -name "*.dmg.sig" -o \
-              -name "*.app.tar.gz" -o \
-              -name "*.app.tar.gz.sig" \
-            \) -exec cp -v {} "${OUTDIR}/" \;
-          fi
-
-          if [[ "${TARGET}" == "x86_64-apple-darwin" ]]; then
-            if [[ -f "${OUTDIR}/Prism.app.tar.gz" ]]; then
-              mv -v "${OUTDIR}/Prism.app.tar.gz" "${OUTDIR}/Prism_${VERSION}_x64.app.tar.gz"
-            fi
-            if [[ -f "${OUTDIR}/Prism.app.tar.gz.sig" ]]; then
-              mv -v "${OUTDIR}/Prism.app.tar.gz.sig" "${OUTDIR}/Prism_${VERSION}_x64.app.tar.gz.sig"
-            fi
-          elif [[ "${TARGET}" == "aarch64-apple-darwin" ]]; then
-            if [[ -f "${OUTDIR}/Prism.app.tar.gz" ]]; then
-              mv -v "${OUTDIR}/Prism.app.tar.gz" "${OUTDIR}/Prism_${VERSION}_aarch64.app.tar.gz"
-            fi
-            if [[ -f "${OUTDIR}/Prism.app.tar.gz.sig" ]]; then
-              mv -v "${OUTDIR}/Prism.app.tar.gz.sig" "${OUTDIR}/Prism_${VERSION}_aarch64.app.tar.gz.sig"
-            fi
-          fi
-
-      - name: Prepare artifacts (windows)
-        if: runner.os == 'Windows'
+      - name: Prepare artifacts (headless windows)
+        if: ${{ !matrix.desktop && runner.os == 'Windows' }}
         shell: pwsh
         run: |
           if ($env:GITHUB_REF_TYPE -eq "tag") {
@@ -262,13 +471,6 @@ jobs:
           $target = "${{ matrix.target }}"
           if (Test-Path "target/$target/release/prism.exe") {
             Copy-Item -Force -Path "target/$target/release/prism.exe" -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
-          }
-
-          $bundleDir = "target/$target/release/bundle"
-          if (Test-Path $bundleDir) {
-            Get-ChildItem -Path "$bundleDir\*" -Recurse -File -Include *.exe, *.msi, *.zip, *.sig | ForEach-Object {
-              Copy-Item -Force -Path $_.FullName -Destination $outdir
-            }
           }
 
       - name: upload artifacts

@@ -6,7 +6,7 @@
 		"dev": "vite dev --port 3000",
 		"build": "vite build",
 		"tauri": "tauri",
-		"build:desktop": "tauri build --no-bundle --ci",
+		"build:desktop": "pnpm build && cargo build --release -p prism --features desktop,custom-protocol",
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
 		"format": "oxfmt",

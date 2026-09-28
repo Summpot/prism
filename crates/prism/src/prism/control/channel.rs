@@ -17,9 +17,9 @@ use super::codec::{
     decode_envelope, decode_msg, encode_msg, length_codec, reject_unsupported_version,
 };
 use super::types::{
-    ADMIN_PROTO_V1, AdminError, AdminEvent, AdminMethod, AdminMsg, AdminPayload, CLIENT_FEATURES,
-    ControlError, FEATURE_EVENTS, FEATURE_RPC, HelloRejectReason, TOPIC_CONNECTIONS,
-    TOPIC_OPTIMIZER, TOPIC_RELOAD, TOPIC_SERVICES,
+    CLIENT_FEATURES, CONTROL_PROTO_V1, ControlError, ControlEvent, ControlMethod, ControlMsg,
+    ControlPayload, ControlRpcError, FEATURE_EVENTS, FEATURE_RPC, HelloRejectReason,
+    TOPIC_CONNECTIONS, TOPIC_OPTIMIZER, TOPIC_RELOAD, TOPIC_SERVICES,
 };
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -27,19 +27,19 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 const EVENT_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug)]
-pub struct AdminCallContext {
+pub struct ControlCallContext {
     pub identity: Option<AuthIdentity>,
     pub features: u64,
 }
 
-impl AdminCallContext {
+impl ControlCallContext {
     pub fn has_feature(&self, feature: u64) -> bool {
         self.features & feature == feature
     }
 }
 
 #[derive(Clone, Default)]
-pub struct AdminEventWatches {
+pub struct ControlEventWatches {
     pub sessions: Option<telemetry::SharedSessions>,
     pub optimizer: Option<telemetry::SharedOptimizerRegistry>,
     pub manager: Option<Arc<Manager>>,
@@ -47,20 +47,20 @@ pub struct AdminEventWatches {
 }
 
 #[async_trait]
-pub trait AdminControl: Send + Sync {
+pub trait ControlHandler: Send + Sync {
     fn features(&self) -> u64;
     fn auth_enabled(&self) -> bool;
-    fn event_watches(&self) -> AdminEventWatches;
-    async fn authenticate(&self, token: &str) -> Result<AuthIdentity, AdminError>;
+    fn event_watches(&self) -> ControlEventWatches;
+    async fn authenticate(&self, token: &str) -> Result<AuthIdentity, ControlRpcError>;
     async fn dispatch(
         &self,
-        method: AdminMethod,
-        ctx: &AdminCallContext,
-    ) -> Result<AdminPayload, AdminError>;
+        method: ControlMethod,
+        ctx: &ControlCallContext,
+    ) -> Result<ControlPayload, ControlRpcError>;
 }
 
 struct PendingMap {
-    inner: Mutex<HashMap<u32, oneshot::Sender<Result<AdminPayload, AdminError>>>>,
+    inner: Mutex<HashMap<u32, oneshot::Sender<Result<ControlPayload, ControlRpcError>>>>,
 }
 
 impl PendingMap {
@@ -70,15 +70,15 @@ impl PendingMap {
         })
     }
 
-    async fn insert(&self, id: u32, tx: oneshot::Sender<Result<AdminPayload, AdminError>>) {
+    async fn insert(&self, id: u32, tx: oneshot::Sender<Result<ControlPayload, ControlRpcError>>) {
         self.inner.lock().await.insert(id, tx);
     }
 
-    async fn take(&self, id: u32) -> Option<oneshot::Sender<Result<AdminPayload, AdminError>>> {
+    async fn take(&self, id: u32) -> Option<oneshot::Sender<Result<ControlPayload, ControlRpcError>>> {
         self.inner.lock().await.remove(&id)
     }
 
-    async fn fail_all(&self, err: AdminError) {
+    async fn fail_all(&self, err: ControlRpcError) {
         let mut guard = self.inner.lock().await;
         for (_, tx) in guard.drain() {
             let _ = tx.send(Err(err.clone()));
@@ -86,11 +86,11 @@ impl PendingMap {
     }
 }
 
-/// Client handle for a negotiated `$admin` control channel.
+/// Client handle for a negotiated `$control` channel.
 pub struct ControlChannel {
-    write_tx: mpsc::Sender<AdminMsg>,
+    write_tx: mpsc::Sender<ControlMsg>,
     pending: Arc<PendingMap>,
-    events: broadcast::Sender<AdminEvent>,
+    events: broadcast::Sender<ControlEvent>,
     features: u64,
     next_id: AtomicU32,
     closed: Arc<AtomicBool>,
@@ -102,7 +102,7 @@ impl ControlChannel {
         self.features
     }
 
-    pub fn subscribe_events(&self) -> broadcast::Receiver<AdminEvent> {
+    pub fn subscribe_events(&self) -> broadcast::Receiver<ControlEvent> {
         self.events.subscribe()
     }
 
@@ -110,12 +110,12 @@ impl ControlChannel {
         self.closed.load(Ordering::Relaxed)
     }
 
-    pub async fn call(&self, method: AdminMethod) -> Result<AdminPayload, AdminError> {
+    pub async fn call(&self, method: ControlMethod) -> Result<ControlPayload, ControlRpcError> {
         if self.is_closed() {
-            return Err(AdminError::unavailable("admin channel closed"));
+            return Err(ControlRpcError::unavailable("control channel closed"));
         }
         if self.features & method.feature() == 0 {
-            return Err(AdminError::unavailable("method not negotiated"));
+            return Err(ControlRpcError::unavailable("method not negotiated"));
         }
         let mut id = self.next_id.fetch_add(1, Ordering::Relaxed);
         if id == 0 {
@@ -125,19 +125,19 @@ impl ControlChannel {
         self.pending.insert(id, tx).await;
         if self
             .write_tx
-            .send(AdminMsg::Request { id, method })
+            .send(ControlMsg::Request { id, method })
             .await
             .is_err()
         {
             let _ = self.pending.take(id).await;
-            return Err(AdminError::unavailable("admin channel closed"));
+            return Err(ControlRpcError::unavailable("control channel closed"));
         }
         match tokio::time::timeout(RPC_TIMEOUT, rx).await {
             Ok(Ok(res)) => res,
-            Ok(Err(_)) => Err(AdminError::unavailable("admin channel closed")),
+            Ok(Err(_)) => Err(ControlRpcError::unavailable("control channel closed")),
             Err(_) => {
                 let _ = self.pending.take(id).await;
-                Err(AdminError::internal("admin request timed out"))
+                Err(ControlRpcError::internal("control request timed out"))
             }
         }
     }
@@ -159,7 +159,7 @@ pub async fn connect(
     requested_features: u64,
 ) -> Result<Arc<ControlChannel>, ControlError> {
     let mut framed = Framed::new(stream, length_codec());
-    let hello = encode_msg(&AdminMsg::Hello {
+    let hello = encode_msg(&ControlMsg::Hello {
         features: requested_features,
     })?;
     framed.send(hello).await.map_err(frame_io)?;
@@ -171,11 +171,11 @@ pub async fn connect(
         .map_err(frame_io)?;
 
     let env = decode_envelope(&first)?;
-    if env.proto != ADMIN_PROTO_V1 {
+    if env.proto != CONTROL_PROTO_V1 {
         return Err(ControlError::UnsupportedVersion(env.proto));
     }
     match decode_msg(&env)? {
-        AdminMsg::HelloAck { features } => {
+        ControlMsg::HelloAck { features } => {
             if features & FEATURE_RPC == 0 {
                 return Err(ControlError::Handshake(
                     "server did not agree FEATURE_RPC".into(),
@@ -183,7 +183,7 @@ pub async fn connect(
             }
             Ok(spawn_client_session(framed, features))
         }
-        AdminMsg::HelloReject { reason } => Err(ControlError::Rejected(reason)),
+        ControlMsg::HelloReject { reason } => Err(ControlError::Rejected(reason)),
         other => Err(ControlError::Handshake(format!(
             "expected HelloAck, got {other:?}"
         ))),
@@ -192,7 +192,7 @@ pub async fn connect(
 
 pub async fn serve(
     stream: BoxedStream,
-    handler: Arc<dyn AdminControl>,
+    handler: Arc<dyn ControlHandler>,
     identity: Option<AuthIdentity>,
 ) -> Result<(), ControlError> {
     serve_with_shared_identity(
@@ -206,11 +206,11 @@ pub async fn serve(
 
 /// Same as [`serve`], but identity is shared with the tunnel session.
 ///
-/// `$admin` Authenticate writes through to `identity` and bumps
+/// `$control` Authenticate writes through to `identity` and bumps
 /// `on_identity_change` so the sidecar catalog can be re-filtered.
 pub async fn serve_with_shared_identity(
     stream: BoxedStream,
-    handler: Arc<dyn AdminControl>,
+    handler: Arc<dyn ControlHandler>,
     identity: Arc<Mutex<Option<AuthIdentity>>>,
     on_identity_change: Option<watch::Sender<u64>>,
 ) -> Result<(), ControlError> {
@@ -225,7 +225,7 @@ pub async fn serve_with_shared_identity(
         Ok(env) => env,
         Err(err) => {
             let _ = framed
-                .send(encode_msg(&AdminMsg::HelloReject {
+                .send(encode_msg(&ControlMsg::HelloReject {
                     reason: HelloRejectReason::Malformed,
                 })?)
                 .await;
@@ -233,16 +233,16 @@ pub async fn serve_with_shared_identity(
         }
     };
 
-    if env.proto != ADMIN_PROTO_V1 {
+    if env.proto != CONTROL_PROTO_V1 {
         let _ = framed.send(reject_unsupported_version(env.proto)?).await;
         return Err(ControlError::UnsupportedVersion(env.proto));
     }
 
     let requested = match decode_msg(&env) {
-        Ok(AdminMsg::Hello { features }) => features,
+        Ok(ControlMsg::Hello { features }) => features,
         Ok(_) => {
             let _ = framed
-                .send(encode_msg(&AdminMsg::HelloReject {
+                .send(encode_msg(&ControlMsg::HelloReject {
                     reason: HelloRejectReason::Malformed,
                 })?)
                 .await;
@@ -250,7 +250,7 @@ pub async fn serve_with_shared_identity(
         }
         Err(err) => {
             let _ = framed
-                .send(encode_msg(&AdminMsg::HelloReject {
+                .send(encode_msg(&ControlMsg::HelloReject {
                     reason: HelloRejectReason::Malformed,
                 })?)
                 .await;
@@ -260,7 +260,7 @@ pub async fn serve_with_shared_identity(
 
     if requested & FEATURE_RPC == 0 {
         let _ = framed
-            .send(encode_msg(&AdminMsg::HelloReject {
+            .send(encode_msg(&ControlMsg::HelloReject {
                 reason: HelloRejectReason::Malformed,
             })?)
             .await;
@@ -271,11 +271,11 @@ pub async fn serve_with_shared_identity(
 
     let agreed = requested & handler.features();
     framed
-        .send(encode_msg(&AdminMsg::HelloAck { features: agreed })?)
+        .send(encode_msg(&ControlMsg::HelloAck { features: agreed })?)
         .await
         .map_err(frame_io)?;
 
-    let (write_tx, mut write_rx) = mpsc::channel::<AdminMsg>(64);
+    let (write_tx, mut write_rx) = mpsc::channel::<ControlMsg>(64);
     let topics = Arc::new(Mutex::new(0u64));
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let mut event_task = None;
@@ -313,7 +313,7 @@ pub async fn serve_with_shared_identity(
                     Err(_) => break,
                 };
                 match msg {
-                    AdminMsg::Request { id, method } => {
+                    ControlMsg::Request { id, method } => {
                         if id == 0 {
                             break;
                         }
@@ -327,16 +327,16 @@ pub async fn serve_with_shared_identity(
                         )
                         .await;
                         if framed
-                            .send(encode_msg(&AdminMsg::Response { id, result })?)
+                            .send(encode_msg(&ControlMsg::Response { id, result })?)
                             .await
                             .is_err()
                         {
                             break;
                         }
                     }
-                    AdminMsg::Hello { .. } => {
+                    ControlMsg::Hello { .. } => {
                         let _ = framed
-                            .send(encode_msg(&AdminMsg::HelloReject {
+                            .send(encode_msg(&ControlMsg::HelloReject {
                                 reason: HelloRejectReason::AlreadyNegotiated,
                             })?)
                             .await;
@@ -355,36 +355,36 @@ pub async fn serve_with_shared_identity(
     Ok(())
 }
 
-fn decode_frame_or_reject(buf: &[u8]) -> Result<AdminMsg, ControlError> {
+fn decode_frame_or_reject(buf: &[u8]) -> Result<ControlMsg, ControlError> {
     decode_msg(&decode_envelope(buf)?)
 }
 
 async fn handle_request(
-    handler: &dyn AdminControl,
+    handler: &dyn ControlHandler,
     identity: &Mutex<Option<AuthIdentity>>,
     on_identity_change: Option<&watch::Sender<u64>>,
     features: u64,
     topics: &Mutex<u64>,
-    method: AdminMethod,
-) -> Result<AdminPayload, AdminError> {
+    method: ControlMethod,
+) -> Result<ControlPayload, ControlRpcError> {
     if features & method.feature() == 0 {
-        return Err(AdminError::unavailable("method not negotiated"));
+        return Err(ControlRpcError::unavailable("method not negotiated"));
     }
 
-    if let AdminMethod::Authenticate { token } = &method {
+    if let ControlMethod::Authenticate { token } = &method {
         let ident = handler.authenticate(token).await?;
         *identity.lock().await = Some(ident.clone());
         if let Some(tx) = on_identity_change {
             let next = tx.borrow().saturating_add(1);
             let _ = tx.send(next);
         }
-        return Ok(AdminPayload::AuthSession(session_from_identity(&ident)));
+        return Ok(ControlPayload::AuthSession(session_from_identity(&ident)));
     }
 
     let current = identity.lock().await.clone();
-    if let AdminMethod::Subscribe { topics: want } = method {
+    if let ControlMethod::Subscribe { topics: want } = method {
         if features & FEATURE_EVENTS == 0 {
-            return Err(AdminError::unavailable("events not negotiated"));
+            return Err(ControlRpcError::unavailable("events not negotiated"));
         }
         if method_needs_auth(handler, &current, true) {
             return Err(session_error(&current));
@@ -392,7 +392,7 @@ async fn handle_request(
         let agreed_topics = want
             & (TOPIC_CONNECTIONS | TOPIC_SERVICES | TOPIC_OPTIMIZER | TOPIC_RELOAD);
         *topics.lock().await = agreed_topics;
-        return Ok(AdminPayload::Subscribed {
+        return Ok(ControlPayload::Subscribed {
             topics: agreed_topics,
         });
     }
@@ -402,7 +402,7 @@ async fn handle_request(
         return Err(session_error(&current));
     }
 
-    let ctx = AdminCallContext {
+    let ctx = ControlCallContext {
         identity: current,
         features,
     };
@@ -410,7 +410,7 @@ async fn handle_request(
 }
 
 fn method_needs_auth(
-    _handler: &dyn AdminControl,
+    _handler: &dyn ControlHandler,
     identity: &Option<AuthIdentity>,
     requires_session: bool,
 ) -> bool {
@@ -424,10 +424,10 @@ fn method_needs_auth(
     }
 }
 
-fn session_error(identity: &Option<AuthIdentity>) -> AdminError {
+fn session_error(identity: &Option<AuthIdentity>) -> ControlRpcError {
     match identity {
-        Some(id) if !id.is_admin => AdminError::forbidden("admin role required"),
-        _ => AdminError::unauthorized("authentication required"),
+        Some(id) if !id.is_admin => ControlRpcError::forbidden("admin role required"),
+        _ => ControlRpcError::unauthorized("authentication required"),
     }
 }
 
@@ -449,7 +449,7 @@ fn spawn_client_session(
     features: u64,
 ) -> Arc<ControlChannel> {
     let (mut sink, mut stream) = framed.split();
-    let (write_tx, mut write_rx) = mpsc::channel::<AdminMsg>(64);
+    let (write_tx, mut write_rx) = mpsc::channel::<ControlMsg>(64);
     let pending = PendingMap::new();
     let (events, _) = broadcast::channel(64);
     let (shutdown_tx, _) = watch::channel(false);
@@ -482,7 +482,7 @@ fn spawn_client_session(
         let _ = SinkExt::close(&mut sink).await;
         closed_w.store(true, Ordering::Relaxed);
         pending_w
-            .fail_all(AdminError::unavailable("admin channel closed"))
+            .fail_all(ControlRpcError::unavailable("control channel closed"))
             .await;
     });
 
@@ -503,15 +503,15 @@ fn spawn_client_session(
                     let Ok(buf) = frame else { break };
                     let Ok(msg) = decode_frame_or_reject(&buf) else { break };
                     match msg {
-                        AdminMsg::Response { id, result } => {
+                        ControlMsg::Response { id, result } => {
                             if let Some(tx) = pending_r.take(id).await {
                                 let _ = tx.send(result);
                             }
                         }
-                        AdminMsg::Event { event, .. } => {
+                        ControlMsg::Event { event, .. } => {
                             let _ = events_r.send(event);
                         }
-                        AdminMsg::HelloReject { .. } => break,
+                        ControlMsg::HelloReject { .. } => break,
                         _ => {}
                     }
                 }
@@ -519,7 +519,7 @@ fn spawn_client_session(
         }
         closed_r.store(true, Ordering::Relaxed);
         pending_r
-            .fail_all(AdminError::unavailable("admin channel closed"))
+            .fail_all(ControlRpcError::unavailable("control channel closed"))
             .await;
     });
 
@@ -535,9 +535,9 @@ fn spawn_client_session(
 }
 
 async fn run_event_loop(
-    watches: AdminEventWatches,
+    watches: ControlEventWatches,
     topics: Arc<Mutex<u64>>,
-    write_tx: mpsc::Sender<AdminMsg>,
+    write_tx: mpsc::Sender<ControlMsg>,
     shutdown: &mut watch::Receiver<bool>,
 ) {
     let mut seq = 1u32;
@@ -570,7 +570,7 @@ async fn run_event_loop(
                         &write_tx,
                         &mut last,
                         &mut seq,
-                        AdminEvent::TunnelServices(snap),
+                        ControlEvent::TunnelServices(snap),
                     )
                     .await;
                 }
@@ -591,7 +591,7 @@ async fn run_event_loop(
                         &write_tx,
                         &mut last,
                         &mut seq,
-                        AdminEvent::Reload { seq: seq_no },
+                        ControlEvent::Reload { seq: seq_no },
                     )
                     .await;
                 }
@@ -605,7 +605,7 @@ async fn run_event_loop(
                         &write_tx,
                         &mut last,
                         &mut seq,
-                        AdminEvent::Connections(sessions.snapshot()),
+                        ControlEvent::Connections(sessions.snapshot()),
                     )
                     .await;
                 }
@@ -617,7 +617,7 @@ async fn run_event_loop(
                         &write_tx,
                         &mut last,
                         &mut seq,
-                        AdminEvent::Optimizer { global, services },
+                        ControlEvent::Optimizer { global, services },
                     )
                     .await;
                 }
@@ -627,10 +627,10 @@ async fn run_event_loop(
 }
 
 async fn push_event(
-    write_tx: &mpsc::Sender<AdminMsg>,
+    write_tx: &mpsc::Sender<ControlMsg>,
     last: &mut HashMap<u64, Vec<u8>>,
     seq: &mut u32,
-    event: AdminEvent,
+    event: ControlEvent,
 ) {
     let topic = event.topic();
     let fingerprint = postcard::to_allocvec(&event).unwrap_or_default();
@@ -644,7 +644,7 @@ async fn push_event(
         *seq = 1;
     }
     let _ = write_tx
-        .send(AdminMsg::Event { seq: id, event })
+        .send(ControlMsg::Event { seq: id, event })
         .await;
 }
 
@@ -668,17 +668,17 @@ mod tests {
     }
 
     #[async_trait]
-    impl AdminControl for MockControl {
+    impl ControlHandler for MockControl {
         fn features(&self) -> u64 {
             self.features
         }
         fn auth_enabled(&self) -> bool {
             self.auth
         }
-        fn event_watches(&self) -> AdminEventWatches {
-            AdminEventWatches::default()
+        fn event_watches(&self) -> ControlEventWatches {
+            ControlEventWatches::default()
         }
-        async fn authenticate(&self, token: &str) -> Result<AuthIdentity, AdminError> {
+        async fn authenticate(&self, token: &str) -> Result<AuthIdentity, ControlRpcError> {
             if token == "ok" {
                 Ok(AuthIdentity {
                     user_id: "u1".into(),
@@ -688,18 +688,18 @@ mod tests {
                     is_admin: true,
                 })
             } else {
-                Err(AdminError::unauthorized("bad token"))
+                Err(ControlRpcError::unauthorized("bad token"))
             }
         }
         async fn dispatch(
             &self,
-            method: AdminMethod,
-            _ctx: &AdminCallContext,
-        ) -> Result<AdminPayload, AdminError> {
+            method: ControlMethod,
+            _ctx: &ControlCallContext,
+        ) -> Result<ControlPayload, ControlRpcError> {
             match method {
-                AdminMethod::Health => Ok(AdminPayload::Health { ok: true }),
-                AdminMethod::Connections => Ok(AdminPayload::Connections(Vec::new())),
-                _ => Err(AdminError::not_found("unhandled")),
+                ControlMethod::Health => Ok(ControlPayload::Health { ok: true }),
+                ControlMethod::Connections => Ok(ControlPayload::Connections(Vec::new())),
+                _ => Err(ControlRpcError::not_found("unhandled")),
             }
         }
     }
@@ -707,7 +707,7 @@ mod tests {
     #[tokio::test]
     async fn hello_negotiates_intersection() {
         let (a, b) = tokio::io::duplex(64 * 1024);
-        let handler: Arc<dyn AdminControl> = Arc::new(MockControl {
+        let handler: Arc<dyn ControlHandler> = Arc::new(MockControl {
             features: FEATURE_RPC | FEATURE_AUTH,
             auth: false,
         });
@@ -721,10 +721,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(ch.features(), FEATURE_RPC | FEATURE_AUTH);
-        let payload = ch.call(AdminMethod::Health).await.unwrap();
-        assert_eq!(payload, AdminPayload::Health { ok: true });
-        let err = ch.call(AdminMethod::Connections).await.unwrap_err();
-        assert_eq!(err.code, crate::prism::control::types::AdminErrorCode::Unavailable);
+        let payload = ch.call(ControlMethod::Health).await.unwrap();
+        assert_eq!(payload, ControlPayload::Health { ok: true });
+        let err = ch.call(ControlMethod::Connections).await.unwrap_err();
+        assert_eq!(err.code, crate::prism::control::types::ControlErrorCode::Unavailable);
         ch.close();
         tokio::time::timeout(Duration::from_secs(2), server)
             .await
@@ -736,7 +736,7 @@ mod tests {
     async fn reject_unknown_protocol_version() {
         use futures_util::SinkExt;
         let (a, b) = tokio::io::duplex(64 * 1024);
-        let handler: Arc<dyn AdminControl> = Arc::new(MockControl {
+        let handler: Arc<dyn ControlHandler> = Arc::new(MockControl {
             features: FEATURE_RPC,
             auth: false,
         });
@@ -757,7 +757,7 @@ mod tests {
         let reply = framed.next().await.unwrap().unwrap();
         let msg = crate::prism::control::codec::decode_frame(&reply).unwrap();
         match msg {
-            AdminMsg::HelloReject {
+            ControlMsg::HelloReject {
                 reason: HelloRejectReason::UnsupportedVersion { peer: 9, server: 1 },
             } => {}
             other => panic!("unexpected {other:?}"),
@@ -768,7 +768,7 @@ mod tests {
     #[tokio::test]
     async fn session_methods_require_auth_when_enabled() {
         let (a, b) = tokio::io::duplex(64 * 1024);
-        let handler: Arc<dyn AdminControl> = Arc::new(MockControl {
+        let handler: Arc<dyn ControlHandler> = Arc::new(MockControl {
             features: FEATURE_RPC | FEATURE_PANEL | FEATURE_AUTH,
             auth: true,
         });
@@ -781,30 +781,30 @@ mod tests {
         )
         .await
         .unwrap();
-        let err = ch.call(AdminMethod::Connections).await.unwrap_err();
+        let err = ch.call(ControlMethod::Connections).await.unwrap_err();
         assert_eq!(
             err.code,
-            crate::prism::control::types::AdminErrorCode::Unauthorized
+            crate::prism::control::types::ControlErrorCode::Unauthorized
         );
         let session = ch
-            .call(AdminMethod::Authenticate {
+            .call(ControlMethod::Authenticate {
                 token: "ok".into(),
             })
             .await
             .unwrap();
         match session {
-            AdminPayload::AuthSession(s) => assert!(s.is_admin),
+            ControlPayload::AuthSession(s) => assert!(s.is_admin),
             other => panic!("{other:?}"),
         }
-        let ok = ch.call(AdminMethod::Connections).await.unwrap();
-        assert_eq!(ok, AdminPayload::Connections(Vec::new()));
+        let ok = ch.call(ControlMethod::Connections).await.unwrap();
+        assert_eq!(ok, ControlPayload::Connections(Vec::new()));
         ch.close();
     }
 
     #[tokio::test]
     async fn subscribe_without_events_feature_is_unavailable() {
         let (a, b) = tokio::io::duplex(64 * 1024);
-        let handler: Arc<dyn AdminControl> = Arc::new(MockControl {
+        let handler: Arc<dyn ControlHandler> = Arc::new(MockControl {
             features: FEATURE_RPC,
             auth: false,
         });
@@ -815,14 +815,14 @@ mod tests {
             .await
             .unwrap();
         let err = ch
-            .call(AdminMethod::Subscribe {
+            .call(ControlMethod::Subscribe {
                 topics: TOPIC_CONNECTIONS,
             })
             .await
             .unwrap_err();
         assert_eq!(
             err.code,
-            crate::prism::control::types::AdminErrorCode::Unavailable
+            crate::prism::control::types::ControlErrorCode::Unavailable
         );
         ch.close();
     }

@@ -8,8 +8,8 @@ use crate::prism::telemetry::SessionInfo;
 use crate::prism::tunnel::manager::ServiceSnapshot;
 use crate::prism::tunnel::optimizer::OptimizerStatsSnapshot;
 
-pub const ADMIN_PROTO_V1: u16 = 1;
-pub const MAX_ADMIN_FRAME_BYTES: usize = 1024 * 1024;
+pub const CONTROL_PROTO_V1: u16 = 1;
+pub const MAX_CONTROL_FRAME_BYTES: usize = 1024 * 1024;
 
 pub const FEATURE_RPC: u64 = 1 << 0;
 pub const FEATURE_EVENTS: u64 = 1 << 1;
@@ -36,7 +36,7 @@ pub struct Envelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum AdminMsg {
+pub enum ControlMsg {
     Hello {
         features: u64,
     },
@@ -48,15 +48,15 @@ pub enum AdminMsg {
     },
     Request {
         id: u32,
-        method: AdminMethod,
+        method: ControlMethod,
     },
     Response {
         id: u32,
-        result: Result<AdminPayload, AdminError>,
+        result: Result<ControlPayload, ControlRpcError>,
     },
     Event {
         seq: u32,
-        event: AdminEvent,
+        event: ControlEvent,
     },
 }
 
@@ -68,7 +68,7 @@ pub enum HelloRejectReason {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum AdminMethod {
+pub enum ControlMethod {
     Health,
     ConfigPath,
     Connections,
@@ -121,7 +121,7 @@ pub enum AdminMethod {
     },
 }
 
-impl AdminMethod {
+impl ControlMethod {
     pub fn feature(&self) -> u64 {
         match self {
             Self::Health => FEATURE_RPC,
@@ -161,14 +161,14 @@ impl AdminMethod {
         )
     }
 
-    pub fn from_rpc(name: &str, payload: &serde_json::Value) -> Result<Self, AdminError> {
+    pub fn from_rpc(name: &str, payload: &serde_json::Value) -> Result<Self, ControlRpcError> {
         let obj = || payload.as_object();
-        let str_field = |key: &str| -> Result<String, AdminError> {
+        let str_field = |key: &str| -> Result<String, ControlRpcError> {
             obj()
                 .and_then(|o| o.get(key))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
-                .ok_or_else(|| AdminError::bad_request(format!("missing field '{key}'")))
+                .ok_or_else(|| ControlRpcError::bad_request(format!("missing field '{key}'")))
         };
         match name {
             "health" => Ok(Self::Health),
@@ -209,9 +209,9 @@ impl AdminMethod {
                 let role = obj()
                     .and_then(|o| o.get("role"))
                     .cloned()
-                    .ok_or_else(|| AdminError::bad_request("missing field 'role'"))?;
+                    .ok_or_else(|| ControlRpcError::bad_request("missing field 'role'"))?;
                 let role: UserRole = serde_json::from_value(role)
-                    .map_err(|e| AdminError::bad_request(e.to_string()))?;
+                    .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
                 let service_rules = obj()
                     .and_then(|o| o.get("service_rules"))
                     .and_then(|v| v.as_array())
@@ -242,7 +242,7 @@ impl AdminMethod {
                     .unwrap_or_else(|| payload.clone());
                 let config: HashMap<String, serde_json::Value> = if config.is_object() {
                     serde_json::from_value(config)
-                        .map_err(|e| AdminError::bad_request(e.to_string()))?
+                        .map_err(|e| ControlRpcError::bad_request(e.to_string()))?
                 } else {
                     HashMap::new()
                 };
@@ -261,15 +261,15 @@ impl AdminMethod {
             "authenticate" => Ok(Self::Authenticate {
                 token: str_field("token")?,
             }),
-            other => Err(AdminError::bad_request(format!(
-                "unknown admin method '{other}'"
+            other => Err(ControlRpcError::bad_request(format!(
+                "unknown control method '{other}'"
             ))),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum AdminPayload {
+pub enum ControlPayload {
     Health {
         ok: bool,
     },
@@ -329,7 +329,7 @@ pub enum AdminPayload {
     },
 }
 
-impl AdminPayload {
+impl ControlPayload {
     pub fn to_json_value(&self) -> serde_json::Value {
         match self {
             Self::Health { ok } => serde_json::json!({ "ok": ok }),
@@ -434,7 +434,7 @@ pub struct MiddlewareItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum AdminEvent {
+pub enum ControlEvent {
     Connections(Vec<SessionInfo>),
     TunnelServices(Vec<ServiceSnapshot>),
     Optimizer {
@@ -446,7 +446,7 @@ pub enum AdminEvent {
     },
 }
 
-impl AdminEvent {
+impl ControlEvent {
     pub fn topic(&self) -> u64 {
         match self {
             Self::Connections(_) => TOPIC_CONNECTIONS,
@@ -458,7 +458,7 @@ impl AdminEvent {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AdminErrorCode {
+pub enum ControlErrorCode {
     Unauthorized,
     Forbidden,
     NotFound,
@@ -468,85 +468,85 @@ pub enum AdminErrorCode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AdminError {
-    pub code: AdminErrorCode,
+pub struct ControlRpcError {
+    pub code: ControlErrorCode,
     pub message: String,
 }
 
-impl AdminError {
+impl ControlRpcError {
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self {
-            code: AdminErrorCode::Unauthorized,
+            code: ControlErrorCode::Unauthorized,
             message: message.into(),
         }
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self {
-            code: AdminErrorCode::Forbidden,
+            code: ControlErrorCode::Forbidden,
             message: message.into(),
         }
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {
         Self {
-            code: AdminErrorCode::NotFound,
+            code: ControlErrorCode::NotFound,
             message: message.into(),
         }
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self {
-            code: AdminErrorCode::BadRequest,
+            code: ControlErrorCode::BadRequest,
             message: message.into(),
         }
     }
 
     pub fn unavailable(message: impl Into<String>) -> Self {
         Self {
-            code: AdminErrorCode::Unavailable,
+            code: ControlErrorCode::Unavailable,
             message: message.into(),
         }
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
-            code: AdminErrorCode::Internal,
+            code: ControlErrorCode::Internal,
             message: message.into(),
         }
     }
 
     pub fn http_status(&self) -> u16 {
         match self.code {
-            AdminErrorCode::Unauthorized => 401,
-            AdminErrorCode::Forbidden => 403,
-            AdminErrorCode::NotFound => 404,
-            AdminErrorCode::BadRequest => 400,
-            AdminErrorCode::Unavailable => 503,
-            AdminErrorCode::Internal => 500,
+            ControlErrorCode::Unauthorized => 401,
+            ControlErrorCode::Forbidden => 403,
+            ControlErrorCode::NotFound => 404,
+            ControlErrorCode::BadRequest => 400,
+            ControlErrorCode::Unavailable => 503,
+            ControlErrorCode::Internal => 500,
         }
     }
 }
 
-impl std::fmt::Display for AdminError {
+impl std::fmt::Display for ControlRpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.http_status(), self.message)
     }
 }
 
-impl std::error::Error for AdminError {}
+impl std::error::Error for ControlRpcError {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ControlError {
-    #[error("unsupported admin protocol version {0}")]
+    #[error("unsupported control protocol version {0}")]
     UnsupportedVersion(u16),
-    #[error("admin handshake rejected: {0:?}")]
+    #[error("control handshake rejected: {0:?}")]
     Rejected(HelloRejectReason),
-    #[error("admin handshake failed: {0}")]
+    #[error("control handshake failed: {0}")]
     Handshake(String),
-    #[error("admin frame too large")]
+    #[error("control frame too large")]
     FrameTooLarge,
-    #[error("admin codec: {0}")]
+    #[error("control codec: {0}")]
     Codec(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -556,4 +556,26 @@ impl From<postcard::Error> for ControlError {
     fn from(err: postcard::Error) -> Self {
         ControlError::Codec(err.to_string())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlRpcRequest {
+    pub method: String,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlRpcResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub body: serde_json::Value,
+    #[serde(default)]
+    pub status: u16,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
 }

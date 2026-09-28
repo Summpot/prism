@@ -3,10 +3,10 @@ import { resetClientStats, startClient, stopClient } from "@/lib/client/clientIp
 import { parseDeepLink } from "@/lib/deepLink";
 import { openExternalUrl } from "@/lib/appWindow";
 import {
-	TUNNEL_ADMIN_CONNECTION,
-	isTunnelAdminConnection,
+	TUNNEL_CONTROL_CONNECTION,
+	isTunnelControlConnection,
 	normalizeBaseUrl,
-	tunnelAdminConnection,
+	tunnelControlConnection,
 } from "@/lib/panelConnection";
 import { SUPPORTED_LINK_PROTOCOLS, resolveRemoteConnection } from "@/lib/prismLink";
 import {
@@ -74,10 +74,10 @@ export function syncTunnelPanelConnection(): void {
 		return;
 	}
 	const current = panel.connection;
-	if (current && isTunnelAdminConnection(current) && current.token === token) {
+	if (current && isTunnelControlConnection(current) && current.token === token) {
 		return;
 	}
-	panel.saveConnection(tunnelAdminConnection(token));
+	panel.saveConnection(tunnelControlConnection(token));
 }
 
 export async function persistTunnelAuth(token: string, extra?: LoginSessionExtra): Promise<void> {
@@ -90,7 +90,7 @@ export async function persistTunnelAuth(token: string, extra?: LoginSessionExtra
 	});
 	const config = readClientConfig().active_config;
 	if (config.auto_connect_panel && token) {
-		usePanelStore.getState().saveConnection(tunnelAdminConnection(token));
+		usePanelStore.getState().saveConnection(tunnelControlConnection(token));
 	}
 	if (extra?.user_id || extra?.username || extra?.role) {
 		const role = extra.role?.toLowerCase() ?? "";
@@ -172,7 +172,7 @@ export async function redetectProviders(overrideUrl?: string): Promise<void> {
 	try {
 		const target = overrideUrl?.trim()
 			? { baseUrl: normalizeBaseUrl(overrideUrl), token: "" }
-			: TUNNEL_ADMIN_CONNECTION;
+			: TUNNEL_CONTROL_CONNECTION;
 		const providers = await getAuthProviders(target);
 		ui.setProvidersResult(providers);
 		if (overrideUrl?.trim()) {
@@ -205,7 +205,7 @@ export async function startGitHubAuthWithUrl(
 			window.sessionStorage.removeItem("prism_pending_auth_url");
 			window.sessionStorage.setItem("prism_oauth_state", state);
 		}
-		const res = await getGitHubLoginUrl(TUNNEL_ADMIN_CONNECTION, state);
+		const res = await getGitHubLoginUrl(TUNNEL_CONTROL_CONNECTION, state);
 		if (res.url) {
 			let targetUrl = res.url;
 			try {
@@ -316,7 +316,7 @@ export async function handleManualOAuthCallback(input: string): Promise<{ goAdmi
 
 	try {
 		const deviceId = (await ensureClientConfig()).device_id || undefined;
-		const res = await exchangeGitHubCode(TUNNEL_ADMIN_CONNECTION, code, deviceId);
+		const res = await exchangeGitHubCode(TUNNEL_CONTROL_CONNECTION, code, deviceId);
 		return await finalizeLogin(res.token, {
 			token_id: res.token_id,
 			user_id: res.user?.id,
@@ -411,7 +411,7 @@ export async function connectFromLink(customLink?: string): Promise<{ goAdmin: b
 		let providers = null;
 		let probeErr: string | null = null;
 		try {
-			providers = await getAuthProviders(TUNNEL_ADMIN_CONNECTION);
+			providers = await getAuthProviders(TUNNEL_CONTROL_CONNECTION);
 		} catch (err) {
 			probeErr = err instanceof Error ? err.message : m.client_probe_failed();
 		}

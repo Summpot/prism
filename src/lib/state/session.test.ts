@@ -10,7 +10,7 @@ import {
 } from "@/lib/state/session";
 import type { AuthSessionResponse } from "@/types/admin";
 
-const tunnel: PanelConnection = { baseUrl: "", token: "tok", kind: "tunnel-admin" };
+const tunnel: PanelConnection = { baseUrl: "", token: "tok", kind: "tunnel-control" };
 const bearer: PanelConnection = {
 	baseUrl: "http://127.0.0.1:8080",
 	token: "tok",
@@ -32,7 +32,7 @@ describe("shouldFetchAdminSession", () => {
 		expect(shouldFetchAdminSession(bearer, "connected")).toBe(true);
 	});
 
-	it("fetches tunnel $admin only while the sidecar is connected", () => {
+	it("fetches tunnel $control only while the sidecar is connected", () => {
 		expect(shouldFetchAdminSession(tunnel, "connected")).toBe(true);
 		expect(shouldFetchAdminSession(tunnel, "connecting")).toBe(false);
 		expect(shouldFetchAdminSession(tunnel, "idle")).toBe(false);
@@ -53,7 +53,7 @@ describe("liveAuthSession", () => {
 });
 
 describe("shouldLeaveAdminConsole", () => {
-	it("leaves admin when a tunnel-admin session idles", () => {
+	it("leaves admin when a tunnel-control session idles", () => {
 		expect(shouldLeaveAdminConsole(tunnel, "idle", false)).toBe(true);
 		expect(shouldLeaveAdminConsole(tunnel, "disconnected", false)).toBe(true);
 	});
@@ -70,7 +70,7 @@ describe("shouldAdoptTunnelPanelConnection", () => {
 		expect(shouldAdoptTunnelPanelConnection(null, true, "prism_cl_abc")).toBe(true);
 	});
 
-	it("refreshes an existing tunnel-admin connection", () => {
+	it("refreshes an existing tunnel-control connection", () => {
 		expect(shouldAdoptTunnelPanelConnection(tunnel, true, "prism_cl_abc")).toBe(true);
 	});
 

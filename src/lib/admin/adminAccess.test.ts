@@ -4,7 +4,7 @@ import { resolveAdminConsoleAccess } from "./adminAccess";
 import type { PanelConnection } from "@/lib/panelConnection";
 import type { AuthSessionResponse } from "@/types/admin";
 
-const tunnel: PanelConnection = { baseUrl: "", token: "tok", kind: "tunnel-admin" };
+const tunnel: PanelConnection = { baseUrl: "", token: "tok", kind: "tunnel-control" };
 const bearer: PanelConnection = {
 	baseUrl: "http://127.0.0.1:8080",
 	token: "tok",

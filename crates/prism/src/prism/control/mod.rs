@@ -1,14 +1,15 @@
-//! In-band `$admin` control protocol.
+//! In-band `$control` protocol.
 //!
-//! Yamux stream (`$admin` + PRPX) → length-delimited frames → postcard envelopes.
-//! No HTTP, no loopback dial.
+//! Yamux stream (`$control` + PRPX) → length-delimited frames → postcard envelopes.
+//! Direct binary RPC, no pseudo-REST translation, no loopback dial.
 
 mod channel;
 mod codec;
 mod types;
 
+#[allow(unused_imports)]
 pub use channel::{
-    AdminCallContext, AdminControl, AdminEventWatches, ControlChannel, client_features, connect,
-    serve, serve_with_shared_identity,
+    ControlCallContext, ControlChannel, ControlEventWatches, ControlHandler, client_features,
+    connect, serve, serve_with_shared_identity,
 };
 pub use types::*;

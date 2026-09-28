@@ -4,7 +4,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, watch};
 
 use crate::prism::auth::{AuthIdentity, AuthManager};
-use crate::prism::control::{self, AdminControl};
+use crate::prism::control::{self, ControlHandler};
 use crate::prism::tunnel::{
     manager::Manager,
     protocol,
@@ -40,7 +40,7 @@ pub struct ServerOptions {
     pub webtransport: WebTransportServerOptions,
     pub manager: Arc<Manager>,
     pub auth_manager: Option<Arc<crate::prism::auth::AuthManager>>,
-    pub admin: Option<Arc<dyn AdminControl>>,
+    pub control: Option<Arc<dyn ControlHandler>>,
 }
 
 pub struct Server {
@@ -109,11 +109,11 @@ impl Server {
                     let mgr = self.opts.manager.clone();
                     let token = self.opts.auth_token.clone();
                     let auth_mgr = self.opts.auth_manager.clone();
-                    let admin = self.opts.admin.clone();
+                    let control = self.opts.control.clone();
                     let allow_unauth = self.opts.allow_unauthenticated;
                     tokio::spawn(async move {
                         let _permit = permit;
-                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr, admin, allow_unauth).await {
+                        if let Err(err) = handle_session(mgr, sess, token, auth_mgr, control, allow_unauth).await {
                             tracing::warn!(err=%err, "tunnel: session ended with error");
                         }
                     });
@@ -157,7 +157,7 @@ async fn handle_session(
     sess: Arc<dyn crate::prism::tunnel::transport::TransportSession>,
     auth_token: String,
     auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
-    admin: Option<Arc<dyn AdminControl>>,
+    control: Option<Arc<dyn ControlHandler>>,
     allow_unauthenticated: bool,
 ) -> anyhow::Result<()> {
     let remote = sess
@@ -307,7 +307,7 @@ async fn handle_session(
             let auth_mgr = auth_mgr.clone();
             let identity = session_identity.clone();
             let ident_tx = ident_tx.clone();
-            let admin = admin.clone();
+            let control = control.clone();
             let auth_token = auth_token.clone();
             tokio::spawn(async move {
                 if let Err(err) = handle_client_stream(
@@ -316,7 +316,7 @@ async fn handle_session(
                     auth_mgr,
                     identity,
                     ident_tx,
-                    admin,
+                    control,
                     auth_token,
                     allow_unauthenticated,
                 )
@@ -354,17 +354,17 @@ async fn handle_client_stream(
     auth_mgr: Option<Arc<crate::prism::auth::AuthManager>>,
     identity: Arc<Mutex<Option<AuthIdentity>>>,
     ident_tx: watch::Sender<u64>,
-    admin: Option<Arc<dyn AdminControl>>,
+    control: Option<Arc<dyn ControlHandler>>,
     auth_token: String,
     allow_unauthenticated: bool,
 ) -> anyhow::Result<()> {
     let (kind, service_name, flags) =
         protocol::read_proxy_stream_header_with_flags(&mut client_stream).await?;
 
-    if service_name == protocol::ADMIN_SERVICE_NAME {
-        // Any sidecar may open `$admin`. Public auth methods work without a
-        // session; panel methods still require an admin identity on the channel.
-        if let Some(handler) = admin {
+    if service_name == protocol::CONTROL_SERVICE_NAME {
+        // Any sidecar may open `$control`. Public auth methods work without a
+        // session; management methods still require an authorized identity on the channel.
+        if let Some(handler) = control {
             if let Err(err) = control::serve_with_shared_identity(
                 client_stream,
                 handler,
@@ -373,10 +373,10 @@ async fn handle_client_stream(
             )
             .await
             {
-                tracing::debug!(err = %err, "tunnel: $admin control channel ended");
+                tracing::debug!(err = %err, "tunnel: $control control channel ended");
             }
         } else {
-            tracing::warn!("tunnel: $admin stream requested but admin control is not configured");
+            tracing::warn!("tunnel: $control stream requested but control handler is not configured");
         }
         return Ok(());
     }
@@ -855,32 +855,32 @@ mod tests {
     struct HealthControl;
 
     #[async_trait::async_trait]
-    impl AdminControl for HealthControl {
+    impl ControlHandler for HealthControl {
         fn features(&self) -> u64 {
             crate::prism::control::FEATURE_RPC
         }
         fn auth_enabled(&self) -> bool {
             false
         }
-        fn event_watches(&self) -> crate::prism::control::AdminEventWatches {
-            crate::prism::control::AdminEventWatches::default()
+        fn event_watches(&self) -> crate::prism::control::ControlEventWatches {
+            crate::prism::control::ControlEventWatches::default()
         }
         async fn authenticate(
             &self,
             _token: &str,
-        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::AdminError> {
-            Err(crate::prism::control::AdminError::unauthorized("unused"))
+        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::ControlRpcError> {
+            Err(crate::prism::control::ControlRpcError::unauthorized("unused"))
         }
         async fn dispatch(
             &self,
-            method: crate::prism::control::AdminMethod,
-            _ctx: &crate::prism::control::AdminCallContext,
-        ) -> Result<crate::prism::control::AdminPayload, crate::prism::control::AdminError> {
+            method: crate::prism::control::ControlMethod,
+            _ctx: &crate::prism::control::ControlCallContext,
+        ) -> Result<crate::prism::control::ControlPayload, crate::prism::control::ControlRpcError> {
             match method {
-                crate::prism::control::AdminMethod::Health => {
-                    Ok(crate::prism::control::AdminPayload::Health { ok: true })
+                crate::prism::control::ControlMethod::Health => {
+                    Ok(crate::prism::control::ControlPayload::Health { ok: true })
                 }
-                _ => Err(crate::prism::control::AdminError::not_found("unhandled")),
+                _ => Err(crate::prism::control::ControlRpcError::not_found("unhandled")),
             }
         }
     }
@@ -888,7 +888,7 @@ mod tests {
     #[tokio::test]
     async fn server_admin_stream_dispatches_health() {
         let mgr = Arc::new(Manager::new());
-        let admin: Arc<dyn AdminControl> = Arc::new(HealthControl);
+        let control: Arc<dyn ControlHandler> = Arc::new(HealthControl);
 
         let (client_accept_tx, client_accept_rx) = mpsc::channel(16);
         let client_sess = Arc::new(MockSession::new(client_accept_rx, None));
@@ -914,7 +914,7 @@ mod tests {
                 client_sess_clone,
                 "admin_token".into(),
                 None,
-                Some(admin),
+                Some(control),
                 false,
             )
             .await;
@@ -931,7 +931,7 @@ mod tests {
         protocol::write_proxy_stream_header(
             &mut client_stream_c,
             protocol::ProxyStreamKind::Tcp,
-            protocol::ADMIN_SERVICE_NAME,
+            protocol::CONTROL_SERVICE_NAME,
         )
         .await
         .unwrap();
@@ -943,12 +943,12 @@ mod tests {
         .await
         .expect("control handshake");
         let payload = ch
-            .call(crate::prism::control::AdminMethod::Health)
+            .call(crate::prism::control::ControlMethod::Health)
             .await
             .expect("health");
         assert_eq!(
             payload,
-            crate::prism::control::AdminPayload::Health { ok: true }
+            crate::prism::control::ControlPayload::Health { ok: true }
         );
         ch.close();
         client_sess.close().await;
@@ -996,14 +996,14 @@ mod tests {
         let mgr_cs = mgr.clone();
         let client_sess_clone = client_sess.clone();
         let auth_clone = auth.clone();
-        let admin: Arc<dyn AdminControl> = Arc::new(HealthControl);
+        let control: Arc<dyn ControlHandler> = Arc::new(HealthControl);
         tokio::spawn(async move {
             let _ = handle_session(
                 mgr_cs,
                 client_sess_clone,
                 "".into(),
                 Some(auth_clone),
-                Some(admin),
+                Some(control),
                 false,
             )
             .await;
@@ -1020,7 +1020,7 @@ mod tests {
         protocol::write_proxy_stream_header(
             &mut client_stream_c,
             protocol::ProxyStreamKind::Tcp,
-            protocol::ADMIN_SERVICE_NAME,
+            protocol::CONTROL_SERVICE_NAME,
         )
         .await
         .unwrap();
@@ -1030,14 +1030,14 @@ mod tests {
             crate::prism::control::FEATURE_RPC,
         )
         .await
-        .expect("members may open $admin");
+        .expect("members may open $control");
         let payload = ch
-            .call(crate::prism::control::AdminMethod::Health)
+            .call(crate::prism::control::ControlMethod::Health)
             .await
             .expect("health");
         assert_eq!(
             payload,
-            crate::prism::control::AdminPayload::Health { ok: true }
+            crate::prism::control::ControlPayload::Health { ok: true }
         );
         ch.close();
         client_sess.close().await;
@@ -1048,39 +1048,39 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl AdminControl for TokenControl {
+    impl ControlHandler for TokenControl {
         fn features(&self) -> u64 {
             crate::prism::control::FEATURE_RPC | crate::prism::control::FEATURE_AUTH
         }
         fn auth_enabled(&self) -> bool {
             true
         }
-        fn event_watches(&self) -> crate::prism::control::AdminEventWatches {
-            crate::prism::control::AdminEventWatches::default()
+        fn event_watches(&self) -> crate::prism::control::ControlEventWatches {
+            crate::prism::control::ControlEventWatches::default()
         }
         async fn authenticate(
             &self,
             token: &str,
-        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::AdminError> {
+        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::ControlRpcError> {
             self.auth.verify_token(token).await.ok_or_else(|| {
-                crate::prism::control::AdminError::unauthorized("invalid bearer token")
+                crate::prism::control::ControlRpcError::unauthorized("invalid bearer token")
             })
         }
         async fn dispatch(
             &self,
-            method: crate::prism::control::AdminMethod,
-            _ctx: &crate::prism::control::AdminCallContext,
-        ) -> Result<crate::prism::control::AdminPayload, crate::prism::control::AdminError> {
+            method: crate::prism::control::ControlMethod,
+            _ctx: &crate::prism::control::ControlCallContext,
+        ) -> Result<crate::prism::control::ControlPayload, crate::prism::control::ControlRpcError> {
             match method {
-                crate::prism::control::AdminMethod::Health => {
-                    Ok(crate::prism::control::AdminPayload::Health { ok: true })
+                crate::prism::control::ControlMethod::Health => {
+                    Ok(crate::prism::control::ControlPayload::Health { ok: true })
                 }
-                crate::prism::control::AdminMethod::AuthSession => {
-                    Ok(crate::prism::control::AdminPayload::AuthSession(
+                crate::prism::control::ControlMethod::AuthSession => {
+                    Ok(crate::prism::control::ControlPayload::AuthSession(
                         crate::prism::control::AuthSessionSnapshot::unauthenticated(),
                     ))
                 }
-                _ => Err(crate::prism::control::AdminError::not_found("unhandled")),
+                _ => Err(crate::prism::control::ControlRpcError::not_found("unhandled")),
             }
         }
     }
@@ -1164,9 +1164,9 @@ mod tests {
         let mgr_cs = mgr.clone();
         let client_sess_c = client_sess.clone();
         let auth_cs = auth.clone();
-        let admin: Arc<dyn AdminControl> = Arc::new(TokenControl { auth: auth.clone() });
+        let control: Arc<dyn ControlHandler> = Arc::new(TokenControl { auth: auth.clone() });
         tokio::spawn(async move {
-            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), Some(admin), false)
+            let _ = handle_session(mgr_cs, client_sess_c, "".into(), Some(auth_cs), Some(control), false)
                 .await;
         });
 
@@ -1181,7 +1181,7 @@ mod tests {
         protocol::write_proxy_stream_header(
             &mut client_stream_c,
             protocol::ProxyStreamKind::Tcp,
-            protocol::ADMIN_SERVICE_NAME,
+            protocol::CONTROL_SERVICE_NAME,
         )
         .await
         .unwrap();
@@ -1193,13 +1193,13 @@ mod tests {
         .await
         .expect("control handshake");
         let session = ch
-            .call(crate::prism::control::AdminMethod::Authenticate {
+            .call(crate::prism::control::ControlMethod::Authenticate {
                 token: alice_token,
             })
             .await
             .expect("authenticate");
         match session {
-            crate::prism::control::AdminPayload::AuthSession(s) => {
+            crate::prism::control::ControlPayload::AuthSession(s) => {
                 assert!(s.authenticated);
                 assert_eq!(s.username.as_deref(), Some("alice"));
             }

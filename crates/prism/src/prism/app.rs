@@ -4,7 +4,7 @@ use anyhow::Context;
 use tokio::task::JoinSet;
 
 use crate::prism::middleware::MiddlewareProvider;
-use crate::prism::control::AdminControl;
+use crate::prism::control::ControlHandler;
 use crate::prism::{
     admin, config, logging, middleware, net, proxy, router, runtime_paths, telemetry,
     tunnel,
@@ -324,9 +324,9 @@ pub async fn run(
                 },
                 manager: tunnel_manager.clone(),
                 auth_manager: Some(auth_manager.clone()),
-                admin: admin_state
+                control: admin_state
                     .clone()
-                    .map(|s| s as Arc<dyn AdminControl>),
+                    .map(|s| s as Arc<dyn ControlHandler>),
             })?;
 
             let shutdown = shutdown_rx.clone();

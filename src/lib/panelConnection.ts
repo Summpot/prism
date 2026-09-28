@@ -1,7 +1,7 @@
 export interface PanelConnection {
 	baseUrl: string;
 	token: string;
-	kind?: "bearer" | "console-cookie" | "tunnel-admin";
+	kind?: "bearer" | "console-cookie" | "tunnel-control";
 }
 
 export interface StorageLike {
@@ -12,19 +12,19 @@ export interface StorageLike {
 
 export const PANEL_CONNECTION_STORAGE_KEY = "prism.panel.connection";
 
-/** Client talks to the remote admin API over the in-band `$admin` stream. */
-export const TUNNEL_ADMIN_CONNECTION: PanelConnection = {
+/** Client talks to the remote control API over the in-band `$control` stream. */
+export const TUNNEL_CONTROL_CONNECTION: PanelConnection = {
 	baseUrl: "",
 	token: "",
-	kind: "tunnel-admin",
+	kind: "tunnel-control",
 };
 
-export function isTunnelAdminConnection(value: PanelConnection): boolean {
-	return value.kind === "tunnel-admin" || !normalizeBaseUrl(value.baseUrl || "");
+export function isTunnelControlConnection(value: PanelConnection): boolean {
+	return value.kind === "tunnel-control" || !normalizeBaseUrl(value.baseUrl || "");
 }
 
-export function tunnelAdminConnection(token = ""): PanelConnection {
-	return { baseUrl: "", token, kind: "tunnel-admin" };
+export function tunnelControlConnection(token = ""): PanelConnection {
+	return { baseUrl: "", token, kind: "tunnel-control" };
 }
 
 export function normalizeBaseUrl(value: string) {
@@ -64,7 +64,7 @@ export function normalizePanelConnection(value: PanelConnection): PanelConnectio
 
 export function isValidPanelConnection(value: PanelConnection | null): value is PanelConnection {
 	if (!value) return false;
-	if (value.kind === "tunnel-admin") {
+	if (value.kind === "tunnel-control") {
 		return Boolean(value.token);
 	}
 	return Boolean(value.baseUrl && (value.token || value.kind === "console-cookie"));

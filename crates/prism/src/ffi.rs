@@ -745,7 +745,7 @@ impl PrismClientSession {
         })
     }
 
-    pub async fn admin_rpc(
+    pub async fn control_rpc(
         &self,
         payload: AdminRpcRequest,
     ) -> Result<AdminRpcResponse, PrismFfiError> {
@@ -759,13 +759,13 @@ impl PrismClientSession {
             })
             .collect();
 
-        let req = crate::prism::admin::AdminRpcRequest {
+        let req = crate::prism::admin::ControlRpcRequest {
             method: payload.method,
             payload: serde_json::to_value(json_params).unwrap_or(serde_json::Value::Null),
             token: payload.token,
         };
 
-        let res = crate::prism::admin::do_admin_rpc(&self.client, req).await?;
+        let res = crate::prism::admin::do_control_rpc(&self.client, req).await?;
         let mut result_map = HashMap::new();
         if let Some(obj) = res.body.as_object() {
             for (k, v) in obj {
@@ -1049,9 +1049,9 @@ pub async fn admin_request(payload: AdminHttpRequest) -> Result<AdminHttpRespons
 }
 
 #[uniffi::export]
-pub async fn admin_rpc(payload: AdminRpcRequest) -> Result<AdminRpcResponse, PrismFfiError> {
+pub async fn control_rpc(payload: AdminRpcRequest) -> Result<AdminRpcResponse, PrismFfiError> {
     let session = get_or_init_session()?;
-    session.admin_rpc(payload).await
+    session.control_rpc(payload).await
 }
 
 #[cfg(test)]

@@ -2,55 +2,56 @@ use bytes::Bytes;
 use tokio_util::codec::LengthDelimitedCodec;
 
 use super::types::{
-    ADMIN_PROTO_V1, AdminMsg, ControlError, Envelope, HelloRejectReason, MAX_ADMIN_FRAME_BYTES,
+    CONTROL_PROTO_V1, ControlError, ControlMsg, Envelope, HelloRejectReason,
+    MAX_CONTROL_FRAME_BYTES,
 };
 
 pub fn length_codec() -> LengthDelimitedCodec {
     LengthDelimitedCodec::builder()
         .length_field_length(4)
-        .max_frame_length(MAX_ADMIN_FRAME_BYTES)
+        .max_frame_length(MAX_CONTROL_FRAME_BYTES)
         .new_codec()
 }
 
-pub fn encode_msg(msg: &AdminMsg) -> Result<Bytes, ControlError> {
+pub fn encode_msg(msg: &ControlMsg) -> Result<Bytes, ControlError> {
     encode_envelope(&Envelope {
-        proto: ADMIN_PROTO_V1,
+        proto: CONTROL_PROTO_V1,
         msg: postcard::to_allocvec(msg)?,
     })
 }
 
 pub fn encode_envelope(env: &Envelope) -> Result<Bytes, ControlError> {
     let bytes = postcard::to_allocvec(env)?;
-    if bytes.len() > MAX_ADMIN_FRAME_BYTES {
+    if bytes.len() > MAX_CONTROL_FRAME_BYTES {
         return Err(ControlError::FrameTooLarge);
     }
     Ok(Bytes::from(bytes))
 }
 
 pub fn decode_envelope(buf: &[u8]) -> Result<Envelope, ControlError> {
-    if buf.len() > MAX_ADMIN_FRAME_BYTES {
+    if buf.len() > MAX_CONTROL_FRAME_BYTES {
         return Err(ControlError::FrameTooLarge);
     }
     Ok(postcard::from_bytes(buf)?)
 }
 
-pub fn decode_msg(env: &Envelope) -> Result<AdminMsg, ControlError> {
-    if env.proto != ADMIN_PROTO_V1 {
+pub fn decode_msg(env: &Envelope) -> Result<ControlMsg, ControlError> {
+    if env.proto != CONTROL_PROTO_V1 {
         return Err(ControlError::UnsupportedVersion(env.proto));
     }
     Ok(postcard::from_bytes(&env.msg)?)
 }
 
 #[cfg(test)]
-pub fn decode_frame(buf: &[u8]) -> Result<AdminMsg, ControlError> {
+pub fn decode_frame(buf: &[u8]) -> Result<ControlMsg, ControlError> {
     decode_msg(&decode_envelope(buf)?)
 }
 
 pub fn reject_unsupported_version(peer: u16) -> Result<Bytes, ControlError> {
-    encode_msg(&AdminMsg::HelloReject {
+    encode_msg(&ControlMsg::HelloReject {
         reason: HelloRejectReason::UnsupportedVersion {
             peer,
-            server: ADMIN_PROTO_V1,
+            server: CONTROL_PROTO_V1,
         },
     })
 }
@@ -58,11 +59,11 @@ pub fn reject_unsupported_version(peer: u16) -> Result<Bytes, ControlError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prism::control::types::{FEATURE_RPC, Envelope};
+    use crate::prism::control::types::{Envelope, FEATURE_RPC};
 
     #[test]
     fn envelope_roundtrip() {
-        let msg = AdminMsg::Hello {
+        let msg = ControlMsg::Hello {
             features: FEATURE_RPC,
         };
         let bytes = encode_msg(&msg).unwrap();

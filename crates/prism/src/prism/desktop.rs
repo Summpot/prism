@@ -319,11 +319,11 @@ pub async fn run(
     }
 
     #[tauri::command]
-    async fn admin_rpc(
+    async fn control_rpc(
         state: tauri::State<'_, DesktopClientState>,
-        payload: crate::prism::admin::AdminRpcRequest,
-    ) -> Result<crate::prism::admin::AdminRpcResponse, String> {
-        crate::prism::admin::do_admin_rpc(&state.client, payload).await
+        payload: crate::prism::admin::ControlRpcRequest,
+    ) -> Result<crate::prism::admin::ControlRpcResponse, String> {
+        crate::prism::admin::do_control_rpc(&state.client, payload).await
     }
 
     #[tauri::command]
@@ -432,7 +432,7 @@ pub async fn run(
             client_install_update,
             client_get_initial_deep_link,
             admin_request,
-            admin_rpc,
+            control_rpc,
         ])
         .setup(move |app| {
             // Register prism:// custom URL scheme using pure Rust sysuri
@@ -461,19 +461,19 @@ pub async fn run(
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                use crate::prism::control::AdminEvent;
+                use crate::prism::control::ControlEvent;
                 use tauri::Emitter;
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                    let Some(mut rx) = event_client.admin_events().await else {
+                    let Some(mut rx) = event_client.control_events().await else {
                         continue;
                     };
                     while let Ok(ev) = rx.recv().await {
                         let topic = match &ev {
-                            AdminEvent::Connections(_) => "connections",
-                            AdminEvent::TunnelServices(_) => "services",
-                            AdminEvent::Optimizer { .. } => "optimizer",
-                            AdminEvent::Reload { .. } => "reload",
+                            ControlEvent::Connections(_) => "connections",
+                            ControlEvent::TunnelServices(_) => "services",
+                            ControlEvent::Optimizer { .. } => "optimizer",
+                            ControlEvent::Reload { .. } => "reload",
                         };
                         let payload = serde_json::to_value(&ev).unwrap_or_default();
                         let _ = handle.emit(

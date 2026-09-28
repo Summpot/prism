@@ -1,4 +1,4 @@
-import { isTunnelAdminConnection, type PanelConnection } from "@/lib/panelConnection";
+import { isTunnelControlConnection, type PanelConnection } from "@/lib/panelConnection";
 import type { AuthSessionResponse } from "@/types/admin";
 
 export type AdminConsoleAccess = "loading" | "allow" | "deny";
@@ -7,7 +7,7 @@ export type AdminConsoleAccess = "loading" | "allow" | "deny";
  * Decide whether the admin layout should spin, render, or reject.
  *
  * A confirmed admin always stays allowed while a refresh is in flight.
- * Tunnel `$admin` without a snapshot is "not confirmed yet", not "not an admin".
+ * Tunnel `$control` without a snapshot is "not confirmed yet", not "not an admin".
  */
 export function resolveAdminConsoleAccess(input: {
 	ready: boolean;
@@ -22,7 +22,7 @@ export function resolveAdminConsoleAccess(input: {
 	}
 	if (
 		input.connection &&
-		isTunnelAdminConnection(input.connection) &&
+		isTunnelControlConnection(input.connection) &&
 		input.tunnelState !== undefined
 	) {
 		if (!input.tunnelState || input.tunnelState === "connecting") {
@@ -38,7 +38,7 @@ export function resolveAdminConsoleAccess(input: {
 	if (input.isLoadingSession) {
 		return "loading";
 	}
-	if (input.connection && isTunnelAdminConnection(input.connection) && input.authSession === null) {
+	if (input.connection && isTunnelControlConnection(input.connection) && input.authSession === null) {
 		return "loading";
 	}
 	return "deny";

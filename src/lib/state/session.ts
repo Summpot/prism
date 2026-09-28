@@ -1,5 +1,5 @@
 import {
-	isTunnelAdminConnection,
+	isTunnelControlConnection,
 	normalizeBaseUrl,
 	type PanelConnection,
 } from "@/lib/panelConnection";
@@ -11,7 +11,7 @@ export function sessionIsAdmin(res: AuthSessionResponse | null | undefined): boo
 
 /**
  * Whether the admin session query should run.
- * Tunnel `$admin` is only reachable while the sidecar is connected.
+ * Tunnel `$control` is only reachable while the sidecar is connected.
  */
 export function shouldFetchAdminSession(
 	connection: PanelConnection | null,
@@ -20,7 +20,7 @@ export function shouldFetchAdminSession(
 	if (!connection) {
 		return false;
 	}
-	if (!isTunnelAdminConnection(connection)) {
+	if (!isTunnelControlConnection(connection)) {
 		return Boolean(normalizeBaseUrl(connection.baseUrl || ""));
 	}
 	return tunnelState === "connected";
@@ -46,14 +46,14 @@ export function shouldLeaveAdminConsole(
 	if (actionLoading) {
 		return false;
 	}
-	if (!connection || !isTunnelAdminConnection(connection)) {
+	if (!connection || !isTunnelControlConnection(connection)) {
 		return false;
 	}
 	return tunnelState === "idle" || tunnelState === "disconnected";
 }
 
 /**
- * Auto-bind the in-band `$admin` connection from a stored client token.
+ * Auto-bind the in-band `$control` connection from a stored client token.
  * Never overwrite a live HTTP panel login.
  */
 export function shouldAdoptTunnelPanelConnection(
@@ -67,5 +67,5 @@ export function shouldAdoptTunnelPanelConnection(
 	if (!connection) {
 		return true;
 	}
-	return isTunnelAdminConnection(connection);
+	return isTunnelControlConnection(connection);
 }

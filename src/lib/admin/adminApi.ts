@@ -1,4 +1,4 @@
-import { adminRequest } from "@/lib/admin/adminClient";
+import { requestControl } from "@/lib/control/controlClient";
 import { normalizeBaseUrl, type PanelConnection } from "@/lib/panelConnection";
 import type {
 	AuthProvidersResponse,
@@ -21,29 +21,45 @@ import type {
 export type { ServiceSnapshot, SessionInfo, TokenRecord, UserRecord } from "@/types/admin";
 
 export function getConnections(connection: PanelConnection) {
-	return adminRequest<SessionInfo[]>(connection, "/conns");
+	return requestControl<SessionInfo[]>(connection, {
+		rpc: { method: "connections" },
+		http: { path: "/conns", method: "GET" },
+	});
 }
 
 export function getOptimizerStats(connection: PanelConnection) {
-	return adminRequest<OptimizerOverviewResponse>(connection, "/stats/optimizer");
+	return requestControl<OptimizerOverviewResponse>(connection, {
+		rpc: { method: "optimizer_stats" },
+		http: { path: "/stats/optimizer", method: "GET" },
+	});
 }
 
 export function getTunnelServices(connection: PanelConnection) {
-	return adminRequest<ServiceSnapshot[]>(connection, "/tunnel/services");
+	return requestControl<ServiceSnapshot[]>(connection, {
+		rpc: { method: "tunnel_services" },
+		http: { path: "/tunnel/services", method: "GET" },
+	});
 }
 
 export function triggerReload(connection: PanelConnection) {
-	return adminRequest<ReloadResponse>(connection, "/reload", {
-		method: "POST",
+	return requestControl<ReloadResponse>(connection, {
+		rpc: { method: "reload" },
+		http: { path: "/reload", method: "POST" },
 	});
 }
 
 export function getHealth(connection: PanelConnection) {
-	return adminRequest<HealthResponse>(connection, "/health");
+	return requestControl<HealthResponse>(connection, {
+		rpc: { method: "health" },
+		http: { path: "/health", method: "GET" },
+	});
 }
 
 export function getConfigPath(connection: PanelConnection) {
-	return adminRequest<ConfigPathResponse>(connection, "/config");
+	return requestControl<ConfigPathResponse>(connection, {
+		rpc: { method: "config_path" },
+		http: { path: "/config", method: "GET" },
+	});
 }
 
 export async function getAuthProviders(
@@ -51,7 +67,10 @@ export async function getAuthProviders(
 ): Promise<AuthProvidersResponse> {
 	const connection: PanelConnection =
 		typeof target === "string" ? { baseUrl: normalizeBaseUrl(target), token: "" } : target;
-	const data = await adminRequest<Record<string, unknown>>(connection, "/auth/providers");
+	const data = await requestControl<Record<string, unknown>>(connection, {
+		rpc: { method: "auth.providers" },
+		http: { path: "/auth/providers", method: "GET" },
+	});
 	const github_enabled = Boolean(data.github_enabled ?? data.github);
 	const mode = (data.mode as string) ?? "token";
 	let providers = Array.isArray(data.providers) ? (data.providers as string[]) : [];
@@ -67,10 +86,13 @@ export async function getAuthProviders(
 }
 
 export function getGitHubLoginUrl(connection: PanelConnection, state?: string) {
-	const path = state
-		? `/auth/github/login?state=${encodeURIComponent(state)}`
-		: "/auth/github/login";
-	return adminRequest<GitHubLoginUrlResponse>(connection, path);
+	return requestControl<GitHubLoginUrlResponse>(connection, {
+		rpc: { method: "auth.github.login", payload: state ? { state } : {} },
+		http: {
+			path: state ? `/auth/github/login?state=${encodeURIComponent(state)}` : "/auth/github/login",
+			method: "GET",
+		},
+	});
 }
 
 export function exchangeGitHubCode(
@@ -79,44 +101,62 @@ export function exchangeGitHubCode(
 	deviceId?: string | null,
 	state?: string | null,
 ) {
-	return adminRequest<{
+	const payload: Record<string, unknown> = {
+		code,
+		...(deviceId ? { device_id: deviceId } : {}),
+		...(state ? { state } : {}),
+	};
+	return requestControl<{
 		token: string;
 		user: UserRecord;
 		token_id: string;
 		expires_at_unix_ms?: number | null;
-	}>(connection, "/auth/github/exchange", {
-		method: "POST",
-		body: JSON.stringify({
-			code,
-			...(deviceId ? { device_id: deviceId } : {}),
-			...(state ? { state } : {}),
-		}),
+	}>(connection, {
+		rpc: { method: "auth.github.exchange", payload },
+		http: { path: "/auth/github/exchange", method: "POST", body: payload },
 	});
 }
 
 export function getAuthSession(connection: PanelConnection) {
-	return adminRequest<AuthSessionResponse>(connection, "/auth/session");
+	return requestControl<AuthSessionResponse>(connection, {
+		rpc: { method: "auth.session" },
+		http: { path: "/auth/session", method: "GET" },
+	});
 }
 
 export function listAuthTokens(connection: PanelConnection) {
-	return adminRequest<TokenRecord[]>(connection, "/auth/tokens");
+	return requestControl<TokenRecord[]>(connection, {
+		rpc: { method: "auth.tokens.list" },
+		http: { path: "/auth/tokens", method: "GET" },
+	});
 }
 
 export function createAuthToken(connection: PanelConnection, payload: CreateTokenPayload) {
-	return adminRequest<CreateTokenResponse>(connection, "/auth/tokens", {
-		method: "POST",
-		body: JSON.stringify(payload),
+	return requestControl<CreateTokenResponse>(connection, {
+		rpc: {
+			method: "auth.tokens.create",
+			payload: {
+				name: payload.name,
+				token_type: payload.token_type,
+				...(payload.expires_in_days ? { expires_in_days: payload.expires_in_days } : {}),
+			},
+		},
+		http: { path: "/auth/tokens", method: "POST", body: payload },
 	});
 }
 
 export function revokeAuthToken(connection: PanelConnection, tokenId: string) {
-	return adminRequest<{ ok: boolean }>(connection, `/auth/tokens/${encodeURIComponent(tokenId)}`, {
-		method: "DELETE",
+	return requestControl<{ ok: boolean }>(connection, {
+		rpc: { method: "auth.tokens.revoke", payload: { token_id: tokenId } },
+		http: { path: `/auth/tokens/${encodeURIComponent(tokenId)}`, method: "DELETE" },
 	});
 }
 
 export function listUsers(connection: PanelConnection) {
-	return adminRequest<UserRecord[]>(connection, "/auth/users");
+	return requestControl<UserRecord[]>(connection, {
+		rpc: { method: "auth.users" },
+		http: { path: "/auth/users", method: "GET" },
+	});
 }
 
 export function updateUser(
@@ -124,9 +164,9 @@ export function updateUser(
 	userId: string,
 	payload: { role?: string; service_rules?: string[] },
 ) {
-	return adminRequest<UserRecord>(connection, `/auth/users/${encodeURIComponent(userId)}`, {
-		method: "PUT",
-		body: JSON.stringify(payload),
+	return requestControl<UserRecord>(connection, {
+		rpc: { method: "auth.user.put", payload: { user_id: userId, ...payload } },
+		http: { path: `/auth/users/${encodeURIComponent(userId)}`, method: "PUT", body: payload },
 	});
 }
 
@@ -134,21 +174,24 @@ export const listManagedUsers = listUsers;
 export const updateManagedUser = updateUser;
 
 export function listMiddlewares(connection: PanelConnection) {
-	return adminRequest<MiddlewareItem[]>(connection, "/middlewares");
+	return requestControl<MiddlewareItem[]>(connection, {
+		rpc: { method: "middlewares.list" },
+		http: { path: "/middlewares", method: "GET" },
+	});
 }
 
 export function getMiddlewareSchema(connection: PanelConnection, name: string) {
-	return adminRequest<MiddlewareConfigSchema>(
-		connection,
-		`/middlewares/${encodeURIComponent(name)}/schema`,
-	);
+	return requestControl<MiddlewareConfigSchema>(connection, {
+		rpc: { method: "middlewares.schema", payload: { name } },
+		http: { path: `/middlewares/${encodeURIComponent(name)}/schema`, method: "GET" },
+	});
 }
 
 export function getMiddlewareConfig(connection: PanelConnection, name: string) {
-	return adminRequest<Record<string, any>>(
-		connection,
-		`/middlewares/${encodeURIComponent(name)}/config`,
-	);
+	return requestControl<Record<string, any>>(connection, {
+		rpc: { method: "middlewares.config", payload: { name } },
+		http: { path: `/middlewares/${encodeURIComponent(name)}/config`, method: "GET" },
+	});
 }
 
 export function updateMiddlewareConfig(
@@ -156,22 +199,18 @@ export function updateMiddlewareConfig(
 	name: string,
 	config: Record<string, any>,
 ) {
-	return adminRequest<{ status: string; name: string; config: Record<string, any> }>(
+	return requestControl<{ status: string; name: string; config: Record<string, any> }>(
 		connection,
-		`/middlewares/${encodeURIComponent(name)}/config`,
 		{
-			method: "PUT",
-			body: JSON.stringify(config),
+			rpc: { method: "middlewares.config.put", payload: { name, config } },
+			http: { path: `/middlewares/${encodeURIComponent(name)}/config`, method: "PUT", body: config },
 		},
 	);
 }
 
 export function resetMiddlewareConfig(connection: PanelConnection, name: string) {
-	return adminRequest<{ status: string; name: string; reset: boolean }>(
-		connection,
-		`/middlewares/${encodeURIComponent(name)}/config/reset`,
-		{
-			method: "POST",
-		},
-	);
+	return requestControl<{ status: string; name: string; reset: boolean }>(connection, {
+		rpc: { method: "middlewares.config.reset", payload: { name } },
+		http: { path: `/middlewares/${encodeURIComponent(name)}/config/reset`, method: "POST" },
+	});
 }

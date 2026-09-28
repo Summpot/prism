@@ -15,9 +15,9 @@ use async_trait::async_trait;
 
 use crate::prism::auth::AuthIdentity;
 use crate::prism::control::{
-    self, AdminCallContext, AdminControl, AdminError, AdminEventWatches, AdminMethod, AdminPayload,
-    AuthSessionSnapshot, FEATURE_AUTH, FEATURE_EVENTS, FEATURE_MIDDLEWARE, FEATURE_PANEL,
-    FEATURE_RPC, MiddlewareItem,
+    self, AuthSessionSnapshot, ControlCallContext, ControlEventWatches, ControlHandler,
+    ControlMethod, ControlPayload, ControlRpcError, FEATURE_AUTH, FEATURE_EVENTS,
+    FEATURE_MIDDLEWARE, FEATURE_PANEL, FEATURE_RPC, MiddlewareItem,
 };
 use crate::prism::telemetry;
 use crate::prism::tunnel;
@@ -648,27 +648,7 @@ pub struct AdminHttpResponse {
     pub body: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminRpcRequest {
-    pub method: String,
-    #[serde(default)]
-    pub payload: serde_json::Value,
-    #[serde(default)]
-    pub token: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminRpcResponse {
-    pub ok: bool,
-    #[serde(default)]
-    pub body: serde_json::Value,
-    #[serde(default)]
-    pub status: u16,
-    #[serde(default)]
-    pub code: Option<String>,
-    #[serde(default)]
-    pub message: Option<String>,
-}
+pub use crate::prism::control::{ControlRpcRequest, ControlRpcResponse};
 
 fn normalize_http_base(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
@@ -735,24 +715,24 @@ pub(crate) async fn do_admin_request(
     Ok(AdminHttpResponse { status, body })
 }
 
-pub(crate) async fn do_admin_rpc(
+pub(crate) async fn do_control_rpc(
     client: &crate::prism::tunnel::client::ClientController,
-    payload: AdminRpcRequest,
-) -> Result<AdminRpcResponse, String> {
-    let method = control::AdminMethod::from_rpc(&payload.method, &payload.payload)
+    payload: ControlRpcRequest,
+) -> Result<ControlRpcResponse, String> {
+    let method = control::ControlMethod::from_rpc(&payload.method, &payload.payload)
         .map_err(|e| e.to_string())?;
     match client
-        .admin_rpc(method, payload.token.as_deref())
+        .control_rpc(method, payload.token.as_deref())
         .await
     {
-        Ok(body) => Ok(AdminRpcResponse {
+        Ok(body) => Ok(ControlRpcResponse {
             ok: true,
             body: body.to_json_value(),
             status: 200,
             code: None,
             message: None,
         }),
-        Err(err) => Ok(AdminRpcResponse {
+        Err(err) => Ok(ControlRpcResponse {
             ok: false,
             body: serde_json::json!({ "error": err.message }),
             status: err.http_status(),
@@ -1743,7 +1723,7 @@ async fn put_managed_user(
 }
 
 #[async_trait]
-impl AdminControl for AdminState {
+impl ControlHandler for AdminState {
     fn features(&self) -> u64 {
         FEATURE_RPC | FEATURE_EVENTS | FEATURE_PANEL | FEATURE_MIDDLEWARE | FEATURE_AUTH
     }
@@ -1752,8 +1732,8 @@ impl AdminControl for AdminState {
         self.auth_manager.is_some() || self.auth.panel_token.is_some()
     }
 
-    fn event_watches(&self) -> AdminEventWatches {
-        AdminEventWatches {
+    fn event_watches(&self) -> ControlEventWatches {
+        ControlEventWatches {
             sessions: Some(self.sessions.clone()),
             optimizer: Some(self.optimizer.clone()),
             manager: self.tunnel.clone(),
@@ -1761,10 +1741,10 @@ impl AdminControl for AdminState {
         }
     }
 
-    async fn authenticate(&self, token: &str) -> Result<AuthIdentity, AdminError> {
+    async fn authenticate(&self, token: &str) -> Result<AuthIdentity, ControlRpcError> {
         let token = token.trim();
         if token.is_empty() {
-            return Err(AdminError::unauthorized("missing token"));
+            return Err(ControlRpcError::unauthorized("missing token"));
         }
         if let Some(ref am) = self.auth_manager
             && let Some(ident) = am.verify_token(token).await
@@ -1776,14 +1756,14 @@ impl AdminControl for AdminState {
         {
             return Ok(panel_admin_identity());
         }
-        Err(AdminError::unauthorized("invalid bearer token"))
+        Err(ControlRpcError::unauthorized("invalid bearer token"))
     }
 
     async fn dispatch(
         &self,
-        method: AdminMethod,
-        ctx: &AdminCallContext,
-    ) -> Result<AdminPayload, AdminError> {
+        method: ControlMethod,
+        ctx: &ControlCallContext,
+    ) -> Result<ControlPayload, ControlRpcError> {
         self.dispatch_method(method, ctx).await
     }
 }
@@ -1801,115 +1781,115 @@ fn panel_admin_identity() -> AuthIdentity {
 impl AdminState {
     async fn dispatch_method(
         &self,
-        method: AdminMethod,
-        ctx: &AdminCallContext,
-    ) -> Result<AdminPayload, AdminError> {
+        method: ControlMethod,
+        ctx: &ControlCallContext,
+    ) -> Result<ControlPayload, ControlRpcError> {
         if !ctx.has_feature(method.feature()) {
-            return Err(AdminError::unavailable("method not negotiated"));
+            return Err(ControlRpcError::unavailable("method not negotiated"));
         }
         match method {
-            AdminMethod::Health => Ok(AdminPayload::Health { ok: true }),
-            AdminMethod::ConfigPath => Ok(AdminPayload::ConfigPath {
+            ControlMethod::Health => Ok(ControlPayload::Health { ok: true }),
+            ControlMethod::ConfigPath => Ok(ControlPayload::ConfigPath {
                 path: self.config_path.display().to_string(),
             }),
-            AdminMethod::Connections => Ok(AdminPayload::Connections(self.sessions.snapshot())),
-            AdminMethod::TunnelServices => {
+            ControlMethod::Connections => Ok(ControlPayload::Connections(self.sessions.snapshot())),
+            ControlMethod::TunnelServices => {
                 let snap = if let Some(mgr) = &self.tunnel {
                     mgr.snapshot_services().await
                 } else {
                     Vec::new()
                 };
-                Ok(AdminPayload::TunnelServices(snap))
+                Ok(ControlPayload::TunnelServices(snap))
             }
-            AdminMethod::OptimizerStats => {
+            ControlMethod::OptimizerStats => {
                 let (global, services) = self.optimizer.snapshot();
-                Ok(AdminPayload::Optimizer { global, services })
+                Ok(ControlPayload::Optimizer { global, services })
             }
-            AdminMethod::Reload => {
+            ControlMethod::Reload => {
                 let mut next = (*self.reload_tx.borrow()).clone();
                 next.next();
                 let seq = next.seq;
                 let _ = self.reload_tx.send(next);
-                Ok(AdminPayload::Reload { seq })
+                Ok(ControlPayload::Reload { seq })
             }
-            AdminMethod::AuthProviders => Ok(self.rpc_auth_providers()),
-            AdminMethod::AuthGithubLogin { state } => {
+            ControlMethod::AuthProviders => Ok(self.rpc_auth_providers()),
+            ControlMethod::AuthGithubLogin { state } => {
                 self.rpc_github_login(state.as_deref()).await
             }
-            AdminMethod::AuthGithubExchange { code, device_id } => {
+            ControlMethod::AuthGithubExchange { code, device_id } => {
                 self.rpc_github_exchange(&code, device_id.as_deref()).await
             }
-            AdminMethod::AuthSession => Ok(self.rpc_auth_session(ctx).await),
-            AdminMethod::AuthListTokens => {
+            ControlMethod::AuthSession => Ok(self.rpc_auth_session(ctx).await),
+            ControlMethod::AuthListTokens => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
-                    AdminError::not_found("auth manager not configured")
+                    ControlRpcError::not_found("auth manager not configured")
                 })?;
-                Ok(AdminPayload::AuthTokens(am.list_tokens(None).await))
+                Ok(ControlPayload::AuthTokens(am.list_tokens(None).await))
             }
-            AdminMethod::AuthCreateToken {
+            ControlMethod::AuthCreateToken {
                 user_id,
                 name,
                 expires_in_days,
             } => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
-                    AdminError::not_found("auth manager not configured")
+                    ControlRpcError::not_found("auth manager not configured")
                 })?;
                 let (raw_token, token) = am
                     .create_client_token(&user_id, &name, expires_in_days)
                     .await
-                    .map_err(|e| AdminError::bad_request(e.to_string()))?;
-                Ok(AdminPayload::AuthCreateToken { raw_token, token })
+                    .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
+                Ok(ControlPayload::AuthCreateToken { raw_token, token })
             }
-            AdminMethod::AuthRevokeToken { token_id } => {
+            ControlMethod::AuthRevokeToken { token_id } => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
-                    AdminError::not_found("auth manager not configured")
+                    ControlRpcError::not_found("auth manager not configured")
                 })?;
                 let revoked = am.revoke_token(&token_id).await;
-                Ok(AdminPayload::AuthRevokeToken { revoked })
+                Ok(ControlPayload::AuthRevokeToken { revoked })
             }
-            AdminMethod::AuthUsers => {
+            ControlMethod::AuthUsers => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
-                    AdminError::not_found("auth manager not configured")
+                    ControlRpcError::not_found("auth manager not configured")
                 })?;
-                Ok(AdminPayload::AuthUsers(am.list_users().await))
+                Ok(ControlPayload::AuthUsers(am.list_users().await))
             }
-            AdminMethod::PutAuthUser {
+            ControlMethod::PutAuthUser {
                 user_id,
                 role,
                 service_rules,
             } => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
-                    AdminError::not_found("auth manager not configured")
+                    ControlRpcError::not_found("auth manager not configured")
                 })?;
                 let mut user = am
                     .get_user(&user_id)
                     .await
-                    .ok_or_else(|| AdminError::not_found("user not found"))?;
+                    .ok_or_else(|| ControlRpcError::not_found("user not found"))?;
                 user.role = role;
                 user.service_rules = service_rules;
                 am.upsert_user(user.clone())
                     .await
-                    .map_err(|e| AdminError::bad_request(e.to_string()))?;
-                Ok(AdminPayload::AuthUser(user))
+                    .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
+                Ok(ControlPayload::AuthUser(user))
             }
-            AdminMethod::ListMiddlewares => self.rpc_list_middlewares(),
-            AdminMethod::MiddlewareSchema { name } => self.rpc_middleware_schema(&name),
-            AdminMethod::MiddlewareConfig { name } => self.rpc_middleware_config(&name),
-            AdminMethod::PutMiddlewareConfig { name, config } => {
+            ControlMethod::ListMiddlewares => self.rpc_list_middlewares(),
+            ControlMethod::MiddlewareSchema { name } => self.rpc_middleware_schema(&name),
+            ControlMethod::MiddlewareConfig { name } => self.rpc_middleware_config(&name),
+            ControlMethod::PutMiddlewareConfig { name, config } => {
                 let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim().to_string();
                 if let Some(ref storage) = self.storage {
                     storage
                         .save_middleware_config(&base_name, &config)
-                        .map_err(|e| AdminError::bad_request(e.to_string()))?;
+                        .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
                 }
                 crate::prism::middleware::set_dynamic_middleware_config(&base_name, config.clone());
-                Ok(AdminPayload::MiddlewareConfigUpdated {
+                Ok(ControlPayload::MiddlewareConfigUpdated {
                     status: "ok".into(),
                     name: base_name,
                     config,
                 })
             }
-            AdminMethod::ResetMiddlewareConfig { name } => {
+            ControlMethod::ResetMiddlewareConfig { name } => {
                 let base_name = name.strip_suffix(".wat").unwrap_or(&name).trim().to_string();
                 if let Some(ref storage) = self.storage {
                     let _ = storage.delete_middleware_config(&base_name);
@@ -1932,19 +1912,19 @@ impl AdminState {
                         );
                     }
                 }
-                Ok(AdminPayload::MiddlewareConfigReset {
+                Ok(ControlPayload::MiddlewareConfigReset {
                     status: "ok".into(),
                     name: base_name,
                     reset: true,
                 })
             }
-            AdminMethod::Subscribe { .. } | AdminMethod::Authenticate { .. } => {
-                Err(AdminError::internal("handled by control channel"))
+            ControlMethod::Subscribe { .. } | ControlMethod::Authenticate { .. } => {
+                Err(ControlRpcError::internal("handled by control channel"))
             }
         }
     }
 
-    fn rpc_auth_providers(&self) -> AdminPayload {
+    fn rpc_auth_providers(&self) -> ControlPayload {
         let (github_enabled, github_client_id, mode, providers) = if let Some(ref am) =
             self.auth_manager
         {
@@ -1960,7 +1940,7 @@ impl AdminState {
         } else {
             (false, None, "token".to_string(), Vec::new())
         };
-        AdminPayload::AuthProviders {
+        ControlPayload::AuthProviders {
             github_enabled,
             github_client_id,
             mode,
@@ -1968,14 +1948,14 @@ impl AdminState {
         }
     }
 
-    async fn rpc_github_login(&self, state: Option<&str>) -> Result<AdminPayload, AdminError> {
+    async fn rpc_github_login(&self, state: Option<&str>) -> Result<ControlPayload, ControlRpcError> {
         let am = self
             .auth_manager
             .as_ref()
-            .ok_or_else(|| AdminError::bad_request("auth manager not configured"))?;
+            .ok_or_else(|| ControlRpcError::bad_request("auth manager not configured"))?;
         let gh = am
             .github_config()
-            .ok_or_else(|| AdminError::bad_request("GitHub OAuth not enabled"))?;
+            .ok_or_else(|| ControlRpcError::bad_request("GitHub OAuth not enabled"))?;
         let state_param = state
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.to_string())
@@ -1992,23 +1972,23 @@ impl AdminState {
         if let Some(ref r) = gh.redirect_uri {
             url.push_str(&format!("&redirect_uri={r}"));
         }
-        Ok(AdminPayload::AuthGithubLogin { url })
+        Ok(ControlPayload::AuthGithubLogin { url })
     }
 
     async fn rpc_github_exchange(
         &self,
         code: &str,
         device_id: Option<&str>,
-    ) -> Result<AdminPayload, AdminError> {
+    ) -> Result<ControlPayload, ControlRpcError> {
         let am = self
             .auth_manager
             .as_ref()
-            .ok_or_else(|| AdminError::bad_request("auth manager not configured"))?;
+            .ok_or_else(|| ControlRpcError::bad_request("auth manager not configured"))?;
         let (user, raw_token, token_record) = am
             .exchange_code(code, device_id)
             .await
-            .map_err(|e| AdminError::bad_request(e.to_string()))?;
-        Ok(AdminPayload::AuthGithubExchange {
+            .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
+        Ok(ControlPayload::AuthGithubExchange {
             token: raw_token,
             user,
             token_id: token_record.id,
@@ -2016,14 +1996,14 @@ impl AdminState {
         })
     }
 
-    async fn rpc_auth_session(&self, ctx: &AdminCallContext) -> AdminPayload {
+    async fn rpc_auth_session(&self, ctx: &ControlCallContext) -> ControlPayload {
         if let Some(ident) = &ctx.identity {
             let user = if let Some(ref am) = self.auth_manager {
                 am.get_user(&ident.user_id).await
             } else {
                 None
             };
-            return AdminPayload::AuthSession(AuthSessionSnapshot {
+            return ControlPayload::AuthSession(AuthSessionSnapshot {
                 authenticated: true,
                 user_id: Some(ident.user_id.clone()),
                 username: Some(ident.username.clone()),
@@ -2034,36 +2014,36 @@ impl AdminState {
                 is_admin: ident.is_admin,
             });
         }
-        AdminPayload::AuthSession(AuthSessionSnapshot::unauthenticated())
+        ControlPayload::AuthSession(AuthSessionSnapshot::unauthenticated())
     }
 
-    fn rpc_list_middlewares(&self) -> Result<AdminPayload, AdminError> {
-        let items = do_list_middlewares().map_err(|e| AdminError::bad_request(e))?;
-        Ok(AdminPayload::Middlewares(items))
+    fn rpc_list_middlewares(&self) -> Result<ControlPayload, ControlRpcError> {
+        let items = do_list_middlewares().map_err(|e| ControlRpcError::bad_request(e))?;
+        Ok(ControlPayload::Middlewares(items))
     }
 
-    fn rpc_middleware_schema(&self, name: &str) -> Result<AdminPayload, AdminError> {
+    fn rpc_middleware_schema(&self, name: &str) -> Result<ControlPayload, ControlRpcError> {
         let base_name = name.strip_suffix(".wat").unwrap_or(name).trim();
         let wat = crate::prism::middleware::get_default_middleware_wat(base_name)
-            .ok_or_else(|| AdminError::not_found(format!("middleware '{name}' not found")))?;
+            .ok_or_else(|| ControlRpcError::not_found(format!("middleware '{name}' not found")))?;
         let engine = wasmtime::Engine::default();
         let (_, schema) =
             crate::prism::middleware::compile_module_from_wat(&engine, base_name, wat.as_bytes())
-                .map_err(|e| AdminError::bad_request(e.to_string()))?;
+                .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
         let s = schema.ok_or_else(|| {
-            AdminError::not_found(format!("middleware '{name}' has no component schema"))
+            ControlRpcError::not_found(format!("middleware '{name}' has no component schema"))
         })?;
-        Ok(AdminPayload::MiddlewareSchema(s))
+        Ok(ControlPayload::MiddlewareSchema(s))
     }
 
-    fn rpc_middleware_config(&self, name: &str) -> Result<AdminPayload, AdminError> {
+    fn rpc_middleware_config(&self, name: &str) -> Result<ControlPayload, ControlRpcError> {
         let base_name = name.strip_suffix(".wat").unwrap_or(name).trim();
         let wat = crate::prism::middleware::get_default_middleware_wat(base_name)
-            .ok_or_else(|| AdminError::not_found(format!("middleware '{name}' not found")))?;
+            .ok_or_else(|| ControlRpcError::not_found(format!("middleware '{name}' not found")))?;
         let engine = wasmtime::Engine::default();
         let (_, schema) =
             crate::prism::middleware::compile_module_from_wat(&engine, base_name, wat.as_bytes())
-                .map_err(|e| AdminError::bad_request(e.to_string()))?;
+                .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
         let mut effective = std::collections::HashMap::new();
         if let Some(ref s) = schema {
             for f in &s.fields {
@@ -2075,7 +2055,7 @@ impl AdminState {
                 effective.insert(k, v);
             }
         }
-        Ok(AdminPayload::MiddlewareConfig(effective))
+        Ok(ControlPayload::MiddlewareConfig(effective))
     }
 }
 

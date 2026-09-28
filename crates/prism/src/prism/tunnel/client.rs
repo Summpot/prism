@@ -19,7 +19,9 @@ use crate::prism::middleware::{
     HandshakeResult, PollResult, WasmProtocolSession, compile_module_from_wat,
     get_default_middleware_wat,
 };
-use crate::prism::control::{self, AdminError, AdminMethod, AdminPayload, ControlChannel};
+use crate::prism::control::{
+    self, ControlChannel, ControlMethod, ControlPayload, ControlRpcError,
+};
 use crate::prism::net;
 use crate::prism::tunnel::fake_lan::{AdvertisedService, FakeLanBroadcaster};
 use crate::prism::tunnel::optimizer::{
@@ -124,8 +126,8 @@ impl Client {
         current.is_some()
     }
 
-    /// Opens an in-band admin control stream targeting the server's `$admin` service.
-    pub async fn open_admin_stream(
+    /// Opens an in-band control stream targeting the server's `$control` service.
+    pub async fn open_control_stream(
         &self,
     ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
         let sess = {
@@ -140,7 +142,7 @@ impl Client {
         protocol::write_proxy_stream_header_with_flags(
             &mut stream,
             protocol::ProxyStreamKind::Tcp,
-            protocol::ADMIN_SERVICE_NAME,
+            protocol::CONTROL_SERVICE_NAME,
             protocol::FLAG_RAW,
         )
         .await?;
@@ -148,36 +150,49 @@ impl Client {
         Ok(stream)
     }
 
-    /// Active `$admin` control channel, if the current tunnel session finished handshake.
+    /// Active `$control` control channel, if the current tunnel session finished handshake.
     pub async fn control_channel(&self) -> Option<Arc<ControlChannel>> {
         self.control.read().await.clone()
     }
 
-    /// RPC over the persistent `$admin` control channel.
-    pub async fn admin_rpc(&self, method: AdminMethod) -> Result<AdminPayload, AdminError> {
+    /// RPC over the persistent `$control` control channel.
+    pub async fn control_rpc(&self, method: ControlMethod) -> Result<ControlPayload, ControlRpcError> {
         let ch = self.control_channel().await.ok_or_else(|| {
-            AdminError::unavailable("tunnel client: not connected to server")
+            ControlRpcError::unavailable("tunnel client: not connected to server")
         })?;
         ch.call(method).await
     }
 
     async fn establish_control(&self) {
-        match self.open_admin_stream().await {
+        match self.open_control_stream().await {
             Ok(stream) => match control::connect(stream, control::client_features()).await {
                 Ok(ch) => {
                     tracing::info!(
                         features = ch.features(),
-                        "tunnel client: $admin control channel ready"
+                        "tunnel client: $control control channel ready"
                     );
+                    let token = self.config.auth_token.trim();
+                    if !token.is_empty() {
+                        match ch.call(control::ControlMethod::Authenticate {
+                            token: token.to_string(),
+                        }).await {
+                            Ok(_) => {
+                                tracing::info!("tunnel client: $control authenticated on connect");
+                            }
+                            Err(err) => {
+                                tracing::debug!(err = %err, "tunnel client: $control initial authenticate returned error");
+                            }
+                        }
+                    }
                     *self.control.write().await = Some(ch);
                 }
                 Err(err) => {
-                    tracing::warn!(err = %err, "tunnel client: $admin handshake failed");
+                    tracing::warn!(err = %err, "tunnel client: $control handshake failed");
                     *self.control.write().await = None;
                 }
             },
             Err(err) => {
-                tracing::warn!(err = %err, "tunnel client: failed to open $admin stream");
+                tracing::warn!(err = %err, "tunnel client: failed to open $control stream");
                 *self.control.write().await = None;
             }
         }
@@ -1081,9 +1096,9 @@ impl ClientController {
         );
     }
 
-    /// Opens an in-band administrative stream to the connected tunnel server.
+    /// Opens an in-band control stream to the connected tunnel server.
     #[allow(dead_code)]
-    pub async fn open_admin_stream(
+    pub async fn open_control_stream(
         &self,
     ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
         let guard = self.active.read().await;
@@ -1091,28 +1106,23 @@ impl ClientController {
             Some(inst) => inst.client.clone(),
             None => anyhow::bail!("client sidecar is not running"),
         };
-        client.open_admin_stream().await
+        client.open_control_stream().await
     }
 
-    /// RPC to the connected server's `$admin` control channel.
-    pub async fn admin_rpc(
+    /// RPC to the connected server's `$control` control channel.
+    pub async fn control_rpc(
         &self,
-        method: AdminMethod,
+        method: ControlMethod,
         token: Option<&str>,
-    ) -> Result<AdminPayload, AdminError> {
-        let mut last_err = AdminError::unavailable("client sidecar is not running");
-        for attempt in 0..20 {
+    ) -> Result<ControlPayload, ControlRpcError> {
+        let mut last_err = ControlRpcError::unavailable("client sidecar is not running");
+        for attempt in 0..10 {
             let client = {
                 let guard = self.active.read().await;
                 match guard.as_ref() {
                     Some(inst) => inst.client.clone(),
                     None => {
-                        last_err = AdminError::unavailable("client sidecar is not running");
-                        if attempt == 19 {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(150)).await;
-                        continue;
+                        return Err(ControlRpcError::unavailable("client sidecar is not running"));
                     }
                 }
             };
@@ -1121,59 +1131,52 @@ impl ClientController {
                 Err(err) => {
                     let retryable = matches!(
                         err.code,
-                        crate::prism::control::AdminErrorCode::Unavailable
+                        crate::prism::control::ControlErrorCode::Unavailable
                     ) && (err.message.contains("not connected")
                         || err.message.contains("not running")
                         || err.message.contains("closed"));
                     last_err = err;
-                    if !retryable || attempt == 19 {
+                    if !retryable || attempt == 9 {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
         }
         tracing::warn!(
             err = %last_err,
-            "tunnel client: $admin RPC failed"
+            "tunnel client: $control RPC failed"
         );
         Err(last_err)
     }
 
     async fn call_with_optional_auth(
         client: &Client,
-        method: AdminMethod,
+        method: ControlMethod,
         token: Option<&str>,
-    ) -> Result<AdminPayload, AdminError> {
-        if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
-            match client
-                .admin_rpc(AdminMethod::Authenticate {
-                    token: token.to_string(),
-                })
-                .await
-            {
-                Ok(_) => {}
-                Err(err)
-                    if matches!(err.code, crate::prism::control::AdminErrorCode::Unavailable) =>
-                {
-                    return Err(err);
-                }
-                Err(err) => {
-                    // $admin may already carry the tunnel handshake identity.
-                    // A stale panel token must not block methods on that session.
-                    tracing::debug!(
-                        err = %err,
-                        method = ?method,
-                        "tunnel client: $admin authenticate skipped"
-                    );
+    ) -> Result<ControlPayload, ControlRpcError> {
+        // Fast-path: try executing method directly (channel was authenticated during connect if token was configured).
+        match client.control_rpc(method.clone()).await {
+            Ok(res) => Ok(res),
+            Err(err) if matches!(err.code, crate::prism::control::ControlErrorCode::Unauthorized) => {
+                // If unauthorized and caller supplied a token, try authenticating once and retrying.
+                if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+                    let _ = client
+                        .control_rpc(ControlMethod::Authenticate {
+                            token: token.to_string(),
+                        })
+                        .await;
+                    client.control_rpc(method).await
+                } else {
+                    Err(err)
                 }
             }
+            Err(err) => Err(err),
         }
-        client.admin_rpc(method).await
     }
 
-    /// Subscribe to `$admin` events from the current control channel, if any.
-    pub async fn admin_events(&self) -> Option<tokio::sync::broadcast::Receiver<control::AdminEvent>> {
+    /// Subscribe to `$control` events from the current control channel, if any.
+    pub async fn control_events(&self) -> Option<tokio::sync::broadcast::Receiver<control::ControlEvent>> {
         let guard = self.active.read().await;
         let ch = match guard.as_ref() {
             Some(inst) => inst.client.control_channel().await,
@@ -1379,7 +1382,7 @@ mod tests {
             webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
-            admin: None,
+            control: None,
         })
         .unwrap();
 
@@ -1598,7 +1601,7 @@ mod tests {
             webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
-            admin: None,
+            control: None,
         })
         .unwrap();
 
@@ -1726,14 +1729,14 @@ mod tests {
         shutdown_tx.send(true).unwrap();
     }
 
-    struct MockAdminSession {
+    struct MockControlSession {
         open_tx: tokio::sync::Mutex<
             tokio::sync::mpsc::Sender<crate::prism::tunnel::transport::BoxedStream>,
         >,
     }
 
     #[async_trait::async_trait]
-    impl crate::prism::tunnel::transport::TransportSession for MockAdminSession {
+    impl crate::prism::tunnel::transport::TransportSession for MockControlSession {
         async fn open_stream(
             &self,
         ) -> anyhow::Result<crate::prism::tunnel::transport::BoxedStream> {
@@ -1763,11 +1766,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_open_admin_stream() {
+    async fn test_client_open_control_stream() {
         use tokio::sync::mpsc;
 
         let (server_open_tx, mut server_open_rx) = mpsc::channel(16);
-        let mock_sess = Arc::new(MockAdminSession {
+        let mock_sess = Arc::new(MockControlSession {
             open_tx: tokio::sync::Mutex::new(server_open_tx),
         });
 
@@ -1795,53 +1798,53 @@ mod tests {
                 .await
                 .expect("header read");
             assert_eq!(kind, protocol::ProxyStreamKind::Tcp);
-            assert_eq!(svc, protocol::ADMIN_SERVICE_NAME);
+            assert_eq!(svc, protocol::CONTROL_SERVICE_NAME);
             assert_eq!(flags, protocol::FLAG_RAW);
         });
 
-        let _admin_stream = client
-            .open_admin_stream()
+        let _control_stream = client
+            .open_control_stream()
             .await
-            .expect("open_admin_stream success");
+            .expect("open_control_stream success");
         reader.await.expect("reader passed");
     }
 
     struct HealthControl;
 
     #[async_trait::async_trait]
-    impl crate::prism::control::AdminControl for HealthControl {
+    impl crate::prism::control::ControlHandler for HealthControl {
         fn features(&self) -> u64 {
             crate::prism::control::FEATURE_RPC
         }
         fn auth_enabled(&self) -> bool {
             false
         }
-        fn event_watches(&self) -> crate::prism::control::AdminEventWatches {
-            crate::prism::control::AdminEventWatches::default()
+        fn event_watches(&self) -> crate::prism::control::ControlEventWatches {
+            crate::prism::control::ControlEventWatches::default()
         }
         async fn authenticate(
             &self,
             _token: &str,
-        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::AdminError> {
-            Err(crate::prism::control::AdminError::unauthorized("unused"))
+        ) -> Result<crate::prism::auth::AuthIdentity, crate::prism::control::ControlRpcError> {
+            Err(crate::prism::control::ControlRpcError::unauthorized("unused"))
         }
         async fn dispatch(
             &self,
-            method: crate::prism::control::AdminMethod,
-            _ctx: &crate::prism::control::AdminCallContext,
-        ) -> Result<crate::prism::control::AdminPayload, crate::prism::control::AdminError>
+            method: crate::prism::control::ControlMethod,
+            _ctx: &crate::prism::control::ControlCallContext,
+        ) -> Result<crate::prism::control::ControlPayload, crate::prism::control::ControlRpcError>
         {
             match method {
-                crate::prism::control::AdminMethod::Health => {
-                    Ok(crate::prism::control::AdminPayload::Health { ok: true })
+                crate::prism::control::ControlMethod::Health => {
+                    Ok(crate::prism::control::ControlPayload::Health { ok: true })
                 }
-                _ => Err(crate::prism::control::AdminError::not_found("unhandled")),
+                _ => Err(crate::prism::control::ControlRpcError::not_found("unhandled")),
             }
         }
     }
 
     #[tokio::test]
-    async fn test_client_e2e_in_band_admin_rpc() {
+    async fn test_client_e2e_in_band_control_rpc() {
         use crate::prism::tunnel::manager::Manager;
         use crate::prism::tunnel::server::{QuicServerOptions, Server, ServerOptions};
 
@@ -1850,7 +1853,7 @@ mod tests {
         drop(server_listener);
 
         let mgr = Arc::new(Manager::new());
-        let admin: Arc<dyn crate::prism::control::AdminControl> = Arc::new(HealthControl);
+        let control: Arc<dyn crate::prism::control::ControlHandler> = Arc::new(HealthControl);
         let server = Server::new(ServerOptions {
             listen_addr: server_addr.clone(),
             transport: "tcp".into(),
@@ -1861,7 +1864,7 @@ mod tests {
             webtransport: Default::default(),
             manager: mgr.clone(),
             auth_manager: None,
-            admin: Some(admin),
+            control: Some(control),
         })
         .unwrap();
 
@@ -1910,15 +1913,15 @@ mod tests {
         let mut payload = None;
         for _ in 0..40 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            if let Ok(p) = client.admin_rpc(AdminMethod::Health).await {
+            if let Ok(p) = client.control_rpc(ControlMethod::Health).await {
                 payload = Some(p);
                 break;
             }
         }
         assert_eq!(
             payload,
-            Some(AdminPayload::Health { ok: true }),
-            "in-band $admin RPC health"
+            Some(ControlPayload::Health { ok: true }),
+            "in-band $control RPC health"
         );
 
         shutdown_tx.send(true).unwrap();

@@ -22,7 +22,7 @@ import {
 	minimizeWindow,
 	toggleMaximizeWindow,
 } from "@/lib/appWindow";
-import { TUNNEL_ADMIN_CONNECTION, tunnelAdminConnection } from "@/lib/panelConnection";
+import { TUNNEL_CONTROL_CONNECTION, tunnelControlConnection } from "@/lib/panelConnection";
 import { usePanelSession } from "@/lib/panelSession";
 import { useTheme } from "@/lib/theme";
 import { m } from "@/paraglide/messages";
@@ -226,7 +226,7 @@ function RootContent() {
 				saveConnectionRef.current(
 					currentBaseUrl
 						? { baseUrl: currentBaseUrl, token: payload.token }
-						: tunnelAdminConnection(payload.token),
+						: tunnelControlConnection(payload.token),
 				);
 				window.dispatchEvent(new CustomEvent("prism:deep-link-auth", { detail: payload }));
 				if (isCurrentlyLoggingIn) {
@@ -265,7 +265,7 @@ function RootContent() {
 					}
 					try {
 						const res = await exchangeGitHubCode(
-							TUNNEL_ADMIN_CONNECTION,
+							TUNNEL_CONTROL_CONNECTION,
 							payload.code,
 							deviceId,
 							payload.state,
@@ -274,7 +274,7 @@ function RootContent() {
 							window.localStorage.removeItem("prism_pending_auth_url");
 							window.sessionStorage.removeItem("prism_pending_auth_url");
 						}
-						saveConnectionRef.current(tunnelAdminConnection(res.token));
+						saveConnectionRef.current(tunnelControlConnection(res.token));
 						window.dispatchEvent(
 							new CustomEvent("prism:deep-link-auth", {
 								detail: {

@@ -9,8 +9,8 @@
 export type * from "@/types/client";
 export type * from "@/types/admin";
 
-// Re-export Admin Client and Error
-export { AdminApiError, ManagementApiError, adminRequest } from "@/lib/admin/adminClient";
+// Re-export Control Client Error
+export { ControlApiError } from "@/lib/control/controlClient";
 
 // Re-export Remote Admin REST APIs
 export {

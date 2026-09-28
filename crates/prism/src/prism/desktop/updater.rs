@@ -63,6 +63,26 @@ pub fn parse_minisign_pubkey(raw: &str) -> anyhow::Result<PublicKey> {
     anyhow::bail!("failed to parse Minisign public key from provided configuration")
 }
 
+pub fn parse_minisign_signature(raw: &str) -> anyhow::Result<Signature> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("signature is empty");
+    }
+    // 1. Try decoding directly as raw multiline format
+    if let Ok(sig) = Signature::decode(trimmed) {
+        return Ok(sig);
+    }
+    // 2. Try decoding from base64 (Tauri updater format)
+    if let Ok(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed) {
+        if let Ok(s) = String::from_utf8(decoded_bytes) {
+            if let Ok(sig) = Signature::decode(&s) {
+                return Ok(sig);
+            }
+        }
+    }
+    anyhow::bail!("failed to parse Minisign signature: invalid format or encoding")
+}
+
 pub fn current_platform_keys() -> &'static [&'static str] {
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     return &["windows-x86_64", "windows-x86_64-nsis"];
@@ -179,8 +199,12 @@ pub async fn check_update(
     let mut matched_platform: Option<ManifestPlatform> = None;
     for k in keys {
         if let Some(p) = manifest.platforms.get(*k) {
-            matched_platform = Some(p.clone());
-            break;
+            if !p.signature.trim().is_empty() {
+                matched_platform = Some(p.clone());
+                break;
+            } else {
+                tracing::warn!(platform = %k, "platform manifest entry has empty signature; skipping");
+            }
         }
     }
 
@@ -233,7 +257,7 @@ pub async fn download_and_install_update(
 
     // 1. Minisign verification
     let pk = parse_minisign_pubkey(pubkey_str)?;
-    let sig = Signature::decode(&target_platform.signature)
+    let sig = parse_minisign_signature(&target_platform.signature)
         .map_err(|e| anyhow::anyhow!("failed to decode signature: {e}"))?;
     pk.verify(&asset_bytes, &sig, false)
         .map_err(|e| anyhow::anyhow!("signature verification failed: {e}"))?;
@@ -456,5 +480,14 @@ mod tests {
             extract_commit_identifier("0.1.0", None),
             None
         );
+    }
+
+    #[test]
+    fn test_parse_minisign_signature() {
+        let b64_sig = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSMFFZdU1kcjIvWXNldE9sNkEwd2szSUU5K2dDZkxMcGlPY3RwUFViR3o1TWFjS00vdlR2Z2xzMHFHU2tOOUY4WktqSlh0WFNyYmdCenZIVjFhSFQzNUN1QVprU2ZLdUFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTkyOTYyCWZpbGU6UHJpc21fMC4xLjAtZGV2LmU0MTg4NDdfYW1kNjQuQXBwSW1hZ2UudGFyLmd6CkJUV1hLSjZ6RjV3ejFNKzNySHRkOUJxaUU5SmF2YzZZWTVRUkRjZTNBV0lsYTNXQzhINVFoNGNpYTYxdGdKajQyWTNZM2swdjEya0R5ZUZHTncxR0FnPT0K";
+        assert!(parse_minisign_signature(b64_sig).is_ok());
+        assert!(parse_minisign_signature("").is_err());
+        assert!(parse_minisign_signature("   ").is_err());
+        assert!(parse_minisign_signature("not-a-sig").is_err());
     }
 }

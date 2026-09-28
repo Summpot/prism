@@ -258,7 +258,7 @@ jobs:
 
           # 4. Sign updater artifacts with Tauri CLI signer
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-            Get-ChildItem -Path $outdir -File -Include *.exe, *.msi, *.zip | ForEach-Object {
+            Get-ChildItem -Path $outdir -File | Where-Object { $_.Extension -in '.exe', '.msi', '.zip' } | ForEach-Object {
               Write-Host "Signing $($_.Name)..."
               pnpm exec tauri signer sign $_.FullName
             }
@@ -561,32 +561,29 @@ jobs:
             platforms: {}
           };
 
-          function findAsset(pattern) {
+          function findSignedAsset(pattern) {
             const candidates = files.filter(f => pattern.test(f) && !f.endsWith(".sig"));
-            // First check if there is a signed candidate
             for (const asset of candidates) {
               if (files.includes(asset + ".sig")) {
-                return asset;
+                const sigContent = fs.readFileSync(path.join(distDir, asset + ".sig"), "utf8").trim();
+                if (sigContent) {
+                  return { asset, signature: sigContent };
+                }
               }
             }
-            // Fallback to first matching candidate
-            return candidates[0] || null;
+            return null;
           }
 
           function registerPlatform(keys, pattern) {
-            const asset = findAsset(pattern);
-            if (!asset) return false;
-            let signature = "";
-            if (files.includes(asset + ".sig")) {
-              signature = fs.readFileSync(path.join(distDir, asset + ".sig"), "utf8").trim();
-            }
+            const match = findSignedAsset(pattern);
+            if (!match) return false;
             const entry = {
-              signature: signature,
-              url: `https://github.com/${repo}/releases/download/${tag}/${asset}`
+              signature: match.signature,
+              url: `https://github.com/${repo}/releases/download/${tag}/${match.asset}`
             };
             for (const key of (Array.isArray(keys) ? keys : [keys])) {
               manifest.platforms[key] = entry;
-              console.log(`Added platform ${key}: asset=${asset} (signed: ${Boolean(signature)})`);
+              console.log(`Added platform ${key}: asset=${match.asset}`);
             }
             return true;
           }

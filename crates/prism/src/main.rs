@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            return prism::desktop::run(cli.config, is_autostart, is_silent).await;
+            return prism::desktop::run(cli.config, is_autostart, is_silent, cli.extra_args).await;
         }
     }
 

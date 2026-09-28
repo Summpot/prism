@@ -1,4 +1,4 @@
-import { isTauriContext } from "./appWindow";
+import { invokeTauri, isTauriContext } from "./appWindow";
 import { type ClientProfile, parsePrismLink } from "./prismLink";
 
 export type DeepLinkPayload =
@@ -147,7 +147,7 @@ export function setupDeepLinkListener(onPayload: DeepLinkHandler): () => void {
 		return () => {};
 	}
 
-	let unlisten: (() => void) | null = null;
+	let unlistenTauriEvent: (() => void) | null = null;
 	let cancelled = false;
 
 	const handleUrl = (url: string) => {
@@ -167,52 +167,63 @@ export function setupDeepLinkListener(onPayload: DeepLinkHandler): () => void {
 		onPayload(parseDeepLink(trimmed));
 	};
 
-	import("@tauri-apps/plugin-deep-link")
-		.then(({ onOpenUrl, getCurrent }) => {
-			if (cancelled) return;
-
-			// Handle initial URL on startup (e.g. app launched via deep link)
-			getCurrent()
-				.then((urls) => {
-					if (cancelled || !urls || urls.length === 0) return;
-					for (const url of urls) {
-						if (url) {
-							handleUrl(url);
-						}
-					}
-				})
-				.catch((err) => {
-					console.debug("Failed to get current deep link:", err);
-				});
-
-			// Handle URLs received while app is already running
-			onOpenUrl((urls) => {
-				if (cancelled) return;
-				for (const url of urls) {
-					if (url) {
-						handleUrl(url);
-					}
-				}
-			})
-				.then((fn) => {
-					if (cancelled) {
-						fn();
-					} else {
-						unlisten = fn;
-					}
-				})
-				.catch((err) => {
-					console.debug("Failed to listen to deep links:", err);
-				});
+	// 1. Check for initial URL on startup (e.g. app launched via deep link)
+	invokeTauri<string | null>("client_get_initial_deep_link")
+		.then((initialUrl) => {
+			if (cancelled || !initialUrl) return;
+			handleUrl(initialUrl);
 		})
 		.catch((err) => {
-			console.debug("Failed to import @tauri-apps/plugin-deep-link:", err);
+			console.debug("Failed to get initial deep link from Tauri:", err);
 		});
+
+	// 2. Listen to custom DOM event dispatched by Rust webview.eval
+	const onDomEvent = (event: Event) => {
+		if (cancelled) return;
+		const detail = (event as CustomEvent<string>).detail;
+		if (typeof detail === "string") {
+			handleUrl(detail);
+		}
+	};
+	window.addEventListener("prism-deep-link", onDomEvent);
+
+	// 3. Listen to native Tauri event if global Tauri event listener is available
+	const globalTauri = (
+		window as unknown as {
+			__TAURI__?: {
+				event?: {
+					listen: (event: string, cb: (e: { payload: unknown }) => void) => Promise<() => void>;
+				};
+			};
+		}
+	).__TAURI__;
+	if (globalTauri?.event?.listen) {
+		globalTauri.event
+			.listen("prism://deep-link", (e) => {
+				if (cancelled) return;
+				if (typeof e.payload === "string") {
+					handleUrl(e.payload);
+				} else if (Array.isArray(e.payload) && typeof e.payload[0] === "string") {
+					handleUrl(e.payload[0]);
+				}
+			})
+			.then((fn) => {
+				if (cancelled) {
+					fn();
+				} else {
+					unlistenTauriEvent = fn;
+				}
+			})
+			.catch((err) => {
+				console.debug("Failed to listen to prism://deep-link event:", err);
+			});
+	}
 
 	return () => {
 		cancelled = true;
-		if (unlisten) {
-			unlisten();
+		window.removeEventListener("prism-deep-link", onDomEvent);
+		if (unlistenTauriEvent) {
+			unlistenTauriEvent();
 		}
 	};
 }

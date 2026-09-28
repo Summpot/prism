@@ -1,6 +1,11 @@
 //! Tauri desktop application integration for Prism client.
 #![cfg(feature = "desktop")]
 
+pub mod autostart;
+pub mod deep_link;
+pub mod single_instance;
+pub mod updater;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -18,9 +23,28 @@ pub async fn run(
     config_path: Option<PathBuf>,
     is_autostart: bool,
     is_silent: bool,
+    extra_args: Vec<String>,
 ) -> anyhow::Result<()> {
     crate::prism::logging::init_desktop_or_test_subscriber();
     tracing::info!(is_autostart, is_silent, "prism: starting desktop GUI mode");
+
+    // 0. Pure Rust Single Instance check via interprocess IPC
+    let all_args: Vec<String> = std::env::args().collect();
+    let single_instance_listener = match single_instance::check_single_instance_or_forward(&all_args).await? {
+        Some(listener) => Some(listener),
+        None => {
+            tracing::info!("forwarded launch arguments to existing primary instance; exiting");
+            return Ok(());
+        }
+    };
+
+    // Extract initial deep link if any
+    for arg in extra_args.iter().chain(all_args.iter()) {
+        if arg.starts_with("prism://") {
+            deep_link::set_initial_deep_link(arg.clone());
+            break;
+        }
+    }
 
     // 1. Prepare Prism client controller and background Admin/Client API
     let (reload_tx, _) = tokio::sync::watch::channel(crate::prism::telemetry::ReloadSignal::new());
@@ -202,16 +226,12 @@ pub async fn run(
 
     #[tauri::command]
     fn client_get_config(
-        app: tauri::AppHandle,
         state: tauri::State<'_, DesktopClientState>,
     ) -> Result<crate::prism::storage::ClientConfigResponse, String> {
         let mut cfg = crate::prism::admin::do_client_get_config(
             state.storage.as_deref(),
         );
-        use tauri_plugin_autostart::ManagerExt;
-        if let Ok(enabled) = app.autolaunch().is_enabled() {
-            cfg.active_config.autostart = enabled;
-        }
+        cfg.active_config.autostart = autostart::is_autostart_enabled();
         cfg.active_config.auth_token = crate::prism::admin::mask_token(&cfg.active_config.auth_token);
         for p in &mut cfg.profiles {
             p.auth_token = crate::prism::admin::mask_token(&p.auth_token);
@@ -221,22 +241,13 @@ pub async fn run(
 
     #[tauri::command]
     fn client_save_config(
-        app: tauri::AppHandle,
         state: tauri::State<'_, DesktopClientState>,
         payload: crate::prism::admin::SaveConfigRequest,
     ) -> Result<(), String> {
         if let Some(ref active) = payload.active_config {
             if let Some(autostart_enable) = active.autostart {
-                use tauri_plugin_autostart::ManagerExt;
-                let manager = app.autolaunch();
-                if autostart_enable {
-                    if let Err(err) = manager.enable() {
-                        tracing::warn!(err = %err, "desktop: failed to enable autostart");
-                    }
-                } else {
-                    if let Err(err) = manager.disable() {
-                        tracing::warn!(err = %err, "desktop: failed to disable autostart");
-                    }
+                if let Err(err) = autostart::set_autostart(autostart_enable) {
+                    tracing::warn!(err = %err, "desktop: failed to set autostart");
                 }
             }
         }
@@ -315,92 +326,9 @@ pub async fn run(
         crate::prism::admin::do_admin_rpc(&state.client, payload).await
     }
 
-    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-    pub struct UpdateCheckResponse {
-        pub available: bool,
-        pub current_version: String,
-        pub version: Option<String>,
-        pub date: Option<String>,
-        pub body: Option<String>,
-        pub channel: String,
-    }
-
-    fn extract_commit_identifier(version: &str, notes: Option<&str>) -> Option<String> {
-        if let Some(notes) = notes {
-            if let Some(start) = notes.rfind('(') {
-                if let Some(end) = notes[start..].find(')') {
-                    let candidate = notes[start + 1..start + end].trim();
-                    if candidate.len() >= 7 && candidate.chars().all(|c| c.is_ascii_hexdigit()) {
-                        return Some(candidate.to_ascii_lowercase());
-                    }
-                }
-            }
-        }
-        for part in version.split(|c| c == '.' || c == '-' || c == '+') {
-            if part.len() >= 7 && part.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Some(part.to_ascii_lowercase());
-            }
-        }
-        None
-    }
-
-    fn build_client_updater(
-        app: &tauri::AppHandle,
-        channel: &str,
-    ) -> Result<tauri_plugin_updater::Updater, String> {
-        use tauri_plugin_updater::UpdaterExt;
-
-        let endpoint = match channel {
-            "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
-            _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
-        };
-
-        let is_dev = channel == "dev";
-        let local_commit = env!("PRISM_COMMIT_HASH").trim().to_ascii_lowercase();
-        let local_build_time: u64 = env!("PRISM_BUILD_TIME").parse().unwrap_or(0);
-
-        let updater_builder = app
-            .updater_builder()
-            .endpoints(vec![url::Url::parse(endpoint).map_err(|e| e.to_string())?])
-            .map_err(|e| e.to_string())?
-            .version_comparator(move |current_ver, remote| {
-                if !is_dev {
-                    return remote.version > current_ver;
-                }
-
-                // Dev channel checking mechanism:
-                // 1. If remote commit hash can be extracted and we know local commit hash:
-                let remote_ver_str = remote.version.to_string();
-                if let Some(remote_commit) = extract_commit_identifier(&remote_ver_str, remote.notes.as_deref()) {
-                    if !local_commit.is_empty() && local_commit != "unknown" {
-                        // Same commit means same build -> no update
-                        if remote_commit.starts_with(&local_commit) || local_commit.starts_with(&remote_commit) {
-                            return false;
-                        }
-                        // If pub_date is available and local_build_time is valid, ensure remote is newer
-                        if let Some(pub_date) = remote.pub_date {
-                            let remote_ts = pub_date.unix_timestamp();
-                            if remote_ts > 0 && local_build_time > 0 {
-                                return (remote_ts as u64) > local_build_time;
-                            }
-                        }
-                        return true;
-                    }
-                }
-
-                // 2. If publication timestamp is available, compare with local build timestamp
-                if let Some(pub_date) = remote.pub_date {
-                    let remote_ts = pub_date.unix_timestamp();
-                    if remote_ts > 0 && local_build_time > 0 {
-                        return (remote_ts as u64) > local_build_time;
-                    }
-                }
-
-                // 3. Fallback: if remote version differs from current_ver (e.g. 0.1.0-dev.* vs 0.1.0)
-                remote.version != current_ver
-            });
-
-        updater_builder.build().map_err(|e| e.to_string())
+    #[tauri::command]
+    fn client_get_initial_deep_link() -> Option<String> {
+        deep_link::take_initial_deep_link()
     }
 
     #[tauri::command]
@@ -408,7 +336,7 @@ pub async fn run(
         app: tauri::AppHandle,
         state: tauri::State<'_, DesktopClientState>,
         channel: Option<String>,
-    ) -> Result<UpdateCheckResponse, String> {
+    ) -> Result<updater::UpdateCheckResponse, String> {
         let resolved_channel = channel.unwrap_or_else(|| {
             state
                 .storage
@@ -429,35 +357,12 @@ pub async fn run(
             app.package_info().version.to_string()
         };
 
-        let updater = build_client_updater(&app, &resolved_channel)?;
-
-        match updater.check().await {
-            Ok(Some(update)) => Ok(UpdateCheckResponse {
-                available: true,
-                current_version,
-                version: Some(update.version.clone()),
-                date: update.date.map(|d| d.to_string()),
-                body: update.body.clone(),
-                channel: resolved_channel,
-            }),
-            Ok(None) => Ok(UpdateCheckResponse {
-                available: false,
-                current_version,
-                version: None,
-                date: None,
-                body: None,
-                channel: resolved_channel,
-            }),
-            Err(err) => {
-                let endpoint = match resolved_channel.as_str() {
-                    "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
-                    _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
-                };
-                tracing::warn!(error = %err, endpoint = %endpoint, "failed to check for updates");
-                Err(format!(
-                    "Failed to check for updates from {resolved_channel} channel: {err}"
-                ))
-            }
+        let client = reqwest::Client::new();
+        match updater::check_update(&client, &resolved_channel, &current_version).await {
+            Ok((resp, _)) => Ok(resp),
+            Err(err) => Err(format!(
+                "Failed to check for updates from {resolved_channel} channel: {err}"
+            )),
         }
     }
 
@@ -476,60 +381,38 @@ pub async fn run(
                 .unwrap_or_else(|| "release".to_string())
         });
 
-        let updater = build_client_updater(&app, &resolved_channel)?;
+        let current_version = if resolved_channel == "dev" {
+            let commit = env!("PRISM_COMMIT_HASH");
+            if commit != "unknown" && !commit.is_empty() {
+                format!("{}-dev.{}", app.package_info().version, commit)
+            } else {
+                app.package_info().version.to_string()
+            }
+        } else {
+            app.package_info().version.to_string()
+        };
 
-        if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
-            tracing::info!(version = %update.version, "downloading and installing update");
+        let client = reqwest::Client::new();
+        let (_resp, update_opt) = updater::check_update(&client, &resolved_channel, &current_version)
+            .await
+            .map_err(|e| format!("failed to check update: {e}"))?;
 
-            // Gracefully stop active tunnel client to release connections, ports, and file locks
+        if let Some((manifest, platform)) = update_opt {
+            tracing::info!(version = %manifest.version, "downloading and installing update");
             let _ = crate::prism::admin::do_client_stop(&state.client, state.storage.as_deref()).await;
-
-            update
-                .download_and_install(|_, _| {}, || {})
+            updater::download_and_install_update(&client, updater::DEFAULT_PUBKEY, &platform, &manifest.version)
                 .await
                 .map_err(|e| format!("failed to download/install update: {e}"))?;
-
-            tracing::info!("update installed, restarting application");
-            app.restart();
+            return Ok(());
         }
 
         Err("No update available to install".to_string())
     }
 
-    // 2. Run Tauri desktop application
+    // 2. Run Tauri desktop application without external plugins
     let event_client = desktop_client_state.client.clone();
     tauri::Builder::default()
         .manage(desktop_client_state)
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--autostart"]),
-        ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let is_silent_arg = args
-                .iter()
-                .any(|a| a == "--silent" || a == "--minimized" || a == "--autostart");
-            if !is_silent_arg {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            }
-            #[cfg(desktop)]
-            {
-                use tauri::Emitter;
-                for arg in &args {
-                    if arg.starts_with("prism://") {
-                        if let Ok(url) = url::Url::parse(arg) {
-                            let _ = app.emit("deep-link://new-url", vec![url]);
-                        }
-                    }
-                }
-            }
-        }))
-        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             open_external_url,
             client_status,
@@ -547,16 +430,17 @@ pub async fn run(
             client_reset_middleware_config,
             client_check_update,
             client_install_update,
+            client_get_initial_deep_link,
             admin_request,
             admin_rpc,
         ])
         .setup(move |app| {
-            #[cfg(desktop)]
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                if let Err(err) = app.deep_link().register_all() {
-                    tracing::warn!(err = %err, "failed to register deep link schemes");
-                }
+            // Register prism:// custom URL scheme using pure Rust sysuri
+            let _ = deep_link::register_protocol();
+
+            // Spawn single instance IPC listener if primary instance
+            if let Some(listener) = single_instance_listener {
+                single_instance::spawn_ipc_handler(app.handle().clone(), listener);
             }
 
             let main_window = app.get_webview_window("main").expect("main window exists");
@@ -615,14 +499,16 @@ pub async fn run(
                     return;
                 }
 
-                if let Ok(updater) = build_client_updater(&handle_for_updater, &channel) {
-                    if let Ok(Some(update)) = updater.check().await {
+                let client = reqwest::Client::new();
+                let current_version = handle_for_updater.package_info().version.to_string();
+                if let Ok((resp, _)) = updater::check_update(&client, &channel, &current_version).await {
+                    if resp.available {
                         let _ = handle_for_updater.emit(
                             "client://update-available",
                             serde_json::json!({
-                                "version": update.version,
-                                "date": update.date.map(|d| d.to_string()),
-                                "body": update.body,
+                                "version": resp.version,
+                                "date": resp.date,
+                                "body": resp.body,
                                 "channel": channel,
                             }),
                         );

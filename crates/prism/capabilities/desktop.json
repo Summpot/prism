@@ -14,11 +14,6 @@
 		"core:window:allow-hide",
 		"core:window:allow-close",
 		"core:window:allow-start-dragging",
-		"core:window:allow-destroy",
-		"deep-link:default",
-		"updater:default",
-		"process:default",
-		"process:allow-restart",
-		"autostart:default"
+		"core:window:allow-destroy"
 	]
 }

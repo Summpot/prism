@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Prism</AssemblyName>
+    <RootNamespace>Prism</RootNamespace>
+    <ApplicationIcon>Assets/favicon.ico</ApplicationIcon>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- UniFFISharp Settings -->
+    <UniFFICargoProject>..\crates\prism\Cargo.toml</UniFFICargoProject>
+    <UniFFICargoTargetDir>..\target</UniFFICargoTargetDir>
+    <UniFFICrateName>prism_native</UniFFICrateName>
+    <UniFFINamespace>Prism.Native</UniFFINamespace>
+    <UniFFIAutoBuildCargo>false</UniFFIAutoBuildCargo>
+    <UniFFIRustStaticLibrary Condition="'$(PublishAot)' == 'true'">..\target\release\prism_native.lib</UniFFIRustStaticLibrary>
+    <UniFFIRustStaticLibrary Condition="'$(PublishAot)' != 'true'">none</UniFFIRustStaticLibrary>
+    <UniFFIRustLibrary>..\target\release\prism_native.dll</UniFFIRustLibrary>
+
+    <!-- ZeroI18n Settings -->
+    <ZeroI18nDefaultLocale>zh-CN</ZeroI18nDefaultLocale>
+    <ZeroI18nClassName>Messages</ZeroI18nClassName>
+    <ZeroI18nNamespace>Prism.I18n</ZeroI18nNamespace>
+
+    <!-- NativeAOT Static Linking Settings -->
+    <PublishAot Condition="'$(PublishAot)' == 'true'">true</PublishAot>
+    <StripSymbols>true</StripSymbols>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+  </PropertyGroup>
+
+  <!-- NativeAOT Windows System Dependencies for Rust -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <CustomLinkerArg Include="ws2_32.lib userenv.lib bcrypt.lib ntdll.lib crypt32.lib secur32.lib ncrypt.lib iphlpapi.lib" />
+  </ItemGroup>
+
+  <!-- Clean up static library intermediate artifacts and redundant DLLs from publish folder -->
+  <Target Name="PruneAotPublishOutputs" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(PublishAot)' == 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.lib' or '%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Point ZeroI18n to messages directory -->
+  <ItemGroup>
+    <AdditionalFiles Include="..\messages\*.json" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
+    <PackageReference Include="ShadUI" Version="0.2.4" />
+    <PackageReference Include="UniFFISharp" Version="0.1.0" />
+    <PackageReference Include="ZeroI18n" Version="1.0.0" />
+    <PackageReference Include="Summpot.SkiaSharp.Static" Version="3.119.4-avalonia.12.1.3" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.1.0-dev-292" />
+  </ItemGroup>
+</Project>

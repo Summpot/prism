@@ -24,3 +24,10 @@ auth-state.json
 *.pem
 *.key
 *.crt
+
+# .NET and IDE
+bin/
+obj/
+*.user
+*.suo
+.vs/

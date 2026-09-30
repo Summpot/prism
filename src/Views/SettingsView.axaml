@@ -1,0 +1,208 @@
+<UserControl
+    x:Class="Prism.Views.SettingsView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
+    x:DataType="vm:SettingsViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="20">
+        <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
+            <!-- Header -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
+                <TextBlock Text="{Binding [client_settings_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+            </StackPanel>
+
+            <TabControl Margin="0,8,0,0">
+                <!-- Tab 1: General -->
+                <TabItem Header="{Binding [settings_tab_general], Source={x:Static i18n:LocalizationManager.Instance}}">
+                    <StackPanel Spacing="16" Margin="0,16,0,0">
+                        <!-- Language Card -->
+                        <shadui:Card Padding="16">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{Binding [settings_language], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="{Binding [settings_language_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </StackPanel>
+                                <ComboBox
+                                    Grid.Column="1"
+                                    ItemsSource="{x:Static vm:SettingsViewModel.AvailableLanguages}"
+                                    SelectedValue="{Binding CurrentLocale, Mode=TwoWay}"
+                                    SelectedValueBinding="{Binding Key, x:DataType=common:LocaleOption}"
+                                    DisplayMemberBinding="{Binding Value, x:DataType=common:LocaleOption}"
+                                    Width="160"
+                                    Height="32"
+                                    FontSize="12"/>
+                            </Grid>
+                        </shadui:Card>
+
+                        <!-- Theme Card -->
+                        <shadui:Card Padding="16">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{Binding [settings_theme], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="{Binding [settings_theme_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </StackPanel>
+                                <ComboBox
+                                    Grid.Column="1"
+                                    ItemsSource="{x:Static vm:SettingsViewModel.AvailableThemes}"
+                                    SelectedItem="{Binding SelectedTheme, Mode=TwoWay}"
+                                    Width="160"
+                                    Height="32"
+                                    FontSize="12"/>
+                            </Grid>
+                        </shadui:Card>
+
+                        <!-- Launch Options Card -->
+                        <shadui:Card Padding="16">
+                            <StackPanel Spacing="14">
+                                <TextBlock Text="Startup &amp; Behavior" FontWeight="SemiBold" FontSize="13"/>
+                                
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{Binding [settings_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                                        <TextBlock Text="Automatically connect to active profile on startup" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnect, Mode=TwoWay}"/>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{Binding [settings_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                                        <TextBlock Text="Automatically login and sync with management node" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnectPanel, Mode=TwoWay}"/>
+                                </Grid>
+                            </StackPanel>
+                        </shadui:Card>
+                    </StackPanel>
+                </TabItem>
+
+                <!-- Tab 2: Connection -->
+                <TabItem Header="{Binding [settings_tab_connection], Source={x:Static i18n:LocalizationManager.Instance}}">
+                    <StackPanel Spacing="16" Margin="0,16,0,0">
+                        <!-- Management URL -->
+                        <shadui:Card Padding="16">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                <TextBlock Text="Prism server control API URL" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBox Text="{Binding ManagementUrl, Mode=TwoWay}" Height="32" FontSize="12" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </shadui:Card>
+
+                        <!-- Device Identifier -->
+                        <shadui:Card Padding="16">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding [settings_device_id], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                <TextBlock Text="Unique client identifier registered on management panel" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <Grid ColumnDefinitions="*, 8, Auto" Margin="0,4,0,0">
+                                    <TextBox Grid.Column="0" Text="{Binding DeviceId}" IsReadOnly="True" Height="32" FontSize="12"/>
+                                    <Button Grid.Column="2" Classes="Outline" Command="{Binding CopyDeviceIdCommand}" Content="Copy ID" Height="32" FontSize="11" Padding="12,0"/>
+                                </Grid>
+                            </StackPanel>
+                        </shadui:Card>
+
+                        <!-- Fake LAN -->
+                        <shadui:Card Padding="16">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="Fake LAN Broadcast" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="Broadcast virtual LAN presence for Minecraft multiplayer discovery" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding FakeLanBroadcast, Mode=TwoWay}"/>
+                            </Grid>
+                        </shadui:Card>
+                    </StackPanel>
+                </TabItem>
+
+                <!-- Tab 3: Updates -->
+                <TabItem Header="{Binding [settings_tab_updates], Source={x:Static i18n:LocalizationManager.Instance}}">
+                    <StackPanel Spacing="16" Margin="0,16,0,0">
+                        <shadui:Card Padding="16">
+                            <StackPanel Spacing="14">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{Binding [settings_update_channel], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                        <TextBlock Text="Select update release channel" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ComboBox Grid.Column="1"
+                                        ItemsSource="{x:Static vm:SettingsViewModel.AvailableUpdateChannels}"
+                                        SelectedItem="{Binding UpdateChannel, Mode=TwoWay}"
+                                        Width="140"
+                                        Height="32"
+                                        FontSize="12"/>
+                                </Grid>
+
+                                <Separator Background="{DynamicResource BorderColor}" Height="1"/>
+
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding UpdateStatusMessage, FallbackValue='Prism is up to date'}" FontSize="12"/>
+                                    </StackPanel>
+                                    <Button
+                                        Grid.Column="1"
+                                        Classes="Primary"
+                                        Command="{Binding CheckUpdateCommand}"
+                                        IsEnabled="{Binding IsCheckingUpdate, Converter={x:Static common:Converters.BooleanNegation}}"
+                                        Content="Check for Updates"
+                                        Height="32"
+                                        FontSize="12"
+                                        Padding="14,0"/>
+                                </Grid>
+
+                                <StackPanel IsVisible="{Binding UpdateAvailable}" Spacing="8">
+                                    <shadui:Badge Content="{Binding LatestVersion, StringFormat='New Version: {0}'}" Height="24" Padding="8,0"/>
+                                    <TextBlock Text="{Binding UpdateChangelog}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </shadui:Card>
+                    </StackPanel>
+                </TabItem>
+
+                <!-- Tab 4: About -->
+                <TabItem Header="{Binding [settings_tab_about], Source={x:Static i18n:LocalizationManager.Instance}}">
+                    <StackPanel Spacing="16" Margin="0,16,0,0">
+                        <shadui:Card Padding="24">
+                            <StackPanel Spacing="16" HorizontalAlignment="Center">
+                                <Image Source="avares://Prism/Assets/logo192.png" Width="72" Height="72" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Prism Desktop" FontWeight="Bold" FontSize="20" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Cross-Platform High-Performance Tunnel &amp; Game Accelerator" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                
+                                <Border Background="{DynamicResource CardBackgroundColor}" CornerRadius="8" Padding="16" Margin="0,10">
+                                    <StackPanel Spacing="8">
+                                        <Grid ColumnDefinitions="140, *">
+                                            <TextBlock Grid.Column="0" Text="UI Framework:" FontWeight="SemiBold" FontSize="11"/>
+                                            <TextBlock Grid.Column="1" Text="Avalonia 12.1.3 + ShadUI" FontSize="11"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="140, *">
+                                            <TextBlock Grid.Column="0" Text="Core Engine:" FontWeight="SemiBold" FontSize="11"/>
+                                            <TextBlock Grid.Column="1" Text="Rust native core (prism_native)" FontSize="11"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="140, *">
+                                            <TextBlock Grid.Column="0" Text="FFI Bridge:" FontWeight="SemiBold" FontSize="11"/>
+                                            <TextBlock Grid.Column="1" Text="UniFFISharp 0.1.0" FontSize="11"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="140, *">
+                                            <TextBlock Grid.Column="0" Text="Localization:" FontWeight="SemiBold" FontSize="11"/>
+                                            <TextBlock Grid.Column="1" Text="ZeroI18n 1.0.0" FontSize="11"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="140, *">
+                                            <TextBlock Grid.Column="0" Text="Compilation:" FontWeight="SemiBold" FontSize="11"/>
+                                            <TextBlock Grid.Column="1" Text=".NET 10 NativeAOT + SkiaSharp.Static" FontSize="11"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </shadui:Card>
+                    </StackPanel>
+                </TabItem>
+            </TabControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

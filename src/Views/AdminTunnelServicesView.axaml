@@ -1,0 +1,54 @@
+<UserControl
+    x:Class="Prism.Views.AdminTunnelServicesView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
+    x:DataType="vm:AdminTunnelServicesViewModel">
+
+    <Grid RowDefinitions="Auto, *" Margin="20">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
+            <TextBlock Text="Tunnel Services" FontWeight="Bold" FontSize="20"/>
+            <TextBlock Text="Configured route targets and virtual local/remote port mappings" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+        </StackPanel>
+
+        <!-- Services Table -->
+        <shadui:Card Grid.Row="1" Padding="12">
+            <DataGrid
+                ItemsSource="{Binding Services}"
+                AutoGenerateColumns="False"
+                IsReadOnly="True"
+                GridLinesVisibility="Horizontal"
+                BorderThickness="0"
+                Background="Transparent">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Service Name" Binding="{Binding Name}" Width="140"/>
+                    <DataGridTextColumn Header="Protocol" Binding="{Binding Proto}" Width="90"/>
+                    <DataGridTextColumn Header="Local Address" Binding="{Binding LocalAddr}" Width="*"/>
+                    <DataGridTextColumn Header="Remote Target" Binding="{Binding RemoteAddr}" Width="*"/>
+                    <DataGridTextColumn Header="Masquerade SNI" Binding="{Binding Masquerade}" Width="*"/>
+                    <DataGridTemplateColumn Header="Action" Width="90">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate x:DataType="vm:ServiceRowItem">
+                                <Button
+                                    Classes="Outline"
+                                    Command="{Binding ((vm:AdminTunnelServicesViewModel)DataContext).DeleteServiceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Content="Remove"
+                                    Height="24"
+                                    FontSize="10"
+                                    Padding="6,0"
+                                    Foreground="#ef4444"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </shadui:Card>
+    </Grid>
+</UserControl>

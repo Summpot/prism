@@ -1,0 +1,129 @@
+<UserControl
+    x:Class="Prism.Views.ClientProfilesView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    x:DataType="vm:ClientProfilesViewModel"
+    mc:Ignorable="d">
+
+    <Grid ColumnDefinitions="4*, 6*" Margin="16">
+        <!-- Left: Profiles List -->
+        <shadui:Card Grid.Column="0" Margin="0,0,8,0" Padding="12">
+            <Grid RowDefinitions="Auto, *, Auto">
+                <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,8">
+                    <TextBlock Text="{Binding [client_saved_profiles], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+                    <Button Grid.Column="1" Classes="Primary" Command="{Binding NewProfileCommand}" Height="26" Padding="8,0">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Plus}" Width="10" Height="10" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                            <TextBlock Text="{Binding [client_new_profile], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <ListBox
+                    Grid.Row="1"
+                    ItemsSource="{Binding Profiles}"
+                    SelectedItem="{Binding SelectedProfile, Mode=TwoWay}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:EditableProfile">
+                            <Grid ColumnDefinitions="*, Auto" Margin="2,4">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12"/>
+                                        <shadui:Badge Content="{Binding Transport}" Height="16" Padding="4,0" FontSize="9"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding ServerAddr}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="1"
+                                    Classes="Ghost"
+                                    Command="{Binding $parent[UserControl].((vm:ClientProfilesViewModel)DataContext).DeleteProfileCommand}"
+                                    CommandParameter="{Binding}"
+                                    Height="24"
+                                    Width="24"
+                                    Padding="4">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Trash2}" Width="12" Height="12" Foreground="#ef4444"/>
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </shadui:Card>
+
+        <!-- Right: Profile Editor Form -->
+        <shadui:Card Grid.Column="1" Margin="8,0,0,0" Padding="16">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="{Binding [client_settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14"/>
+
+                    <!-- Profile Name -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Profile Name" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBox Text="{Binding SelectedProfile.Name, Mode=TwoWay}" Height="32" FontSize="12"/>
+                    </StackPanel>
+
+                    <!-- Server Address -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Server Address (host:port)" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBox Text="{Binding SelectedProfile.ServerAddr, Mode=TwoWay}" Height="32" FontSize="12"/>
+                    </StackPanel>
+
+                    <!-- Transport -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Transport" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <ComboBox
+                            ItemsSource="{Binding AvailableTransports}"
+                            SelectedItem="{Binding SelectedProfile.Transport, Mode=TwoWay}"
+                            HorizontalAlignment="Stretch"
+                            Height="32"
+                            FontSize="12"/>
+                    </StackPanel>
+
+                    <!-- Listen Address -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Listen Address" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBox Text="{Binding SelectedProfile.ListenAddr, Mode=TwoWay}" Height="32" FontSize="12"/>
+                    </StackPanel>
+
+                    <!-- Fake LAN Broadcast Switch -->
+                    <Grid ColumnDefinitions="*, Auto" Margin="0,4">
+                        <TextBlock Text="Fake LAN Broadcast" FontSize="12" VerticalAlignment="Center"/>
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding SelectedProfile.FakeLanBroadcast, Mode=TwoWay}"/>
+                    </Grid>
+
+                    <!-- Auto Connect on Launch Switch -->
+                    <Grid ColumnDefinitions="*, Auto" Margin="0,4">
+                        <TextBlock Text="Auto Connect on Launch" FontSize="12" VerticalAlignment="Center"/>
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding SelectedProfile.AutoConnect, Mode=TwoWay}"/>
+                    </Grid>
+
+                    <!-- Management URL -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Management API Base URL (Optional)" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBox Text="{Binding SelectedProfile.ManagementUrl, Mode=TwoWay}" Height="32" FontSize="12"/>
+                    </StackPanel>
+
+                    <!-- Actions Bar -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                        <Button Classes="Primary" Command="{Binding SaveSelectedProfileCommand}" Content="Save Profile" Height="30" FontSize="12" Padding="12,0"/>
+                        <Button Classes="Outline" Command="{Binding SetActiveProfileCommand}" Content="Set as Active" Height="30" FontSize="12" Padding="12,0"/>
+                    </StackPanel>
+
+                    <!-- Status Notification -->
+                    <TextBlock
+                        IsVisible="{Binding StatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                        Text="{Binding StatusMessage}"
+                        FontSize="11"
+                        Foreground="#10b981"
+                        Margin="0,4,0,0"/>
+                </StackPanel>
+            </ScrollViewer>
+        </shadui:Card>
+    </Grid>
+</UserControl>

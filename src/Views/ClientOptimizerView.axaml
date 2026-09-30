@@ -1,0 +1,98 @@
+<UserControl
+    x:Class="Prism.Views.ClientOptimizerView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    x:DataType="vm:ClientOptimizerViewModel"
+    mc:Ignorable="d">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="960" Spacing="14" Margin="16">
+
+            <!-- Page Header -->
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
+                        <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
+                        <shadui:Badge Content="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanNegation}}" Height="20" Padding="6,0" FontSize="10"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding [optimizer_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </StackPanel>
+
+                <!-- Actions: Reset defaults -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Classes="Outline" Command="{Binding ResetDefaultsCommand}" Content="Reset Defaults" Height="26" FontSize="11" Padding="8,0"/>
+                    <TextBlock IsVisible="{Binding SavedNotice}" Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="#10b981" FontSize="11" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Card 1: Master Switch -->
+            <shadui:Card Padding="14">
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="{Binding [optimizer_general_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+                        <TextBlock Text="{Binding [optimizer_general_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding OptimizerEnabled, Mode=TwoWay}"/>
+                </Grid>
+            </shadui:Card>
+
+            <!-- Card 2: Zstandard Compression Level -->
+            <shadui:Card Padding="14" IsEnabled="{Binding OptimizerEnabled}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*, Auto">
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock Text="{Binding [optimizer_compression_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+                            <TextBlock Text="{Binding [optimizer_compression_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+                        <shadui:Badge Grid.Column="1" Content="{Binding OptimizerZstdLevel}" Height="20" Padding="6,0" FontSize="11"/>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*, Auto" Margin="0,4,0,0">
+                        <TextBlock Grid.Column="0" Text="{Binding [optimizer_level_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="1" Content="1 (Fast)" Height="24" FontSize="10" Padding="6,0"/>
+                            <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="3" Content="3 (Balanced)" Height="24" FontSize="10" Padding="6,0"/>
+                            <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="5" Content="5" Height="24" FontSize="10" Padding="6,0"/>
+                            <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="9" Content="9" Height="24" FontSize="10" Padding="6,0"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Slider Minimum="1" Maximum="19" Value="{Binding OptimizerZstdLevel, Mode=TwoWay}"/>
+                </StackPanel>
+            </shadui:Card>
+
+            <!-- Card 3: Batching & Latency Control -->
+            <shadui:Card Padding="14" IsEnabled="{Binding OptimizerEnabled}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding [optimizer_batching_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+                        <TextBlock Text="{Binding [optimizer_batching_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+
+                    <!-- Adaptive Flush -->
+                    <Grid ColumnDefinitions="*, Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding [optimizer_adaptive_flush_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" VerticalAlignment="Center"/>
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding OptimizerAdaptiveFlush, Mode=TwoWay}"/>
+                    </Grid>
+
+                    <!-- Flush Interval -->
+                    <StackPanel Spacing="4">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding [optimizer_flush_interval_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                            <TextBlock Grid.Column="1" Text="{Binding OptimizerFlushIntervalMs, StringFormat='{}{0} ms'}" FontSize="12" FontWeight="SemiBold"/>
+                        </Grid>
+                        <Slider Minimum="2" Maximum="60" Value="{Binding OptimizerFlushIntervalMs, Mode=TwoWay}"/>
+                    </StackPanel>
+                </StackPanel>
+            </shadui:Card>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

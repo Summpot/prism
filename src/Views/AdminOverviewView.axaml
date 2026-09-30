@@ -1,0 +1,89 @@
+<UserControl
+    x:Class="Prism.Views.AdminOverviewView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+    x:DataType="vm:AdminOverviewViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="20">
+        <StackPanel Spacing="16" MaxWidth="800" HorizontalAlignment="Left">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Server Administration" FontWeight="Bold" FontSize="20"/>
+                <TextBlock Text="Management node control, system metrics, and live tunnels" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+            </StackPanel>
+
+            <!-- Metrics Grid -->
+            <Grid ColumnDefinitions="*, 12, *, 12, *" Margin="0,8,0,0">
+                <!-- Active Connections -->
+                <shadui:Card Grid.Column="0" Padding="16">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Active Connections" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding ConnectionCount}" FontWeight="Bold" FontSize="24"/>
+                        <TextBlock Text="Total client tunnels attached" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+                </shadui:Card>
+
+                <!-- Registered Services -->
+                <shadui:Card Grid.Column="2" Padding="16">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Tunnel Services" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding ServiceCount}" FontWeight="Bold" FontSize="24"/>
+                        <TextBlock Text="TCP / UDP route targets" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+                </shadui:Card>
+
+                <!-- Server Status -->
+                <shadui:Card Grid.Column="4" Padding="16">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Node State" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8" Height="8" Fill="#10b981" VerticalAlignment="Center"/>
+                            <TextBlock Text="HEALTHY" FontWeight="Bold" FontSize="18" Foreground="#10b981"/>
+                        </StackPanel>
+                        <TextBlock Text="Control plane active" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+                </shadui:Card>
+            </Grid>
+
+            <!-- Configuration Card -->
+            <shadui:Card Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Configuration &amp; Runtime Operations" FontWeight="SemiBold" FontSize="14"/>
+                    
+                    <Grid ColumnDefinitions="140, *">
+                        <TextBlock Grid.Column="0" Text="Config File:" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding ConfigPath}" FontFamily="Consolas, monospace" FontSize="12"/>
+                    </Grid>
+
+                    <Separator Background="{DynamicResource BorderColor}" Height="1"/>
+
+                    <Grid ColumnDefinitions="*, Auto">
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock Text="Hot Reload Configuration" FontWeight="SemiBold" FontSize="12"/>
+                            <TextBlock Text="Reload prism.toml and refresh tunnel routes without dropping active connections" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+                        <Button
+                            Grid.Column="1"
+                            Classes="Outline"
+                            Command="{Binding ReloadServerCommand}"
+                            Content="Reload Config"
+                            Height="32"
+                            FontSize="12"
+                            Padding="14,0"/>
+                    </Grid>
+
+                    <TextBlock
+                        IsVisible="{Binding ReloadMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                        Text="{Binding ReloadMessage}"
+                        Foreground="#10b981"
+                        FontSize="11"/>
+                </StackPanel>
+            </shadui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

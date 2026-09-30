@@ -1,0 +1,55 @@
+<UserControl
+    x:Class="Prism.Views.AdminConnectionsView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
+    x:DataType="vm:AdminConnectionsViewModel">
+
+    <Grid RowDefinitions="Auto, *" Margin="20">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
+            <TextBlock Text="Active Connections" FontWeight="Bold" FontSize="20"/>
+            <TextBlock Text="Live active client connections and tunnel sessions attached to this node" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+        </StackPanel>
+
+        <!-- Connections Table -->
+        <shadui:Card Grid.Row="1" Padding="12">
+            <DataGrid
+                ItemsSource="{Binding Connections}"
+                AutoGenerateColumns="False"
+                IsReadOnly="True"
+                GridLinesVisibility="Horizontal"
+                BorderThickness="0"
+                Background="Transparent">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Session ID" Binding="{Binding Id}" Width="120"/>
+                    <DataGridTextColumn Header="Peer Address" Binding="{Binding PeerAddr}" Width="*"/>
+                    <DataGridTextColumn Header="Protocol" Binding="{Binding Proto}" Width="90"/>
+                    <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="100"/>
+                    <DataGridTextColumn Header="Raw Traffic" Binding="{Binding RawBytes}" Width="110"/>
+                    <DataGridTextColumn Header="Wire Traffic" Binding="{Binding WireBytes}" Width="110"/>
+                    <DataGridTemplateColumn Header="Action" Width="100">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate x:DataType="vm:ConnectionItem">
+                                <Button
+                                    Classes="Outline"
+                                    Command="{Binding ((vm:AdminConnectionsViewModel)DataContext).DisconnectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Content="Disconnect"
+                                    Height="24"
+                                    FontSize="10"
+                                    Padding="6,0"
+                                    Foreground="#ef4444"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </shadui:Card>
+    </Grid>
+</UserControl>

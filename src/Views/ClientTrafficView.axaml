@@ -1,0 +1,150 @@
+<UserControl
+    x:Class="Prism.Views.ClientTrafficView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.Avalonia;assembly=LiveChartsCore.SkiaSharpView.Avalonia"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    x:DataType="vm:ClientTrafficViewModel"
+    mc:Ignorable="d">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="960" Spacing="14" Margin="16">
+
+            <!-- Page Header -->
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDownUp}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
+                        <TextBlock Text="{Binding [client_traffic_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding [client_traffic_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </StackPanel>
+
+                <!-- Actions: Session/Lifetime toggle & Reset -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="Outline" Command="{Binding SetStatsModeCommand}" CommandParameter="session" Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
+                    <Button Classes="Outline" Command="{Binding SetStatsModeCommand}" CommandParameter="lifetime" Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
+                    <Button Classes="Outline" Command="{Binding ResetStatsCommand}" Height="26" Padding="6,0">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- 4 High-Level Metric Tiles -->
+            <Grid ColumnDefinitions="*, *, *, *">
+                <shadui:Card Grid.Column="0" Margin="0,0,4,0" Padding="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding [client_uptime], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding UptimeText}" FontWeight="Bold" FontSize="15"/>
+                    </StackPanel>
+                </shadui:Card>
+                <shadui:Card Grid.Column="1" Margin="4,0,4,0" Padding="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding RawBytesText}" FontWeight="Bold" FontSize="15"/>
+                    </StackPanel>
+                </shadui:Card>
+                <shadui:Card Grid.Column="2" Margin="4,0,4,0" Padding="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding WireBytesText}" FontWeight="Bold" FontSize="15"/>
+                    </StackPanel>
+                </shadui:Card>
+                <shadui:Card Grid.Column="3" Margin="4,0,0,0" Padding="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="#10b981"/>
+                        <TextBlock Text="{Binding SavedRatioText}" FontWeight="Bold" FontSize="15" Foreground="#10b981"/>
+                    </StackPanel>
+                </shadui:Card>
+            </Grid>
+
+            <!-- LiveCharts Real-Time Throughput Graph -->
+            <shadui:Card Padding="14">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*, Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="14" Height="14" Foreground="#10b981"/>
+                            <TextBlock Text="{Binding [traffic_throughput], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="12"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding CurrentThroughputText}" Foreground="#10b981" FontWeight="Bold" FontSize="12"/>
+                    </Grid>
+                    <lvc:CartesianChart
+                        Height="140"
+                        Series="{Binding Series}"
+                        TooltipPosition="Hidden" />
+                </StackPanel>
+            </shadui:Card>
+
+            <!-- Detailed Optimizer Quantiles -->
+            <shadui:Card Padding="14">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+
+                    <Grid ColumnDefinitions="*, *" Margin="0,4,0,0">
+                        <!-- Uplink Direction -->
+                        <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,6,0">
+                            <StackPanel Spacing="6">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Text="↑ Uplink" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding UplinkRawWireText}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </Grid>
+                                <Grid ColumnDefinitions="*, *, *, *" Margin="0,4,0,0">
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="P50" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding UplinkP50}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="P90" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding UplinkP90}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="P99" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding UplinkP99}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3">
+                                        <TextBlock Text="MAX" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding UplinkMax}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Downlink Direction -->
+                        <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="6,0,0,0">
+                            <StackPanel Spacing="6">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Text="↓ Downlink" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding DownlinkRawWireText}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </Grid>
+                                <Grid ColumnDefinitions="*, *, *, *" Margin="0,4,0,0">
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="P50" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding DownlinkP50}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="P90" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding DownlinkP90}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="P99" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding DownlinkP99}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3">
+                                        <TextBlock Text="MAX" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding DownlinkMax}" FontWeight="SemiBold" FontSize="11"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </shadui:Card>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

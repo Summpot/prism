@@ -15,8 +15,6 @@ pub mod storage;
 pub mod telemetry;
 pub mod tunnel;
 
-#[cfg(feature = "desktop")]
-pub mod desktop;
 
 pub async fn run(
     config_path: Option<std::path::PathBuf>,

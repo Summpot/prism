@@ -12,32 +12,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 name = "prism"
 path = "src/main.rs"
 
-[features]
-default = []
-desktop = [
-	"dep:tauri",
-	"dep:tauri-build",
-	"dep:auto-launch",
-	"dep:interprocess",
-	"dep:sysuri",
-	"dep:minisign-verify",
-	"dep:self-replace",
-]
-# Production desktop builds must enable this so the webview loads
-# embedded frontendDist instead of build.devUrl (http://localhost:3000).
-custom-protocol = ["desktop", "tauri/custom-protocol"]
-
 [build-dependencies]
-tauri-build = { version = "2", default-features = false, optional = true, features = [] }
 uniffi = { version = "0.32", features = ["build", "bindgen"] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"], optional = true }
-auto-launch = { version = "0.5", optional = true }
-interprocess = { version = "2.2", features = ["tokio"], optional = true }
-sysuri = { version = "0.1", optional = true }
-minisign-verify = { version = "0.2", optional = true }
-self-replace = { version = "1.5", optional = true }
 uniffi = { version = "0.32", features = ["tokio"] }
 anyhow = "1.0"
 arc-swap = "1.9"

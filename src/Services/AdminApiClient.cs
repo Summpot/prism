@@ -66,6 +66,18 @@ public class AdminReloadResponse
     [JsonPropertyName("seq")] public long Seq { get; set; }
 }
 
+public class AdminSessionResponse
+{
+    [JsonPropertyName("authenticated")] public bool Authenticated { get; set; }
+    [JsonPropertyName("user_id")] public string? UserId { get; set; }
+    [JsonPropertyName("username")] public string? Username { get; set; }
+    [JsonPropertyName("display_name")] public string? DisplayName { get; set; }
+    [JsonPropertyName("avatar_url")] public string? AvatarUrl { get; set; }
+    [JsonPropertyName("role")] public string? Role { get; set; }
+    [JsonPropertyName("service_rules")] public List<string>? ServiceRules { get; set; }
+    [JsonPropertyName("is_admin")] public bool IsAdmin { get; set; }
+}
+
 public class AdminApiClient
 {
     private static readonly Lazy<AdminApiClient> _instance = new(() => new AdminApiClient());
@@ -131,6 +143,11 @@ public class AdminApiClient
     public async Task<AdminReloadResponse> TriggerReloadAsync()
     {
         return await InvokeControlRpcAsync("reload", null, AdminJsonContext.Default.AdminReloadResponse);
+    }
+
+    public async Task<AdminSessionResponse> GetSessionAsync()
+    {
+        return await InvokeControlRpcAsync("auth.session", null, AdminJsonContext.Default.AdminSessionResponse);
     }
 
     public async Task CloseConnectionAsync(string id)

@@ -45,9 +45,6 @@
         <DataTemplate DataType="vm:SettingsViewModel">
             <views:SettingsView />
         </DataTemplate>
-        <DataTemplate DataType="vm:LoginViewModel">
-            <views:LoginView />
-        </DataTemplate>
         <DataTemplate DataType="vm:AdminOverviewViewModel">
             <views:AdminOverviewView />
         </DataTemplate>

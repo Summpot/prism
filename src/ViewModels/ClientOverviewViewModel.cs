@@ -31,9 +31,18 @@ public class DiscoveredServiceItem : ObservableObject
 public partial class ClientOverviewViewModel : ViewModelBase
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
-    private readonly PanelSessionService _session = PanelSessionService.Instance;
 
-    public PanelSessionService Session => _session;
+    [ObservableProperty]
+    private bool _isSessionAuthenticated;
+
+    [ObservableProperty]
+    private string _sessionUsername = "";
+
+    [ObservableProperty]
+    private bool _sessionIsAdmin;
+
+    [ObservableProperty]
+    private string _sessionRole = "";
 
     public List<string> SupportedProtocols { get; } = new()
     {
@@ -132,6 +141,12 @@ public partial class ClientOverviewViewModel : ViewModelBase
             ServerAddress = cfg.ActiveConfig.ServerAddr;
             ActiveTransport = (cfg.ActiveConfig.Transport ?? "AUTO").ToUpperInvariant();
 
+            if (!string.IsNullOrWhiteSpace(cfg.ActiveConfig.Username) || !string.IsNullOrWhiteSpace(cfg.ActiveConfig.AuthToken))
+            {
+                IsSessionAuthenticated = true;
+                SessionUsername = string.IsNullOrWhiteSpace(cfg.ActiveConfig.Username) ? "User" : cfg.ActiveConfig.Username;
+            }
+
             _isSwitchingProfile = true;
             AvailableProfiles.Clear();
             var profiles = _client.GetProfiles();
@@ -210,7 +225,43 @@ public partial class ClientOverviewViewModel : ViewModelBase
         var result = PrismLinkService.ParseDeepLink(link);
         if (result.Kind == "auth" && !string.IsNullOrWhiteSpace(result.Token))
         {
-            _session.SignIn(result.Token, result.Username ?? "User", result.Role == "admin");
+            try
+            {
+                var patch = new ClientConfigPatch(
+                    ProfileName: null,
+                    ServerAddr: null,
+                    Transport: null,
+                    AuthToken: result.Token,
+                    ListenAddr: null,
+                    FakeLanBroadcast: null,
+                    AutoConnectPanel: null,
+                    AutoConnect: null,
+                    ManagementUrl: null,
+                    TokenId: null,
+                    TokenType: null,
+                    UserId: null,
+                    Username: result.Username,
+                    ExpiresAt: null,
+                    AutoCheckUpdate: null,
+                    UpdateChannel: null,
+                    Autostart: null,
+                    SilentAutostart: null,
+                    OptimizerEnabled: null,
+                    OptimizerZstdLevel: null,
+                    OptimizerAdaptiveFlush: null,
+                    OptimizerFlushIntervalMs: null,
+                    OptimizerBufferThreshold: null
+                );
+                _client.SaveConfig(new SaveConfigRequest(
+                    ActiveProfileId: null,
+                    ActiveConfig: patch
+                ));
+            }
+            catch { }
+
+            IsSessionAuthenticated = true;
+            SessionUsername = result.Username ?? "User";
+            SessionIsAdmin = string.Equals(result.Role, "admin", StringComparison.OrdinalIgnoreCase);
             ShowOAuthWaiting = false;
             ShowOAuthExchanging = false;
             ManualCallbackInput = "";
@@ -336,7 +387,43 @@ public partial class ClientOverviewViewModel : ViewModelBase
                     }
                 }
 
-                _session.SignIn(token, username, isAdmin);
+                try
+                {
+                    var patch = new ClientConfigPatch(
+                        ProfileName: null,
+                        ServerAddr: null,
+                        Transport: null,
+                        AuthToken: token,
+                        ListenAddr: null,
+                        FakeLanBroadcast: null,
+                        AutoConnectPanel: null,
+                        AutoConnect: null,
+                        ManagementUrl: null,
+                        TokenId: null,
+                        TokenType: null,
+                        UserId: null,
+                        Username: username,
+                        ExpiresAt: null,
+                        AutoCheckUpdate: null,
+                        UpdateChannel: null,
+                        Autostart: null,
+                        SilentAutostart: null,
+                        OptimizerEnabled: null,
+                        OptimizerZstdLevel: null,
+                        OptimizerAdaptiveFlush: null,
+                        OptimizerFlushIntervalMs: null,
+                        OptimizerBufferThreshold: null
+                    );
+                    _client.SaveConfig(new SaveConfigRequest(
+                        ActiveProfileId: null,
+                        ActiveConfig: patch
+                    ));
+                }
+                catch { }
+
+                IsSessionAuthenticated = true;
+                SessionUsername = username;
+                SessionIsAdmin = isAdmin;
                 ShowOAuthWaiting = false;
                 ManualCallbackInput = "";
             }
@@ -417,6 +504,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
             });
             idx++;
         }
+
+        if (status.Running)
+        {
+            _ = RefreshControlSessionAsync();
+        }
     }
 
     private static string GetLoopbackTarget(int idx, string listenAddr)
@@ -487,10 +579,72 @@ public partial class ClientOverviewViewModel : ViewModelBase
         _client.ResetStats();
     }
 
-    [RelayCommand]
-    public void SignOut()
+    private async Task RefreshControlSessionAsync()
     {
-        _session.SignOut();
+        try
+        {
+            var session = await AdminApiClient.Instance.GetSessionAsync();
+            if (session.Authenticated)
+            {
+                IsSessionAuthenticated = true;
+                SessionUsername = session.Username ?? session.DisplayName ?? "User";
+                SessionIsAdmin = session.IsAdmin;
+                SessionRole = session.Role ?? "";
+            }
+        }
+        catch
+        {
+            // Control RPC is only accessible once tunnel is ready
+        }
+    }
+
+    [RelayCommand]
+    public async Task SignOutAsync()
+    {
+        try
+        {
+            var patch = new ClientConfigPatch(
+                ProfileName: null,
+                ServerAddr: null,
+                Transport: null,
+                AuthToken: "",
+                ListenAddr: null,
+                FakeLanBroadcast: null,
+                AutoConnectPanel: null,
+                AutoConnect: null,
+                ManagementUrl: null,
+                TokenId: null,
+                TokenType: null,
+                UserId: null,
+                Username: "",
+                ExpiresAt: null,
+                AutoCheckUpdate: null,
+                UpdateChannel: null,
+                Autostart: null,
+                SilentAutostart: null,
+                OptimizerEnabled: null,
+                OptimizerZstdLevel: null,
+                OptimizerAdaptiveFlush: null,
+                OptimizerFlushIntervalMs: null,
+                OptimizerBufferThreshold: null
+            );
+            _client.SaveConfig(new SaveConfigRequest(
+                ActiveProfileId: null,
+                ActiveConfig: patch
+            ));
+            IsSessionAuthenticated = false;
+            SessionUsername = "";
+            SessionIsAdmin = false;
+            SessionRole = "";
+            if (IsRunning)
+            {
+                await _client.StopAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
     }
 
     [RelayCommand]

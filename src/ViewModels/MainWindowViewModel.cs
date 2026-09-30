@@ -13,7 +13,6 @@ namespace Prism.ViewModels;
 public partial class MainWindowViewModel : ViewModelBase
 {
     public NavigationService Navigation { get; } = NavigationService.Instance;
-    public PanelSessionService Session { get; } = PanelSessionService.Instance;
     public NativeClientService NativeClient { get; } = NativeClientService.Instance;
 
     public DialogManager DialogManager { get; } = new();
@@ -47,7 +46,6 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ClientMiddlewareViewModel _clientMiddleware;
     private readonly ClientOptimizerViewModel _clientOptimizer;
     private readonly SettingsViewModel _settings;
-    private readonly LoginViewModel _login;
     private readonly AdminOverviewViewModel _adminOverview;
     private readonly AdminConnectionsViewModel _adminConnections;
     private readonly AdminTunnelServicesViewModel _adminServices;
@@ -64,7 +62,6 @@ public partial class MainWindowViewModel : ViewModelBase
         _clientMiddleware = new ClientMiddlewareViewModel();
         _clientOptimizer = new ClientOptimizerViewModel();
         _settings = new SettingsViewModel();
-        _login = new LoginViewModel();
         _adminOverview = new AdminOverviewViewModel();
         _adminConnections = new AdminConnectionsViewModel();
         _adminServices = new AdminTunnelServicesViewModel();
@@ -86,7 +83,6 @@ public partial class MainWindowViewModel : ViewModelBase
             "client.middleware" or "client.middlewares" => _clientMiddleware,
             "client.optimizer" => _clientOptimizer,
             "settings" or "client.settings" => _settings,
-            "login" => _login,
             "admin.overview" => _adminOverview,
             "admin.connections" => _adminConnections,
             "admin.services" => _adminServices,

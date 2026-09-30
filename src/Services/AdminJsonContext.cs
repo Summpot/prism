@@ -20,6 +20,7 @@ public class OAuthExchangeRequest
 [JsonSerializable(typeof(List<AdminServiceSnapshot>))]
 [JsonSerializable(typeof(AdminUserRecord))]
 [JsonSerializable(typeof(List<AdminUserRecord>))]
+[JsonSerializable(typeof(AdminSessionResponse))]
 public partial class AdminJsonContext : JsonSerializerContext
 {
 }

@@ -46,7 +46,7 @@
                 <StackPanel Spacing="10">
                     <!-- Branch A: Authenticated Card -->
                     <Grid
-                        IsVisible="{Binding Session.IsAuthenticated}"
+                        IsVisible="{Binding IsSessionAuthenticated}"
                         ColumnDefinitions="Auto, *, Auto">
                         <Border
                             Grid.Column="0"
@@ -55,17 +55,17 @@
                             CornerRadius="18"
                             Background="{DynamicResource PrimaryColor}"
                             Margin="0,0,12,0">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="18" Height="18" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="18" Height="18" Foreground="{DynamicResource PrimaryForegroundColor}"/>
                         </Border>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <TextBlock
-                                    Text="{Binding Session.Username}"
+                                    Text="{Binding SessionUsername}"
                                     FontWeight="Bold"
                                     FontSize="13" />
                                 <shadui:Badge
                                     Content="{Binding [client_admin], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                    IsVisible="{Binding Session.IsAdmin}"
+                                    IsVisible="{Binding SessionIsAdmin}"
                                     Height="18"
                                     Padding="6,0"
                                     FontSize="10" />
@@ -85,7 +85,7 @@
                     </Grid>
 
                     <!-- Branch B: Anonymous / Connect Input -->
-                    <StackPanel IsVisible="{Binding Session.IsAuthenticated, Converter={x:Static common:Converters.BooleanNegation}}" Spacing="8">
+                    <StackPanel IsVisible="{Binding IsSessionAuthenticated, Converter={x:Static common:Converters.BooleanNegation}}" Spacing="8">
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}" />

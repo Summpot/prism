@@ -15,12 +15,8 @@
     <!-- UniFFISharp Settings -->
     <UniFFICargoProject>..\crates\prism\Cargo.toml</UniFFICargoProject>
     <UniFFICargoTargetDir>..\target</UniFFICargoTargetDir>
-    <UniFFICrateName>prism_native</UniFFICrateName>
+    <UniFFICargoProfile>release</UniFFICargoProfile>
     <UniFFINamespace>Prism.Native</UniFFINamespace>
-    <UniFFIAutoBuildCargo>false</UniFFIAutoBuildCargo>
-    <UniFFIRustStaticLibrary Condition="'$(PublishAot)' == 'true'">..\target\release\prism_native.lib</UniFFIRustStaticLibrary>
-    <UniFFIRustStaticLibrary Condition="'$(PublishAot)' != 'true'">none</UniFFIRustStaticLibrary>
-    <UniFFIRustLibrary>..\target\release\prism_native.dll</UniFFIRustLibrary>
 
     <!-- ZeroI18n Settings -->
     <ZeroI18nDefaultLocale>zh-CN</ZeroI18nDefaultLocale>
@@ -28,7 +24,6 @@
     <ZeroI18nNamespace>Prism.I18n</ZeroI18nNamespace>
 
     <!-- NativeAOT Static Linking Settings -->
-    <PublishAot Condition="'$(PublishAot)' == 'true'">true</PublishAot>
     <StripSymbols>true</StripSymbols>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
   </PropertyGroup>

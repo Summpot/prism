@@ -13,7 +13,7 @@ public partial class LoginViewModel : ViewModelBase
     private readonly NativeClientService _client = NativeClientService.Instance;
 
     [ObservableProperty]
-    private string _baseUrl = "http://127.0.0.1:8080";
+    private string _baseUrl = "";
 
     [ObservableProperty]
     private string _staticToken = "";

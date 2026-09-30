@@ -233,13 +233,14 @@ public partial class ClientOverviewViewModel : ViewModelBase
         try
         {
             ErrorMessage = null;
-            string host = "127.0.0.1";
-            if (!string.IsNullOrWhiteSpace(ServerAddress))
+            string? baseUrl = ResolveManagementBaseUrl();
+            if (string.IsNullOrWhiteSpace(baseUrl))
             {
-                host = ServerAddress.Contains(':') ? ServerAddress.Split(':')[0] : ServerAddress;
+                ErrorMessage = "GitHub OAuth requires a Management URL. Please configure it in Settings or import a profile with Management URL.";
+                return;
             }
 
-            string authUrl = $"http://{host}:8080/auth/github/login";
+            string authUrl = $"{baseUrl}/auth/github/login";
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = authUrl,
@@ -252,6 +253,20 @@ public partial class ClientOverviewViewModel : ViewModelBase
         {
             ErrorMessage = $"Failed to open browser: {ex.Message}";
         }
+    }
+
+    private string? ResolveManagementBaseUrl()
+    {
+        try
+        {
+            var cfg = _client.GetConfig();
+            if (!string.IsNullOrWhiteSpace(cfg?.ActiveConfig?.ManagementUrl))
+            {
+                return cfg.ActiveConfig.ManagementUrl.Trim().TrimEnd('/');
+            }
+        }
+        catch { }
+        return null;
     }
 
     [RelayCommand]
@@ -288,13 +303,14 @@ public partial class ClientOverviewViewModel : ViewModelBase
         ShowOAuthExchanging = true;
         try
         {
-            string host = "127.0.0.1";
-            if (!string.IsNullOrWhiteSpace(ServerAddress))
+            string? baseUrl = ResolveManagementBaseUrl();
+            if (string.IsNullOrWhiteSpace(baseUrl))
             {
-                host = ServerAddress.Contains(':') ? ServerAddress.Split(':')[0] : ServerAddress;
+                ErrorMessage = "Management URL is not configured. Cannot exchange OAuth token.";
+                return;
             }
 
-            string exchangeUrl = $"http://{host}:8080/auth/github/exchange";
+            string exchangeUrl = $"{baseUrl}/auth/github/exchange";
             var payload = new OAuthExchangeRequest { Code = code, State = state };
             var json = System.Text.Json.JsonSerializer.Serialize(payload, AdminJsonContext.Default.OAuthExchangeRequest);
             var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");

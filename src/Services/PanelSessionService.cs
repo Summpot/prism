@@ -10,7 +10,7 @@ public partial class PanelSessionService : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsAuthenticated))]
-    private string _baseUrl = "http://127.0.0.1:8080";
+    private string _baseUrl = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsAuthenticated))]

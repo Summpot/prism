@@ -14,7 +14,7 @@ public class ParsedPrismLink
     public string AuthToken { get; set; } = "";
     public string ListenAddr { get; set; } = "127.0.0.1:25565";
     public bool FakeLanBroadcast { get; set; } = true;
-    public string ManagementUrl { get; set; } = "";
+    public string? ManagementUrl { get; set; }
 }
 
 public static class PrismLinkService
@@ -91,7 +91,7 @@ public static class PrismLinkService
             var fakeLanStr = query["fake_lan"];
             bool fakeLan = fakeLanStr != "0" && !string.Equals(fakeLanStr, "false", StringComparison.OrdinalIgnoreCase);
 
-            string hostOnly = hostAndPort.Contains(':') ? hostAndPort.Split(':')[0] : hostAndPort;
+            var mgmt = query["management_url"] ?? query["mgmt"];
 
             return new ParsedPrismLink
             {
@@ -101,7 +101,7 @@ public static class PrismLinkService
                 AuthToken = token,
                 ListenAddr = listen,
                 FakeLanBroadcast = fakeLan,
-                ManagementUrl = $"http://{hostOnly}:8080"
+                ManagementUrl = !string.IsNullOrWhiteSpace(mgmt) ? mgmt : null
             };
         }
 
@@ -130,7 +130,6 @@ public static class PrismLinkService
         // 3. raw host:port or host
         if (!trimmed.Contains(' '))
         {
-            string hostOnly = trimmed.Contains(':') ? trimmed.Split(':')[0] : trimmed;
             return new ParsedPrismLink
             {
                 Name = trimmed,
@@ -138,7 +137,7 @@ public static class PrismLinkService
                 Transport = "auto",
                 ListenAddr = "127.0.0.1:25565",
                 FakeLanBroadcast = true,
-                ManagementUrl = $"http://{hostOnly}:8080"
+                ManagementUrl = null
             };
         }
 

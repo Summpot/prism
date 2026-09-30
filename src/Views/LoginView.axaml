@@ -24,7 +24,7 @@
                 <!-- Base URL -->
                 <StackPanel Spacing="4">
                     <TextBlock Text="Server Base URL" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    <TextBox Text="{Binding BaseUrl, Mode=TwoWay}" Height="34" FontSize="12"/>
+                    <TextBox Text="{Binding BaseUrl, Mode=TwoWay}" PlaceholderText="https://prism.example.com" Height="34" FontSize="12"/>
                 </StackPanel>
 
                 <!-- Token -->

@@ -46,9 +46,15 @@
                     <!-- Header -->
                     <Grid ColumnDefinitions="*, Auto">
                         <StackPanel Grid.Column="0" Spacing="2">
-                            <TextBlock Text="{Binding SelectedMiddleware.Name, FallbackValue='Select a middleware'}" FontWeight="Bold" FontSize="16"/>
-                            <TextBlock Text="Configure parameters and behavior" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding SelectedMiddleware.Name, FallbackValue='Select a middleware'}" FontWeight="Bold" FontSize="16"/>
+                                <shadui:Badge Content="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
+                                              Background="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"
+                                              Foreground="White" Height="20" Padding="6,0" FontSize="10"/>
+                            </StackPanel>
+                            <TextBlock Text="Configure parameters, multi-lane thresholds, and packet pacing" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
                     </Grid>
 
                     <Separator Background="{DynamicResource BorderColor}" Height="1"/>
@@ -72,10 +78,13 @@
                                         FontSize="11"
                                         Foreground="{DynamicResource MutedForegroundColor}"
                                         TextWrapping="Wrap"/>
-                                    <TextBox
-                                        Text="{Binding Value, Mode=TwoWay}"
-                                        Height="32"
-                                        FontSize="12"/>
+                                    
+                                    <!-- Polymorphic Editors -->
+                                    <Grid>
+                                        <ToggleSwitch IsVisible="{Binding IsBool}" IsChecked="{Binding BoolValue, Mode=TwoWay}"/>
+                                        <NumericUpDown IsVisible="{Binding IsNumber}" Value="{Binding NumberValue, Mode=TwoWay}" Height="32" FontSize="12"/>
+                                        <TextBox IsVisible="{Binding IsString}" Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12"/>
+                                    </Grid>
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

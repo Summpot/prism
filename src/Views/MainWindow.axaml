@@ -67,8 +67,10 @@
             <!-- Language Switcher Dropdown -->
             <ComboBox
                 ItemsSource="{x:Static vm:MainWindowViewModel.AvailableLocales}"
-                SelectedItem="{Binding CurrentLocale, Mode=TwoWay}"
-                Width="95"
+                SelectedValue="{Binding CurrentLocale, Mode=TwoWay}"
+                SelectedValueBinding="{Binding Key, x:DataType=common:LocaleOption}"
+                DisplayMemberBinding="{Binding Value, x:DataType=common:LocaleOption}"
+                Width="105"
                 Height="28"
                 FontSize="11"
                 Padding="6,2"/>

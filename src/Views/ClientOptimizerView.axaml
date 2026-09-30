@@ -20,7 +20,9 @@
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
                         <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
-                        <shadui:Badge Content="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanNegation}}" Height="20" Padding="6,0" FontSize="10"/>
+                        <shadui:Badge Content="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
+                                      Background="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"
+                                      Foreground="White" Height="20" Padding="6,0" FontSize="10"/>
                     </StackPanel>
                     <TextBlock Text="{Binding [optimizer_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </StackPanel>
@@ -31,6 +33,42 @@
                     <TextBlock IsVisible="{Binding SavedNotice}" Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="#10b981" FontSize="11" VerticalAlignment="Center"/>
                 </StackPanel>
             </Grid>
+
+            <!-- Card 0: Quick Presets -->
+            <shadui:Card Padding="14">
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="加速策略预设 (Presets)" FontWeight="Bold" FontSize="13"/>
+                        <TextBlock Text="快速应用经过针对性测试的网络优化配置组合" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="gaming" Height="28" FontSize="11" Padding="8,0">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="12" Height="12"/>
+                                <TextBlock Text="Gaming (5ms)"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="low_latency" Height="28" FontSize="11" Padding="8,0">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="12" Height="12"/>
+                                <TextBlock Text="Low Latency (10ms)"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="balanced" Height="28" FontSize="11" Padding="8,0">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12"/>
+                                <TextBlock Text="Balanced (20ms)"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="max_compression" Height="28" FontSize="11" Padding="8,0">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="12" Height="12"/>
+                                <TextBlock Text="Max Save (50ms)"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </shadui:Card>
 
             <!-- Card 1: Master Switch -->
             <shadui:Card Padding="14">
@@ -90,7 +128,28 @@
                         </Grid>
                         <Slider Minimum="2" Maximum="60" Value="{Binding OptimizerFlushIntervalMs, Mode=TwoWay}"/>
                     </StackPanel>
+
+                    <!-- Buffer Threshold -->
+                    <StackPanel Spacing="4">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding [optimizer_buffer_threshold_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                            <TextBlock Grid.Column="1" Text="{Binding OptimizerBufferThreshold, StringFormat='{}{0} Bytes'}" FontSize="12" FontWeight="SemiBold"/>
+                        </Grid>
+                        <Slider Minimum="4096" Maximum="262144" SmallChange="4096" LargeChange="16384" Value="{Binding OptimizerBufferThreshold, Mode=TwoWay}"/>
+                    </StackPanel>
                 </StackPanel>
+            </shadui:Card>
+
+            <!-- Card 4: Protocol Middleware Multi-Lane Integration -->
+            <shadui:Card Padding="14">
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [optimizer_middleware_lanes_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToMiddlewareCommand}" Content="{Binding [optimizer_go_to_middleware], Source={x:Static i18n:LocalizationManager.Instance}}" Height="28" FontSize="11" Padding="10,0" VerticalAlignment="Center"/>
+                </Grid>
             </shadui:Card>
 
         </StackPanel>

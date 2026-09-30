@@ -64,6 +64,29 @@ pub struct ClientRegisteredService {
     pub middleware: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DirectionQuantiles {
+    pub p50_us: u64,
+    pub p90_us: u64,
+    pub p99_us: u64,
+    pub max_us: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DirectionStatsSnapshotFfi {
+    pub raw_bytes: u64,
+    pub wire_bytes: u64,
+    pub saved_bytes: u64,
+    pub saved_ratio: f64,
+    pub batches: u64,
+    pub batching_delay_us: u64,
+    pub compression_time_us: u64,
+    pub decompression_time_us: u64,
+    pub link_rate_bps: f64,
+    pub batching_delay: DirectionQuantiles,
+    pub compression_time: DirectionQuantiles,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ClientOptimizerStats {
     pub raw_bytes: u64,
@@ -81,6 +104,8 @@ pub struct ClientOptimizerStats {
     pub batching_delay_us: u64,
     pub compression_time_us: u64,
     pub decompression_time_us: u64,
+    pub uplink: DirectionStatsSnapshotFfi,
+    pub downlink: DirectionStatsSnapshotFfi,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -395,6 +420,52 @@ impl PrismClientSession {
                 batching_delay_us: snap.stats.batching_delay_us,
                 compression_time_us: snap.stats.compression_time_us,
                 decompression_time_us: snap.stats.decompression_time_us,
+                uplink: DirectionStatsSnapshotFfi {
+                    raw_bytes: snap.stats.uplink.raw_bytes,
+                    wire_bytes: snap.stats.uplink.wire_bytes,
+                    saved_bytes: snap.stats.uplink.saved_bytes,
+                    saved_ratio: snap.stats.uplink.saved_ratio,
+                    batches: snap.stats.uplink.batches,
+                    batching_delay_us: snap.stats.uplink.batching_delay_us,
+                    compression_time_us: snap.stats.uplink.compression_time_us,
+                    decompression_time_us: snap.stats.uplink.decompression_time_us,
+                    link_rate_bps: snap.stats.uplink.link_rate_bps,
+                    batching_delay: DirectionQuantiles {
+                        p50_us: snap.stats.uplink.batching_delay.p50_us,
+                        p90_us: snap.stats.uplink.batching_delay.p90_us,
+                        p99_us: snap.stats.uplink.batching_delay.p99_us,
+                        max_us: snap.stats.uplink.batching_delay.max_us,
+                    },
+                    compression_time: DirectionQuantiles {
+                        p50_us: snap.stats.uplink.compression_time.p50_us,
+                        p90_us: snap.stats.uplink.compression_time.p90_us,
+                        p99_us: snap.stats.uplink.compression_time.p99_us,
+                        max_us: snap.stats.uplink.compression_time.max_us,
+                    },
+                },
+                downlink: DirectionStatsSnapshotFfi {
+                    raw_bytes: snap.stats.downlink.raw_bytes,
+                    wire_bytes: snap.stats.downlink.wire_bytes,
+                    saved_bytes: snap.stats.downlink.saved_bytes,
+                    saved_ratio: snap.stats.downlink.saved_ratio,
+                    batches: snap.stats.downlink.batches,
+                    batching_delay_us: snap.stats.downlink.batching_delay_us,
+                    compression_time_us: snap.stats.downlink.compression_time_us,
+                    decompression_time_us: snap.stats.downlink.decompression_time_us,
+                    link_rate_bps: snap.stats.downlink.link_rate_bps,
+                    batching_delay: DirectionQuantiles {
+                        p50_us: snap.stats.downlink.batching_delay.p50_us,
+                        p90_us: snap.stats.downlink.batching_delay.p90_us,
+                        p99_us: snap.stats.downlink.batching_delay.p99_us,
+                        max_us: snap.stats.downlink.batching_delay.max_us,
+                    },
+                    compression_time: DirectionQuantiles {
+                        p50_us: snap.stats.downlink.compression_time.p50_us,
+                        p90_us: snap.stats.downlink.compression_time.p90_us,
+                        p99_us: snap.stats.downlink.compression_time.p99_us,
+                        max_us: snap.stats.downlink.compression_time.max_us,
+                    },
+                },
             },
             active_profile_id,
             cumulative_stats,

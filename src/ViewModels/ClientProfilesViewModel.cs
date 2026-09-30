@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
+using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Prism.Native;
@@ -105,6 +107,18 @@ public partial class ClientProfilesViewModel : ViewModelBase
     [ObservableProperty]
     private string? _statusMessage;
 
+    [ObservableProperty]
+    private string _importInputText = "";
+
+    [ObservableProperty]
+    private bool _showImportBox;
+
+    [ObservableProperty]
+    private int? _pingMs;
+
+    [ObservableProperty]
+    private bool _isPinging;
+
     public ClientProfilesViewModel()
     {
         LoadProfiles();
@@ -146,6 +160,101 @@ public partial class ClientProfilesViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    public void ToggleImportBox()
+    {
+        ShowImportBox = !ShowImportBox;
+    }
+
+    [RelayCommand]
+    public void ImportLink()
+    {
+        if (string.IsNullOrWhiteSpace(ImportInputText)) return;
+
+        var parsed = PrismLinkService.Parse(ImportInputText);
+        if (parsed == null || string.IsNullOrWhiteSpace(parsed.ServerAddr))
+        {
+            StatusMessage = "Invalid prism:// link or address.";
+            return;
+        }
+
+        var newProf = new EditableProfile
+        {
+            Id = $"profile-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+            Name = string.IsNullOrWhiteSpace(parsed.Name) ? parsed.ServerAddr : parsed.Name,
+            ServerAddr = parsed.ServerAddr,
+            Transport = parsed.Transport,
+            AuthToken = parsed.AuthToken,
+            ListenAddr = parsed.ListenAddr,
+            FakeLanBroadcast = parsed.FakeLanBroadcast,
+            ManagementUrl = parsed.ManagementUrl
+        };
+
+        Profiles.Add(newProf);
+        SelectedProfile = newProf;
+        ImportInputText = "";
+        ShowImportBox = false;
+        SaveSelectedProfile();
+        StatusMessage = $"Imported profile '{newProf.Name}'.";
+    }
+
+    [RelayCommand]
+    public async Task ShareLinkAsync()
+    {
+        if (SelectedProfile == null) return;
+        var link = PrismLinkService.Encode(
+            SelectedProfile.Name,
+            SelectedProfile.ServerAddr,
+            SelectedProfile.Transport,
+            SelectedProfile.ListenAddr,
+            SelectedProfile.FakeLanBroadcast,
+            SelectedProfile.AuthToken
+        );
+
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop && desktop.MainWindow?.Clipboard != null)
+        {
+            await desktop.MainWindow.Clipboard.SetTextAsync(link);
+            StatusMessage = "Prism link copied to clipboard!";
+        }
+    }
+
+    [RelayCommand]
+    public async Task PingServerAsync()
+    {
+        if (SelectedProfile == null || string.IsNullOrWhiteSpace(SelectedProfile.ServerAddr)) return;
+        IsPinging = true;
+        PingMs = null;
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string addr = SelectedProfile.ServerAddr.Trim();
+            string host = addr;
+            int port = 7000;
+            if (addr.Contains(':'))
+            {
+                var parts = addr.Split(':');
+                host = parts[0];
+                int.TryParse(parts[1], out port);
+            }
+
+            using var client = new System.Net.Sockets.TcpClient();
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await client.ConnectAsync(host, port, cts.Token);
+            sw.Stop();
+            PingMs = (int)sw.ElapsedMilliseconds;
+            StatusMessage = $"Ping to {host}:{port} succeeded in {PingMs}ms.";
+        }
+        catch (Exception ex)
+        {
+            PingMs = -1;
+            StatusMessage = $"Ping failed: {ex.Message}";
+        }
+        finally
+        {
+            IsPinging = false;
+        }
+    }
+
+    [RelayCommand]
     public void NewProfile()
     {
         var p = new EditableProfile
@@ -178,6 +287,41 @@ public partial class ClientProfilesViewModel : ViewModelBase
             )).ToList();
 
             _client.SaveProfiles(list);
+
+            if (SelectedProfile.IsActive)
+            {
+                var patch = new ClientConfigPatch(
+                    ProfileName: SelectedProfile.Name,
+                    ServerAddr: SelectedProfile.ServerAddr,
+                    Transport: SelectedProfile.Transport,
+                    AuthToken: SelectedProfile.AuthToken,
+                    ListenAddr: SelectedProfile.ListenAddr,
+                    FakeLanBroadcast: SelectedProfile.FakeLanBroadcast,
+                    AutoConnectPanel: SelectedProfile.AutoConnectPanel,
+                    AutoConnect: SelectedProfile.AutoConnect,
+                    ManagementUrl: string.IsNullOrWhiteSpace(SelectedProfile.ManagementUrl) ? null : SelectedProfile.ManagementUrl,
+                    TokenId: null,
+                    TokenType: null,
+                    UserId: null,
+                    Username: null,
+                    ExpiresAt: null,
+                    AutoCheckUpdate: null,
+                    UpdateChannel: null,
+                    Autostart: null,
+                    SilentAutostart: null,
+                    OptimizerEnabled: null,
+                    OptimizerZstdLevel: null,
+                    OptimizerAdaptiveFlush: null,
+                    OptimizerFlushIntervalMs: null,
+                    OptimizerBufferThreshold: null
+                );
+
+                _client.SaveConfig(new SaveConfigRequest(
+                    ActiveProfileId: SelectedProfile.Id,
+                    ActiveConfig: patch
+                ));
+            }
+
             StatusMessage = "Profile saved successfully.";
         }
         catch (Exception ex)
@@ -191,12 +335,22 @@ public partial class ClientProfilesViewModel : ViewModelBase
     {
         var target = profile ?? SelectedProfile;
         if (target == null) return;
+        bool wasActive = target.IsActive;
+
         Profiles.Remove(target);
         if (SelectedProfile == target)
         {
             SelectedProfile = Profiles.FirstOrDefault();
         }
-        SaveSelectedProfile();
+
+        if (wasActive && SelectedProfile != null)
+        {
+            SetActiveProfile();
+        }
+        else
+        {
+            SaveSelectedProfile();
+        }
     }
 
     [RelayCommand]

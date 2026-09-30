@@ -69,13 +69,13 @@ public partial class SettingsViewModel : ViewModelBase
     public static readonly Common.LocaleOption[] AvailableLanguages =
     [
         new("zh-CN", "简体中文"),
-        new("en-US", "English"),
-        new("ja-JP", "日本語"),
-        new("zh-TW", "繁體中文")
+        new("en", "English")
     ];
 
     public static readonly string[] AvailableThemes = ["Default", "Light", "Dark"];
     public static readonly string[] AvailableUpdateChannels = ["stable", "beta"];
+
+    private bool _isLoading;
 
     public SettingsViewModel()
     {
@@ -87,12 +87,64 @@ public partial class SettingsViewModel : ViewModelBase
     {
         try
         {
+            _isLoading = true;
             var cfg = _client.GetConfig();
             AutoConnect = cfg.ActiveConfig.AutoConnect;
             AutoConnectPanel = cfg.ActiveConfig.AutoConnectPanel;
             FakeLanBroadcast = cfg.ActiveConfig.FakeLanBroadcast;
             DeviceId = !string.IsNullOrWhiteSpace(cfg.ActiveConfig.TokenId) ? cfg.ActiveConfig.TokenId : Guid.NewGuid().ToString("N")[..16];
             ManagementUrl = cfg.ActiveConfig.ManagementUrl ?? "";
+            UpdateChannel = string.IsNullOrWhiteSpace(cfg.ActiveConfig.UpdateChannel) ? "stable" : cfg.ActiveConfig.UpdateChannel;
+            AutoCheckUpdate = cfg.ActiveConfig.AutoCheckUpdate;
+            Autostart = DesktopService.IsAutostartEnabled() || cfg.ActiveConfig.Autostart;
+            SilentAutostart = cfg.ActiveConfig.SilentAutostart;
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void SaveConfig()
+    {
+        if (_isLoading) return;
+
+        try
+        {
+            var cfg = _client.GetConfig();
+            var patch = new ClientConfigPatch(
+                ProfileName: null,
+                ServerAddr: null,
+                Transport: null,
+                AuthToken: null,
+                ListenAddr: null,
+                FakeLanBroadcast: FakeLanBroadcast,
+                AutoConnectPanel: AutoConnectPanel,
+                AutoConnect: AutoConnect,
+                ManagementUrl: string.IsNullOrWhiteSpace(ManagementUrl) ? null : ManagementUrl,
+                TokenId: DeviceId,
+                TokenType: null,
+                UserId: null,
+                Username: null,
+                ExpiresAt: null,
+                AutoCheckUpdate: AutoCheckUpdate,
+                UpdateChannel: UpdateChannel,
+                Autostart: Autostart,
+                SilentAutostart: SilentAutostart,
+                OptimizerEnabled: null,
+                OptimizerZstdLevel: null,
+                OptimizerAdaptiveFlush: null,
+                OptimizerFlushIntervalMs: null,
+                OptimizerBufferThreshold: null
+            );
+
+            _client.SaveConfig(new SaveConfigRequest(
+                ActiveProfileId: cfg.ActiveProfileId,
+                ActiveConfig: patch
+            ));
         }
         catch
         {
@@ -116,6 +168,30 @@ public partial class SettingsViewModel : ViewModelBase
             };
         }
     }
+
+    partial void OnAutostartChanged(bool value)
+    {
+        if (_isLoading) return;
+        DesktopService.SetAutostart(value, SilentAutostart);
+        SaveConfig();
+    }
+
+    partial void OnSilentAutostartChanged(bool value)
+    {
+        if (_isLoading) return;
+        if (Autostart)
+        {
+            DesktopService.SetAutostart(true, value);
+        }
+        SaveConfig();
+    }
+
+    partial void OnAutoConnectChanged(bool value) => SaveConfig();
+    partial void OnAutoConnectPanelChanged(bool value) => SaveConfig();
+    partial void OnFakeLanBroadcastChanged(bool value) => SaveConfig();
+    partial void OnUpdateChannelChanged(string value) => SaveConfig();
+    partial void OnAutoCheckUpdateChanged(bool value) => SaveConfig();
+    partial void OnManagementUrlChanged(string value) => SaveConfig();
 
     [RelayCommand]
     public async Task CopyDeviceIdAsync()

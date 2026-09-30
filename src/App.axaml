@@ -7,5 +7,6 @@
     RequestedThemeVariant="Default">
     <Application.Styles>
         <shadui:ShadTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
     </Application.Styles>
 </Application>

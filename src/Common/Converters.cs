@@ -48,6 +48,13 @@ public static class Converters
 
     public static readonly IValueConverter StatusToLabel =
         new FuncValueConverter<bool, string>(running => running ? "RUNNING" : "IDLE");
+
+    public static readonly IValueConverter ActiveStatusToLabel =
+        new FuncValueConverter<bool, string>(active => active ? "ACTIVE" : "DISABLED");
+
+    public static readonly IValueConverter ActiveStatusToBrush =
+        new FuncValueConverter<bool, IBrush>(active =>
+            active ? new SolidColorBrush(Color.Parse("#10b981")) : new SolidColorBrush(Color.Parse("#6b7280")));
 }
 
 public class LocaleOption

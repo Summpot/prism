@@ -37,6 +37,9 @@ public partial class ClientLogsViewModel : ViewModelBase
         OnLogsUpdated(_client.CurrentLogs);
     }
 
+    private string _lastFilter = "";
+    private string _lastSearch = "";
+
     private void OnLogsUpdated(List<ClientLogEntry> logs)
     {
         var filtered = logs.AsEnumerable();
@@ -54,10 +57,26 @@ public partial class ClientLogsViewModel : ViewModelBase
         }
 
         var list = filtered.ToList();
-        FilteredLogs.Clear();
-        foreach (var entry in list)
+
+        bool filterChanged = _lastFilter != FilterLevel || _lastSearch != SearchQuery;
+        _lastFilter = FilterLevel;
+        _lastSearch = SearchQuery;
+
+        if (filterChanged || list.Count < FilteredLogs.Count)
         {
-            FilteredLogs.Add(entry);
+            FilteredLogs.Clear();
+            foreach (var entry in list)
+            {
+                FilteredLogs.Add(entry);
+            }
+        }
+        else if (list.Count > FilteredLogs.Count)
+        {
+            int existing = FilteredLogs.Count;
+            for (int i = existing; i < list.Count; i++)
+            {
+                FilteredLogs.Add(list[i]);
+            }
         }
 
         StatusCountText = $"{FilteredLogs.Count} / {logs.Count}";

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Prism.Common;
 using Prism.Services;
 
 namespace Prism.ViewModels;
@@ -10,6 +12,7 @@ namespace Prism.ViewModels;
 public partial class AdminOverviewViewModel : ViewModelBase
 {
     private readonly PanelSessionService _session = PanelSessionService.Instance;
+    private readonly AdminApiClient _api = AdminApiClient.Instance;
 
     [ObservableProperty]
     private int _connectionCount = 0;
@@ -23,10 +26,63 @@ public partial class AdminOverviewViewModel : ViewModelBase
     [ObservableProperty]
     private string? _reloadMessage;
 
-    [RelayCommand]
-    public void ReloadServer()
+    [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
+    private string? _errorMessage;
+
+    [ObservableProperty]
+    private bool _isHealthy;
+
+    public AdminOverviewViewModel()
     {
-        ReloadMessage = "Server configuration reload signal sent.";
+        _ = LoadDataAsync();
+    }
+
+    [RelayCommand]
+    public async Task LoadDataAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+
+            var healthTask = _api.GetHealthAsync();
+            var connsTask = _api.GetConnectionsAsync();
+            var servicesTask = _api.GetTunnelServicesAsync();
+            var configTask = _api.GetConfigPathAsync();
+
+            await Task.WhenAll(healthTask, connsTask, servicesTask, configTask);
+
+            IsHealthy = (await healthTask).Ok;
+            ConnectionCount = (await connsTask).Count;
+            ServiceCount = (await servicesTask).Count;
+            ConfigPath = (await configTask).Path;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to load admin overview: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task ReloadServerAsync()
+    {
+        try
+        {
+            ReloadMessage = "Sending reload signal...";
+            var res = await _api.TriggerReloadAsync();
+            ReloadMessage = $"Server configuration reloaded (seq {res.Seq}).";
+        }
+        catch (Exception ex)
+        {
+            ReloadMessage = $"Reload failed: {ex.Message}";
+        }
     }
 }
 
@@ -42,18 +98,69 @@ public class ConnectionItem : ObservableObject
 
 public partial class AdminConnectionsViewModel : ViewModelBase
 {
+    private readonly AdminApiClient _api = AdminApiClient.Instance;
+
     public ObservableCollection<ConnectionItem> Connections { get; } = new();
+
+    [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
+    private string? _errorMessage;
 
     public AdminConnectionsViewModel()
     {
-        Connections.Add(new ConnectionItem { Id = "conn-101", PeerAddr = "192.168.1.100:54321", Proto = "KCP", Duration = "12m 40s", RawBytes = "4.2 MB", WireBytes = "1.8 MB" });
-        Connections.Add(new ConnectionItem { Id = "conn-102", PeerAddr = "10.0.0.15:49152", Proto = "QUIC", Duration = "3m 12s", RawBytes = "1.1 MB", WireBytes = "450 KB" });
+        _ = RefreshAsync();
     }
 
     [RelayCommand]
-    public void Disconnect(ConnectionItem item)
+    public async Task RefreshAsync()
     {
-        Connections.Remove(item);
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+            var list = await _api.GetConnectionsAsync();
+            Connections.Clear();
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            foreach (var c in list)
+            {
+                long elapsedSeconds = Math.Max(0, (now - c.StartedAtUnixMs) / 1000);
+                Connections.Add(new ConnectionItem
+                {
+                    Id = c.Id,
+                    PeerAddr = string.IsNullOrWhiteSpace(c.Client) ? c.Host : c.Client,
+                    Proto = string.IsNullOrWhiteSpace(c.Upstream) ? "TCP" : c.Upstream,
+                    Duration = Formatters.FormatUptime((ulong)elapsedSeconds),
+                    RawBytes = Formatters.FormatBytes(c.RawBytes),
+                    WireBytes = Formatters.FormatBytes(c.WireBytes)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to load connections: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task DisconnectAsync(ConnectionItem? item)
+    {
+        if (item == null) return;
+        try
+        {
+            await _api.CloseConnectionAsync(item.Id);
+            Connections.Remove(item);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to close connection {item.Id}: {ex.Message}";
+        }
     }
 }
 
@@ -64,22 +171,62 @@ public class ServiceRowItem : ObservableObject
     public string LocalAddr { get; set; } = "";
     public string RemoteAddr { get; set; } = "";
     public string Masquerade { get; set; } = "";
+    public bool Primary { get; set; }
 }
 
 public partial class AdminTunnelServicesViewModel : ViewModelBase
 {
+    private readonly AdminApiClient _api = AdminApiClient.Instance;
+
     public ObservableCollection<ServiceRowItem> Services { get; } = new();
+
+    [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
+    private string? _errorMessage;
 
     public AdminTunnelServicesViewModel()
     {
-        Services.Add(new ServiceRowItem { Name = "minecraft", Proto = "TCP", LocalAddr = "127.0.0.1:25565", RemoteAddr = ":25565", Masquerade = "mc.example.com" });
-        Services.Add(new ServiceRowItem { Name = "web-panel", Proto = "HTTP", LocalAddr = "127.0.0.1:8080", RemoteAddr = ":8080", Masquerade = "panel.example.com" });
+        _ = RefreshAsync();
     }
 
     [RelayCommand]
-    public void DeleteService(ServiceRowItem item)
+    public async Task RefreshAsync()
     {
-        Services.Remove(item);
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+            var list = await _api.GetTunnelServicesAsync();
+            Services.Clear();
+            foreach (var s in list)
+            {
+                Services.Add(new ServiceRowItem
+                {
+                    Name = s.Service.Name,
+                    Proto = s.Service.Proto,
+                    LocalAddr = s.Service.LocalAddr,
+                    RemoteAddr = s.Service.RemoteAddr,
+                    Masquerade = s.Service.MasqueradeHost,
+                    Primary = s.Primary
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to load services: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
+    public void DeleteService(ServiceRowItem? item)
+    {
+        if (item != null) Services.Remove(item);
     }
 }
 
@@ -93,11 +240,49 @@ public class UserRowItem : ObservableObject
 
 public partial class AdminUsersViewModel : ViewModelBase
 {
+    private readonly AdminApiClient _api = AdminApiClient.Instance;
+
     public ObservableCollection<UserRowItem> Users { get; } = new();
+
+    [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
+    private string? _errorMessage;
 
     public AdminUsersViewModel()
     {
-        Users.Add(new UserRowItem { Username = "admin", Role = "admin", GithubId = "github:12345", CreatedAt = "2026-09-01" });
-        Users.Add(new UserRowItem { Username = "guest_user", Role = "member", GithubId = "github:67890", CreatedAt = "2026-09-15" });
+        _ = RefreshAsync();
+    }
+
+    [RelayCommand]
+    public async Task RefreshAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+            var list = await _api.GetUsersAsync();
+            Users.Clear();
+            foreach (var u in list)
+            {
+                string created = DateTimeOffset.FromUnixTimeMilliseconds(u.CreatedAtUnixMs).ToString("yyyy-MM-dd HH:mm");
+                Users.Add(new UserRowItem
+                {
+                    Username = string.IsNullOrWhiteSpace(u.DisplayName) ? u.Username : $"{u.DisplayName} ({u.Username})",
+                    Role = u.Role,
+                    GithubId = u.Id,
+                    CreatedAt = created
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to load users: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 }

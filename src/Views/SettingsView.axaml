@@ -63,6 +63,26 @@
                         <shadui:Card Padding="16">
                             <StackPanel Spacing="14">
                                 <TextBlock Text="Startup &amp; Behavior" FontWeight="SemiBold" FontSize="13"/>
+
+                                <!-- Autostart -->
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{Binding [client_autostart], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                                        <TextBlock Text="{Binding [client_autostart_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding Autostart, Mode=TwoWay}"/>
+                                </Grid>
+
+                                <!-- Silent Autostart -->
+                                <Grid ColumnDefinitions="*, Auto" IsEnabled="{Binding Autostart}">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{Binding [client_silent_autostart], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                                        <TextBlock Text="{Binding [client_silent_autostart_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding SilentAutostart, Mode=TwoWay}"/>
+                                </Grid>
+
+                                <Separator Background="{DynamicResource BorderColor}" Height="1"/>
                                 
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2">

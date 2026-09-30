@@ -33,8 +33,25 @@ public partial class LoginViewModel : ViewModelBase
             IsConnecting = true;
             ErrorMessage = null;
 
-            // In actual management node, verify token via AdminRequest or health check
-            _session.SetSession(BaseUrl.Trim(), StaticToken.Trim(), true, "admin", "Administrator", "");
+            string normalizedUrl = BaseUrl.Trim().TrimEnd('/');
+            string token = StaticToken.Trim();
+
+            _session.SetSession(normalizedUrl, token, true, "admin", "Administrator", "");
+
+            try
+            {
+                var health = await AdminApiClient.Instance.GetHealthAsync();
+                if (!health.Ok)
+                {
+                    throw new Exception("Server reported unhealthy state.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _session.SignOut();
+                throw new Exception($"Verification failed: {ex.Message}");
+            }
+
             _nav.NavigateTo("admin.overview");
         }
         catch (Exception ex)

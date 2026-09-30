@@ -104,12 +104,21 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [ObservableProperty]
     private string _manualCallbackInput = "";
 
+    public ObservableCollection<Prism.Native.ClientProfile> AvailableProfiles { get; } = new();
+
+    [ObservableProperty]
+    private Prism.Native.ClientProfile? _selectedProfile;
+
+    private static readonly System.Net.Http.HttpClient _httpClient = new();
+    private bool _isSwitchingProfile;
+
     public ObservableCollection<DiscoveredServiceItem> DiscoveredServices { get; } = new();
 
     public ClientOverviewViewModel()
     {
         _client.StatusUpdated += OnStatusUpdated;
         _client.ThroughputSampleAdded += OnThroughputSample;
+        DesktopService.DeepLinkReceived += OnDeepLinkReceived;
 
         RefreshInitial();
     }
@@ -119,12 +128,214 @@ public partial class ClientOverviewViewModel : ViewModelBase
         try
         {
             var cfg = _client.GetConfig();
-            ProfileName = cfg.ActiveProfileId ?? "Default";
+            ProfileName = cfg.ActiveConfig.ProfileName ?? cfg.ActiveProfileId ?? "Default";
             ServerAddress = cfg.ActiveConfig.ServerAddr;
             ActiveTransport = (cfg.ActiveConfig.Transport ?? "AUTO").ToUpperInvariant();
+
+            _isSwitchingProfile = true;
+            AvailableProfiles.Clear();
+            var profiles = _client.GetProfiles();
+            foreach (var p in profiles)
+            {
+                AvailableProfiles.Add(p);
+            }
+            SelectedProfile = AvailableProfiles.FirstOrDefault(p => p.Id == cfg.ActiveProfileId) ?? AvailableProfiles.FirstOrDefault();
+            _isSwitchingProfile = false;
         }
         catch
         {
+            _isSwitchingProfile = false;
+        }
+    }
+
+    partial void OnSelectedProfileChanged(Prism.Native.ClientProfile? value)
+    {
+        if (_isSwitchingProfile || value == null) return;
+
+        try
+        {
+            var patch = new ClientConfigPatch(
+                ProfileName: value.Name,
+                ServerAddr: value.ServerAddr,
+                Transport: value.Transport,
+                AuthToken: value.AuthToken,
+                ListenAddr: value.ListenAddr,
+                FakeLanBroadcast: value.FakeLanBroadcast,
+                AutoConnectPanel: null,
+                AutoConnect: null,
+                ManagementUrl: null,
+                TokenId: null,
+                TokenType: null,
+                UserId: null,
+                Username: null,
+                ExpiresAt: null,
+                AutoCheckUpdate: null,
+                UpdateChannel: null,
+                Autostart: null,
+                SilentAutostart: null,
+                OptimizerEnabled: null,
+                OptimizerZstdLevel: null,
+                OptimizerAdaptiveFlush: null,
+                OptimizerFlushIntervalMs: null,
+                OptimizerBufferThreshold: null
+            );
+
+            _client.SaveConfig(new SaveConfigRequest(
+                ActiveProfileId: value.Id,
+                ActiveConfig: patch
+            ));
+
+            ProfileName = value.Name;
+            ServerAddress = value.ServerAddr;
+            ActiveTransport = (value.Transport ?? "AUTO").ToUpperInvariant();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to switch profile: {ex.Message}";
+        }
+    }
+
+    private void OnDeepLinkReceived(string link)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            await HandleDeepLinkAsync(link);
+        });
+    }
+
+    public async Task HandleDeepLinkAsync(string link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+
+        var result = PrismLinkService.ParseDeepLink(link);
+        if (result.Kind == "auth" && !string.IsNullOrWhiteSpace(result.Token))
+        {
+            _session.SignIn(result.Token, result.Username ?? "User", result.Role == "admin");
+            ShowOAuthWaiting = false;
+            ShowOAuthExchanging = false;
+            ManualCallbackInput = "";
+        }
+        else if (result.Kind == "auth-code" && !string.IsNullOrWhiteSpace(result.Code))
+        {
+            await ExchangeAuthCodeAsync(result.Code, result.State);
+        }
+        else if (result.Kind == "profile" && result.Profile != null)
+        {
+            RemoteLinkInput = result.Profile.ServerAddr;
+            SelectedProtocol = "prism://";
+            await ConnectFromLinkAsync();
+        }
+    }
+
+    [RelayCommand]
+    public void StartGitHubLogin()
+    {
+        try
+        {
+            ErrorMessage = null;
+            string host = "127.0.0.1";
+            if (!string.IsNullOrWhiteSpace(ServerAddress))
+            {
+                host = ServerAddress.Contains(':') ? ServerAddress.Split(':')[0] : ServerAddress;
+            }
+
+            string authUrl = $"http://{host}:8080/auth/github/login";
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = authUrl,
+                UseShellExecute = true
+            });
+
+            ShowOAuthWaiting = true;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to open browser: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    public async Task VerifyManualCallbackAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ManualCallbackInput)) return;
+
+        try
+        {
+            ErrorMessage = null;
+            ShowOAuthExchanging = true;
+            await HandleDeepLinkAsync(ManualCallbackInput.Trim());
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Verification failed: {ex.Message}";
+        }
+        finally
+        {
+            ShowOAuthExchanging = false;
+        }
+    }
+
+    [RelayCommand]
+    public void CancelOAuth()
+    {
+        ShowOAuthWaiting = false;
+        ShowOAuthExchanging = false;
+        ManualCallbackInput = "";
+    }
+
+    private async Task ExchangeAuthCodeAsync(string code, string? state)
+    {
+        ShowOAuthExchanging = true;
+        try
+        {
+            string host = "127.0.0.1";
+            if (!string.IsNullOrWhiteSpace(ServerAddress))
+            {
+                host = ServerAddress.Contains(':') ? ServerAddress.Split(':')[0] : ServerAddress;
+            }
+
+            string exchangeUrl = $"http://{host}:8080/auth/github/exchange";
+            var payload = new OAuthExchangeRequest { Code = code, State = state };
+            var json = System.Text.Json.JsonSerializer.Serialize(payload, AdminJsonContext.Default.OAuthExchangeRequest);
+            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+            var resp = await _httpClient.PostAsync(exchangeUrl, content);
+            if (resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                string token = doc.RootElement.GetProperty("token").GetString() ?? "";
+                string username = "GitHub User";
+                bool isAdmin = false;
+
+                if (doc.RootElement.TryGetProperty("user", out var userElem))
+                {
+                    if (userElem.TryGetProperty("username", out var u) || userElem.TryGetProperty("login", out u))
+                    {
+                        username = u.GetString() ?? username;
+                    }
+                    if (userElem.TryGetProperty("role", out var r))
+                    {
+                        isAdmin = string.Equals(r.GetString(), "admin", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+
+                _session.SignIn(token, username, isAdmin);
+                ShowOAuthWaiting = false;
+                ManualCallbackInput = "";
+            }
+            else
+            {
+                ErrorMessage = $"OAuth exchange failed with HTTP {resp.StatusCode}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"OAuth exchange failed: {ex.Message}";
+        }
+        finally
+        {
+            ShowOAuthExchanging = false;
         }
     }
 
@@ -172,8 +383,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
             }
         }
 
-        UplinkStatsText = $"{Formatters.FormatBytes(status.Stats.WireBytes)} ({Formatters.FormatPercentage(status.Stats.SavedRatio)})";
-        DownlinkStatsText = status.Stats.LinkRateMeasured ? Formatters.FormatBitRate(status.Stats.LinkRateBps) : "--";
+        UplinkStatsText = $"{Formatters.FormatBytes(status.Stats.Uplink.WireBytes)} ({Formatters.FormatPercentage(status.Stats.Uplink.SavedRatio)})";
+        DownlinkStatsText = $"{Formatters.FormatBytes(status.Stats.Downlink.WireBytes)} ({Formatters.FormatPercentage(status.Stats.Downlink.SavedRatio)})";
 
         // Update discovered services
         DiscoveredServices.Clear();

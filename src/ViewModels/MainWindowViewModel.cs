@@ -25,7 +25,16 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private string _currentLocale = "zh-CN";
 
-    public static readonly string[] AvailableLocales = ["zh-CN", "en-US", "ja-JP", "zh-TW"];
+    public static readonly Common.LocaleOption[] AvailableLocales =
+    [
+        new("zh-CN", "简体中文"),
+        new("en", "English")
+    ];
+
+    partial void OnCurrentLocaleChanged(string value)
+    {
+        LocalizationManager.Instance.CurrentLocale = value;
+    }
 
     [ObservableProperty]
     private ViewModelBase _currentPageViewModel;

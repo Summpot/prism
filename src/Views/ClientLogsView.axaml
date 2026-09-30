@@ -39,6 +39,9 @@
                     Height="26"
                     FontSize="11" />
 
+                <!-- AutoScroll Toggle -->
+                <CheckBox IsChecked="{Binding AutoScroll, Mode=TwoWay}" Content="Auto-scroll" FontSize="11" Margin="4,0"/>
+
                 <!-- Clear Logs -->
                 <Button Classes="Outline" Command="{Binding ClearLogsCommand}" Content="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
 
@@ -48,55 +51,57 @@
         </Grid>
 
         <!-- Terminal Log Window -->
-        <shadui:Card Grid.Row="1" Padding="8">
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                <ItemsControl ItemsSource="{Binding FilteredLogs}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="native:ClientLogEntry">
-                            <Border Padding="6,3" CornerRadius="4">
-                                <Grid ColumnDefinitions="Auto, Auto, Auto, *">
-                                    <!-- Timestamp -->
-                                    <TextBlock
-                                        Grid.Column="0"
-                                        Text="{Binding Timestamp}"
-                                        FontSize="11"
-                                        FontFamily="Consolas, Courier New, monospace"
-                                        Foreground="{DynamicResource MutedForegroundColor}"
-                                        Margin="0,0,8,0" />
+        <shadui:Card Grid.Row="1" Padding="4">
+            <ListBox
+                x:Name="LogsList"
+                ItemsSource="{Binding FilteredLogs}"
+                Background="Transparent"
+                BorderThickness="0"
+                Padding="4">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="native:ClientLogEntry">
+                        <Grid ColumnDefinitions="Auto, Auto, Auto, *" Margin="0,2">
+                            <!-- Timestamp -->
+                            <TextBlock
+                                Grid.Column="0"
+                                Text="{Binding Timestamp}"
+                                FontSize="11"
+                                FontFamily="Consolas, Courier New, monospace"
+                                Foreground="{DynamicResource MutedForegroundColor}"
+                                Margin="0,0,8,0" />
 
-                                    <!-- Level Badge -->
-                                    <Border
-                                        Grid.Column="1"
-                                        CornerRadius="3"
-                                        Background="{Binding Level, Converter={x:Static common:Converters.LogLevelToBrush}}"
-                                        Padding="4,1"
-                                        Margin="0,0,8,0">
-                                        <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold" Foreground="White"/>
-                                    </Border>
-
-                                    <!-- Target -->
-                                    <TextBlock
-                                        Grid.Column="2"
-                                        Text="{Binding Target}"
-                                        FontSize="11"
-                                        FontFamily="Consolas, Courier New, monospace"
-                                        FontWeight="SemiBold"
-                                        Foreground="{DynamicResource MutedForegroundColor}"
-                                        Margin="0,0,6,0" />
-
-                                    <!-- Message -->
-                                    <TextBlock
-                                        Grid.Column="3"
-                                        Text="{Binding Message}"
-                                        FontSize="11"
-                                        FontFamily="Consolas, Courier New, monospace"
-                                        TextWrapping="Wrap" />
-                                </Grid>
+                            <!-- Level Badge -->
+                            <Border
+                                Grid.Column="1"
+                                CornerRadius="3"
+                                Background="{Binding Level, Converter={x:Static common:Converters.LogLevelToBrush}}"
+                                Padding="4,1"
+                                Margin="0,0,8,0"
+                                VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold" Foreground="White"/>
                             </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+
+                            <!-- Target -->
+                            <TextBlock
+                                Grid.Column="2"
+                                Text="{Binding Target}"
+                                FontSize="11"
+                                FontFamily="Consolas, Courier New, monospace"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource MutedForegroundColor}"
+                                Margin="0,0,6,0" />
+
+                            <!-- Message -->
+                            <TextBlock
+                                Grid.Column="3"
+                                Text="{Binding Message}"
+                                FontSize="11"
+                                FontFamily="Consolas, Courier New, monospace"
+                                TextWrapping="Wrap" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
         </shadui:Card>
     </Grid>
 </UserControl>

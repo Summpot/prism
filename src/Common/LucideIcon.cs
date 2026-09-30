@@ -1,6 +1,7 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Media;
 
 namespace Prism.Common;
@@ -15,7 +16,7 @@ public class LucideIcon : Control
         AvaloniaProperty.Register<LucideIcon, Geometry?>(nameof(Data));
 
     public static readonly StyledProperty<IBrush?> ForegroundProperty =
-        AvaloniaProperty.Register<LucideIcon, IBrush?>(nameof(Foreground), inherits: true);
+        TextElement.ForegroundProperty.AddOwner<LucideIcon>();
 
     public static readonly StyledProperty<double> StrokeThicknessProperty =
         AvaloniaProperty.Register<LucideIcon, double>(nameof(StrokeThickness), 1.8);
@@ -47,7 +48,22 @@ public class LucideIcon : Control
     {
         if (Data == null) return;
 
-        var brush = Foreground ?? Brushes.Black;
+        var brush = Foreground;
+        if (brush == null)
+        {
+            if (this.TryFindResource("Foreground", out var res) && res is IBrush b)
+            {
+                brush = b;
+            }
+            else if (this.TryFindResource("ForegroundColor", out var resColor) && resColor is Color c)
+            {
+                brush = new SolidColorBrush(c);
+            }
+            else
+            {
+                brush = Brushes.Gray;
+            }
+        }
         var pen = new Pen(brush, StrokeThickness, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
 
         // Standard Lucide icons use a 24x24 viewBox

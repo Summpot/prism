@@ -140,18 +140,21 @@ public partial class ClientTrafficViewModel : ViewModelBase
         TimerBatchesText = $"{opt.TimerBatches}";
         ThresholdBatchesText = $"{opt.ThresholdBatches}";
 
-        UplinkRawWireText = $"{Formatters.FormatBytes(opt.RawBytes)} → {Formatters.FormatBytes(opt.WireBytes)}";
-        DownlinkRawWireText = opt.LinkRateMeasured ? Formatters.FormatBitRate(opt.LinkRateBps) : "--";
+        var up = opt.Uplink;
+        var down = opt.Downlink;
 
-        UplinkP50 = $"{opt.BatchingDelayUs}µs";
-        UplinkP90 = $"{opt.CompressionTimeUs}µs";
-        UplinkP99 = $"{opt.DecompressionTimeUs}µs";
-        UplinkMax = $"{opt.ExplicitBatches}";
+        UplinkRawWireText = $"{Formatters.FormatBytes(up.RawBytes)} → {Formatters.FormatBytes(up.WireBytes)} ({Formatters.FormatPercentage(up.SavedRatio)})";
+        DownlinkRawWireText = $"{Formatters.FormatBytes(down.RawBytes)} → {Formatters.FormatBytes(down.WireBytes)} ({Formatters.FormatPercentage(down.SavedRatio)})";
 
-        DownlinkP50 = $"{opt.BatchingDelayUs}µs";
-        DownlinkP90 = $"{opt.CompressionTimeUs}µs";
-        DownlinkP99 = $"{opt.DecompressionTimeUs}µs";
-        DownlinkMax = $"{opt.LinkRateBusyUs}µs";
+        UplinkP50 = $"{up.BatchingDelay.P50Us}µs";
+        UplinkP90 = $"{up.BatchingDelay.P90Us}µs";
+        UplinkP99 = $"{up.BatchingDelay.P99Us}µs";
+        UplinkMax = $"{up.BatchingDelay.MaxUs}µs";
+
+        DownlinkP50 = $"{down.CompressionTime.P50Us}µs";
+        DownlinkP90 = $"{down.CompressionTime.P90Us}µs";
+        DownlinkP99 = $"{down.CompressionTime.P99Us}µs";
+        DownlinkMax = $"{down.CompressionTime.MaxUs}µs";
     }
 
     [RelayCommand]

@@ -9,6 +9,7 @@ namespace Prism.ViewModels;
 public partial class ClientOptimizerViewModel : ViewModelBase
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
+    private bool _isLoading;
 
     [ObservableProperty]
     private bool _optimizerEnabled = true;
@@ -37,6 +38,7 @@ public partial class ClientOptimizerViewModel : ViewModelBase
     {
         try
         {
+            _isLoading = true;
             var cfg = _client.GetConfig();
             OptimizerEnabled = cfg.ActiveConfig.OptimizerEnabled;
             OptimizerZstdLevel = cfg.ActiveConfig.OptimizerZstdLevel;
@@ -47,10 +49,16 @@ public partial class ClientOptimizerViewModel : ViewModelBase
         catch
         {
         }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
     private void SaveConfig()
     {
+        if (_isLoading) return;
+
         try
         {
             var cfg = _client.GetConfig();
@@ -93,6 +101,57 @@ public partial class ClientOptimizerViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    public void ApplyPreset(string preset)
+    {
+        _isLoading = true;
+        try
+        {
+            switch (preset.ToLowerInvariant())
+            {
+                case "gaming":
+                    OptimizerEnabled = true;
+                    OptimizerZstdLevel = 1;
+                    OptimizerAdaptiveFlush = false;
+                    OptimizerFlushIntervalMs = 5;
+                    OptimizerBufferThreshold = 16384;
+                    break;
+                case "low_latency":
+                    OptimizerEnabled = true;
+                    OptimizerZstdLevel = 1;
+                    OptimizerAdaptiveFlush = true;
+                    OptimizerFlushIntervalMs = 10;
+                    OptimizerBufferThreshold = 32768;
+                    break;
+                case "balanced":
+                    OptimizerEnabled = true;
+                    OptimizerZstdLevel = 3;
+                    OptimizerAdaptiveFlush = true;
+                    OptimizerFlushIntervalMs = 20;
+                    OptimizerBufferThreshold = 65536;
+                    break;
+                case "max_compression":
+                    OptimizerEnabled = true;
+                    OptimizerZstdLevel = 9;
+                    OptimizerAdaptiveFlush = true;
+                    OptimizerFlushIntervalMs = 50;
+                    OptimizerBufferThreshold = 131072;
+                    break;
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+        SaveConfig();
+    }
+
+    [RelayCommand]
+    public void GoToMiddleware()
+    {
+        NavigationService.Instance.NavigateTo("client.middleware");
+    }
+
+    [RelayCommand]
     public void SetLevel(int level)
     {
         OptimizerZstdLevel = level;
@@ -102,12 +161,7 @@ public partial class ClientOptimizerViewModel : ViewModelBase
     [RelayCommand]
     public void ResetDefaults()
     {
-        OptimizerEnabled = true;
-        OptimizerZstdLevel = 3;
-        OptimizerAdaptiveFlush = true;
-        OptimizerFlushIntervalMs = 20;
-        OptimizerBufferThreshold = 65536;
-        SaveConfig();
+        ApplyPreset("balanced");
     }
 
     partial void OnOptimizerEnabledChanged(bool value) => SaveConfig();

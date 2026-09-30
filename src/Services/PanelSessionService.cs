@@ -1,19 +1,34 @@
 using System;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Prism.Services;
 
-public class PanelSessionService
+public partial class PanelSessionService : ObservableObject
 {
     private static readonly Lazy<PanelSessionService> _instance = new(() => new PanelSessionService());
     public static PanelSessionService Instance => _instance.Value;
 
-    public string BaseUrl { get; set; } = "http://127.0.0.1:8080";
-    public string Token { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAuthenticated))]
+    private string _baseUrl = "http://127.0.0.1:8080";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAuthenticated))]
+    private string _token = "";
+
     public bool IsAuthenticated => !string.IsNullOrWhiteSpace(Token);
-    public bool IsAdmin { get; set; } = false;
-    public string Username { get; set; } = "";
-    public string DisplayName { get; set; } = "";
-    public string AvatarUrl { get; set; } = "";
+
+    [ObservableProperty]
+    private bool _isAdmin = false;
+
+    [ObservableProperty]
+    private string _username = "";
+
+    [ObservableProperty]
+    private string _displayName = "";
+
+    [ObservableProperty]
+    private string _avatarUrl = "";
 
     public event Action? SessionChanged;
 
@@ -26,6 +41,11 @@ public class PanelSessionService
         DisplayName = displayName;
         AvatarUrl = avatarUrl;
         SessionChanged?.Invoke();
+    }
+
+    public void SignIn(string token, string username = "User", bool isAdmin = false, string? baseUrl = null, string displayName = "", string avatarUrl = "")
+    {
+        SetSession(baseUrl ?? BaseUrl, token, isAdmin, username, string.IsNullOrEmpty(displayName) ? username : displayName, avatarUrl);
     }
 
     public void SignOut()

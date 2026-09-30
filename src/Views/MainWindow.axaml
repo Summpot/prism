@@ -75,18 +75,6 @@
                 FontSize="11"
                 Padding="6,2"/>
 
-            <!-- Login / Account Button -->
-            <Button
-                Classes="Ghost"
-                Command="{Binding NavigateCommand}"
-                CommandParameter="login"
-                Height="28"
-                Padding="8,0">
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="12" Height="12"/>
-                    <TextBlock Text="{Binding Session.Username, FallbackValue='Sign In'}" FontSize="11" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
         </StackPanel>
     </shadui:Window.RightWindowTitleBarContent>
 
@@ -147,7 +135,7 @@
                 </shadui:SidebarItem>
 
                 <!-- Admin Section -->
-                <StackPanel IsVisible="{Binding Session.IsAdmin}" Spacing="3">
+                <StackPanel Spacing="3">
                     <shadui:SidebarItemLabel AsSeparator="True" Text="Management" />
                     <shadui:SidebarItem Route="admin.overview" Content="Overview">
                         <shadui:SidebarItem.Icon>

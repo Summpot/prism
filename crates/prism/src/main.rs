@@ -20,30 +20,6 @@ struct Cli {
     /// Directory to load middleware .wat files from. Defaults to "<config_dir>/middlewares" (Linux default: /etc/prism/middlewares).
     #[arg(long, env = "PRISM_MIDDLEWARE_DIR")]
     middleware_dir: Option<std::path::PathBuf>,
-
-    /// Run in headless server mode without desktop GUI, even if no config file was passed.
-    #[arg(long)]
-    headless: bool,
-
-    /// Force launch desktop GUI client.
-    #[arg(long)]
-    gui: bool,
-
-    /// Started automatically at system boot / startup.
-    #[arg(long)]
-    autostart: bool,
-
-    /// Start silently in the background / minimized to system tray.
-    #[arg(long)]
-    silent: bool,
-
-    /// Alias for --silent: start minimized to system tray.
-    #[arg(long)]
-    minimized: bool,
-
-    /// Deep link URL or extra positional arguments (e.g. prism://...)
-    #[arg(trailing_var_arg = true)]
-    extra_args: Vec<String>,
 }
 
 #[tokio::main]
@@ -57,36 +33,6 @@ async fn main() -> anyhow::Result<()> {
         .expect("install rustls CryptoProvider");
 
     let cli = Cli::parse();
-
-    if cli.gui || cli.autostart || cli.silent || cli.minimized {
-        anyhow::bail!("The desktop GUI has migrated to Avalonia. Please run Prism.exe instead.");
-    }
-
     prism::run(cli.config, cli.workdir, cli.middleware_dir).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cli_accepts_deep_link_url() {
-        let args = ["prism", "prism://auth/callback?code=test12345"];
-        let cli = Cli::try_parse_from(args).expect("Cli must accept deep link url");
-        assert_eq!(cli.extra_args, vec!["prism://auth/callback?code=test12345"]);
-    }
-
-    #[test]
-    fn test_cli_accepts_autostart_and_silent_flags() {
-        let args = ["prism", "--autostart", "--silent"];
-        let cli = Cli::try_parse_from(args).expect("Cli must accept autostart and silent flags");
-        assert!(cli.autostart);
-        assert!(cli.silent);
-        assert!(!cli.minimized);
-
-        let args2 = ["prism", "--minimized"];
-        let cli2 = Cli::try_parse_from(args2).expect("Cli must accept minimized flag");
-        assert!(cli2.minimized);
-    }
 }
 

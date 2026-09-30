@@ -301,6 +301,7 @@ pub struct AdminRpcRequest {
 pub struct AdminRpcResponse {
     pub ok: bool,
     pub status: u16,
+    pub body: String,
     pub result: HashMap<String, String>,
     pub code: Option<String>,
     pub message: Option<String>,
@@ -852,9 +853,11 @@ impl PrismClientSession {
             result_map.insert("value".into(), res.body.to_string());
         }
 
+        let body_str = res.body.to_string();
         Ok(AdminRpcResponse {
             ok: res.ok,
             status: res.status,
+            body: body_str,
             result: result_map,
             code: res.code,
             message: res.message,

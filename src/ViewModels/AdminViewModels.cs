@@ -11,8 +11,8 @@ namespace Prism.ViewModels;
 
 public partial class AdminOverviewViewModel : ViewModelBase
 {
-    private readonly PanelSessionService _session = PanelSessionService.Instance;
     private readonly AdminApiClient _api = AdminApiClient.Instance;
+    private readonly NativeClientService _client = NativeClientService.Instance;
 
     [ObservableProperty]
     private int _connectionCount = 0;
@@ -43,6 +43,15 @@ public partial class AdminOverviewViewModel : ViewModelBase
     [RelayCommand]
     public async Task LoadDataAsync()
     {
+        if (_client.CurrentStatus?.Running != true)
+        {
+            ErrorMessage = "Prism tunnel is disconnected. Connect in the Overview tab to view server telemetry via in-band $control.";
+            IsHealthy = false;
+            ConnectionCount = 0;
+            ServiceCount = 0;
+            return;
+        }
+
         try
         {
             IsLoading = true;
@@ -58,7 +67,7 @@ public partial class AdminOverviewViewModel : ViewModelBase
             IsHealthy = (await healthTask).Ok;
             ConnectionCount = (await connsTask).Count;
             ServiceCount = (await servicesTask).Count;
-            ConfigPath = (await configTask).Path;
+            ConfigPath = (await configTask).Path ?? "Managed via in-band $control";
         }
         catch (Exception ex)
         {
@@ -99,6 +108,7 @@ public class ConnectionItem : ObservableObject
 public partial class AdminConnectionsViewModel : ViewModelBase
 {
     private readonly AdminApiClient _api = AdminApiClient.Instance;
+    private readonly NativeClientService _client = NativeClientService.Instance;
 
     public ObservableCollection<ConnectionItem> Connections { get; } = new();
 
@@ -116,6 +126,13 @@ public partial class AdminConnectionsViewModel : ViewModelBase
     [RelayCommand]
     public async Task RefreshAsync()
     {
+        if (_client.CurrentStatus?.Running != true)
+        {
+            ErrorMessage = "Tunnel is disconnected. Connect to a server in Overview to view active connections via in-band $control.";
+            Connections.Clear();
+            return;
+        }
+
         try
         {
             IsLoading = true;
@@ -177,6 +194,7 @@ public class ServiceRowItem : ObservableObject
 public partial class AdminTunnelServicesViewModel : ViewModelBase
 {
     private readonly AdminApiClient _api = AdminApiClient.Instance;
+    private readonly NativeClientService _client = NativeClientService.Instance;
 
     public ObservableCollection<ServiceRowItem> Services { get; } = new();
 
@@ -194,6 +212,13 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase
     [RelayCommand]
     public async Task RefreshAsync()
     {
+        if (_client.CurrentStatus?.Running != true)
+        {
+            ErrorMessage = "Tunnel is disconnected. Connect to a server in Overview to view tunnel services via in-band $control.";
+            Services.Clear();
+            return;
+        }
+
         try
         {
             IsLoading = true;
@@ -241,6 +266,7 @@ public class UserRowItem : ObservableObject
 public partial class AdminUsersViewModel : ViewModelBase
 {
     private readonly AdminApiClient _api = AdminApiClient.Instance;
+    private readonly NativeClientService _client = NativeClientService.Instance;
 
     public ObservableCollection<UserRowItem> Users { get; } = new();
 
@@ -258,6 +284,13 @@ public partial class AdminUsersViewModel : ViewModelBase
     [RelayCommand]
     public async Task RefreshAsync()
     {
+        if (_client.CurrentStatus?.Running != true)
+        {
+            ErrorMessage = "Tunnel is disconnected. Connect to a server in Overview to view users via in-band $control.";
+            Users.Clear();
+            return;
+        }
+
         try
         {
             IsLoading = true;

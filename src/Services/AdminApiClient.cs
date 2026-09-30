@@ -72,98 +72,74 @@ public class AdminApiClient
     public static AdminApiClient Instance => _instance.Value;
 
     private readonly NativeClientService _client = NativeClientService.Instance;
-    private readonly PanelSessionService _session = PanelSessionService.Instance;
 
-    public async Task<T> RequestAsync<T>(string path, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, string method = "GET", string? bodyJson = null)
+    public async Task<T> InvokeControlRpcAsync<T>(string method, Dictionary<string, string>? parameters, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
     {
-        var headers = new Dictionary<string, string>
+        string? token = null;
+        try
         {
-            ["Accept"] = "application/json"
-        };
-
-        if (!string.IsNullOrWhiteSpace(_session.Token))
-        {
-            headers["Authorization"] = $"Bearer {_session.Token.Trim()}";
+            var cfg = _client.GetConfig();
+            token = cfg?.ActiveConfig?.AuthToken;
         }
+        catch { }
 
-        if (bodyJson != null)
-        {
-            headers["Content-Type"] = "application/json";
-        }
-
-        var req = new AdminHttpRequest(
-            BaseUrl: _session.BaseUrl.TrimEnd('/'),
-            Path: path,
-            Method: method.ToUpperInvariant(),
-            Headers: headers,
-            Body: bodyJson
+        var rpcReq = new AdminRpcRequest(
+            Method: method,
+            Params: parameters ?? new Dictionary<string, string>(),
+            Token: string.IsNullOrWhiteSpace(token) ? null : token.Trim()
         );
 
-        var resp = await _client.AdminRequestAsync(req);
-        if (resp.Status < 200 || resp.Status >= 300)
+        var resp = await _client.ControlRpcAsync(rpcReq);
+        if (!resp.Ok)
         {
-            throw new Exception($"Admin API error {resp.Status}: {resp.Body}");
+            throw new Exception(resp.Message ?? $"$control RPC '{method}' failed with status {resp.Status}");
         }
 
         var result = JsonSerializer.Deserialize(resp.Body, typeInfo);
         if (result == null)
         {
-            throw new Exception("Empty or invalid response from server.");
+            throw new Exception($"Empty or invalid response from $control RPC '{method}'.");
         }
         return result;
     }
 
     public async Task<List<AdminConnectionRecord>> GetConnectionsAsync()
     {
-        return await RequestAsync("/conns", AdminJsonContext.Default.ListAdminConnectionRecord);
+        return await InvokeControlRpcAsync("connections", null, AdminJsonContext.Default.ListAdminConnectionRecord);
     }
 
     public async Task<List<AdminServiceSnapshot>> GetTunnelServicesAsync()
     {
-        return await RequestAsync("/tunnel/services", AdminJsonContext.Default.ListAdminServiceSnapshot);
+        return await InvokeControlRpcAsync("tunnel_services", null, AdminJsonContext.Default.ListAdminServiceSnapshot);
     }
 
     public async Task<List<AdminUserRecord>> GetUsersAsync()
     {
-        return await RequestAsync("/auth/users", AdminJsonContext.Default.ListAdminUserRecord);
+        return await InvokeControlRpcAsync("auth.users", null, AdminJsonContext.Default.ListAdminUserRecord);
     }
 
     public async Task<AdminHealthResponse> GetHealthAsync()
     {
-        return await RequestAsync("/health", AdminJsonContext.Default.AdminHealthResponse);
+        return await InvokeControlRpcAsync("health", null, AdminJsonContext.Default.AdminHealthResponse);
     }
 
     public async Task<AdminConfigPathResponse> GetConfigPathAsync()
     {
-        return await RequestAsync("/config", AdminJsonContext.Default.AdminConfigPathResponse);
+        return await InvokeControlRpcAsync("config_path", null, AdminJsonContext.Default.AdminConfigPathResponse);
     }
 
     public async Task<AdminReloadResponse> TriggerReloadAsync()
     {
-        return await RequestAsync("/reload", AdminJsonContext.Default.AdminReloadResponse, "POST");
+        return await InvokeControlRpcAsync("reload", null, AdminJsonContext.Default.AdminReloadResponse);
     }
 
     public async Task CloseConnectionAsync(string id)
     {
-        try
-        {
-            var req = new AdminHttpRequest(
-                BaseUrl: _session.BaseUrl.TrimEnd('/'),
-                Path: $"/conns/{Uri.EscapeDataString(id)}",
-                Method: "DELETE",
-                Headers: new Dictionary<string, string> { ["Authorization"] = $"Bearer {_session.Token.Trim()}" },
-                Body: null
-            );
-            await _client.AdminRequestAsync(req);
-        }
-        catch
-        {
-            var rpcReq = new AdminRpcRequest(
-                Method: "connections.close",
-                Params: new Dictionary<string, string> { ["id"] = id },
-                Token: string.IsNullOrWhiteSpace(_session.Token) ? null : _session.Token
-            );
-            await _client.ControlRpcAsync(rpcReq);
-        }
+        var rpcReq = new AdminRpcRequest(
+            Method: "connections.close",
+            Params: new Dictionary<string, string> { ["id"] = id },
+            Token: null
+        );
+        await _client.ControlRpcAsync(rpcReq);
     }
 }

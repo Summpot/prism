@@ -476,9 +476,24 @@ public partial class ClientOverviewViewModel : ViewModelBase
             }
             catch { }
 
+            if (IsConnected && !string.IsNullOrWhiteSpace(result.Token))
+            {
+                try
+                {
+                    var authedSession = await AdminApiClient.Instance.AuthenticateAsync(result.Token);
+                    if (authedSession.Authenticated)
+                    {
+                        SessionUsername = authedSession.DisplayName ?? authedSession.Username ?? result.Username ?? "User";
+                        SessionIsAdmin = authedSession.IsAdmin;
+                        SessionRole = authedSession.Role ?? "";
+                    }
+                }
+                catch { }
+            }
+
             IsSessionAuthenticated = true;
-            SessionUsername = result.Username ?? "User";
-            SessionIsAdmin = string.Equals(result.Role, "admin", StringComparison.OrdinalIgnoreCase);
+            SessionUsername = result.Username ?? SessionUsername ?? "User";
+            SessionIsAdmin = SessionIsAdmin || string.Equals(result.Role, "admin", StringComparison.OrdinalIgnoreCase);
             ShowOAuthWaiting = false;
             ShowOAuthExchanging = false;
             ManualCallbackInput = "";
@@ -719,6 +734,22 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 ));
             }
             catch { }
+
+            if (IsConnected && !string.IsNullOrWhiteSpace(token))
+            {
+                try
+                {
+                    var authedSession = await AdminApiClient.Instance.AuthenticateAsync(token);
+                    if (authedSession.Authenticated)
+                    {
+                        username = authedSession.DisplayName ?? authedSession.Username ?? username;
+                        avatarUrl = authedSession.AvatarUrl ?? avatarUrl;
+                        role = authedSession.Role ?? role;
+                        isAdmin = authedSession.IsAdmin;
+                    }
+                }
+                catch { }
+            }
 
             IsSessionAuthenticated = true;
             SessionUsername = username;

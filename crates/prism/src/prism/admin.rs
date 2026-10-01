@@ -407,11 +407,27 @@ fn persist_started_client(
         .or_else(|| storage.load_active_profile_id().ok().flatten())
         .unwrap_or_else(|| format!("profile-{}", crate::prism::telemetry::now_unix_ms()));
 
+    let auth_token = if payload.auth_token.trim().is_empty() || payload.auth_token.starts_with("***") {
+        if !existing.auth_token.starts_with("***") && !existing.auth_token.trim().is_empty() {
+            existing.auth_token.clone()
+        } else if let Ok(Some(cred)) = storage.load_credential(&profile_id) {
+            if !cred.token.starts_with("***") && !cred.token.trim().is_empty() {
+                cred.token
+            } else {
+                existing.auth_token.clone()
+            }
+        } else {
+            existing.auth_token.clone()
+        }
+    } else {
+        payload.auth_token.clone()
+    };
+
     let form_state = crate::prism::storage::ClientConfigState {
         profile_name: profile_name.clone(),
         server_addr: payload.server_addr.clone(),
         transport: payload.transport.clone(),
-        auth_token: payload.auth_token.clone(),
+        auth_token: auth_token.clone(),
         listen_addr: payload.listen_addr.clone(),
         fake_lan_broadcast: payload.fake_lan_broadcast,
         auto_connect_panel: existing.auto_connect_panel,
@@ -439,7 +455,7 @@ fn persist_started_client(
         name: profile_name,
         server_addr: payload.server_addr.clone(),
         transport: payload.transport.clone(),
-        auth_token: payload.auth_token.clone(),
+        auth_token,
         listen_addr: payload.listen_addr.clone(),
         fake_lan_broadcast: payload.fake_lan_broadcast,
     });

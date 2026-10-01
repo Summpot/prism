@@ -173,7 +173,7 @@ impl Client {
                         "tunnel client: $control control channel ready"
                     );
                     let token = self.config.auth_token.trim();
-                    if !token.is_empty() {
+                    if !token.is_empty() && !token.starts_with("***") {
                         match ch.call(control::ControlMethod::Authenticate {
                             token: token.to_string(),
                         }).await {
@@ -1178,21 +1178,48 @@ impl ClientController {
         method: ControlMethod,
         token: Option<&str>,
     ) -> Result<ControlPayload, ControlRpcError> {
-        // Fast-path: try executing method directly (channel was authenticated during connect if token was configured).
+        let valid_token = token
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && !t.starts_with("***"));
+
+        if matches!(method, ControlMethod::Authenticate { .. }) {
+            return client.control_rpc(method).await;
+        }
+
         match client.control_rpc(method.clone()).await {
-            Ok(res) => Ok(res),
-            Err(err) if matches!(err.code, crate::prism::control::ControlErrorCode::Unauthorized) => {
-                // If unauthorized and caller supplied a token, try authenticating once and retrying.
-                if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
-                    let _ = client
+            Ok(ControlPayload::AuthSession(ref s)) if !s.authenticated => {
+                if let Some(token) = valid_token {
+                    let auth_res = client
                         .control_rpc(ControlMethod::Authenticate {
                             token: token.to_string(),
                         })
                         .await;
-                    client.control_rpc(method).await
-                } else {
-                    Err(err)
+                    if auth_res.is_ok() {
+                        return client.control_rpc(method).await;
+                    }
                 }
+                Ok(ControlPayload::AuthSession(s.clone()))
+            }
+            Ok(res) => Ok(res),
+            Err(err)
+                if matches!(
+                    err.code,
+                    crate::prism::control::ControlErrorCode::Unauthorized
+                        | crate::prism::control::ControlErrorCode::Forbidden
+                ) =>
+            {
+                // If unauthorized or forbidden and caller supplied a valid token, try authenticating once and retrying.
+                if let Some(token) = valid_token {
+                    let auth_res = client
+                        .control_rpc(ControlMethod::Authenticate {
+                            token: token.to_string(),
+                        })
+                        .await;
+                    if auth_res.is_ok() {
+                        return client.control_rpc(method).await;
+                    }
+                }
+                Err(err)
             }
             Err(err) => Err(err),
         }

@@ -545,7 +545,6 @@ impl PrismClientSession {
 
     pub fn client_get_config(&self) -> Result<ClientConfigResponse, PrismFfiError> {
         let cfg = crate::prism::admin::do_client_get_config(self.storage.as_deref());
-        let masked_auth = crate::prism::admin::mask_token(&cfg.active_config.auth_token);
 
         Ok(ClientConfigResponse {
             active_profile_id: cfg.active_profile_id,
@@ -553,7 +552,7 @@ impl PrismClientSession {
                 profile_name: cfg.active_config.profile_name,
                 server_addr: cfg.active_config.server_addr,
                 transport: cfg.active_config.transport,
-                auth_token: masked_auth,
+                auth_token: cfg.active_config.auth_token,
                 listen_addr: cfg.active_config.listen_addr,
                 fake_lan_broadcast: cfg.active_config.fake_lan_broadcast,
                 auto_connect_panel: cfg.active_config.auto_connect_panel,
@@ -582,7 +581,7 @@ impl PrismClientSession {
                     name: p.name,
                     server_addr: p.server_addr,
                     transport: p.transport,
-                    auth_token: crate::prism::admin::mask_token(&p.auth_token),
+                    auth_token: p.auth_token,
                     listen_addr: p.listen_addr,
                     fake_lan_broadcast: p.fake_lan_broadcast,
                 })

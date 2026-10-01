@@ -236,6 +236,10 @@ public class AdminApiClient
         {
             var cfg = _client.GetConfig();
             token = cfg?.ActiveConfig?.AuthToken;
+            if (!string.IsNullOrWhiteSpace(token) && token.StartsWith("***"))
+            {
+                token = null;
+            }
         }
         catch { }
 
@@ -303,11 +307,44 @@ public class AdminApiClient
         SessionUpdated?.Invoke(null);
     }
 
+    public async Task<AdminSessionResponse> AuthenticateAsync(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Trim().StartsWith("***"))
+        {
+            throw new ArgumentException("Invalid token", nameof(token));
+        }
+        var parameters = new Dictionary<string, string>
+        {
+            ["token"] = token.Trim()
+        };
+        var session = await InvokeControlRpcAsync("authenticate", parameters, AdminJsonContext.Default.AdminSessionResponse);
+        CurrentSession = session;
+        SessionUpdated?.Invoke(session);
+        return session;
+    }
+
     public async Task<AdminSessionResponse> GetSessionAsync()
     {
         try
         {
             var session = await InvokeControlRpcAsync("auth.session", null, AdminJsonContext.Default.AdminSessionResponse);
+            if (!session.Authenticated)
+            {
+                var cfg = _client.GetConfig();
+                var token = cfg?.ActiveConfig?.AuthToken;
+                if (!string.IsNullOrWhiteSpace(token) && !token.StartsWith("***"))
+                {
+                    try
+                    {
+                        var authed = await AuthenticateAsync(token.Trim());
+                        if (authed.Authenticated)
+                        {
+                            return authed;
+                        }
+                    }
+                    catch { }
+                }
+            }
             CurrentSession = session;
             SessionUpdated?.Invoke(session);
             return session;

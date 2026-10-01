@@ -9,18 +9,21 @@
     xmlns:common="clr-namespace:Prism.Common"
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
     x:DataType="vm:AdminUsersViewModel">
 
-    <Grid RowDefinitions="Auto, Auto, *" Margin="20">
-        <!-- Header -->
-        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
-            <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock Text="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
-                <TextBlock Text="{Binding [admin_users_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-            </StackPanel>
-
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+    <Panel>
+    <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
+                         IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
+    <Grid RowDefinitions="Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
+        <controls:PageHeader
+            Grid.Row="0"
+            Title="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Description="{Binding [admin_users_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Icon="{x:Static common:AppIcons.Users}"
+            Margin="0,0,0,16">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
                     <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
                 </Button>
@@ -33,20 +36,13 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </Grid>
+        </controls:PageHeader>
 
-        <!-- Error Banner -->
-        <Border
+        <controls:ErrorBanner
             Grid.Row="1"
-            IsVisible="{Binding ErrorMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-            Background="#20ef4444"
-            BorderBrush="#50ef4444"
-            BorderThickness="1"
-            CornerRadius="{DynamicResource MdCornerRadius}"
-            Padding="12,8"
-            Margin="0,0,0,12">
-            <TextBlock Text="{Binding ErrorMessage}" Foreground="#ef4444" FontSize="12"/>
-        </Border>
+            Message="{Binding ErrorMessage}"
+            RetryCommand="{Binding RefreshCommand}"
+            Margin="0,0,0,12"/>
 
         <!-- Tabbed User & Token Content -->
         <TabControl Grid.Row="2">
@@ -60,7 +56,7 @@
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                         <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
-                                        <TextBlock Text="{Binding EditingUser.Username, StringFormat='编辑用户：{0}'}" FontWeight="Bold" FontSize="13"/>
+                                        <TextBlock Text="{Binding EditUserTitle}" FontWeight="Bold" FontSize="13"/>
                                     </StackPanel>
                                     <Button Grid.Column="1" Classes="Ghost" Command="{Binding CloseEditUserDialogCommand}" Height="22" Width="22" Padding="2">
                                         <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="11" Height="11"/>
@@ -142,15 +138,13 @@
                                 </DataGrid.Columns>
                             </DataGrid>
 
-                            <StackPanel
+                            <controls:EmptyState
                                 IsVisible="{Binding Users.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                                Icon="{x:Static common:AppIcons.Users}"
+                                Title="{Binding [users_no_users_title], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                Margin="0,24"
                                 HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Spacing="8"
-                                Margin="0,40">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                <TextBlock Text="{Binding [users_no_users_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            </StackPanel>
+                                VerticalAlignment="Center"/>
                         </Grid>
                     </Grid>
                 </shadui:Card>
@@ -247,19 +241,18 @@
                                 </DataGrid.Columns>
                             </DataGrid>
 
-                            <StackPanel
+                            <controls:EmptyState
                                 IsVisible="{Binding Tokens.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                                Icon="{x:Static common:AppIcons.Shield}"
+                                Title="{Binding [users_no_tokens_title], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                Margin="0,24"
                                 HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Spacing="8"
-                                Margin="0,40">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Shield}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                <TextBlock Text="{Binding [users_no_tokens_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            </StackPanel>
+                                VerticalAlignment="Center"/>
                         </Grid>
                     </Grid>
                 </shadui:Card>
             </TabItem>
         </TabControl>
     </Grid>
+    </Panel>
 </UserControl>

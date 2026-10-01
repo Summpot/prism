@@ -8,30 +8,26 @@
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:vm="clr-namespace:Prism.ViewModels"
     xmlns:common="clr-namespace:Prism.Common"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     x:DataType="vm:ClientOptimizerViewModel"
     mc:Ignorable="d">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel MaxWidth="960" Spacing="12" Margin="16">
 
-            <!-- Page Header -->
-            <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
-                <StackPanel Grid.Column="0" Spacing="2">
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
-                        <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
-                        <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
-                                       FontSize="10"
-                                       FontWeight="SemiBold"
-                                       Foreground="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
-                        </Border>
-                    </StackPanel>
-                    <TextBlock Text="{Binding [optimizer_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                </StackPanel>
-
-                <!-- Actions: Traffic link & Reset defaults -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <controls:PageHeader
+                Title="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Description="{Binding [optimizer_description], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Icon="{x:Static common:AppIcons.Zap}">
+                <controls:PageHeader.Badge>
+                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
+                    </Border>
+                </controls:PageHeader.Badge>
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Button Classes="Outline" Command="{Binding GoToTrafficCommand}" Height="28" Padding="10,0">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
@@ -49,7 +45,7 @@
                         <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="#10b981" FontSize="11" FontWeight="Medium"/>
                     </StackPanel>
                 </StackPanel>
-            </Grid>
+            </controls:PageHeader>
 
             <!-- Card 0: Quick Presets -->
             <shadui:Card Padding="14">
@@ -122,7 +118,7 @@
                 </shadui:Card>
 
                 <!-- Right: Zstandard Compression Level Card -->
-                <shadui:Card Grid.Column="2" Padding="14" IsEnabled="{Binding OptimizerEnabled}" Opacity="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='1.0|0.5'}">
+                <shadui:Card Grid.Column="2" Padding="14" IsEnabled="{Binding OptimizerEnabled}" Opacity="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanToOpacity}}">
                     <StackPanel Spacing="10">
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
@@ -162,7 +158,7 @@
             </Grid>
 
             <!-- Card 3: Batching & Latency Control Card -->
-            <shadui:Card Padding="14" IsEnabled="{Binding OptimizerEnabled}" Opacity="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='1.0|0.5'}">
+            <shadui:Card Padding="14" IsEnabled="{Binding OptimizerEnabled}" Opacity="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanToOpacity}}">
                 <StackPanel Spacing="12">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                         <common:LucideIcon Data="{x:Static common:AppIcons.Gauge}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>

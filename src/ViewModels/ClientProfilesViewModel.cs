@@ -342,13 +342,30 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             string addr = SelectedProfile.ServerAddr.Trim();
+            int schemeIdx = addr.IndexOf("://", StringComparison.Ordinal);
+            if (schemeIdx >= 0)
+            {
+                addr = addr[(schemeIdx + 3)..];
+            }
             string host = addr;
             int port = 7000;
-            if (addr.Contains(':'))
+            if (addr.StartsWith('['))
+            {
+                int close = addr.IndexOf(']');
+                if (close > 0)
+                {
+                    host = addr.Substring(1, close - 1);
+                    if (close + 1 < addr.Length && addr[close + 1] == ':')
+                    {
+                        int.TryParse(addr[(close + 2)..], out port);
+                    }
+                }
+            }
+            else if (addr.Contains(':'))
             {
                 var parts = addr.Split(':');
                 host = parts[0];
-                int.TryParse(parts[1], out port);
+                int.TryParse(parts[^1], out port);
             }
 
             using var client = new System.Net.Sockets.TcpClient();
@@ -376,7 +393,7 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         {
             Id = $"profile-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
             Name = "New Profile",
-            ServerAddr = "127.0.0.1:443",
+            ServerAddr = "relay.example.com",
             Transport = "auto",
             ListenAddr = "127.0.0.1:25565",
             FakeLanBroadcast = true
@@ -451,9 +468,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
                     AuthToken: null,
                     ListenAddr: null,
                     FakeLanBroadcast: null,
-                    AutoConnectPanel: SelectedProfile.AutoConnectPanel,
-                    AutoConnect: SelectedProfile.AutoConnect,
-                    ManagementUrl: string.IsNullOrWhiteSpace(SelectedProfile.ManagementUrl) ? null : SelectedProfile.ManagementUrl,
+                    AutoConnectPanel: null,
+                    AutoConnect: null,
+                    ManagementUrl: null,
                     TokenId: null,
                     TokenType: null,
                     UserId: null,
@@ -476,21 +493,29 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
                 ));
             }
 
-            StatusMessage = "Profile saved successfully.";
-            AppServices.ShowSuccess($"Profile '{SelectedProfile.Name}' saved successfully.", "Saved");
+            StatusMessage = I18n.I18nText.T("common_save");
+            AppServices.ShowSuccess(SelectedProfile.Name);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
-            AppServices.ShowError(ex.Message, "Save Failed");
+            AppServices.ShowError(ex.Message, I18n.I18nText.T("common_save_failed"));
         }
     }
 
     [RelayCommand]
-    public void DeleteProfile(EditableProfile? profile)
+    public async Task DeleteProfileAsync(EditableProfile? profile)
     {
         var target = profile ?? SelectedProfile;
         if (target == null) return;
+        if (!await AppServices.ConfirmAsync(
+                I18n.I18nText.T("common_confirm"),
+                I18n.I18nText.T("confirm_delete_profile"),
+                I18n.I18nText.T("common_delete"),
+                destructive: true))
+        {
+            return;
+        }
         bool wasActive = target.IsActive;
 
         Profiles.Remove(target);
@@ -510,9 +535,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
-    public void DeleteSelectedProfile()
+    public async Task DeleteSelectedProfileAsync()
     {
-        DeleteProfile(SelectedProfile);
+        await DeleteProfileAsync(SelectedProfile);
     }
 
     [RelayCommand]

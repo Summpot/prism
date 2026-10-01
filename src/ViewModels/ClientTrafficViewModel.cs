@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LiveChartsCore;
@@ -31,7 +32,7 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     private bool _showEmptyState = true;
 
     [ObservableProperty]
-    private string _metric1Title = "运行时间";
+    private string _metric1Title = "";
 
     [ObservableProperty]
     private string _metric1Value = "0s";
@@ -74,7 +75,7 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     private string _sessionSavedText = "0 B (0.0%)";
 
     [ObservableProperty]
-    private string _sessionLinkRate = "0 bps (估计)";
+    private string _sessionLinkRate = "0 bps";
 
     [ObservableProperty]
     private string _urgentBatchesText = "0";
@@ -330,8 +331,15 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
-    public void ResetStats()
+    public async Task ResetStatsAsync()
     {
+        if (!await AppServices.ConfirmAsync(
+                I18nText.T("common_confirm"),
+                I18nText.T("confirm_reset_stats"),
+                I18nText.T("client_reset")))
+        {
+            return;
+        }
         _client.ResetStats();
         UpdateProperties(_client.CurrentStatus);
     }

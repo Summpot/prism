@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Prism.Native;
@@ -23,7 +24,8 @@ public abstract class MiddlewareFieldViewModel : ObservableObject
         MiddlewareFieldViewModel vm = fieldType.ToLowerInvariant() switch
         {
             "bool" or "boolean" => new BoolMiddlewareFieldViewModel(),
-            "number" or "int" or "integer" or "float" => new NumberMiddlewareFieldViewModel(),
+            "number" or "int" or "integer" or "float" or "u8" or "u16" or "u32" or "i32" or "i64" or "f32" or "f64" => new NumberMiddlewareFieldViewModel(),
+            "list_string" or "string[]" or "list" => new ListStringMiddlewareFieldViewModel(),
             _ => new StringMiddlewareFieldViewModel()
         };
         vm.Key = key;
@@ -53,6 +55,15 @@ public partial class NumberMiddlewareFieldViewModel : MiddlewareFieldViewModel
 }
 
 public partial class StringMiddlewareFieldViewModel : MiddlewareFieldViewModel
+{
+    [ObservableProperty]
+    private string _value = "";
+
+    public override string GetStringValue() => Value;
+    public override void SetStringValue(string value) => Value = value ?? "";
+}
+
+public partial class ListStringMiddlewareFieldViewModel : MiddlewareFieldViewModel
 {
     [ObservableProperty]
     private string _value = "";
@@ -155,8 +166,9 @@ public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
 
             string currentName = SelectedMiddleware.Name;
             var updated = _client.UpdateMiddlewareConfig(currentName, dict);
-            StatusMessage = $"Config for {updated.Name} saved successfully.";
+            StatusMessage = I18n.I18nText.T("middleware_applied");
             LoadData(currentName);
+            AppServices.ShowSuccess(StatusMessage);
         }
         catch (Exception ex)
         {
@@ -165,20 +177,29 @@ public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
-    public void ResetConfig()
+    public async Task ResetConfigAsync()
     {
         if (SelectedMiddleware == null) return;
+        if (!await AppServices.ConfirmAsync(
+                I18n.I18nText.T("common_confirm"),
+                I18n.I18nText.T("confirm_reset_middleware"),
+                I18n.I18nText.T("common_reset")))
+        {
+            return;
+        }
 
         try
         {
             string currentName = SelectedMiddleware.Name;
             var reset = _client.ResetMiddlewareConfig(currentName);
-            StatusMessage = $"Config for {reset.Name} reset to default.";
+            StatusMessage = I18n.I18nText.T("middleware_reset_done");
             LoadData(currentName);
+            AppServices.ShowSuccess(StatusMessage);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
+            AppServices.ShowError(ex.Message);
         }
     }
 }

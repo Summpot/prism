@@ -15,8 +15,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public NavigationService Navigation { get; } = NavigationService.Instance;
     public NativeClientService NativeClient { get; } = NativeClientService.Instance;
 
-    public DialogManager DialogManager { get; } = new();
-    public ToastManager ToastManager { get; } = new();
+    public DialogManager DialogManager => AppServices.DialogManager;
+    public ToastManager ToastManager => AppServices.ToastManager;
 
     [ObservableProperty]
     private bool _isSidebarExpanded = true;
@@ -32,7 +32,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnCurrentLocaleChanged(string value)
     {
-        LocalizationManager.Instance.CurrentLocale = value;
+        if (string.IsNullOrWhiteSpace(value)) return;
+        if (!string.Equals(LocalizationManager.Instance.CurrentLocale, value, StringComparison.Ordinal))
+        {
+            LocalizationManager.Instance.CurrentLocale = value;
+        }
+        DesktopService.SetUiLocale(value);
     }
 
     [ObservableProperty]
@@ -67,6 +72,14 @@ public partial class MainWindowViewModel : ViewModelBase
     public MainWindowViewModel()
     {
         CurrentLocale = LocalizationManager.Instance.CurrentLocale;
+        Messages.CurrentLocaleChanged += () =>
+        {
+            var next = LocalizationManager.Instance.CurrentLocale;
+            if (!string.Equals(CurrentLocale, next, StringComparison.Ordinal))
+            {
+                CurrentLocale = next;
+            }
+        };
 
         _clientOverview = new ClientOverviewViewModel();
         _clientTraffic = new ClientTrafficViewModel();
@@ -92,9 +105,10 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                if (s != null)
+                IsAdmin = s?.IsAdmin == true;
+                if (!IsAdmin && Navigation.CurrentRoute.StartsWith("admin."))
                 {
-                    IsAdmin = s.IsAdmin;
+                    Navigation.NavigateTo("client.overview");
                 }
             });
         };

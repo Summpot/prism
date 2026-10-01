@@ -30,6 +30,7 @@ public class OAuthExchangeRequest
 [JsonSerializable(typeof(OptimizerStatsSnapshot))]
 [JsonSerializable(typeof(DirectionStatsSnapshot))]
 [JsonSerializable(typeof(Quantiles))]
+[JsonSerializable(typeof(WindowSnapshot))]
 [JsonSerializable(typeof(AdminGitHubLoginUrlResponse))]
 [JsonSerializable(typeof(AdminGitHubExchangeResponse))]
 [JsonSerializable(typeof(AdminMiddlewareConfigField))]

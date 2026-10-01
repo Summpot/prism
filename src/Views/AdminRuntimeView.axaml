@@ -8,23 +8,24 @@
     xmlns:common="clr-namespace:Prism.Common"
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
     x:DataType="vm:AdminRuntimeViewModel">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="20" Spacing="16">
-            <!-- Header -->
-            <Grid ColumnDefinitions="*, Auto">
-                <StackPanel Grid.Column="0" Spacing="4">
-                    <TextBlock Text="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
-                    <TextBlock Text="{Binding [admin_runtime_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                </StackPanel>
-                
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+    <Panel>
+    <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
+                         IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsReady}">
+        <StackPanel Margin="16" Spacing="12">
+            <controls:PageHeader
+                Title="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Description="{Binding [admin_runtime_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Icon="{x:Static common:AppIcons.Cpu}">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
                         <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
                     </Button>
-                    <Button Grid.Column="1" Classes="Outline" Command="{Binding LoadDataCommand}"
+                    <Button Classes="Outline" Command="{Binding LoadDataCommand}"
                             IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
                             Height="28" Padding="10,0">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -33,18 +34,9 @@
                         </StackPanel>
                     </Button>
                 </StackPanel>
-            </Grid>
+            </controls:PageHeader>
 
-            <!-- Error Banner -->
-            <Border
-                IsVisible="{Binding ErrorMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                Background="#20ef4444"
-                BorderBrush="#50ef4444"
-                BorderThickness="1"
-                CornerRadius="{DynamicResource MdCornerRadius}"
-                Padding="12,8">
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="#ef4444" FontSize="12"/>
-            </Border>
+            <controls:ErrorBanner Message="{Binding ErrorMessage}" RetryCommand="{Binding LoadDataCommand}"/>
 
             <!-- Diagnostics Card -->
             <shadui:Card Padding="16">
@@ -106,4 +98,5 @@
             </shadui:Card>
         </StackPanel>
     </ScrollViewer>
+    </Panel>
 </UserControl>

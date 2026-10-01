@@ -1,0 +1,49 @@
+<UserControl
+    x:Class="Prism.Views.Controls.PageHeader"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Prism.Common"
+    x:Name="Root">
+
+    <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
+        <StackPanel Grid.Column="0" Spacing="2" MinWidth="0">
+            <TextBlock
+                Text="{Binding Eyebrow, ElementName=Root}"
+                FontSize="10"
+                FontWeight="SemiBold"
+                Opacity="0.8"
+                Foreground="{DynamicResource MutedForegroundColor}"
+                IsVisible="{Binding Eyebrow, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <common:LucideIcon
+                    Data="{Binding Icon, ElementName=Root}"
+                    Width="16"
+                    Height="16"
+                    Foreground="{DynamicResource PrimaryColor}"
+                    IsVisible="{Binding Icon, ElementName=Root, Converter={x:Static common:Converters.NotNullToBoolean}}"
+                    VerticalAlignment="Center"/>
+                <TextBlock
+                    Text="{Binding Title, ElementName=Root}"
+                    FontWeight="Bold"
+                    FontSize="16"
+                    VerticalAlignment="Center"
+                    TextTrimming="CharacterEllipsis"/>
+                <ContentPresenter
+                    Content="{Binding Badge, ElementName=Root}"
+                    VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock
+                Text="{Binding Description, ElementName=Root}"
+                FontSize="12"
+                Foreground="{DynamicResource MutedForegroundColor}"
+                TextWrapping="Wrap"
+                IsVisible="{Binding Description, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+        </StackPanel>
+        <ContentPresenter
+            Grid.Column="1"
+            Content="{Binding Actions, ElementName=Root}"
+            VerticalAlignment="Center"
+            HorizontalAlignment="Right"
+            Margin="12,0,0,0"/>
+    </Grid>
+</UserControl>

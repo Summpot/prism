@@ -9,22 +9,23 @@
     xmlns:vm="clr-namespace:Prism.ViewModels"
     xmlns:common="clr-namespace:Prism.Common"
     xmlns:native="clr-namespace:Prism.Native"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     x:DataType="vm:ClientLogsViewModel"
     mc:Ignorable="d">
 
     <Grid RowDefinitions="Auto, *" Margin="16">
-        <!-- Header Controls Row -->
-        <Grid Grid.Row="0" ColumnDefinitions="Auto, *, Auto" Margin="0,0,0,12">
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
-                <TextBlock Text="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
+        <controls:PageHeader
+            Grid.Row="0"
+            Title="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Description="{Binding [client_logs_description], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Icon="{x:Static common:AppIcons.Terminal}"
+            Margin="0,0,0,12">
+            <controls:PageHeader.Badge>
                 <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding StatusCountText}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </Border>
-            </StackPanel>
-
-            <!-- Filters and Actions -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            </controls:PageHeader.Badge>
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <!-- Level Filter Group (Segmented) -->
                 <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="2">
                     <StackPanel Orientation="Horizontal" Spacing="2">
@@ -82,7 +83,7 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </Grid>
+        </controls:PageHeader>
 
         <!-- Terminal Viewport Card -->
         <Border Grid.Row="1"
@@ -93,15 +94,10 @@
                 Padding="6"
                 ClipToBounds="True">
             <Panel>
-                <!-- Empty State -->
-                <StackPanel IsVisible="{Binding IsEmpty}"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="8">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="32" Height="32" Foreground="{DynamicResource MutedForegroundColor}" Opacity="0.4" HorizontalAlignment="Center"/>
-                    <TextBlock Text="{Binding [client_logs_empty], Source={x:Static i18n:LocalizationManager.Instance}}"
-                               FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                </StackPanel>
+                <controls:EmptyState
+                    IsVisible="{Binding IsEmpty}"
+                    Icon="{x:Static common:AppIcons.Terminal}"
+                    Title="{Binding [client_logs_empty], Source={x:Static i18n:LocalizationManager.Instance}}"/>
 
                 <!-- Logs List Stream -->
                 <ListBox

@@ -53,10 +53,6 @@ public static class PrismLinkService
         {
             query["fake_lan"] = "0";
         }
-        if (!string.IsNullOrWhiteSpace(authToken))
-        {
-            query["token"] = authToken.Trim();
-        }
 
         var qs = query.ToString();
         return string.IsNullOrEmpty(qs) ? $"prism://{server}" : $"prism://{server}?{qs}";
@@ -222,8 +218,19 @@ public static class PrismLinkService
 
         if (isAuth)
         {
+            int hashIndex = target.IndexOf('#');
+            string hashQuery = "";
+            if (hashIndex >= 0)
+            {
+                hashQuery = target.Substring(hashIndex + 1);
+                target = target.Substring(0, hashIndex);
+            }
             int qIndex = target.IndexOf('?');
             var queryString = qIndex >= 0 ? target.Substring(qIndex + 1) : "";
+            if (!string.IsNullOrEmpty(hashQuery))
+            {
+                queryString = string.IsNullOrEmpty(queryString) ? hashQuery : queryString + "&" + hashQuery;
+            }
             var query = HttpUtility.ParseQueryString(queryString);
 
             var token = query["token"];

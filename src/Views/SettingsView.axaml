@@ -8,25 +8,23 @@
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:common="clr-namespace:Prism.Common"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
     x:DataType="vm:SettingsViewModel">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel MaxWidth="960" Spacing="14" Margin="16">
 
-            <!-- Page Header -->
-            <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
-                <StackPanel Grid.Column="0" Spacing="2">
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
-                        <TextBlock Text="{Binding [settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
-                        <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                            <TextBlock Text="v0.1.0" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
-                        </Border>
-                    </StackPanel>
-                    <TextBlock Text="{Binding [settings_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                </StackPanel>
-            </Grid>
+            <controls:PageHeader
+                Title="{Binding [settings_title], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Description="{Binding [settings_description], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Icon="{x:Static common:AppIcons.Settings}">
+                <controls:PageHeader.Badge>
+                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding AppVersion}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    </Border>
+                </controls:PageHeader.Badge>
+            </controls:PageHeader>
 
             <!-- Navigation Tabs Bar -->
             <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="3" HorizontalAlignment="Left">
@@ -362,13 +360,13 @@
                             <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,4,0">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="{Binding [settings_app_version], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    <TextBlock Text="{Binding UpdateChannel, StringFormat='v0.1.0 ({0})'}" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Text="{Binding VersionChannelText}" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,0,0">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="Target Architecture" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    <TextBlock Text="NativeAOT Windows x64" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Text="{Binding [about_architecture], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding ArchitectureText}" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -383,7 +381,7 @@
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <common:LucideIcon IsVisible="{Binding !CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
                                         <common:LucideIcon IsVisible="{Binding CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="#10b981"/>
-                                        <TextBlock Text="{Binding CopiedDeviceIdNotice, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='已复制|复制'}"/>
+                                        <TextBlock Text="{Binding CopiedDeviceIdNotice, Converter={x:Static common:Converters.CopiedOrCopyLabel}}"/>
                                     </StackPanel>
                                 </Button>
                             </Grid>

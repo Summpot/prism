@@ -1,0 +1,49 @@
+<UserControl
+    x:Class="Prism.Views.Controls.EmptyState"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Prism.Common"
+    x:Name="Root">
+
+    <Border
+        BorderBrush="{DynamicResource BorderColor}"
+        BorderThickness="1"
+        CornerRadius="12"
+        Padding="24,28"
+        Background="{DynamicResource GhostColor}">
+        <StackPanel Spacing="8" HorizontalAlignment="Center" MaxWidth="420">
+            <Border
+                Width="40"
+                Height="40"
+                CornerRadius="8"
+                Background="{DynamicResource MutedColor}"
+                HorizontalAlignment="Center"
+                IsVisible="{Binding Icon, ElementName=Root, Converter={x:Static common:Converters.NotNullToBoolean}}">
+                <common:LucideIcon
+                    Data="{Binding Icon, ElementName=Root}"
+                    Width="18"
+                    Height="18"
+                    Foreground="{DynamicResource MutedForegroundColor}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock
+                Text="{Binding Title, ElementName=Root}"
+                FontWeight="SemiBold"
+                FontSize="13"
+                TextAlignment="Center"
+                IsVisible="{Binding Title, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+            <TextBlock
+                Text="{Binding Description, ElementName=Root}"
+                FontSize="12"
+                Foreground="{DynamicResource MutedForegroundColor}"
+                TextAlignment="Center"
+                TextWrapping="Wrap"
+                IsVisible="{Binding Description, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+            <ContentPresenter
+                Content="{Binding Actions, ElementName=Root}"
+                HorizontalAlignment="Center"
+                Margin="0,6,0,0"/>
+        </StackPanel>
+    </Border>
+</UserControl>

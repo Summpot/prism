@@ -1,0 +1,46 @@
+<UserControl
+    x:Class="Prism.Views.Controls.AdminReady"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
+    x:Name="Root">
+
+    <Panel>
+        <controls:EmptyState
+            IsVisible="{Binding IsLoadingState, ElementName=Root}"
+            Icon="{x:Static common:AppIcons.RotateCcw}"
+            Title="{Binding [common_restoring_session], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+
+        <controls:EmptyState
+            IsVisible="{Binding IsDisconnectedState, ElementName=Root}"
+            Icon="{x:Static common:AppIcons.Unplug}"
+            Title="{Binding [common_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Description="{Binding [admin_not_connected_hint], Source={x:Static i18n:LocalizationManager.Instance}}">
+            <Button
+                Classes="Primary"
+                Command="{Binding ConnectCommand, ElementName=Root}"
+                Height="28"
+                Padding="12,0"
+                FontSize="12">
+                <TextBlock Text="{Binding [admin_go_connect], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+            </Button>
+        </controls:EmptyState>
+
+        <controls:EmptyState
+            IsVisible="{Binding IsAccessDeniedState, ElementName=Root}"
+            Icon="{x:Static common:AppIcons.Shield}"
+            Title="{Binding [admin_access_denied], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Description="{Binding [admin_access_denied_hint], Source={x:Static i18n:LocalizationManager.Instance}}">
+            <Button
+                Classes="Outline"
+                Command="{Binding ConnectCommand, ElementName=Root}"
+                Height="28"
+                Padding="12,0"
+                FontSize="12">
+                <TextBlock Text="{Binding [admin_go_connect], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+            </Button>
+        </controls:EmptyState>
+    </Panel>
+</UserControl>

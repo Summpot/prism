@@ -1,11 +1,13 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Prism.I18n;
 using Prism.Services;
 using Prism.Views;
 
@@ -16,7 +18,10 @@ public partial class App : Application
     private static App? s_current;
     private TrayIcon? _trayIcon;
     private NativeMenuItem? _toggleTunnelItem;
+    private NativeMenuItem? _hideItem;
     private bool _isExplicitExit;
+    private bool _trayReady;
+    private string? _dismissedUpdateVersion;
 
     public override void Initialize()
     {
@@ -33,7 +38,7 @@ public partial class App : Application
             "Dark" => Avalonia.Styling.ThemeVariant.Dark,
             _ => Avalonia.Styling.ThemeVariant.Default
         };
-        I18n.LocalizationManager.Instance.CurrentLocale = DesktopService.GetUiLocale();
+        LocalizationManager.Instance.CurrentLocale = DesktopService.GetUiLocale();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -43,31 +48,36 @@ public partial class App : Application
             };
             desktop.MainWindow = mainWindow;
 
-            // Close-to-tray handler: hide instead of terminate
+            _trayReady = SetupTrayIcon(desktop, mainWindow);
+
             mainWindow.Closing += (sender, e) =>
             {
-                if (!_isExplicitExit)
+                if (!_isExplicitExit && _trayReady)
                 {
                     e.Cancel = true;
                     mainWindow.Hide();
                 }
             };
 
-            SetupTrayIcon(desktop, mainWindow);
-
-            // Handle start arguments (--silent, --minimized, deep link)
             var args = desktop.Args ?? Array.Empty<string>();
             bool isSilent = args.Any(a => a == "--silent" || a == "--minimized" || a == "--autostart");
             if (isSilent)
             {
-                mainWindow.WindowState = WindowState.Minimized;
+                if (_trayReady)
+                {
+                    mainWindow.Hide();
+                }
+                else
+                {
+                    mainWindow.WindowState = WindowState.Minimized;
+                    mainWindow.Show();
+                }
             }
             else
             {
                 mainWindow.Show();
             }
 
-            // Check initial deep links in args
             foreach (var arg in args)
             {
                 if (arg.StartsWith("prism://", StringComparison.OrdinalIgnoreCase))
@@ -75,17 +85,100 @@ public partial class App : Application
                     DesktopService.TriggerDeepLink(arg);
                 }
             }
+
+            _ = RunStartupLifecycleAsync();
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void SetupTrayIcon(IClassicDesktopStyleApplicationLifetime desktop, MainWindow mainWindow)
+    private async Task RunStartupLifecycleAsync()
+    {
+        try
+        {
+            var client = NativeClientService.Instance;
+            var cfg = client.GetConfig();
+
+            if (cfg.ActiveConfig.AutoConnect && !string.IsNullOrWhiteSpace(cfg.ActiveConfig.ServerAddr))
+            {
+                try
+                {
+                    await client.StartAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Auto-connect failed: {ex.Message}");
+                    Dispatcher.UIThread.Post(() =>
+                        AppServices.ShowError(ex.Message, I18nText.T("client_connection_failed", "Connection failed")));
+                }
+            }
+
+            if (cfg.ActiveConfig.AutoCheckUpdate)
+            {
+                await Task.Delay(4000);
+                await CheckUpdateOnStartupAsync(cfg.ActiveConfig.UpdateChannel);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Startup lifecycle error: {ex.Message}");
+        }
+    }
+
+    private async Task CheckUpdateOnStartupAsync(string? channel)
+    {
+        try
+        {
+            var res = await NativeClientService.Instance.CheckUpdateAsync(channel);
+            if (!res.Available || string.IsNullOrWhiteSpace(res.Version)) return;
+            if (string.Equals(_dismissedUpdateVersion, res.Version, StringComparison.Ordinal)) return;
+
+            string title = I18nText.T("client_update_prompt_title", "New Version Available");
+            string body = I18nText.Format("client_update_prompt_desc", ("version", res.Version));
+            if (!string.IsNullOrWhiteSpace(res.Body))
+            {
+                body = body + "\n\n" + res.Body;
+            }
+
+            bool confirm = await AppServices.ConfirmAsync(
+                title,
+                body,
+                I18nText.T("client_update_prompt_confirm", "Update & Restart"));
+
+            if (!confirm)
+            {
+                _dismissedUpdateVersion = res.Version;
+                return;
+            }
+
+            try
+            {
+                await NativeClientService.Instance.InstallUpdateAsync(channel);
+            }
+            catch
+            {
+                NativeClientService.Instance.OpenExternalUrl("https://github.com/Summpot/prism/releases");
+                AppServices.ShowInfo(
+                    I18nText.T("client_update_open_releases", "Opening the GitHub releases page to download the update."),
+                    I18nText.T("client_update_prompt_title"));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Background update check failed: {ex.Message}");
+        }
+    }
+
+    private bool SetupTrayIcon(IClassicDesktopStyleApplicationLifetime desktop, MainWindow mainWindow)
     {
         try
         {
             var trayIcons = TrayIcon.GetIcons(this);
-            if (trayIcons == null) return;
+            if (trayIcons == null)
+            {
+                Console.WriteLine("[WARN] TrayIcon.Icons is not declared; close-to-tray disabled.");
+                return false;
+            }
 
             var uri = new Uri("avares://Prism/Assets/favicon.ico");
             var iconStream = AssetLoader.Open(uri);
@@ -99,12 +192,21 @@ public partial class App : Application
 
             var menu = new NativeMenu();
 
-            var showItem = new NativeMenuItem(I18n.LocalizationManager.Instance["tray_open"]);
-            showItem.Click += (s, e) => ToggleMainWindow(mainWindow);
+            var showItem = new NativeMenuItem(I18nText.T("tray_open"));
+            showItem.Click += (_, _) =>
+            {
+                mainWindow.Show();
+                mainWindow.WindowState = WindowState.Normal;
+                mainWindow.Activate();
+            };
             menu.Items.Add(showItem);
 
-            _toggleTunnelItem = new NativeMenuItem(I18n.LocalizationManager.Instance["tray_connect"]);
-            _toggleTunnelItem.Click += async (s, e) =>
+            _hideItem = new NativeMenuItem(I18nText.T("tray_hide"));
+            _hideItem.Click += (_, _) => mainWindow.Hide();
+            menu.Items.Add(_hideItem);
+
+            _toggleTunnelItem = new NativeMenuItem(I18nText.T("tray_connect"));
+            _toggleTunnelItem.Click += async (_, _) =>
             {
                 try
                 {
@@ -121,48 +223,55 @@ public partial class App : Application
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[TRAY] Toggle tunnel error: {ex.Message}");
+                    AppServices.ShowError(ex.Message);
                 }
             };
             menu.Items.Add(_toggleTunnelItem);
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
-            var exitItem = new NativeMenuItem(I18n.LocalizationManager.Instance["tray_exit"]);
-            exitItem.Click += (s, e) => ExitApp(desktop);
+            var exitItem = new NativeMenuItem(I18nText.T("tray_exit"));
+            exitItem.Click += (_, _) => ExitApp(desktop);
             menu.Items.Add(exitItem);
 
             _trayIcon.Menu = menu;
-            _trayIcon.Clicked += (s, e) => ToggleMainWindow(mainWindow);
+            _trayIcon.Clicked += (_, _) => ToggleMainWindow(mainWindow);
 
             trayIcons.Add(_trayIcon);
 
-            Action updateTrayTexts = () =>
+            void UpdateTrayTexts()
             {
                 var status = NativeClientService.Instance.CurrentStatus;
                 bool isRunning = status?.Running == true;
-                showItem.Header = I18n.LocalizationManager.Instance["tray_open"];
-                exitItem.Header = I18n.LocalizationManager.Instance["tray_exit"];
+                showItem.Header = I18nText.T("tray_open");
+                exitItem.Header = I18nText.T("tray_exit");
+                if (_hideItem != null)
+                {
+                    _hideItem.Header = I18nText.T("tray_hide");
+                }
                 if (_toggleTunnelItem != null)
                 {
                     _toggleTunnelItem.Header = isRunning
-                        ? I18n.LocalizationManager.Instance["tray_disconnect"]
-                        : I18n.LocalizationManager.Instance["tray_connect"];
+                        ? I18nText.T("tray_disconnect")
+                        : I18nText.T("tray_connect");
                 }
                 if (_trayIcon != null)
                 {
                     _trayIcon.ToolTipText = isRunning
-                        ? string.Format(I18n.LocalizationManager.Instance["tray_running"], status?.ServerAddr ?? "")
-                        : I18n.LocalizationManager.Instance["tray_idle"];
+                        ? I18nText.Format("tray_running", ("0", status?.ServerAddr ?? ""))
+                        : I18nText.T("tray_idle");
                 }
-            };
+            }
 
-            updateTrayTexts();
-            I18n.Messages.CurrentLocaleChanged += () => Dispatcher.UIThread.Post(updateTrayTexts);
-            NativeClientService.Instance.StatusUpdated += _ => Dispatcher.UIThread.Post(updateTrayTexts);
+            UpdateTrayTexts();
+            Messages.CurrentLocaleChanged += () => Dispatcher.UIThread.Post(UpdateTrayTexts);
+            NativeClientService.Instance.StatusUpdated += _ => Dispatcher.UIThread.Post(UpdateTrayTexts);
+            return true;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[WARN] Failed to setup tray icon: {ex.Message}");
+            return false;
         }
     }
 
@@ -200,7 +309,8 @@ public partial class App : Application
 
             foreach (var a in args)
             {
-                if (a.StartsWith("prism://", StringComparison.OrdinalIgnoreCase) || PrismLinkService.Parse(a) != null)
+                if (a.StartsWith("prism://", StringComparison.OrdinalIgnoreCase) ||
+                    a.Contains("://", StringComparison.Ordinal) && PrismLinkService.ParseDeepLink(a).Kind != "unknown")
                 {
                     DesktopService.TriggerDeepLink(a);
                 }

@@ -99,7 +99,8 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         {
             filtered = filtered.Where(l =>
                 l.Message.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
-                l.Target.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase));
+                l.Target.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
+                l.Level.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase));
         }
 
         var list = filtered.ToList();
@@ -219,8 +220,15 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     [RelayCommand]
     public async Task ClearLogsAsync()
     {
+        if (!await AppServices.ConfirmAsync(
+                I18nText.T("common_confirm"),
+                I18nText.T("confirm_clear_logs"),
+                I18nText.T("client_logs_clear")))
+        {
+            return;
+        }
         await _client.ClearLogsAsync();
-        AppServices.ShowInfo("Logs buffer cleared.", "Cleared");
+        AppServices.ShowInfo(I18nText.T("logs_cleared"));
     }
 
     [RelayCommand]

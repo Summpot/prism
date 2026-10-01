@@ -9,21 +9,24 @@
     xmlns:common="clr-namespace:Prism.Common"
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
     x:DataType="vm:AdminConnectionsViewModel">
 
-    <Grid RowDefinitions="Auto, Auto, *" Margin="20">
-        <!-- Header -->
-        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
-            <StackPanel Grid.Column="0" Spacing="4">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
-                    <shadui:Badge Content="{Binding Connections.Count}" Height="20" Padding="6,0" FontSize="10" VerticalAlignment="Center"/>
-                </StackPanel>
-                <TextBlock Text="{Binding [admin_connections_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-            </StackPanel>
-            
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+    <Panel>
+    <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
+                         IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
+    <Grid RowDefinitions="Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
+        <controls:PageHeader
+            Grid.Row="0"
+            Title="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Description="{Binding [admin_connections_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}"
+            Icon="{x:Static common:AppIcons.Cable}"
+            Margin="0,0,0,16">
+            <controls:PageHeader.Badge>
+                <shadui:Badge Content="{Binding Connections.Count}" Height="20" Padding="6,0" FontSize="10" VerticalAlignment="Center"/>
+            </controls:PageHeader.Badge>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [admin_filter_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -42,20 +45,13 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </Grid>
+        </controls:PageHeader>
 
-        <!-- Error Banner -->
-        <Border
+        <controls:ErrorBanner
             Grid.Row="1"
-            IsVisible="{Binding ErrorMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-            Background="#20ef4444"
-            BorderBrush="#50ef4444"
-            BorderThickness="1"
-            CornerRadius="{DynamicResource MdCornerRadius}"
-            Padding="12,8"
-            Margin="0,0,0,12">
-            <TextBlock Text="{Binding ErrorMessage}" Foreground="#ef4444" FontSize="12"/>
-        </Border>
+            Message="{Binding ErrorMessage}"
+            RetryCommand="{Binding RefreshCommand}"
+            Margin="0,0,0,12"/>
 
         <!-- Connections Table -->
         <shadui:Card Grid.Row="2" Padding="12">
@@ -68,10 +64,11 @@
                     BorderThickness="0"
                     Background="Transparent">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="{Binding [admin_col_session_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Id}" Width="140"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_peer_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding PeerAddr}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_protocol], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Proto}" Width="90"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_duration], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Duration}" Width="100"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_session_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Id}" Width="120"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Client}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_peer_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Host}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Upstream}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_duration], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Duration}" Width="90"/>
                         <DataGridTextColumn Header="{Binding [admin_col_raw_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RawBytes}" Width="110"/>
                         <DataGridTextColumn Header="{Binding [admin_col_wire_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding WireBytes}" Width="110"/>
                         <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
@@ -92,17 +89,15 @@
                     </DataGrid.Columns>
                 </DataGrid>
 
-                <!-- Empty State -->
-                <StackPanel
+                <controls:EmptyState
                     IsVisible="{Binding Connections.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                    Icon="{x:Static common:AppIcons.Radio}"
+                    Title="{Binding [admin_no_active_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Margin="0,24"
                     HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Spacing="8"
-                    Margin="0,40">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    <TextBlock Text="{Binding [admin_no_active_connections], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                </StackPanel>
+                    VerticalAlignment="Center"/>
             </Grid>
         </shadui:Card>
     </Grid>
+    </Panel>
 </UserControl>

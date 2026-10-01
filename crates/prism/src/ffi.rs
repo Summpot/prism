@@ -4,8 +4,9 @@
 //! corresponding to the Prism Tauri IPC commands without any UDL or JSON representations.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum PrismFfiError {
@@ -869,6 +870,32 @@ impl PrismClientSession {
 // Global Default Session and Helpers
 // ---------------------------------------------------------------------------
 
+fn ffi_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_name("prism-ffi")
+            .build()
+            .expect("failed to create prism FFI tokio runtime")
+    })
+}
+
+async fn on_runtime<F, T>(fut: F) -> T
+where
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        fut.await
+    } else {
+        ffi_runtime()
+            .spawn(fut)
+            .await
+            .expect("prism FFI runtime task panicked")
+    }
+}
+
 static GLOBAL_SESSION: LazyLock<RwLock<Option<Arc<PrismClientSession>>>> =
     LazyLock::new(|| RwLock::new(None));
 
@@ -1023,20 +1050,29 @@ pub fn open_external_url(url: String) -> Result<(), PrismFfiError> {
 
 #[uniffi::export]
 pub async fn client_status() -> Result<ClientStatusResponse, PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_status().await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_status().await
+    })
+    .await
 }
 
 #[uniffi::export]
 pub async fn client_start(payload: StartClientRequest) -> Result<(), PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_start(payload).await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_start(payload).await
+    })
+    .await
 }
 
 #[uniffi::export]
 pub async fn client_stop() -> Result<(), PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_stop().await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_stop().await
+    })
+    .await
 }
 
 #[uniffi::export]
@@ -1071,14 +1107,20 @@ pub fn client_reset_stats() -> Result<(), PrismFfiError> {
 
 #[uniffi::export]
 pub async fn client_logs(limit: Option<u32>) -> Result<Vec<ClientLogEntry>, PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_logs(limit).await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_logs(limit).await
+    })
+    .await
 }
 
 #[uniffi::export]
 pub async fn client_clear_logs() -> Result<(), PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_clear_logs().await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_clear_logs().await
+    })
+    .await
 }
 
 #[uniffi::export]
@@ -1106,26 +1148,38 @@ pub fn client_reset_middleware_config(name: String) -> Result<MiddlewareItem, Pr
 pub async fn client_check_update(
     channel: Option<String>,
 ) -> Result<UpdateCheckResponse, PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_check_update(channel).await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_check_update(channel).await
+    })
+    .await
 }
 
 #[uniffi::export]
 pub async fn client_install_update(channel: Option<String>) -> Result<(), PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.client_install_update(channel).await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.client_install_update(channel).await
+    })
+    .await
 }
 
 #[uniffi::export]
 pub async fn admin_request(payload: AdminHttpRequest) -> Result<AdminHttpResponse, PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.admin_request(payload).await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.admin_request(payload).await
+    })
+    .await
 }
 
 #[uniffi::export]
 pub async fn control_rpc(payload: AdminRpcRequest) -> Result<AdminRpcResponse, PrismFfiError> {
-    let session = get_or_init_session()?;
-    session.control_rpc(payload).await
+    on_runtime(async move {
+        let session = get_or_init_session()?;
+        session.control_rpc(payload).await
+    })
+    .await
 }
 
 #[cfg(test)]

@@ -80,7 +80,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
     private string _selectedProtocol = "auto://";
 
     [ObservableProperty]
-    private string _remoteLinkInput = "mc.627500.xyz";
+    private string _remoteLinkInput = "";
 
     [ObservableProperty]
     private string _listenAddress = "127.0.0.1:25565";
@@ -155,7 +155,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(ServerAddress);
-            AppServices.ShowSuccess("Server address copied to clipboard.", "Copied");
+            AppServices.ShowSuccess(I18nText.T("common_copied"), I18nText.T("common_copy"));
         }
     }
 
@@ -168,7 +168,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(fullUrl);
-            AppServices.ShowSuccess("Connection address copied to clipboard.", "Copied");
+            AppServices.ShowSuccess(I18nText.T("common_copied"), I18nText.T("common_copy"));
         }
     }
 
@@ -217,7 +217,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
     public ObservableCollection<ulong> ThroughputSamples { get; } = new();
 
     [ObservableProperty]
-    private bool _isGithubAuthAvailable = true;
+    private bool _isGithubAuthAvailable;
 
     [ObservableProperty]
     private string? _errorMessage;
@@ -279,7 +279,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             else
             {
                 SelectedProtocol = "auto://";
-                RemoteLinkInput = "mc.627500.xyz";
+                RemoteLinkInput = "";
             }
 
             // In accordance with Tauri selectClientAuthView:
@@ -313,9 +313,9 @@ public partial class ClientOverviewViewModel : ViewModelBase
         ShowLoggedInCard = liveAuth;
         ShowConnectAndLoginHero = !liveAuth;
 
-        ShowLoginMethods = !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated;
+        ShowLoginMethods = !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated && (IsGithubAuthAvailable || IsConnected);
 
-        string host = !string.IsNullOrWhiteSpace(ServerAddress) ? ServerAddress : (!string.IsNullOrWhiteSpace(RemoteLinkInput) ? RemoteLinkInput : "mc.627500.xyz");
+        string host = !string.IsNullOrWhiteSpace(ServerAddress) ? ServerAddress : RemoteLinkInput;
         string listen = !string.IsNullOrWhiteSpace(ListenAddress) ? ListenAddress : "127.0.0.1:25565";
         MappingText = $"{host} -> {listen}";
 
@@ -373,11 +373,25 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
             ProfileName = value.Name;
             ServerAddress = value.ServerAddr;
+            ListenAddress = value.ListenAddr;
             ActiveTransport = (value.Transport ?? "AUTO").ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(value.ServerAddr))
+            {
+                var idx = value.ServerAddr.IndexOf("://", StringComparison.Ordinal);
+                if (idx > 0)
+                {
+                    SelectedProtocol = value.ServerAddr.Substring(0, idx + 3);
+                    RemoteLinkInput = value.ServerAddr.Substring(idx + 3);
+                }
+                else
+                {
+                    RemoteLinkInput = value.ServerAddr;
+                }
+            }
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to switch profile: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
     }
 
@@ -396,6 +410,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
         var result = PrismLinkService.ParseDeepLink(link);
         if (result.Kind == "auth" && !string.IsNullOrWhiteSpace(result.Token))
         {
+            if (IsSessionAuthenticated)
+            {
+                ErrorMessage = I18nText.T("client_oauth_unsolicited");
+                return;
+            }
             try
             {
                 var patch = new ClientConfigPatch(
@@ -444,8 +463,18 @@ public partial class ClientOverviewViewModel : ViewModelBase
         else if (result.Kind == "profile" && result.Profile != null)
         {
             RemoteLinkInput = result.Profile.ServerAddr;
-            SelectedProtocol = "prism://";
+            SelectedProtocol = string.IsNullOrWhiteSpace(result.Profile.Transport) || result.Profile.Transport == "auto"
+                ? "auto://"
+                : result.Profile.Transport + "://";
             await ConnectFromLinkAsync();
+        }
+        else
+        {
+            var trimmed = link.Trim();
+            if (trimmed.Length is >= 16 and <= 64 && trimmed.All(char.IsLetterOrDigit))
+            {
+                await ExchangeAuthCodeAsync(trimmed, DesktopService.PendingOAuthState);
+            }
         }
     }
 
@@ -456,6 +485,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         {
             ErrorMessage = null;
             string state = Guid.NewGuid().ToString("N");
+            DesktopService.PendingOAuthState = state;
             string? targetUrl = null;
 
             // 1. If connected, prefer in-band control RPC
@@ -484,7 +514,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
             if (string.IsNullOrWhiteSpace(targetUrl))
             {
-                ErrorMessage = "Cannot start GitHub OAuth: tunnel is not connected and Management URL is not configured.";
+                ErrorMessage = I18nText.T("client_probe_failed");
                 return;
             }
 
@@ -498,7 +528,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to open browser for OAuth: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
     }
 
@@ -547,6 +577,12 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
     private async Task ExchangeAuthCodeAsync(string code, string? state)
     {
+        if (!string.IsNullOrWhiteSpace(DesktopService.PendingOAuthState) &&
+            !string.Equals(DesktopService.PendingOAuthState, state, StringComparison.Ordinal))
+        {
+            ErrorMessage = I18nText.T("client_oauth_state_mismatch");
+            return;
+        }
         ShowOAuthExchanging = true;
         try
         {
@@ -619,7 +655,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
             if (string.IsNullOrWhiteSpace(token))
             {
-                ErrorMessage = "OAuth exchange failed: server did not return a valid token.";
+                ErrorMessage = I18nText.T("client_github_exchange_failed");
                 return;
             }
 
@@ -813,7 +849,23 @@ public partial class ClientOverviewViewModel : ViewModelBase
             port = listenAddr[(listenAddr.LastIndexOf(':') + 1)..];
         }
 
-        string ip = idx <= 254 ? $"127.0.0.{idx + 1}" : $"127.0.{idx / 256}.{idx % 256}";
+        string ip = "127.0.0.1";
+        if (idx <= 254)
+        {
+            ip = $"127.0.0.{idx + 1}";
+        }
+        else
+        {
+            int offset = idx - 255;
+            int b = 1 + offset / 65536;
+            if (b <= 7)
+            {
+                int rem = offset % 65536;
+                int c = rem / 256;
+                int d = rem % 256;
+                ip = $"127.{b}.{c}.{d}";
+            }
+        }
         return port == "25565" ? ip : $"{ip}:{port}";
     }
 
@@ -841,6 +893,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [RelayCommand]
     public async Task ConnectFromLinkAsync()
     {
+        if (IsRunning)
+        {
+            await ToggleTunnelAsync();
+            return;
+        }
         if (string.IsNullOrWhiteSpace(RemoteLinkInput)) return;
 
         try
@@ -987,6 +1044,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 ActiveProfileId: null,
                 ActiveConfig: patch
             ));
+            AdminApiClient.Instance.ClearSession();
             UserAvatarBitmap = null;
             SessionAvatarUrl = null;
             IsSessionAuthenticated = false;

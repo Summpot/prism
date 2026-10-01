@@ -24,6 +24,10 @@ public static class Converters
     public static readonly IValueConverter NullOrEmptyToBoolean =
         new FuncValueConverter<string?, bool>(s => !string.IsNullOrWhiteSpace(s));
 
+    public static readonly IValueConverter SettingsCountLabel =
+        new FuncValueConverter<int, string>(c =>
+            Prism.I18n.I18nText.Format("middleware_settings_count", ("count", c)));
+
     public static readonly IValueConverter BoolToCopyOrCheckIcon =
         new FuncValueConverter<bool, Geometry>(copied => copied ? AppIcons.Check : AppIcons.Copy);
 
@@ -95,10 +99,31 @@ public static class Converters
                 : (Prism.I18n.LocalizationManager.Instance["language_english_short"] ?? "EN"));
 
     public static readonly IValueConverter StatusToLabel =
-        new FuncValueConverter<bool, string>(running => running ? "RUNNING" : "IDLE");
+        new FuncValueConverter<bool, string>(running =>
+            running
+                ? (Prism.I18n.LocalizationManager.Instance["status_running"] ?? "RUNNING")
+                : (Prism.I18n.LocalizationManager.Instance["status_idle"] ?? "IDLE"));
 
     public static readonly IValueConverter ActiveStatusToLabel =
-        new FuncValueConverter<bool, string>(active => active ? "ACTIVE" : "DISABLED");
+        new FuncValueConverter<bool, string>(active =>
+            active
+                ? (Prism.I18n.LocalizationManager.Instance["status_active"] ?? "ACTIVE")
+                : (Prism.I18n.LocalizationManager.Instance["status_disabled"] ?? "DISABLED"));
+
+    public static readonly IValueConverter HealthToLabel =
+        new FuncValueConverter<bool, string>(healthy =>
+            healthy
+                ? (Prism.I18n.LocalizationManager.Instance["status_healthy"] ?? "HEALTHY")
+                : (Prism.I18n.LocalizationManager.Instance["status_unhealthy"] ?? "UNHEALTHY"));
+
+    public static readonly IValueConverter BooleanToOpacity =
+        new FuncValueConverter<bool, double>(enabled => enabled ? 1.0 : 0.5);
+
+    public static readonly IValueConverter PrimaryStandbyLabel =
+        new FuncValueConverter<bool, string>(primary =>
+            primary
+                ? (Prism.I18n.LocalizationManager.Instance["admin_primary"] ?? "Primary")
+                : (Prism.I18n.LocalizationManager.Instance["admin_standby"] ?? "Standby"));
 
     public static readonly IValueConverter ActiveStatusToBrush =
         new FuncValueConverter<bool, IBrush>(active =>
@@ -111,6 +136,18 @@ public static class Converters
             var parts = param.Split('|');
             return val ? parts[0] : (parts.Length > 1 ? parts[1] : "");
         });
+
+    public static readonly IValueConverter CopiedOrCopyLabel =
+        new FuncValueConverter<bool, string>(copied =>
+            copied
+                ? (Prism.I18n.LocalizationManager.Instance["common_copied"] ?? "Copied")
+                : (Prism.I18n.LocalizationManager.Instance["common_copy"] ?? "Copy"));
+
+    public static readonly IValueConverter CopiedOrShareLabel =
+        new FuncValueConverter<bool, string>(copied =>
+            copied
+                ? (Prism.I18n.LocalizationManager.Instance["common_copied"] ?? "Copied")
+                : (Prism.I18n.LocalizationManager.Instance["client_share_config"] ?? "Share"));
 }
 
 public class LocaleOption

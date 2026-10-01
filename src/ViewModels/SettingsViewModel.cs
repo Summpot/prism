@@ -75,6 +75,20 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     public static readonly string[] AvailableThemes = ["Default", "Light", "Dark"];
     public static readonly string[] AvailableUpdateChannels = ["stable", "beta", "alpha", "dev"];
 
+    public string AppVersion
+    {
+        get
+        {
+            var version = typeof(App).Assembly.GetName().Version;
+            return version == null ? "v0.1.0" : $"v{version.ToString(3)}";
+        }
+    }
+
+    public string VersionChannelText => $"{AppVersion} ({UpdateChannel})";
+
+    public string ArchitectureText =>
+        $"{System.Runtime.InteropServices.RuntimeInformation.OSDescription} {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}";
+
     private bool _isLoading;
 
     public SettingsViewModel()
@@ -204,7 +218,11 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     partial void OnAutoConnectChanged(bool value) => SaveConfig();
     partial void OnAutoConnectPanelChanged(bool value) => SaveConfig();
     partial void OnFakeLanBroadcastChanged(bool value) => SaveConfig();
-    partial void OnUpdateChannelChanged(string value) => SaveConfig();
+    partial void OnUpdateChannelChanged(string value)
+    {
+        SaveConfig();
+        OnPropertyChanged(nameof(VersionChannelText));
+    }
     partial void OnAutoCheckUpdateChanged(bool value) => SaveConfig();
     partial void OnManagementUrlChanged(string value) => SaveConfig();
 
@@ -281,7 +299,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             UpdateChangelog = res.Body ?? "";
             if (res.Available)
             {
-                UpdateStatusMessage = $"Update available: {res.Version}";
+                UpdateStatusMessage = I18nText.Format("client_update_found", ("version", res.Version ?? ""));
             }
             else
             {
@@ -306,11 +324,13 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             IsInstallingUpdate = true;
             UpdateStatusMessage = LocalizationManager.Instance["client_update_installing"] ?? "Downloading and applying update...";
             await _client.InstallUpdateAsync(UpdateChannel);
-            UpdateStatusMessage = "Update downloaded. Restart Prism to complete installation.";
+            UpdateStatusMessage = I18nText.T("client_update_prompt_updating");
         }
         catch (Exception ex)
         {
-            UpdateStatusMessage = $"Update installation failed: {ex.Message}";
+            UpdateStatusMessage = I18nText.Format("client_update_failed", ("error", ex.Message));
+            _client.OpenExternalUrl("https://github.com/Summpot/prism/releases");
+            AppServices.ShowInfo(I18nText.T("client_update_open_releases"));
         }
         finally
         {

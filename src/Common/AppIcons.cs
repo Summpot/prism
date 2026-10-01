@@ -46,6 +46,7 @@ public static class AppIcons
     public static readonly StreamGeometry Palette = Parse("M12 2C6.5 2 2 6.5 2 12c0 3.6 2 6.8 5 8.2.5.2 1.1-.1 1.1-.7v-1.1c0-.5.4-1 1-1h1.5c3.6 0 6.5-2.9 6.5-6.4 0-4.4-4-8-9.1-8z");
     public static readonly StreamGeometry ArrowUpCircle = Parse("M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zm0-6V8m-4 4l4-4 4 4");
     public static readonly StreamGeometry Info = Parse("M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zm0-8v4m0-8h.01");
+    public static readonly StreamGeometry AlertTriangle = Parse("M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4m0 4h.01");
     public static readonly StreamGeometry Monitor = Parse("M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm8 14v4m-4 0h8");
     public static readonly StreamGeometry Sun = Parse("M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42m12.72-12.72l1.42-1.42M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z");
     public static readonly StreamGeometry Moon = Parse("M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z");

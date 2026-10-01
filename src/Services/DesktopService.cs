@@ -1,41 +1,72 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
-using Microsoft.Win32;
+using System.Text;
 
 namespace Prism.Services;
 
 public static class DesktopService
 {
-    public static event Action<string>? DeepLinkReceived;
+    private static readonly object Sync = new();
+    private static readonly List<string> PendingDeepLinks = new();
+    private static readonly HashSet<string> ConsumedDeepLinks = new(StringComparer.OrdinalIgnoreCase);
+    private static Action<string>? _deepLinkReceived;
+
+    public static string? PendingOAuthState { get; set; }
+
+    public static event Action<string>? DeepLinkReceived
+    {
+        add
+        {
+            _deepLinkReceived += value;
+            List<string> replay;
+            lock (Sync)
+            {
+                replay = [.. PendingDeepLinks];
+                PendingDeepLinks.Clear();
+            }
+            foreach (var uri in replay)
+            {
+                value?.Invoke(uri);
+            }
+        }
+        remove => _deepLinkReceived -= value;
+    }
 
     public static void TriggerDeepLink(string uri)
     {
         if (string.IsNullOrWhiteSpace(uri)) return;
-        DeepLinkReceived?.Invoke(uri.Trim());
+        uri = uri.Trim();
+
+        Action<string>? handler;
+        lock (Sync)
+        {
+            if (!ConsumedDeepLinks.Add(uri)) return;
+            handler = _deepLinkReceived;
+            if (handler == null)
+            {
+                PendingDeepLinks.Add(uri);
+                return;
+            }
+        }
+        handler.Invoke(uri);
     }
 
     public static void RegisterPrismProtocol()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         try
         {
             string? exePath = Environment.ProcessPath;
             if (string.IsNullOrEmpty(exePath)) return;
 
-            using var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\prism");
-            if (key != null)
+            if (OperatingSystem.IsWindows())
             {
-                key.SetValue("", "URL:Prism Protocol");
-                key.SetValue("URL Protocol", "");
-
-                using var defaultIcon = key.CreateSubKey("DefaultIcon");
-                defaultIcon?.SetValue("", $"\"{exePath}\",0");
-
-                using var shell = key.CreateSubKey(@"shell\open\command");
-                shell?.SetValue("", $"\"{exePath}\" \"%1\"");
+                RegisterWindowsProtocol(exePath);
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                RegisterLinuxProtocol(exePath);
             }
         }
         catch (Exception ex)
@@ -44,41 +75,146 @@ public static class DesktopService
         }
     }
 
-    public static bool IsAutostartEnabled()
+    private static void RegisterWindowsProtocol(string exePath)
     {
-        if (!OperatingSystem.IsWindows()) return false;
+        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\prism");
+        if (key == null) return;
+        key.SetValue("", "URL:Prism Protocol");
+        key.SetValue("URL Protocol", "");
+        using var defaultIcon = key.CreateSubKey("DefaultIcon");
+        defaultIcon?.SetValue("", $"\"{exePath}\",0");
+        using var shell = key.CreateSubKey(@"shell\open\command");
+        shell?.SetValue("", $"\"{exePath}\" \"%1\"");
+    }
 
+    private static void RegisterLinuxProtocol(string exePath)
+    {
+        string appsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".local", "share", "applications");
+        Directory.CreateDirectory(appsDir);
+        string desktopPath = Path.Combine(appsDir, "prism.desktop");
+        var desktop = new StringBuilder();
+        desktop.AppendLine("[Desktop Entry]");
+        desktop.AppendLine("Name=Prism");
+        desktop.AppendLine("Comment=Prism tunnel client");
+        desktop.AppendLine($"Exec=\"{exePath}\" %u");
+        desktop.AppendLine("Terminal=false");
+        desktop.AppendLine("Type=Application");
+        desktop.AppendLine("Categories=Network;");
+        desktop.AppendLine("MimeType=x-scheme-handler/prism;");
+        File.WriteAllText(desktopPath, desktop.ToString());
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false);
-            return key?.GetValue("Prism") != null;
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "xdg-mime",
+                Arguments = "default prism.desktop x-scheme-handler/prism",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            })?.Dispose();
         }
-        catch
+        catch { }
+    }
+
+    public static bool IsAutostartEnabled()
+    {
+        try
         {
-            return false;
+            if (OperatingSystem.IsWindows())
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false);
+                return key?.GetValue("Prism") != null;
+            }
+            if (OperatingSystem.IsLinux())
+            {
+                return File.Exists(LinuxAutostartPath());
+            }
+            if (OperatingSystem.IsMacOS())
+            {
+                return File.Exists(MacLaunchAgentPath());
+            }
         }
+        catch { }
+        return false;
     }
 
     public static void SetAutostart(bool enable, bool silent = false)
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         try
         {
             string? exePath = Environment.ProcessPath;
             if (string.IsNullOrEmpty(exePath)) return;
 
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
-            if (key == null) return;
-
-            if (enable)
+            if (OperatingSystem.IsWindows())
             {
-                string cmd = silent ? $"\"{exePath}\" --silent" : $"\"{exePath}\"";
-                key.SetValue("Prism", cmd);
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                if (key == null) return;
+                if (enable)
+                {
+                    string cmd = silent ? $"\"{exePath}\" --silent" : $"\"{exePath}\"";
+                    key.SetValue("Prism", cmd);
+                }
+                else
+                {
+                    key.DeleteValue("Prism", false);
+                }
+                return;
             }
-            else
+
+            if (OperatingSystem.IsLinux())
             {
-                key.DeleteValue("Prism", false);
+                string path = LinuxAutostartPath();
+                if (enable)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    string args = silent ? " --silent" : "";
+                    var desktop = new StringBuilder();
+                    desktop.AppendLine("[Desktop Entry]");
+                    desktop.AppendLine("Type=Application");
+                    desktop.AppendLine("Name=Prism");
+                    desktop.AppendLine($"Exec=\"{exePath}\"{args}");
+                    desktop.AppendLine("X-GNOME-Autostart-enabled=true");
+                    File.WriteAllText(path, desktop.ToString());
+                }
+                else if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+                return;
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                string path = MacLaunchAgentPath();
+                if (enable)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    string argsXml = silent
+                        ? "\n    <string>--silent</string>"
+                        : "";
+                    var plist = $"""
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>xyz.prism.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+    <string>{exePath}</string>{argsXml}
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+""";
+                    File.WriteAllText(path, plist);
+                }
+                else if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
             }
         }
         catch (Exception ex)
@@ -86,6 +222,12 @@ public static class DesktopService
             Console.WriteLine($"[WARN] Failed to set autostart: {ex.Message}");
         }
     }
+
+    private static string LinuxAutostartPath() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "autostart", "prism.desktop");
+
+    private static string MacLaunchAgentPath() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "LaunchAgents", "xyz.prism.desktop.plist");
 
     private static readonly string SettingsFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

@@ -66,7 +66,10 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     private int _serviceCount = 0;
 
     [ObservableProperty]
-    private string _configPath = "/etc/prism/prism.toml";
+    private string _configPath = "";
+
+    [ObservableProperty]
+    private string _savedRatioText = "0.0%";
 
     [ObservableProperty]
     private string? _reloadMessage;
@@ -78,13 +81,19 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     private string? _errorMessage;
 
     [ObservableProperty]
+    private AdminReadyState _readyState = AdminReadyState.Loading;
+
+    [ObservableProperty]
+    private bool _isReady;
+
+    [ObservableProperty]
     private bool _isHealthy;
 
     [ObservableProperty]
     private bool _autoRefresh = true;
 
     [ObservableProperty]
-    private string _autoRefreshText = "自动刷新：开";
+    private string _autoRefreshText = "";
 
     private CancellationTokenSource? _autoRefreshCts;
 
@@ -131,12 +140,18 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     [RelayCommand]
     public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
 
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
+
+    [RelayCommand]
+    public void DismissError() => ErrorMessage = null;
+
     private void StartAutoRefresh()
     {
         AutoRefreshHelper.Stop(ref _autoRefreshCts);
         if (AutoRefresh)
         {
-            _autoRefreshCts = AutoRefreshHelper.Start(LoadDataAsync, TimeSpan.FromSeconds(8), () => _client.CurrentStatus?.Running == true && !IsLoading);
+            _autoRefreshCts = AutoRefreshHelper.Start(LoadDataAsync, TimeSpan.FromSeconds(8), () => IsReady && !IsLoading);
         }
     }
 
@@ -147,10 +162,13 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Prism tunnel is disconnected. Connect in the Overview tab to view server telemetry via in-band $control.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             IsHealthy = false;
             ConnectionCount = 0;
             ServiceCount = 0;
+            ConfigPath = "";
             return;
         }
 
@@ -158,22 +176,34 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
 
             var healthTask = _api.GetHealthAsync();
             var connsTask = _api.GetConnectionsAsync();
             var servicesTask = _api.GetTunnelServicesAsync();
             var configTask = _api.GetConfigPathAsync();
+            var statsTask = _api.GetOptimizerStatsAsync();
 
-            await Task.WhenAll(healthTask, connsTask, servicesTask, configTask);
+            await Task.WhenAll(healthTask, connsTask, servicesTask, configTask, statsTask);
 
             IsHealthy = (await healthTask).Ok;
             ConnectionCount = (await connsTask).Count;
             ServiceCount = (await servicesTask).Count;
-            ConfigPath = (await configTask).Path ?? "Managed via in-band $control";
+            var path = (await configTask).Path;
+            ConfigPath = string.IsNullOrWhiteSpace(path) ? "" : path;
+            try
+            {
+                SavedRatioText = Formatters.FormatPercentage((await statsTask).Global.SavedRatio);
+            }
+            catch
+            {
+                SavedRatioText = "0.0%";
+            }
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to load admin overview: {ex.Message}";
+            ErrorMessage = ex.Message;
         }
         finally
         {
@@ -186,15 +216,15 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     {
         try
         {
-            ReloadMessage = "Sending reload signal...";
+            ReloadMessage = I18nText.T("common_loading");
             var res = await _api.TriggerReloadAsync();
-            ReloadMessage = $"Server configuration reloaded (seq {res.Seq}).";
-            AppServices.ShowSuccess($"Server configuration reloaded (seq {res.Seq}).", "Config Reloaded");
+            ReloadMessage = I18nText.Format("reload_ok", ("seq", res.Seq));
+            AppServices.ShowSuccess(ReloadMessage);
         }
         catch (Exception ex)
         {
-            ReloadMessage = $"Reload failed: {ex.Message}";
-            AppServices.ShowError(ex.Message, "Reload Failed");
+            ReloadMessage = ex.Message;
+            AppServices.ShowError(ex.Message, I18nText.T("reload_failed"));
         }
     }
 }
@@ -202,11 +232,17 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
 public class ConnectionItem : ObservableObject
 {
     public string Id { get; set; } = "";
+    public string Client { get; set; } = "";
+    public string Host { get; set; } = "";
+    public string Upstream { get; set; } = "";
     public string PeerAddr { get; set; } = "";
-    public string Proto { get; set; } = "TCP";
+    public string Proto { get; set; } = "";
     public string Duration { get; set; } = "0s";
+    public string StartedAt { get; set; } = "";
     public string RawBytes { get; set; } = "0 B";
     public string WireBytes { get; set; } = "0 B";
+    public string UplinkText { get; set; } = "";
+    public string DownlinkText { get; set; } = "";
 }
 
 public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
@@ -227,10 +263,16 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
     private string? _errorMessage;
 
     [ObservableProperty]
+    private AdminReadyState _readyState = AdminReadyState.Loading;
+
+    [ObservableProperty]
+    private bool _isReady;
+
+    [ObservableProperty]
     private bool _autoRefresh = true;
 
     [ObservableProperty]
-    private string _autoRefreshText = "自动刷新：开";
+    private string _autoRefreshText = "";
 
     private CancellationTokenSource? _autoRefreshCts;
 
@@ -301,6 +343,9 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
             ? _allConnections
             : _allConnections.Where(c => c.Id.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                                          c.PeerAddr.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                         c.Client.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                         c.Host.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                         c.Upstream.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                                          c.Proto.Contains(q, StringComparison.OrdinalIgnoreCase));
         foreach (var c in matches)
         {
@@ -313,7 +358,9 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Tunnel is disconnected. Connect to a server in Overview to view active connections via in-band $control.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             _allConnections.Clear();
             Connections.Clear();
             return;
@@ -323,6 +370,8 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
             var list = await _api.GetConnectionsAsync();
 
             _allConnections.Clear();
@@ -334,15 +383,24 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
                 var duration = Formatters.FormatUptime((ulong)(durMs / 1000));
                 var raw = Formatters.FormatBytes(r.RawBytes);
                 var wire = Formatters.FormatBytes(r.WireBytes);
+                string started = r.StartedAtUnixMs > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(r.StartedAtUnixMs).ToLocalTime().ToString("HH:mm:ss")
+                    : "";
 
                 _allConnections.Add(new ConnectionItem
                 {
                     Id = r.Id,
+                    Client = r.Client,
+                    Host = r.Host,
+                    Upstream = r.Upstream,
                     PeerAddr = string.IsNullOrWhiteSpace(r.Client) ? r.Host : r.Client,
-                    Proto = "TCP",
+                    Proto = "",
                     Duration = duration,
+                    StartedAt = started,
                     RawBytes = raw,
-                    WireBytes = wire
+                    WireBytes = wire,
+                    UplinkText = $"{Formatters.FormatBytes(r.UplinkRawBytes)} → {Formatters.FormatBytes(r.UplinkWireBytes)}",
+                    DownlinkText = $"{Formatters.FormatBytes(r.DownlinkRawBytes)} → {Formatters.FormatBytes(r.DownlinkWireBytes)}"
                 });
             }
 
@@ -350,7 +408,7 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to fetch connections: {ex.Message}";
+            ErrorMessage = ex.Message;
         }
         finally
         {
@@ -359,20 +417,31 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
+
+    [RelayCommand]
     public async Task DisconnectAsync(ConnectionItem? item)
     {
         if (item == null) return;
+        if (!await AppServices.ConfirmAsync(
+                I18nText.T("common_confirm"),
+                I18nText.T("confirm_disconnect_session"),
+                I18nText.T("session_disconnect"),
+                destructive: true))
+        {
+            return;
+        }
         try
         {
             await _api.CloseConnectionAsync(item.Id);
             _allConnections.Remove(item);
             Connections.Remove(item);
-            AppServices.ShowSuccess($"Session {item.Id} closed.", "Disconnected");
+            AppServices.ShowSuccess(item.Id);
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to close connection: {ex.Message}";
-            AppServices.ShowError(ex.Message, "Disconnect Failed");
+            ErrorMessage = ex.Message;
+            AppServices.ShowError(ex.Message);
         }
     }
 }
@@ -384,6 +453,11 @@ public class ServiceRowItem : ObservableObject
     public string LocalAddr { get; set; } = "";
     public string RemoteAddr { get; set; } = "";
     public string Masquerade { get; set; } = "";
+    public string ClientId { get; set; } = "";
+    public string Remote { get; set; } = "";
+    public bool Primary { get; set; }
+    public bool RouteOnly { get; set; }
+    public bool IsActive { get; set; } = true;
 }
 
 public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAware
@@ -400,12 +474,21 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
     private string? _errorMessage;
 
     [ObservableProperty]
+    private AdminReadyState _readyState = AdminReadyState.Loading;
+
+    [ObservableProperty]
+    private bool _isReady;
+
+    [ObservableProperty]
     private bool _autoRefresh = true;
 
     [ObservableProperty]
-    private string _autoRefreshText = "自动刷新：开";
+    private string _autoRefreshText = "";
 
     private CancellationTokenSource? _autoRefreshCts;
+
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     public AdminTunnelServicesViewModel()
     {
@@ -466,7 +549,9 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Tunnel is disconnected. Connect in the Overview tab to view registered tunnel services.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             Services.Clear();
             return;
         }
@@ -475,6 +560,8 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
             var list = await _api.GetTunnelServicesAsync();
 
             Services.Clear();
@@ -484,16 +571,21 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
                 Services.Add(new ServiceRowItem
                 {
                     Name = s.Name,
-                    Proto = s.Proto.ToUpperInvariant(),
+                    Proto = string.IsNullOrWhiteSpace(s.Proto) ? "" : s.Proto.ToUpperInvariant(),
                     LocalAddr = s.LocalAddr,
                     RemoteAddr = s.RemoteAddr,
-                    Masquerade = string.IsNullOrWhiteSpace(s.MasqueradeHost) ? "-" : s.MasqueradeHost
+                    Masquerade = string.IsNullOrWhiteSpace(s.MasqueradeHost) ? "-" : s.MasqueradeHost,
+                    ClientId = snap.ClientId,
+                    Remote = snap.Remote,
+                    Primary = snap.Primary,
+                    RouteOnly = s.RouteOnly,
+                    IsActive = true
                 });
             }
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to load services: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
         finally
         {
@@ -543,12 +635,21 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     private string? _errorMessage;
 
     [ObservableProperty]
+    private AdminReadyState _readyState = AdminReadyState.Loading;
+
+    [ObservableProperty]
+    private bool _isReady;
+
+    [ObservableProperty]
     private bool _autoRefresh = true;
 
     [ObservableProperty]
-    private string _autoRefreshText = "自动刷新：开";
+    private string _autoRefreshText = "";
 
     private CancellationTokenSource? _autoRefreshCts;
+
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     [ObservableProperty]
     private bool _showTokenDialog;
@@ -569,6 +670,9 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
 
     [ObservableProperty]
     private UserRowItem? _editingUser;
+
+    [ObservableProperty]
+    private string _editUserTitle = "";
 
     [ObservableProperty]
     private string _editRole = "member";
@@ -640,7 +744,9 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Tunnel is disconnected. Connect in the Overview tab to view and manage users and tokens.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             Users.Clear();
             Tokens.Clear();
             return;
@@ -650,6 +756,8 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
 
             var usersTask = _api.GetUsersAsync();
             var tokensTask = _api.GetTokensAsync();
@@ -665,7 +773,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
                     Id = u.Id,
                     Username = string.IsNullOrWhiteSpace(u.DisplayName) ? u.Username : $"{u.DisplayName} ({u.Username})",
                     Role = u.Role.ToUpperInvariant(),
-                    GithubId = u.Username,
+                    GithubId = string.IsNullOrWhiteSpace(u.Id) ? u.Username : u.Id,
                     CreatedAt = created,
                     ServiceRules = u.ServiceRules ?? new List<string>()
                 });
@@ -682,7 +790,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
                 string created = DateTimeOffset.FromUnixTimeMilliseconds(t.CreatedAtUnixMs).ToString("yyyy-MM-dd HH:mm");
                 string expires = t.ExpiresAtUnixMs.HasValue
                     ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToString("yyyy-MM-dd HH:mm")
-                    : "Never";
+                    : I18nText.T("common_never");
 
                 Tokens.Add(new TokenRowItem
                 {
@@ -696,7 +804,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to fetch users or tokens: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
         finally
         {
@@ -731,7 +839,12 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         try
         {
             ErrorMessage = null;
-            string uid = string.IsNullOrWhiteSpace(SelectedUserId) ? "admin-user" : SelectedUserId;
+            if (string.IsNullOrWhiteSpace(SelectedUserId))
+            {
+                ErrorMessage = I18nText.T("common_error");
+                return;
+            }
+            string uid = SelectedUserId;
             var resp = await _api.CreateTokenAsync(NewTokenName.Trim(), uid, SelectedExpirationDays > 0 ? SelectedExpirationDays : null);
             CreatedRawToken = resp.RawToken;
 
@@ -754,7 +867,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to create token: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
             AppServices.ShowError(ex.Message, "Token Creation Failed");
         }
     }
@@ -772,7 +885,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to update role: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
             AppServices.ShowError(ex.Message, "Role Update Failed");
         }
     }
@@ -781,6 +894,14 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     public async Task RevokeTokenAsync(TokenRowItem? item)
     {
         if (item == null) return;
+        if (!await AppServices.ConfirmAsync(
+                I18nText.T("common_confirm"),
+                I18nText.T("confirm_revoke_token"),
+                I18nText.T("common_delete"),
+                destructive: true))
+        {
+            return;
+        }
 
         try
         {
@@ -791,7 +912,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to revoke token: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
             AppServices.ShowError(ex.Message, "Revoke Failed");
         }
     }
@@ -804,7 +925,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(CreatedRawToken);
-            AppServices.ShowSuccess("Token copied to clipboard.", "Copied");
+            AppServices.ShowSuccess(I18nText.T("token_copied"), I18nText.T("common_copied"));
         }
     }
 
@@ -813,6 +934,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     {
         if (item == null) return;
         EditingUser = item;
+        EditUserTitle = I18nText.Format("users_edit_title", ("username", item.Username));
         EditRole = item.Role.ToLowerInvariant();
         EditServiceRules = string.Join(Environment.NewLine, item.ServiceRules);
         ShowEditUserDialog = true;
@@ -844,14 +966,16 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             EditingUser.Role = EditRole.ToUpperInvariant();
             EditingUser.ServiceRules = rules;
 
-            AppServices.ShowSuccess($"User '{EditingUser.Username}' updated.", "User Saved");
+            AppServices.ShowSuccess(
+                I18nText.Format("user_updated", ("name", EditingUser.Username)),
+                I18nText.T("user_saved"));
             ShowEditUserDialog = false;
             EditingUser = null;
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to save user: {ex.Message}";
-            AppServices.ShowError(ex.Message, "Save Failed");
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            AppServices.ShowError(ex.Message, I18nText.T("common_save_failed"));
         }
     }
 }
@@ -882,10 +1006,15 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
 
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
+    [ObservableProperty] private AdminReadyState _readyState = AdminReadyState.Loading;
+    [ObservableProperty] private bool _isReady;
 
     [ObservableProperty] private bool _autoRefresh = true;
-    [ObservableProperty] private string _autoRefreshText = "自动刷新：开";
+    [ObservableProperty] private string _autoRefreshText = "";
     private CancellationTokenSource? _autoRefreshCts;
+
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     public AdminTrafficViewModel()
     {
@@ -946,7 +1075,9 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Tunnel is disconnected. Connect in the Overview tab to view server telemetry.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             return;
         }
 
@@ -954,6 +1085,8 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
 
             var statsTask = _api.GetOptimizerStatsAsync();
             var connsTask = _api.GetConnectionsAsync();
@@ -1000,7 +1133,7 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to load traffic stats: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
         finally
         {
@@ -1029,10 +1162,15 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
+    [ObservableProperty] private AdminReadyState _readyState = AdminReadyState.Loading;
+    [ObservableProperty] private bool _isReady;
 
     [ObservableProperty] private bool _autoRefresh = true;
-    [ObservableProperty] private string _autoRefreshText = "自动刷新：开";
+    [ObservableProperty] private string _autoRefreshText = "";
     private CancellationTokenSource? _autoRefreshCts;
+
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     public AdminConnectorsViewModel()
     {
@@ -1110,7 +1248,9 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Tunnel is disconnected. Connect to a server in Overview to view connectors.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             Connectors.Clear();
             _allConnectors.Clear();
             return;
@@ -1120,6 +1260,8 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
             var snapshots = await _api.GetTunnelServicesAsync();
 
             var groups = new Dictionary<string, ConnectorGroupItem>();
@@ -1146,7 +1288,7 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to load connectors: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
         finally
         {
@@ -1167,6 +1309,12 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
     [ObservableProperty] private bool _isMiddlewareEnabled = true;
     [ObservableProperty] private string? _statusMessage;
     [ObservableProperty] private bool _isLoading;
+    [ObservableProperty] private AdminReadyState _readyState = AdminReadyState.Loading;
+    [ObservableProperty] private bool _isReady;
+    [ObservableProperty] private string? _errorMessage;
+
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     public AdminMiddlewareViewModel()
     {
@@ -1180,7 +1328,9 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            StatusMessage = "Tunnel is not connected. Connect in the Overview tab to manage server middlewares.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            StatusMessage = null;
             Middlewares.Clear();
             SelectedMiddleware = null;
             return;
@@ -1191,6 +1341,8 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             StatusMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
             var list = await _api.GetMiddlewaresAsync();
             foreach (var item in list)
             {
@@ -1255,14 +1407,14 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
 
             string currentName = SelectedMiddleware.Name;
             var updated = await _api.UpdateMiddlewareConfigAsync(currentName, dict);
-            StatusMessage = $"Config for {currentName} saved successfully.";
-            AppServices.ShowSuccess($"Middleware {currentName} updated.", "Saved");
+            StatusMessage = I18nText.Format("middleware_saved", ("name", currentName));
+            AppServices.ShowSuccess(StatusMessage, I18nText.T("common_success"));
             await LoadDataAsync(currentName);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
-            AppServices.ShowError(ex.Message, "Save Failed");
+            AppServices.ShowError(ex.Message, I18nText.T("common_save_failed"));
         }
         finally
         {
@@ -1280,14 +1432,14 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
             IsLoading = true;
             string currentName = SelectedMiddleware.Name;
             var reset = await _api.ResetMiddlewareConfigAsync(currentName);
-            StatusMessage = $"Config for {currentName} reset to default.";
-            AppServices.ShowSuccess($"Middleware {currentName} reset to defaults.", "Reset Defaults");
+            StatusMessage = I18nText.Format("middleware_reset_ok", ("name", currentName));
+            AppServices.ShowSuccess(StatusMessage, I18nText.T("common_success"));
             await LoadDataAsync(currentName);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
-            AppServices.ShowError(ex.Message, "Reset Failed");
+            AppServices.ShowError(ex.Message, I18nText.T("common_reset_failed"));
         }
         finally
         {
@@ -1302,13 +1454,18 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
     private readonly NativeClientService _client = NativeClientService.Instance;
 
     [ObservableProperty] private bool _isHealthy;
-    [ObservableProperty] private string _configPath = "/etc/prism/prism.toml";
+    [ObservableProperty] private string _configPath = "";
     [ObservableProperty] private string? _reloadResult;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
+    [ObservableProperty] private AdminReadyState _readyState = AdminReadyState.Loading;
+    [ObservableProperty] private bool _isReady;
+
+    [RelayCommand]
+    public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     [ObservableProperty] private bool _autoRefresh = true;
-    [ObservableProperty] private string _autoRefreshText = "自动刷新：开";
+    [ObservableProperty] private string _autoRefreshText = "";
     private CancellationTokenSource? _autoRefreshCts;
 
     public AdminRuntimeViewModel()
@@ -1370,7 +1527,9 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
     {
         if (_client.CurrentStatus?.Running != true)
         {
-            ErrorMessage = "Tunnel is disconnected. Connect in the Overview tab to view server runtime.";
+            ReadyState = AdminReadyState.Disconnected;
+            IsReady = false;
+            ErrorMessage = null;
             IsHealthy = false;
             return;
         }
@@ -1379,6 +1538,8 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = true;
             ErrorMessage = null;
+            ReadyState = AdminReadyState.Ready;
+            IsReady = true;
 
             var healthTask = _api.GetHealthAsync();
             var pathTask = _api.GetConfigPathAsync();
@@ -1390,7 +1551,7 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to load runtime telemetry: {ex.Message}";
+            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
         finally
         {

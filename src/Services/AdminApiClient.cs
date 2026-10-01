@@ -29,6 +29,7 @@ public class AdminRegisteredService
     [JsonPropertyName("local_addr")] public string LocalAddr { get; set; } = "";
     [JsonPropertyName("remote_addr")] public string RemoteAddr { get; set; } = "";
     [JsonPropertyName("masquerade_host")] public string MasqueradeHost { get; set; } = "";
+    [JsonPropertyName("route_only")] public bool RouteOnly { get; set; }
 }
 
 public class AdminServiceSnapshot
@@ -131,6 +132,17 @@ public class DirectionStatsSnapshot
     [JsonPropertyName("link_rate_bps")] public double LinkRateBps { get; set; }
     [JsonPropertyName("batching_delay")] public Quantiles? BatchingDelay { get; set; }
     [JsonPropertyName("compression_time")] public Quantiles? CompressionTime { get; set; }
+    [JsonPropertyName("window")] public WindowSnapshot? Window { get; set; }
+}
+
+public class WindowSnapshot
+{
+    [JsonPropertyName("window_ms")] public ulong WindowMs { get; set; }
+    [JsonPropertyName("raw_bytes")] public ulong RawBytes { get; set; }
+    [JsonPropertyName("wire_bytes")] public ulong WireBytes { get; set; }
+    [JsonPropertyName("saved_bytes")] public ulong SavedBytes { get; set; }
+    [JsonPropertyName("saved_ratio")] public double SavedRatio { get; set; }
+    [JsonPropertyName("batches")] public ulong Batches { get; set; }
 }
 
 public class OptimizerStatsSnapshot
@@ -144,11 +156,14 @@ public class OptimizerStatsSnapshot
     [JsonPropertyName("threshold_batches")] public ulong ThresholdBatches { get; set; }
     [JsonPropertyName("link_rate_bps")] public double LinkRateBps { get; set; }
     [JsonPropertyName("link_rate_measured")] public bool LinkRateMeasured { get; set; }
+    [JsonPropertyName("link_rate_bytes")] public ulong LinkRateBytes { get; set; }
+    [JsonPropertyName("link_rate_busy_us")] public ulong LinkRateBusyUs { get; set; }
     [JsonPropertyName("batching_delay_us")] public ulong BatchingDelayUs { get; set; }
     [JsonPropertyName("compression_time_us")] public ulong CompressionTimeUs { get; set; }
     [JsonPropertyName("decompression_time_us")] public ulong DecompressionTimeUs { get; set; }
     [JsonPropertyName("uplink")] public DirectionStatsSnapshot? Uplink { get; set; }
     [JsonPropertyName("downlink")] public DirectionStatsSnapshot? Downlink { get; set; }
+    [JsonPropertyName("window")] public WindowSnapshot? Window { get; set; }
 }
 
 public class AdminOptimizerOverviewResponse
@@ -408,6 +423,12 @@ public class AdminApiClient
             Params: new Dictionary<string, string> { ["id"] = id },
             Token: string.IsNullOrWhiteSpace(token) ? null : token.Trim()
         );
-        await _client.ControlRpcAsync(rpcReq);
+        var resp = await _client.ControlRpcAsync(rpcReq);
+        if (!resp.Ok)
+        {
+            throw new Exception(string.IsNullOrWhiteSpace(resp.Message)
+                ? Prism.I18n.I18nText.T("close_connection_failed", "Failed to close connection.")
+                : resp.Message);
+        }
     }
 }

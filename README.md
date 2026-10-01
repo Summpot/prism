@@ -15,7 +15,7 @@ Prism combines the speed and memory safety of Rust with a WebAssembly-powered ro
 - **Local Service Discovery**: Automatic mDNS advertisement (`*.prism.local`) and Minecraft LAN multicast broadcast reflection (`224.0.2.60:4445`) for zero-config client connections.
 - **Automated TLS & DNS**: Built-in ACME (RFC 8555 / Let's Encrypt / ZeroSSL) with Cloudflare DNS-01 challenge and automatic RFC 9460 HTTPS/SVCB record publication.
 - **Managed Clustering**: Deploy as `standalone`, `management` (control plane), or `worker` (edge agent) with real-time config synchronization.
-- **Admin API & Desktop App**: Built-in administrative management API and Tauri v2 cross-platform desktop client with GitHub OAuth and deep linking (`prism://`).
+- **Admin API & Desktop App**: Built-in administrative management API and Avalonia + ShadUI cross-platform desktop client with GitHub OAuth and deep linking (`prism://`).
 
 ---
 
@@ -51,9 +51,11 @@ volumes:
 # Run headless server
 ./prism --headless --config prism.toml
 
-# Launch desktop GUI (default when compiled with desktop feature)
-./prism --gui
+# Launch the Avalonia desktop client
+dotnet run --project src/Prism.csproj
 ```
+
+The desktop GUI is Avalonia + ShadUI (`src/Prism.csproj`). It drives the local engine through UniFFI (`prism_native`) and uses the in-band `$control` channel for admin pages. On first launch the app registers the `prism://` URL protocol (Windows registry, Linux `.desktop`, macOS Launch Services) so share links and GitHub OAuth callbacks reopen the client. Close-to-tray is enabled when a tray icon is available.
 
 ---
 

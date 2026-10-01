@@ -7,8 +7,9 @@
 //! - PRPX proxy stream bridging with stateful optimizer (`optimizer.rs`).
 //! - Exponential backoff reconnect loop on network interruption.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -977,6 +978,28 @@ impl Default for ClientStatusSnapshot {
     }
 }
 
+fn spawn_on_runtime<F>(fut: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.spawn(fut),
+        Err(_) => {
+            static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+            RUNTIME
+                .get_or_init(|| {
+                    tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .thread_name("prism-client")
+                        .build()
+                        .expect("failed to create prism client tokio runtime")
+                })
+                .handle()
+                .spawn(fut)
+        }
+    }
+}
+
 struct ActiveClientInstance {
     client: Arc<Client>,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
@@ -1025,7 +1048,7 @@ impl ClientController {
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
         let c = client.clone();
-        let join = tokio::spawn(async move {
+        let join = spawn_on_runtime(async move {
             if let Err(err) = c.run(shutdown_rx).await {
                 tracing::warn!(err = %err, "tunnel client: run exited with error");
             }

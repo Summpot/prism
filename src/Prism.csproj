@@ -37,12 +37,12 @@
 
   <!-- NativeAOT macOS System Dependencies for Rust -->
   <ItemGroup Condition="'$(PublishAot)' == 'true' and '$([MSBuild]::IsOSPlatform(&quot;OSX&quot;))'">
-    <CustomLinkerArg Include="-framework Security -framework CoreFoundation -framework SystemConfiguration" />
+    <CustomLinkerArg Include="-framework Security -framework CoreFoundation -framework SystemConfiguration -lc++" />
   </ItemGroup>
 
   <!-- NativeAOT Linux System Dependencies for Rust -->
   <ItemGroup Condition="'$(PublishAot)' == 'true' and '$([MSBuild]::IsOSPlatform(&quot;Linux&quot;))'">
-    <CustomLinkerArg Include="-lfontconfig -lfreetype -lpthread -ldl -lm -lrt" />
+    <CustomLinkerArg Include="-lfontconfig -lfreetype -lpthread -ldl -lm -lrt -lstdc++" />
   </ItemGroup>
 
   <!-- Clean up static library intermediate artifacts and redundant DLLs from publish folder -->
@@ -68,7 +68,7 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
     <PackageReference Include="ShadUI" Version="0.2.4" />
-    <PackageReference Include="UniFFISharp" Version="0.1.0" />
+    <PackageReference Include="UniFFISharp" Version="0.1.2" />
     <PackageReference Include="ZeroI18n" Version="1.0.0" />
     <PackageReference Include="Summpot.SkiaSharp.Static" Version="3.119.4-avalonia.12.1.3" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

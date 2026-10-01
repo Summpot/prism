@@ -70,10 +70,18 @@
                                     Padding="6,0"
                                     FontSize="10" />
                             </StackPanel>
-                            <TextBlock
-                                Text="{Binding ServerAddress}"
-                                FontSize="11"
-                                Foreground="{DynamicResource MutedForegroundColor}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock
+                                    Text="{Binding ServerAddress}"
+                                    FontSize="11"
+                                    Foreground="{DynamicResource MutedForegroundColor}"
+                                    VerticalAlignment="Center"/>
+                                <Button Classes="Ghost" Command="{Binding CopyServerAddressCommand}"
+                                        Width="20" Height="20" Padding="2" ToolTip.Tip="{Binding [common_copy], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                        VerticalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Copy}" Width="10" Height="10"/>
+                                </Button>
+                            </StackPanel>
                         </StackPanel>
                         <Button
                             Grid.Column="2"
@@ -101,57 +109,78 @@
                                 Foreground="{DynamicResource MutedForegroundColor}" />
                         </Grid>
 
-                        <Grid ColumnDefinitions="Auto, *, Auto, Auto" Margin="0,4,0,0">
-                            <!-- Protocol Dropdown -->
-                            <ComboBox
-                                Grid.Column="0"
-                                ItemsSource="{Binding SupportedProtocols}"
-                                SelectedItem="{Binding SelectedProtocol}"
-                                Height="32"
-                                CornerRadius="6"
-                                Margin="0,0,8,0"
-                                FontSize="12" />
+                        <!-- Unified Address Bar (一体化地址栏) -->
+                        <Border Background="{DynamicResource CardBackgroundColor}"
+                                BorderBrush="{DynamicResource BorderColor}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="3"
+                                Margin="0,4,0,0">
+                            <Grid ColumnDefinitions="Auto, Auto, *, Auto">
+                                <!-- Protocol Dropdown -->
+                                <ComboBox
+                                    Grid.Column="0"
+                                    ItemsSource="{Binding SupportedProtocols}"
+                                    SelectedItem="{Binding SelectedProtocol}"
+                                    Height="32"
+                                    BorderThickness="0"
+                                    Background="Transparent"
+                                    CornerRadius="6,0,0,6"
+                                    FontSize="12"
+                                    VerticalAlignment="Center"/>
 
-                            <!-- Remote Address Input -->
-                            <TextBox
-                                Grid.Column="1"
-                                Text="{Binding RemoteLinkInput, Mode=TwoWay}"
-                                PlaceholderText="{Binding [client_remote_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                Height="32"
-                                CornerRadius="6"
-                                Margin="0,0,8,0"
-                                FontSize="12" />
+                                <Separator Grid.Column="1" Width="1" Height="18" Background="{DynamicResource BorderColor}" Margin="2,0"/>
 
-                            <!-- Connect Button -->
-                            <Button
-                                Grid.Column="2"
-                                Classes="Primary"
-                                Command="{Binding ConnectFromLinkCommand}"
-                                Height="32"
-                                CornerRadius="6"
-                                Margin="0,0,8,0"
-                                Padding="14,0">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
-                                    <TextBlock Text="{Binding [client_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" />
+                                <!-- Remote Address Input -->
+                                <TextBox
+                                    Grid.Column="2"
+                                    Classes="Clearable"
+                                    Text="{Binding RemoteLinkInput, Mode=TwoWay}"
+                                    PlaceholderText="{Binding [client_remote_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                    Height="32"
+                                    BorderThickness="0"
+                                    Background="Transparent"
+                                    FontSize="12"
+                                    VerticalAlignment="Center">
+                                    <TextBox.InnerRightContent>
+                                        <Button Classes="Ghost" Command="{Binding PasteToRemoteLinkInputCommand}"
+                                                Width="24" Height="24" Padding="3" Margin="2,0"
+                                                ToolTip.Tip="{Binding [client_paste_tooltip], Source={x:Static i18n:LocalizationManager.Instance}}" VerticalAlignment="Center">
+                                            <common:LucideIcon Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
+                                        </Button>
+                                    </TextBox.InnerRightContent>
+                                </TextBox>
+
+                                <!-- Action Buttons docked on right -->
+                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="0,0,2,0">
+                                    <Button
+                                        Classes="Primary"
+                                        Command="{Binding ConnectFromLinkCommand}"
+                                        Height="30"
+                                        CornerRadius="6"
+                                        Padding="14,0">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                                            <TextBlock Text="{Binding [client_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button
+                                        Classes="Outline"
+                                        Command="{Binding StartGitHubLoginCommand}"
+                                        IsVisible="{Binding IsGithubAuthAvailable}"
+                                        Height="30"
+                                        CornerRadius="6"
+                                        Padding="10,0"
+                                        ToolTip.Tip="{Binding [client_github_login], Source={x:Static i18n:LocalizationManager.Instance}}">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="13" Height="13"/>
+                                            <TextBlock Text="GitHub" FontSize="11"/>
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
-                            </Button>
-
-                            <!-- GitHub OAuth Button -->
-                            <Button
-                                Grid.Column="3"
-                                Classes="Outline"
-                                Command="{Binding StartGitHubLoginCommand}"
-                                Height="32"
-                                CornerRadius="6"
-                                Padding="12,0"
-                                ToolTip.Tip="{Binding [client_github_login], Source={x:Static i18n:LocalizationManager.Instance}}">
-                                <StackPanel Orientation="Horizontal" Spacing="5">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="13" Height="13"/>
-                                    <TextBlock Text="GitHub" FontSize="11"/>
-                                </StackPanel>
-                            </Button>
-                        </Grid>
+                            </Grid>
+                        </Border>
 
                         <!-- OAuth Waiting Box -->
                         <Border
@@ -270,7 +299,8 @@
                                     VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                                     <Button
-                                        Classes="Outline"
+                                        Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
+                                        Classes.Outline="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
                                         Command="{Binding SetStatsModeCommand}"
                                         CommandParameter="session"
                                         Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -278,7 +308,8 @@
                                         FontSize="11"
                                         Padding="8,0" />
                                     <Button
-                                        Classes="Outline"
+                                        Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
+                                        Classes.Outline="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
                                         Command="{Binding SetStatsModeCommand}"
                                         CommandParameter="lifetime"
                                         Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -338,10 +369,17 @@
                                 </Border>
                             </Grid>
 
-                            <!-- Real-time Throughput -->
-                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" Margin="0,4,0,0">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
-                                <TextBlock Text="{Binding ThroughputText}" Foreground="#10b981" FontWeight="Bold" FontSize="12"/>
+                            <!-- Real-time Throughput with Sparkline Graph -->
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,4,0,0">
+                                <common:SparklineControl
+                                    Samples="{Binding ThroughputSamples}"
+                                    Width="120"
+                                    Height="18"
+                                    VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
+                                    <TextBlock Text="{Binding ThroughputText}" Foreground="#10b981" FontWeight="Bold" FontSize="12"/>
+                                </StackPanel>
                             </StackPanel>
                         </StackPanel>
                     </Border>

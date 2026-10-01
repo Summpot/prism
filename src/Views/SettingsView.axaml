@@ -16,7 +16,7 @@
             <!-- Header -->
             <StackPanel Spacing="4">
                 <TextBlock Text="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
-                <TextBlock Text="{Binding [client_settings_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                <TextBlock Text="{Binding [settings_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
             </StackPanel>
 
             <TabControl Margin="0,8,0,0">
@@ -86,7 +86,7 @@
                                 
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [settings_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                                        <TextBlock Text="{Binding [client_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
                                         <TextBlock Text="{Binding [client_auto_connect_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnect, Mode=TwoWay}"/>
@@ -94,7 +94,7 @@
 
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [settings_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                                        <TextBlock Text="{Binding [client_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
                                         <TextBlock Text="{Binding [client_auto_connect_panel_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnectPanel, Mode=TwoWay}"/>
@@ -148,7 +148,7 @@
                             <StackPanel Spacing="14">
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [settings_update_channel], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                        <TextBlock Text="{Binding [client_update_channel], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
                                         <TextBlock Text="Select update release channel" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                     <ComboBox Grid.Column="1"

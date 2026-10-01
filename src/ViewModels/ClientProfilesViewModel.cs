@@ -84,6 +84,39 @@ public class EditableProfile : ObservableObject
         get => _isActive;
         set => SetProperty(ref _isActive, value);
     }
+
+    public EditableProfile Clone()
+    {
+        return new EditableProfile
+        {
+            Id = Id,
+            Name = Name,
+            ServerAddr = ServerAddr,
+            Transport = Transport,
+            ListenAddr = ListenAddr,
+            FakeLanBroadcast = FakeLanBroadcast,
+            AutoConnectPanel = AutoConnectPanel,
+            AutoConnect = AutoConnect,
+            ManagementUrl = ManagementUrl,
+            AuthToken = AuthToken,
+            IsActive = IsActive
+        };
+    }
+
+    public void CopyFrom(EditableProfile other)
+    {
+        Id = other.Id;
+        Name = other.Name;
+        ServerAddr = other.ServerAddr;
+        Transport = other.Transport;
+        ListenAddr = other.ListenAddr;
+        FakeLanBroadcast = other.FakeLanBroadcast;
+        AutoConnectPanel = other.AutoConnectPanel;
+        AutoConnect = other.AutoConnect;
+        ManagementUrl = other.ManagementUrl;
+        AuthToken = other.AuthToken;
+        IsActive = other.IsActive;
+    }
 }
 
 public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
@@ -103,6 +136,42 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 
     [ObservableProperty]
     private EditableProfile? _selectedProfile;
+
+    [ObservableProperty]
+    private EditableProfile? _draftProfile;
+
+    [ObservableProperty]
+    private bool _isDirty;
+
+    partial void OnSelectedProfileChanged(EditableProfile? value)
+    {
+        PingMs = null;
+        if (value != null)
+        {
+            var draft = value.Clone();
+            draft.PropertyChanged += (_, _) => IsDirty = true;
+            DraftProfile = draft;
+            IsDirty = false;
+        }
+        else
+        {
+            DraftProfile = null;
+            IsDirty = false;
+        }
+    }
+
+    [RelayCommand]
+    public void RevertDraft()
+    {
+        if (SelectedProfile != null)
+        {
+            var draft = SelectedProfile.Clone();
+            draft.PropertyChanged += (_, _) => IsDirty = true;
+            DraftProfile = draft;
+            IsDirty = false;
+            AppServices.ShowInfo("Reverted changes to saved profile.", "Reverted");
+        }
+    }
 
     [ObservableProperty]
     private string? _statusMessage;
@@ -288,6 +357,12 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         if (SelectedProfile == null) return;
         try
         {
+            if (DraftProfile != null)
+            {
+                SelectedProfile.CopyFrom(DraftProfile);
+                IsDirty = false;
+            }
+
             var list = Profiles.Select(p => new ClientProfile(
                 Id: p.Id,
                 Name: p.Name,
@@ -335,10 +410,12 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
             }
 
             StatusMessage = "Profile saved successfully.";
+            AppServices.ShowSuccess($"Profile '{SelectedProfile.Name}' saved successfully.", "Saved");
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
+            AppServices.ShowError(ex.Message, "Save Failed");
         }
     }
 

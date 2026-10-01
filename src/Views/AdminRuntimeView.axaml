@@ -1,0 +1,104 @@
+<UserControl
+    x:Class="Prism.Views.AdminRuntimeView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
+    mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
+    x:DataType="vm:AdminRuntimeViewModel">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20" Spacing="16">
+            <!-- Header -->
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
+                    <TextBlock Text="{Binding [admin_runtime_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </StackPanel>
+                
+                <Button Grid.Column="1" Classes="Outline" Command="{Binding LoadDataCommand}"
+                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
+                        Height="28" Padding="10,0" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <!-- Error Banner -->
+            <Border
+                IsVisible="{Binding ErrorMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                Background="#20ef4444"
+                BorderBrush="#50ef4444"
+                BorderThickness="1"
+                CornerRadius="{DynamicResource MdCornerRadius}"
+                Padding="12,8">
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="#ef4444" FontSize="12"/>
+            </Border>
+
+            <!-- Diagnostics Card -->
+            <shadui:Card Padding="16">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding [runtime_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="14"/>
+                    </StackPanel>
+
+                    <Separator Height="1" Background="{DynamicResource BorderColor}"/>
+
+                    <Grid ColumnDefinitions="160, *" RowDefinitions="Auto, Auto" Margin="0,4">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [runtime_health], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="0,6"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="0,6">
+                            <shadui:Badge
+                                Content="{Binding IsHealthy, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='HEALTHY|UNHEALTHY'}"
+                                Height="20"
+                                Padding="6,0"
+                                FontSize="10"
+                                VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding [runtime_config_path], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="0,6"/>
+                        <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="8,4" HorizontalAlignment="Left" Margin="0,6">
+                            <TextBlock Text="{Binding ConfigPath}" FontFamily="Consolas, monospace" FontSize="11" Foreground="{DynamicResource ForegroundColor}"/>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </shadui:Card>
+
+            <!-- Operations Card -->
+            <shadui:Card Padding="16">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="Live Operations" FontWeight="SemiBold" FontSize="14"/>
+                    </StackPanel>
+
+                    <Separator Height="1" Background="{DynamicResource BorderColor}"/>
+
+                    <Grid ColumnDefinitions="*, Auto" Margin="0,4">
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Text="{Binding [admin_reload], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                            <TextBlock Text="{Binding [admin_runtime_reload_note], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                            <TextBlock IsVisible="{Binding ReloadResult, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                       Text="{Binding ReloadResult}" FontSize="11" Foreground="#10b981" Margin="0,4,0,0"/>
+                        </StackPanel>
+
+                        <Button Grid.Column="1" Classes="Primary" Command="{Binding TriggerReloadCommand}"
+                                 IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
+                                 VerticalAlignment="Center" Height="32" Padding="14,0">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="14" Height="14"/>
+                                <TextBlock Text="{Binding [admin_reload], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </shadui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

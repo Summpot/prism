@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Specialized;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Prism.ViewModels;
@@ -8,6 +10,7 @@ namespace Prism.Views;
 public partial class ClientLogsView : UserControl
 {
     private ListBox? _logsList;
+    private ClientLogsViewModel? _currentVm;
 
     public ClientLogsView()
     {
@@ -18,21 +21,40 @@ public partial class ClientLogsView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (DataContext is ClientLogsViewModel vm)
+        if (_currentVm != null)
         {
-            vm.FilteredLogs.CollectionChanged += (s, args) =>
+            _currentVm.FilteredLogs.CollectionChanged -= OnFilteredLogsChanged;
+        }
+
+        _currentVm = DataContext as ClientLogsViewModel;
+
+        if (_currentVm != null)
+        {
+            _currentVm.FilteredLogs.CollectionChanged += OnFilteredLogsChanged;
+        }
+    }
+
+    private void OnFilteredLogsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_currentVm != null && _currentVm.AutoScroll && _currentVm.FilteredLogs.Count > 0 && _logsList != null)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                if (vm.AutoScroll && vm.FilteredLogs.Count > 0 && _logsList != null)
+                if (_currentVm != null && _currentVm.FilteredLogs.Count > 0 && _logsList != null)
                 {
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                    {
-                        if (vm.FilteredLogs.Count > 0)
-                        {
-                            _logsList.ScrollIntoView(vm.FilteredLogs[^1]);
-                        }
-                    });
+                    _logsList.ScrollIntoView(_currentVm.FilteredLogs[^1]);
                 }
-            };
+            });
+        }
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        if (_currentVm != null)
+        {
+            _currentVm.FilteredLogs.CollectionChanged -= OnFilteredLogsChanged;
+            _currentVm = null;
         }
     }
 

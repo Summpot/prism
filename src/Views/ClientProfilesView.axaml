@@ -1,5 +1,6 @@
 <UserControl
     x:Class="Prism.Views.ClientProfilesView"
+    x:Name="Root"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -68,7 +69,7 @@
                                     <Button
                                         Grid.Column="1"
                                         Classes="Ghost"
-                                        Command="{Binding $parent[UserControl].((vm:ClientProfilesViewModel)DataContext).DeleteProfileCommand}"
+                                        Command="{Binding #Root.((vm:ClientProfilesViewModel)DataContext).DeleteProfileCommand}"
                                         CommandParameter="{Binding}"
                                         Height="26"
                                         Width="26"
@@ -111,7 +112,10 @@
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Spacing="2">
                                 <TextBlock Text="{Binding [client_settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14"/>
-                                <TextBlock Text="{Binding SelectedProfile.Name}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding DraftProfile.Name}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <shadui:Badge Content="{Binding [client_unsaved], Source={x:Static i18n:LocalizationManager.Instance}}" IsVisible="{Binding IsDirty}" Background="#f59e0b" Foreground="White" Height="16" Padding="4,0" FontSize="9"/>
+                                </StackPanel>
                             </StackPanel>
                             <!-- Latency Test -->
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -132,7 +136,7 @@
                         <!-- Profile Name -->
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [client_profile_name], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            <TextBox Text="{Binding SelectedProfile.Name, Mode=TwoWay}"
+                            <TextBox Text="{Binding DraftProfile.Name, Mode=TwoWay}"
                                      PlaceholderText="{Binding [client_profile_name_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
                                      Height="32" FontSize="12" CornerRadius="6"/>
                         </StackPanel>
@@ -140,7 +144,7 @@
                         <!-- Server Address -->
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [nodecfg_server_address], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            <TextBox Text="{Binding SelectedProfile.ServerAddr, Mode=TwoWay}"
+                            <TextBox Text="{Binding DraftProfile.ServerAddr, Mode=TwoWay}"
                                      PlaceholderText="{Binding [nodecfg_server_address_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
                                      Height="32" FontSize="12" CornerRadius="6"/>
                         </StackPanel>
@@ -150,7 +154,7 @@
                             <TextBlock Text="{Binding [client_transport], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                             <ComboBox
                                 ItemsSource="{Binding AvailableTransports}"
-                                SelectedItem="{Binding SelectedProfile.Transport, Mode=TwoWay}"
+                                SelectedItem="{Binding DraftProfile.Transport, Mode=TwoWay}"
                                 HorizontalAlignment="Stretch"
                                 Height="32"
                                 CornerRadius="6"
@@ -160,7 +164,7 @@
                         <!-- Listen Address -->
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [client_listen_address], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            <TextBox Text="{Binding SelectedProfile.ListenAddr, Mode=TwoWay}"
+                            <TextBox Text="{Binding DraftProfile.ListenAddr, Mode=TwoWay}"
                                      PlaceholderText="{Binding [nodecfg_listen_address_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
                                      Height="32" FontSize="12" CornerRadius="6"/>
                         </StackPanel>
@@ -171,7 +175,7 @@
                                 <TextBlock Text="{Binding [client_lan_broadcast], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
                                 <TextBlock Text="{Binding [client_lan_broadcast_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
-                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding SelectedProfile.FakeLanBroadcast, Mode=TwoWay}"/>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding DraftProfile.FakeLanBroadcast, Mode=TwoWay}"/>
                         </Grid>
 
                         <!-- Auto Connect on Launch Switch -->
@@ -180,13 +184,13 @@
                                 <TextBlock Text="{Binding [client_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
                                 <TextBlock Text="{Binding [client_auto_connect_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
-                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding SelectedProfile.AutoConnect, Mode=TwoWay}"/>
+                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding DraftProfile.AutoConnect, Mode=TwoWay}"/>
                         </Grid>
 
                         <!-- Management URL -->
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            <TextBox Text="{Binding SelectedProfile.ManagementUrl, Mode=TwoWay}"
+                            <TextBox Text="{Binding DraftProfile.ManagementUrl, Mode=TwoWay}"
                                      PlaceholderText="http://127.0.0.1:8080"
                                      Height="32" FontSize="12" CornerRadius="6"/>
                         </StackPanel>
@@ -196,6 +200,10 @@
                             <Button Classes="Primary" Command="{Binding SaveSelectedProfileCommand}"
                                     Content="{Binding [client_save_profile], Source={x:Static i18n:LocalizationManager.Instance}}"
                                     Height="32" FontSize="12" Padding="14,0" CornerRadius="6"/>
+                            <Button Classes="Ghost" Command="{Binding RevertDraftCommand}"
+                                    IsEnabled="{Binding IsDirty}"
+                                    Content="{Binding [client_revert], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                    Height="32" FontSize="12" Padding="12,0" CornerRadius="6"/>
                             <Button Classes="Outline" Command="{Binding SetActiveProfileCommand}"
                                     Content="{Binding [client_set_as_active], Source={x:Static i18n:LocalizationManager.Instance}}"
                                     Height="32" FontSize="12" Padding="14,0" CornerRadius="6"/>

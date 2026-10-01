@@ -59,6 +59,53 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [ObservableProperty]
     private string _remoteLinkInput = "";
 
+    partial void OnRemoteLinkInputChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        var idx = value.IndexOf("://", StringComparison.Ordinal);
+        if (idx > 0)
+        {
+            var proto = value.Substring(0, idx + 3);
+            if (SupportedProtocols.Contains(proto))
+            {
+                SelectedProtocol = proto;
+                RemoteLinkInput = value.Substring(idx + 3);
+            }
+        }
+    }
+
+    [RelayCommand]
+    public async Task PasteToRemoteLinkInputAsync()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
+            desktop.MainWindow?.Clipboard != null)
+        {
+            var text = await desktop.MainWindow.Clipboard.TryGetTextAsync();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                RemoteLinkInput = text.Trim();
+            }
+        }
+    }
+
+    [RelayCommand]
+    public void ClearRemoteLinkInput()
+    {
+        RemoteLinkInput = "";
+    }
+
+    [RelayCommand]
+    public async Task CopyServerAddressAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ServerAddress)) return;
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
+            desktop.MainWindow?.Clipboard != null)
+        {
+            await desktop.MainWindow.Clipboard.SetTextAsync(ServerAddress);
+            AppServices.ShowSuccess("Server address copied to clipboard.", "Copied");
+        }
+    }
+
     [ObservableProperty]
     private bool _isRunning;
 
@@ -100,6 +147,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _throughputText = "0 B/s";
+
+    public ObservableCollection<ulong> ThroughputSamples { get; } = new();
+
+    [ObservableProperty]
+    private bool _isGithubAuthAvailable = true;
 
     [ObservableProperty]
     private string? _errorMessage;
@@ -447,6 +499,14 @@ public partial class ClientOverviewViewModel : ViewModelBase
     private void OnThroughputSample(ulong bps)
     {
         ThroughputText = $"{Formatters.FormatBytes(bps)}/s";
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            ThroughputSamples.Add(bps);
+            while (ThroughputSamples.Count > 30)
+            {
+                ThroughputSamples.RemoveAt(0);
+            }
+        });
     }
 
     private void OnStatusUpdated(ClientStatusResponse status)
@@ -619,6 +679,13 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 SessionIsAdmin = session.IsAdmin;
                 SessionRole = session.Role ?? "";
             }
+
+            try
+            {
+                var providers = await AdminApiClient.Instance.GetAuthProvidersAsync();
+                IsGithubAuthAvailable = providers.GithubEnabled || providers.Providers.Contains("github");
+            }
+            catch { }
         }
         catch
         {

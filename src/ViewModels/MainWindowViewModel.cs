@@ -36,6 +36,9 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [ObservableProperty]
+    private bool _isAdmin = true;
+
+    [ObservableProperty]
     private ViewModelBase _currentPageViewModel;
 
     // ViewModels cache
@@ -49,6 +52,10 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly AdminOverviewViewModel _adminOverview;
     private readonly AdminConnectionsViewModel _adminConnections;
     private readonly AdminTunnelServicesViewModel _adminServices;
+    private readonly AdminTrafficViewModel _adminTraffic;
+    private readonly AdminConnectorsViewModel _adminConnectors;
+    private readonly AdminMiddlewareViewModel _adminMiddleware;
+    private readonly AdminRuntimeViewModel _adminRuntime;
     private readonly AdminUsersViewModel _adminUsers;
 
     public MainWindowViewModel()
@@ -65,11 +72,37 @@ public partial class MainWindowViewModel : ViewModelBase
         _adminOverview = new AdminOverviewViewModel();
         _adminConnections = new AdminConnectionsViewModel();
         _adminServices = new AdminTunnelServicesViewModel();
+        _adminTraffic = new AdminTrafficViewModel();
+        _adminConnectors = new AdminConnectorsViewModel();
+        _adminMiddleware = new AdminMiddlewareViewModel();
+        _adminRuntime = new AdminRuntimeViewModel();
         _adminUsers = new AdminUsersViewModel();
 
         _currentPageViewModel = _clientOverview;
 
         Navigation.Navigated += OnNavigated;
+
+        AdminApiClient.Instance.SessionUpdated += s =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (s != null)
+                {
+                    IsAdmin = s.IsAdmin;
+                }
+            });
+        };
+
+        NativeClient.StatusUpdated += status =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (!status.Running)
+                {
+                    IsAdmin = true;
+                }
+            });
+        };
     }
 
     private void OnNavigated(string route)
@@ -88,6 +121,10 @@ public partial class MainWindowViewModel : ViewModelBase
             "admin.overview" => _adminOverview,
             "admin.connections" => _adminConnections,
             "admin.services" => _adminServices,
+            "admin.traffic" => _adminTraffic,
+            "admin.connectors" => _adminConnectors,
+            "admin.middleware" => _adminMiddleware,
+            "admin.runtime" => _adminRuntime,
             "admin.users" => _adminUsers,
             _ => _clientOverview
         };

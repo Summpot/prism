@@ -27,9 +27,23 @@
 
                 <!-- Actions: Session/Lifetime toggle & Reset -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <Button Classes="Outline" Command="{Binding SetStatsModeCommand}" CommandParameter="session" Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
-                    <Button Classes="Outline" Command="{Binding SetStatsModeCommand}" CommandParameter="lifetime" Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
-                    <Button Classes="Outline" Command="{Binding ResetStatsCommand}" Height="26" Padding="6,0">
+                    <Border Background="{DynamicResource GhostColor}" CornerRadius="6" Padding="2">
+                        <StackPanel Orientation="Horizontal" Spacing="2">
+                            <Button
+                                Classes="Ghost"
+                                Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
+                                Command="{Binding SetStatsModeCommand}" CommandParameter="session"
+                                Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                Height="24" FontSize="11" Padding="8,0" CornerRadius="4"/>
+                            <Button
+                                Classes="Ghost"
+                                Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
+                                Command="{Binding SetStatsModeCommand}" CommandParameter="lifetime"
+                                Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                Height="24" FontSize="11" Padding="8,0" CornerRadius="4"/>
+                        </StackPanel>
+                    </Border>
+                    <Button Classes="Outline" Command="{Binding ResetStatsCommand}" Height="28" Padding="8,0" ToolTip.Tip="{Binding [common_reset], Source={x:Static i18n:LocalizationManager.Instance}}">
                         <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
                     </Button>
                 </StackPanel>

@@ -57,7 +57,27 @@
                             Background="Transparent">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Username" Binding="{Binding Username}" Width="180"/>
-                                <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="110"/>
+                                <DataGridTemplateColumn Header="Role" Width="130">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate x:DataType="vm:UserRowItem">
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <shadui:Badge
+                                                    Content="{Binding Role}"
+                                                    Height="20"
+                                                    Padding="6,0"
+                                                    FontSize="10"/>
+                                                <Button
+                                                    Classes="Ghost"
+                                                    Command="{Binding ((vm:AdminUsersViewModel)DataContext).ToggleUserRoleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="Toggle between ADMIN and MEMBER"
+                                                    Height="22" Width="22" Padding="2">
+                                                    <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="11" Height="11"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="OAuth Identifier" Binding="{Binding GithubId}" Width="*"/>
                                 <DataGridTextColumn Header="Created Date" Binding="{Binding CreatedAt}" Width="140"/>
                             </DataGrid.Columns>
@@ -101,9 +121,24 @@
                                     </Button>
                                 </Grid>
 
-                                <Grid ColumnDefinitions="*, 8, Auto">
+                                <Grid ColumnDefinitions="*, 8, 140, 8, 90, 8, Auto">
+                                    <!-- Token Name -->
                                     <TextBox Grid.Column="0" Text="{Binding NewTokenName, Mode=TwoWay}" PlaceholderText="{Binding [users_token_name_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="12"/>
-                                    <Button Grid.Column="2" Classes="Primary" Command="{Binding SubmitCreateTokenCommand}" Content="{Binding [common_create], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" Padding="12,0"/>
+
+                                    <!-- User Selector -->
+                                    <ComboBox Grid.Column="2" ItemsSource="{Binding Users}"
+                                              SelectedValue="{Binding SelectedUserId, Mode=TwoWay}"
+                                              SelectedValueBinding="{Binding Id, x:DataType=vm:UserRowItem}"
+                                              DisplayMemberBinding="{Binding Username, x:DataType=vm:UserRowItem}"
+                                              Height="30" FontSize="11" HorizontalAlignment="Stretch"/>
+
+                                    <!-- Expiration Days -->
+                                    <ComboBox Grid.Column="4" ItemsSource="{x:Static vm:AdminUsersViewModel.ExpirationOptions}"
+                                              SelectedItem="{Binding SelectedExpirationDays, Mode=TwoWay}"
+                                              Height="30" FontSize="11" HorizontalAlignment="Stretch"/>
+
+                                    <!-- Create Button -->
+                                    <Button Grid.Column="6" Classes="Primary" Command="{Binding SubmitCreateTokenCommand}" Content="{Binding [common_create], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" Padding="12,0"/>
                                 </Grid>
 
                                 <!-- Created Raw Token Display -->

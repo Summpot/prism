@@ -58,6 +58,14 @@ public static class Converters
     public static readonly IValueConverter ActiveStatusToBrush =
         new FuncValueConverter<bool, IBrush>(active =>
             active ? new SolidColorBrush(Color.Parse("#10b981")) : new SolidColorBrush(Color.Parse("#6b7280")));
+
+    public static readonly IValueConverter BooleanToString =
+        new FuncValueConverter<bool, string, string>((val, param) =>
+        {
+            if (string.IsNullOrWhiteSpace(param)) return val ? "True" : "False";
+            var parts = param.Split('|');
+            return val ? parts[0] : (parts.Length > 1 ? parts[1] : "");
+        });
 }
 
 public class LocaleOption

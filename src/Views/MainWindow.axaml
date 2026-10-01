@@ -54,6 +54,18 @@
         <DataTemplate DataType="vm:AdminTunnelServicesViewModel">
             <views:AdminTunnelServicesView />
         </DataTemplate>
+        <DataTemplate DataType="vm:AdminTrafficViewModel">
+            <views:AdminTrafficView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:AdminConnectorsViewModel">
+            <views:AdminConnectorsView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:AdminMiddlewareViewModel">
+            <views:AdminMiddlewareView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:AdminRuntimeViewModel">
+            <views:AdminRuntimeView />
+        </DataTemplate>
         <DataTemplate DataType="vm:AdminUsersViewModel">
             <views:AdminUsersView />
         </DataTemplate>
@@ -84,72 +96,164 @@
             Width="220"
             MinWidth="60">
             <shadui:Sidebar.Header>
-                <Grid ColumnDefinitions="Auto, *, Auto" Margin="4,0">
-                    <Image Grid.Column="0" Source="avares://Prism/Assets/logo192.png" Width="24" Height="24" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="PRISM" FontWeight="Bold" FontSize="14" Margin="8,0,0,0" VerticalAlignment="Center" IsVisible="{Binding IsSidebarExpanded}"/>
-                    <Button Grid.Column="2" Classes="Ghost" Command="{Binding ToggleSidebarCommand}" Width="28" Height="28" Padding="4">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="14" Height="14"/>
+                <Grid Margin="4,0">
+                    <!-- Expanded Header -->
+                    <Grid ColumnDefinitions="Auto, *, Auto" IsVisible="{Binding IsSidebarExpanded}">
+                        <Image Grid.Column="0" Source="avares://Prism/Assets/logo192.png" Width="24" Height="24" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="PRISM" FontWeight="Bold" FontSize="14" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        <Button Grid.Column="2" Classes="Ghost" Command="{Binding ToggleSidebarCommand}" Width="28" Height="28" Padding="4">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="14" Height="14"/>
+                        </Button>
+                    </Grid>
+                    <!-- Collapsed Header -->
+                    <Button Classes="Ghost" Command="{Binding ToggleSidebarCommand}" Width="32" Height="32" Padding="4" HorizontalAlignment="Center" IsVisible="{Binding !IsSidebarExpanded}">
+                        <Image Source="avares://Prism/Assets/logo192.png" Width="22" Height="22"/>
                     </Button>
                 </Grid>
             </shadui:Sidebar.Header>
 
             <StackPanel Spacing="3">
                 <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_client], Source={x:Static i18n:LocalizationManager.Instance}}" />
-                <shadui:SidebarItem Route="client.overview" Content="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}">
+                
+                <shadui:SidebarItem 
+                    Route="client.overview" 
+                    Content="{Binding [nav_connection], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="client.overview">
                     <shadui:SidebarItem.Icon>
                         <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
-                <shadui:SidebarItem Route="client.traffic" Content="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                <shadui:SidebarItem 
+                    Route="client.traffic" 
+                    Content="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="client.traffic">
                     <shadui:SidebarItem.Icon>
                         <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
-                <shadui:SidebarItem Route="client.optimizer" Content="{Binding [nav_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                <shadui:SidebarItem 
+                    Route="client.optimizer" 
+                    Content="{Binding [nav_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="client.optimizer">
                     <shadui:SidebarItem.Icon>
                         <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
-                <shadui:SidebarItem Route="client.profiles" Content="{Binding [nav_tunnel_config], Source={x:Static i18n:LocalizationManager.Instance}}">
-                    <shadui:SidebarItem.Icon>
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Server}" Width="16" Height="16"/>
-                    </shadui:SidebarItem.Icon>
-                </shadui:SidebarItem>
-                <shadui:SidebarItem Route="client.middleware" Content="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                <shadui:SidebarItem 
+                    Route="client.profiles" 
+                    Content="{Binding [nav_tunnel_config], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="client.profiles">
                     <shadui:SidebarItem.Icon>
                         <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
-                <shadui:SidebarItem Route="client.logs" Content="{Binding [nav_logs], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                <shadui:SidebarItem 
+                    Route="client.middleware" 
+                    Content="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="client.middleware">
+                    <shadui:SidebarItem.Icon>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Sliders}" Width="16" Height="16"/>
+                    </shadui:SidebarItem.Icon>
+                </shadui:SidebarItem>
+
+                <shadui:SidebarItem 
+                    Route="client.logs" 
+                    Content="{Binding [nav_logs], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="client.logs">
                     <shadui:SidebarItem.Icon>
                         <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
-                <shadui:SidebarItem Route="settings" Content="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}">
-                    <shadui:SidebarItem.Icon>
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16"/>
-                    </shadui:SidebarItem.Icon>
-                </shadui:SidebarItem>
 
-                <!-- Admin Section -->
-                <StackPanel Spacing="3">
+                <!-- Admin Section (Shown when IsAdmin is true) -->
+                <StackPanel Spacing="3" IsVisible="{Binding IsAdmin}">
                     <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_admin], Source={x:Static i18n:LocalizationManager.Instance}}" />
-                    <shadui:SidebarItem Route="admin.overview" Content="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}">
+                    
+                    <shadui:SidebarItem 
+                        Route="admin.overview" 
+                        Content="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.overview">
                         <shadui:SidebarItem.Icon>
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Shield}" Width="16" Height="16"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
                     </shadui:SidebarItem>
-                    <shadui:SidebarItem Route="admin.connections" Content="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                    <shadui:SidebarItem 
+                        Route="admin.connections" 
+                        Content="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.connections">
                         <shadui:SidebarItem.Icon>
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="16" Height="16"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Cable}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
                     </shadui:SidebarItem>
-                    <shadui:SidebarItem Route="admin.services" Content="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                    <shadui:SidebarItem 
+                        Route="admin.services" 
+                        Content="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.services">
+                        <shadui:SidebarItem.Icon>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Unplug}" Width="16" Height="16"/>
+                        </shadui:SidebarItem.Icon>
+                    </shadui:SidebarItem>
+
+                    <shadui:SidebarItem 
+                        Route="admin.traffic" 
+                        Content="{Binding [nav_server_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.traffic">
                         <shadui:SidebarItem.Icon>
                             <common:LucideIcon Data="{x:Static common:AppIcons.Server}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
                     </shadui:SidebarItem>
-                    <shadui:SidebarItem Route="admin.users" Content="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}">
+
+                    <shadui:SidebarItem 
+                        Route="admin.connectors" 
+                        Content="{Binding [nav_connector_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.connectors">
+                        <shadui:SidebarItem.Icon>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="16" Height="16"/>
+                        </shadui:SidebarItem.Icon>
+                    </shadui:SidebarItem>
+
+                    <shadui:SidebarItem 
+                        Route="admin.middleware" 
+                        Content="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.middleware">
+                        <shadui:SidebarItem.Icon>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="16" Height="16"/>
+                        </shadui:SidebarItem.Icon>
+                    </shadui:SidebarItem>
+
+                    <shadui:SidebarItem 
+                        Route="admin.runtime" 
+                        Content="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.runtime">
+                        <shadui:SidebarItem.Icon>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Gauge}" Width="16" Height="16"/>
+                        </shadui:SidebarItem.Icon>
+                    </shadui:SidebarItem>
+
+                    <shadui:SidebarItem 
+                        Route="admin.users" 
+                        Content="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="admin.users">
                         <shadui:SidebarItem.Icon>
                             <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
@@ -158,19 +262,31 @@
             </StackPanel>
 
             <shadui:Sidebar.Footer>
-                <!-- Status & Connection state -->
-                <Border Padding="6" Background="Transparent">
-                    <Grid ColumnDefinitions="Auto, *">
-                        <Ellipse Grid.Column="0" Width="8" Height="8" Margin="4,0,8,0"
-                            Fill="{Binding NativeClient.CurrentStatus.Running, Converter={x:Static common:Converters.StatusToBrush}, FallbackValue='#6b7280'}"/>
-                        <TextBlock Grid.Column="1"
-                            Text="{Binding NativeClient.CurrentStatus.State, FallbackValue='IDLE'}"
-                            FontSize="11"
-                            FontWeight="SemiBold"
-                            VerticalAlignment="Center"
-                            IsVisible="{Binding IsSidebarExpanded}"/>
-                    </Grid>
-                </Border>
+                <StackPanel Spacing="4">
+                    <shadui:SidebarItem 
+                        Route="settings" 
+                        Content="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Command="{Binding NavigateCommand}"
+                        CommandParameter="settings">
+                        <shadui:SidebarItem.Icon>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16"/>
+                        </shadui:SidebarItem.Icon>
+                    </shadui:SidebarItem>
+
+                    <!-- Status & Connection state -->
+                    <Border Padding="6,8" Background="Transparent">
+                        <Grid ColumnDefinitions="Auto, *">
+                            <Ellipse Grid.Column="0" Width="8" Height="8" Margin="4,0,8,0"
+                                Fill="{Binding NativeClient.CurrentStatus.Running, Converter={x:Static common:Converters.StatusToBrush}, FallbackValue='#6b7280'}"/>
+                            <TextBlock Grid.Column="1"
+                                Text="{Binding NativeClient.CurrentStatus.State, FallbackValue='IDLE'}"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding IsSidebarExpanded}"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
             </shadui:Sidebar.Footer>
         </shadui:Sidebar>
 

@@ -1,5 +1,5 @@
 <UserControl
-    x:Class="Prism.Views.ClientMiddlewareView"
+    x:Class="Prism.Views.AdminMiddlewareView"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -10,15 +10,15 @@
     xmlns:common="clr-namespace:Prism.Common"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
     mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
-    x:DataType="vm:ClientMiddlewareViewModel">
+    x:DataType="vm:AdminMiddlewareViewModel">
 
     <Grid ColumnDefinitions="260, 16, *" Margin="16">
-        <!-- Left: Middlewares List -->
+        <!-- Left: Server Middleware List -->
         <shadui:Card Grid.Column="0" Padding="12">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
                     <TextBlock Text="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14"/>
-                    <TextBlock Text="{Binding [client_middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                    <TextBlock Text="Server pipeline middleware and filter configuration" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <ListBox
@@ -52,7 +52,7 @@
                                               Background="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"
                                               Foreground="White" Height="20" Padding="6,0" FontSize="10"/>
                             </StackPanel>
-                            <TextBlock Text="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="Dynamic middleware schema options and parameters" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
                         <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
                     </Grid>
@@ -62,7 +62,7 @@
                     <!-- Empty state -->
                     <TextBlock
                         IsVisible="{Binding ConfigFields.Count, Converter={x:Static common:Converters.EqualsZero}}"
-                        Text="{Binding [client_not_connected_service], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='No configurable schema parameters for this middleware.'}"
+                        Text="No configurable schema parameters for this middleware."
                         FontSize="12"
                         Foreground="{DynamicResource MutedForegroundColor}"/>
 
@@ -113,30 +113,13 @@
                         </ItemsControl.DataTemplates>
                     </ItemsControl>
 
-                    <!-- Actions -->
-                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                        <Button
-                            Classes="Primary"
-                            Command="{Binding SaveConfigCommand}"
-                            Content="{Binding [middleware_apply], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            Height="32"
-                            FontSize="12"
-                            Padding="14,0"/>
-                        <Button
-                            Classes="Outline"
-                            Command="{Binding ResetConfigCommand}"
-                            Content="{Binding [middleware_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            Height="32"
-                            FontSize="12"
-                            Padding="14,0"/>
-                    </StackPanel>
+                    <Separator Background="{DynamicResource BorderColor}" Height="1"/>
 
-                    <!-- Status Notification -->
-                    <TextBlock
-                        IsVisible="{Binding StatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                        Text="{Binding StatusMessage}"
-                        Foreground="#10b981"
-                        FontSize="12"/>
+                    <!-- Action buttons -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Classes="Outline" Command="{Binding ResetConfigCommand}" Content="{Binding [common_reset], Source={x:Static i18n:LocalizationManager.Instance}}" Height="32" FontSize="12"/>
+                        <Button Classes="Primary" Command="{Binding SaveConfigCommand}" Content="{Binding [common_save], Source={x:Static i18n:LocalizationManager.Instance}}" Height="32" FontSize="12"/>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </shadui:Card>

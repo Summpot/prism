@@ -21,10 +21,17 @@ public class OAuthExchangeRequest
 [JsonSerializable(typeof(AdminUserRecord))]
 [JsonSerializable(typeof(List<AdminUserRecord>))]
 [JsonSerializable(typeof(AdminSessionResponse))]
+[JsonSerializable(typeof(AdminAuthProvidersResponse))]
 [JsonSerializable(typeof(AdminTokenRecord))]
 [JsonSerializable(typeof(List<AdminTokenRecord>))]
 [JsonSerializable(typeof(AdminCreateTokenResponse))]
 [JsonSerializable(typeof(AdminRevokeTokenResponse))]
+[JsonSerializable(typeof(AdminOptimizerOverviewResponse))]
+[JsonSerializable(typeof(OptimizerStatsSnapshot))]
+[JsonSerializable(typeof(DirectionStatsSnapshot))]
+[JsonSerializable(typeof(Quantiles))]
+[JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(object))]
 public partial class AdminJsonContext : JsonSerializerContext
 {
 }

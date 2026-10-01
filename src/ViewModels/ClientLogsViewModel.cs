@@ -149,6 +149,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     public async Task ClearLogsAsync()
     {
         await _client.ClearLogsAsync();
+        AppServices.ShowInfo("Logs buffer cleared.", "Cleared");
     }
 
     [RelayCommand]
@@ -163,6 +164,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
                 sb.AppendLine($"[{l.Timestamp}] [{l.Level}] {l.Target}: {l.Message}");
             }
             await desktop.MainWindow.Clipboard.SetTextAsync(sb.ToString());
+            AppServices.ShowSuccess("All logs copied to clipboard.", "Copied");
         }
     }
 }

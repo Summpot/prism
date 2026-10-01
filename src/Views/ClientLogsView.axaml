@@ -23,13 +23,23 @@
 
             <!-- Filters -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                <!-- Level Filter Group -->
-                <StackPanel Orientation="Horizontal" Spacing="2">
-                    <Button Classes="Outline" Command="{Binding SetFilterCommand}" CommandParameter="ALL" Content="ALL" Height="26" FontSize="10" Padding="6,0"/>
-                    <Button Classes="Outline" Command="{Binding SetFilterCommand}" CommandParameter="INFO" Content="INFO" Height="26" FontSize="10" Padding="6,0"/>
-                    <Button Classes="Outline" Command="{Binding SetFilterCommand}" CommandParameter="WARN" Content="WARN" Height="26" FontSize="10" Padding="6,0"/>
-                    <Button Classes="Outline" Command="{Binding SetFilterCommand}" CommandParameter="ERROR" Content="ERROR" Height="26" FontSize="10" Padding="6,0"/>
-                </StackPanel>
+                <!-- Level Filter Group (Segmented) -->
+                <Border Background="{DynamicResource GhostColor}" CornerRadius="6" Padding="2" Margin="0,0,4,0">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <Button Classes="Ghost"
+                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ALL}"
+                                Command="{Binding SetFilterCommand}" CommandParameter="ALL" Content="ALL" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
+                        <Button Classes="Ghost"
+                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=INFO}"
+                                Command="{Binding SetFilterCommand}" CommandParameter="INFO" Content="INFO" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
+                        <Button Classes="Ghost"
+                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=WARN}"
+                                Command="{Binding SetFilterCommand}" CommandParameter="WARN" Content="WARN" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
+                        <Button Classes="Ghost"
+                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ERROR}"
+                                Command="{Binding SetFilterCommand}" CommandParameter="ERROR" Content="ERROR" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
+                    </StackPanel>
+                </Border>
 
                 <!-- Search Input -->
                 <TextBox

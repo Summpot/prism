@@ -413,13 +413,13 @@ jobs:
           cp "crates/prism/icons/icon.png" "${APPDIR}/prism.png"
           cp "crates/prism/icons/icon.png" "${APPDIR}/usr/share/icons/hicolor/512x512/apps/prism.png"
 
-          cat << 'EOF' > "${APPDIR}/AppRun"
-#!/bin/sh
-SELF=$(readlink -f "$0")
-HERE="${SELF%/*}"
-export PATH="${HERE}/usr/bin:${PATH}"
-exec "${HERE}/usr/bin/prism" "$@"
-EOF
+          {
+            echo '#!/bin/sh'
+            echo 'SELF=$(readlink -f "$0")'
+            echo 'HERE=${SELF%/*}'
+            echo 'export PATH="${HERE}/usr/bin:${PATH}"'
+            echo 'exec "${HERE}/usr/bin/prism" "$@"'
+          } > "${APPDIR}/AppRun"
           chmod +x "${APPDIR}/AppRun"
 
           APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGE_ARCH}.AppImage"

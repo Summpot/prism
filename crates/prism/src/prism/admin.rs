@@ -1829,13 +1829,14 @@ impl AdminState {
             ControlMethod::AuthCreateToken {
                 user_id,
                 name,
+                token_type,
                 expires_in_days,
             } => {
                 let am = self.auth_manager.as_ref().ok_or_else(|| {
                     ControlRpcError::not_found("auth manager not configured")
                 })?;
                 let (raw_token, token) = am
-                    .create_client_token(&user_id, &name, expires_in_days)
+                    .issue_session_token(&user_id, token_type, &name, None, expires_in_days)
                     .await
                     .map_err(|e| ControlRpcError::bad_request(e.to_string()))?;
                 Ok(ControlPayload::AuthCreateToken { raw_token, token })

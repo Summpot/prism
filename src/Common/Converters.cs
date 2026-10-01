@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using Avalonia;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
 
@@ -12,6 +13,9 @@ public static class Converters
 
     public static readonly IValueConverter EqualsZero =
         new FuncValueConverter<int, bool>(c => c == 0);
+
+    public static readonly IValueConverter NotEqualsZero =
+        new FuncValueConverter<int, bool>(c => c != 0);
 
     public static readonly IValueConverter NullToBoolean =
         new FuncValueConverter<object?, bool>(o => o != null);
@@ -33,15 +37,27 @@ public static class Converters
 
     public static readonly IValueConverter BoolToCopyOrCheckBrush =
         new FuncValueConverter<bool, IBrush>(copied =>
-            copied ? new SolidColorBrush(Color.Parse("#10b981")) : new SolidColorBrush(Color.Parse("#9ca3af")));
+            copied ? ThemeBrush("SuccessColor", "#10b981") : ThemeBrush("MutedForegroundColor", "#9ca3af"));
 
     public static readonly IValueConverter StatusToBrush =
         new FuncValueConverter<bool, IBrush>(running =>
-            running ? new SolidColorBrush(Color.Parse("#10b981")) : new SolidColorBrush(Color.Parse("#6b7280")));
+            running ? ThemeBrush("SuccessColor", "#10b981") : ThemeBrush("MutedForegroundColor", "#6b7280"));
 
     public static readonly IValueConverter RouteEquals =
         new FuncValueConverter<string?, string, bool>((current, target) =>
             string.Equals(current, target, StringComparison.OrdinalIgnoreCase));
+
+    public static readonly IValueConverter TokenTypeLabel =
+        new FuncValueConverter<string?, string>(value => value?.ToLowerInvariant() switch
+        {
+            "admin" => Prism.I18n.I18nText.T("users_token_type_admin"),
+            "connector" => Prism.I18n.I18nText.T("users_token_type_connector"),
+            "client" => Prism.I18n.I18nText.T("users_token_type_client"),
+            _ => value ?? ""
+        });
+
+    public static readonly IValueConverter ExpandedSidebarWidth =
+        new FuncValueConverter<bool, double>(expanded => expanded ? 240 : 56);
 
     public static readonly IValueConverter IntEquals =
         new FuncValueConverter<int, string, bool>((val, param) =>
@@ -53,10 +69,10 @@ public static class Converters
             var l = (level ?? "INFO").ToUpperInvariant();
             return l switch
             {
-                "ERROR" => new SolidColorBrush(Color.Parse("#ef4444")),
-                "WARN" => new SolidColorBrush(Color.Parse("#f59e0b")),
-                "DEBUG" => new SolidColorBrush(Color.Parse("#6b7280")),
-                _ => new SolidColorBrush(Color.Parse("#10b981"))
+                "ERROR" => ThemeBrush("DestructiveColor", "#ef4444"),
+                "WARN" => ThemeBrush("WarningColor", "#f59e0b"),
+                "DEBUG" => ThemeBrush("MutedForegroundColor", "#6b7280"),
+                _ => ThemeBrush("SuccessColor", "#10b981")
             };
         });
 
@@ -127,7 +143,16 @@ public static class Converters
 
     public static readonly IValueConverter ActiveStatusToBrush =
         new FuncValueConverter<bool, IBrush>(active =>
-            active ? new SolidColorBrush(Color.Parse("#10b981")) : new SolidColorBrush(Color.Parse("#6b7280")));
+            active ? ThemeBrush("SuccessColor", "#10b981") : ThemeBrush("MutedForegroundColor", "#6b7280"));
+
+    private static IBrush ThemeBrush(string key, string fallbackHex)
+    {
+        if (Application.Current?.TryGetResource(key, null, out var value) == true && value is IBrush brush)
+        {
+            return brush;
+        }
+        return new SolidColorBrush(Color.Parse(fallbackHex));
+    }
 
     public static readonly IValueConverter BooleanToString =
         new FuncValueConverter<bool, string, string>((val, param) =>

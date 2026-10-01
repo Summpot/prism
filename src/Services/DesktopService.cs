@@ -68,6 +68,10 @@ public static class DesktopService
             {
                 RegisterLinuxProtocol(exePath);
             }
+            else if (OperatingSystem.IsMacOS())
+            {
+                RegisterMacOsProtocol(exePath);
+            }
         }
         catch (Exception ex)
         {
@@ -110,6 +114,56 @@ public static class DesktopService
             {
                 FileName = "xdg-mime",
                 Arguments = "default prism.desktop x-scheme-handler/prism",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            })?.Dispose();
+        }
+        catch { }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    private static void RegisterMacOsProtocol(string exePath)
+    {
+        string support = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library", "Application Support", "Prism");
+        string app = Path.Combine(support, "prism-url-handler.app");
+        string contents = Path.Combine(app, "Contents");
+        string macos = Path.Combine(contents, "MacOS");
+        Directory.CreateDirectory(macos);
+
+        string plist =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+            "<plist version=\"1.0\"><dict>\n" +
+            "<key>CFBundleIdentifier</key><string>dev.prism.url-handler</string>\n" +
+            "<key>CFBundleName</key><string>Prism URL Handler</string>\n" +
+            "<key>CFBundleExecutable</key><string>handler</string>\n" +
+            "<key>CFBundlePackageType</key><string>APPL</string>\n" +
+            "<key>CFBundleVersion</key><string>1</string>\n" +
+            "<key>CFBundleShortVersionString</key><string>1.0</string>\n" +
+            "<key>CFBundleURLTypes</key><array><dict>\n" +
+            "<key>CFBundleURLName</key><string>Prism</string>\n" +
+            "<key>CFBundleURLSchemes</key><array><string>prism</string></array>\n" +
+            "</dict></array>\n" +
+            "</dict></plist>\n";
+        File.WriteAllText(Path.Combine(contents, "Info.plist"), plist);
+
+        string quoted = "'" + exePath.Replace("'", "'\\''") + "'";
+        string handler = Path.Combine(macos, "handler");
+        File.WriteAllText(handler, "#!/bin/sh\nexec " + quoted + " \"$@\"\n");
+        File.SetUnixFileMode(
+            handler,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                ArgumentList = { "-f", app },
                 UseShellExecute = false,
                 CreateNoWindow = true
             })?.Dispose();

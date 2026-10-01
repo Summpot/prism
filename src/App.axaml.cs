@@ -155,11 +155,10 @@ public partial class App : Application
             {
                 await NativeClientService.Instance.InstallUpdateAsync(channel);
             }
-            catch
+            catch (Exception installEx)
             {
-                NativeClientService.Instance.OpenExternalUrl("https://github.com/Summpot/prism/releases");
-                AppServices.ShowInfo(
-                    I18nText.T("client_update_open_releases", "Opening the GitHub releases page to download the update."),
+                AppServices.ShowError(
+                    I18nText.Format("client_update_failed", ("error", installEx.Message)),
                     I18nText.T("client_update_prompt_title"));
             }
         }

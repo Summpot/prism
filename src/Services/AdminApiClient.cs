@@ -330,12 +330,13 @@ public class AdminApiClient
         return await InvokeControlRpcAsync("auth.tokens.list", null, AdminJsonContext.Default.ListAdminTokenRecord);
     }
 
-    public async Task<AdminCreateTokenResponse> CreateTokenAsync(string name, string userId, int? expiresInDays = null)
+    public async Task<AdminCreateTokenResponse> CreateTokenAsync(string name, string userId, string? tokenType = null, int? expiresInDays = null)
     {
         var parameters = new Dictionary<string, string>
         {
             ["name"] = name,
-            ["user_id"] = userId
+            ["user_id"] = userId,
+            ["token_type"] = string.IsNullOrWhiteSpace(tokenType) ? "client" : tokenType.Trim().ToLowerInvariant()
         };
         if (expiresInDays.HasValue && expiresInDays.Value > 0)
         {

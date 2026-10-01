@@ -793,11 +793,35 @@ impl PrismClientSession {
 
     pub async fn client_install_update(
         &self,
-        _channel: Option<String>,
+        channel: Option<String>,
     ) -> Result<(), PrismFfiError> {
-        Err(PrismFfiError::ExecutionFailed {
-            message: "In-app binary update install is only supported on desktop platform".into(),
-        })
+        let resolved_channel = channel.unwrap_or_else(|| {
+            self.storage
+                .as_deref()
+                .and_then(|s| s.load_active_config().ok())
+                .map(|c| c.update_channel)
+                .unwrap_or_else(|| "release".to_string())
+        });
+        let client = updater_http_client()?;
+        let (_, update) = crate::prism::updater::check_update(
+            &client,
+            &resolved_channel,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await?;
+        let Some((manifest, platform)) = update else {
+            return Err(PrismFfiError::ExecutionFailed {
+                message: "no update available for this platform".into(),
+            });
+        };
+        crate::prism::updater::download_and_install_update(
+            &client,
+            crate::prism::updater::DEFAULT_PUBKEY,
+            &platform,
+            &manifest.version,
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn admin_request(
@@ -918,6 +942,16 @@ pub fn get_or_init_session() -> Result<Arc<PrismClientSession>, PrismFfiError> {
     Ok(session)
 }
 
+fn updater_http_client() -> Result<reqwest::Client, PrismFfiError> {
+    reqwest::Client::builder()
+        .user_agent("Prism-Client-Updater")
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| PrismFfiError::ExecutionFailed {
+            message: e.to_string(),
+        })
+}
+
 async fn check_update_internal(
     channel: Option<String>,
     storage: Option<&crate::prism::storage::StorageEngine>,
@@ -930,62 +964,17 @@ async fn check_update_internal(
     });
 
     let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let endpoint = match resolved_channel.as_str() {
-        "dev" => "https://github.com/Summpot/prism/releases/download/dev/latest.json",
-        _ => "https://github.com/Summpot/prism/releases/latest/download/latest.json",
-    };
-
-    let client = reqwest::Client::builder()
-        .user_agent("prism-updater")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| PrismFfiError::ExecutionFailed {
-            message: e.to_string(),
-        })?;
-
-    let res = client.get(endpoint).send().await;
-    match res {
-        Ok(resp) if resp.status().is_success() => {
-            #[derive(serde::Deserialize)]
-            struct UpdateMeta {
-                version: Option<String>,
-                pub_date: Option<String>,
-                notes: Option<String>,
-            }
-            if let Ok(meta) = resp.json::<UpdateMeta>().await {
-                let available = meta
-                    .version
-                    .as_deref()
-                    .map(|v| v != current_version)
-                    .unwrap_or(false);
-                Ok(UpdateCheckResponse {
-                    available,
-                    current_version,
-                    version: meta.version,
-                    date: meta.pub_date,
-                    body: meta.notes,
-                    channel: resolved_channel,
-                })
-            } else {
-                Ok(UpdateCheckResponse {
-                    available: false,
-                    current_version,
-                    version: None,
-                    date: None,
-                    body: None,
-                    channel: resolved_channel,
-                })
-            }
-        }
-        _ => Ok(UpdateCheckResponse {
-            available: false,
-            current_version,
-            version: None,
-            date: None,
-            body: None,
-            channel: resolved_channel,
-        }),
-    }
+    let client = updater_http_client()?;
+    let (response, _) =
+        crate::prism::updater::check_update(&client, &resolved_channel, &current_version).await?;
+    Ok(UpdateCheckResponse {
+        available: response.available,
+        current_version: response.current_version,
+        version: response.version,
+        date: response.date,
+        body: response.body,
+        channel: response.channel,
+    })
 }
 
 // ---------------------------------------------------------------------------

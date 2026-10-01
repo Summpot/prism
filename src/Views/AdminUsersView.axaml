@@ -16,7 +16,7 @@
     <Panel>
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
-    <Grid RowDefinitions="Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
+    <Grid RowDefinitions="Auto, Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
         <controls:PageHeader
             Grid.Row="0"
             Title="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -24,6 +24,12 @@
             Icon="{x:Static common:AppIcons.Users}"
             Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBox
+                    Text="{Binding SearchQuery, Mode=TwoWay}"
+                    PlaceholderText="{Binding [admin_users_search], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Width="200"
+                    Height="28"
+                    FontSize="11"/>
                 <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
                     <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
                 </Button>
@@ -44,52 +50,30 @@
             RetryCommand="{Binding RefreshCommand}"
             Margin="0,0,0,12"/>
 
+        <shadui:Card Grid.Row="2" Padding="12" Margin="0,0,0,12" IsVisible="{Binding HasSession}">
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding [session_logged_in], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding SessionName}" FontWeight="SemiBold" FontSize="13"/>
+                    <TextBlock Text="{Binding SessionDetail}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </StackPanel>
+                <shadui:Badge
+                    Grid.Column="1"
+                    IsVisible="{Binding SessionIsAdmin}"
+                    Content="{Binding [users_session_admin], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Height="20"
+                    Padding="6,0"
+                    FontSize="10"
+                    VerticalAlignment="Center"/>
+            </Grid>
+        </shadui:Card>
+
         <!-- Tabbed User & Token Content -->
-        <TabControl Grid.Row="2">
+        <TabControl Grid.Row="3">
             <!-- Tab 1: Users -->
             <TabItem Header="{Binding [users_title], Source={x:Static i18n:LocalizationManager.Instance}}">
                 <shadui:Card Margin="0,8,0,0" Padding="12">
-                    <Grid RowDefinitions="Auto, *">
-                        <!-- Edit User Dialog Card -->
-                        <shadui:Card Grid.Row="0" IsVisible="{Binding ShowEditUserDialog}" Margin="0,0,0,12" Padding="14">
-                            <StackPanel Spacing="10">
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
-                                        <TextBlock Text="{Binding EditUserTitle}" FontWeight="Bold" FontSize="13"/>
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Classes="Ghost" Command="{Binding CloseEditUserDialogCommand}" Height="22" Width="22" Padding="2">
-                                        <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="11" Height="11"/>
-                                    </Button>
-                                </Grid>
-
-                                <Grid ColumnDefinitions="140, 12, *">
-                                    <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="{Binding [users_role], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
-                                        <ComboBox ItemsSource="{x:Static vm:AdminUsersViewModel.AvailableRoles}"
-                                                  SelectedItem="{Binding EditRole, Mode=TwoWay}"
-                                                  HorizontalAlignment="Stretch"
-                                                  Height="30" FontSize="11"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2" Spacing="4">
-                                        <TextBlock Text="{Binding [users_rules_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
-                                        <TextBox Text="{Binding EditServiceRules, Mode=TwoWay}"
-                                                 AcceptsReturn="True"
-                                                 Height="60"
-                                                 FontSize="11"
-                                                 FontFamily="Consolas, monospace"
-                                                 PlaceholderText="{Binding [admin_users_service_rules_hint], Source={x:Static i18n:LocalizationManager.Instance}}" />
-                                    </StackPanel>
-                                </Grid>
-
-                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                                    <Button Classes="Outline" Command="{Binding CloseEditUserDialogCommand}" Content="{Binding [common_cancel], Source={x:Static i18n:LocalizationManager.Instance}}" Height="28" FontSize="11" Padding="10,0"/>
-                                    <Button Classes="Primary" Command="{Binding SaveUserChangesCommand}" Content="{Binding [common_save], Source={x:Static i18n:LocalizationManager.Instance}}" Height="28" FontSize="11" Padding="12,0"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </shadui:Card>
-
-                        <Grid Grid.Row="1">
+                    <Grid>
                             <DataGrid
                                 ItemsSource="{Binding Users}"
                                 AutoGenerateColumns="False"
@@ -127,7 +111,7 @@
                                                         Classes="Ghost"
                                                         Command="{Binding #Root.((vm:AdminUsersViewModel)DataContext).ToggleUserRoleCommand}"
                                                         CommandParameter="{Binding}"
-                                                        ToolTip.Tip="Toggle between ADMIN and MEMBER"
+                                                        ToolTip.Tip="{Binding [users_toggle_role], Source={x:Static i18n:LocalizationManager.Instance}}"
                                                         Height="22" Width="22" Padding="2">
                                                         <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="11" Height="11"/>
                                                     </Button>
@@ -145,7 +129,6 @@
                                 Margin="0,24"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"/>
-                        </Grid>
                     </Grid>
                 </shadui:Card>
             </TabItem>
@@ -153,7 +136,7 @@
             <!-- Tab 2: Access Tokens -->
             <TabItem Header="{Binding [admin_col_access_tokens], Source={x:Static i18n:LocalizationManager.Instance}}">
                 <shadui:Card Margin="0,8,0,0" Padding="12">
-                    <Grid RowDefinitions="Auto, Auto, *">
+                    <Grid RowDefinitions="Auto, *">
                         <!-- Toolbar -->
                         <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
                             <TextBlock Text="{Binding [admin_users_active_tokens], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
@@ -165,52 +148,8 @@
                             </Button>
                         </Grid>
 
-                        <!-- Create Token Modal Card -->
-                        <shadui:Card Grid.Row="1" IsVisible="{Binding ShowTokenDialog}" Margin="0,0,0,12" Padding="12">
-                            <StackPanel Spacing="10">
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <TextBlock Text="{Binding [users_token_modal_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="12"/>
-                                    <Button Grid.Column="1" Classes="Ghost" Command="{Binding CloseCreateTokenDialogCommand}" Height="22" Width="22" Padding="2">
-                                        <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="11" Height="11"/>
-                                    </Button>
-                                </Grid>
-
-                                <Grid ColumnDefinitions="*, 8, 140, 8, 90, 8, Auto">
-                                    <!-- Token Name -->
-                                    <TextBox Grid.Column="0" Text="{Binding NewTokenName, Mode=TwoWay}" PlaceholderText="{Binding [users_token_name_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="12"/>
-
-                                    <!-- User Selector -->
-                                    <ComboBox Grid.Column="2" ItemsSource="{Binding Users}"
-                                              SelectedValue="{Binding SelectedUserId, Mode=TwoWay}"
-                                              SelectedValueBinding="{Binding Id, x:DataType=vm:UserRowItem}"
-                                              DisplayMemberBinding="{Binding Username, x:DataType=vm:UserRowItem}"
-                                              Height="30" FontSize="11" HorizontalAlignment="Stretch"/>
-
-                                    <!-- Expiration Days -->
-                                    <ComboBox Grid.Column="4" ItemsSource="{x:Static vm:AdminUsersViewModel.ExpirationOptions}"
-                                              SelectedItem="{Binding SelectedExpirationDays, Mode=TwoWay}"
-                                              Height="30" FontSize="11" HorizontalAlignment="Stretch"/>
-
-                                    <!-- Create Button -->
-                                    <Button Grid.Column="6" Classes="Primary" Command="{Binding SubmitCreateTokenCommand}" Content="{Binding [common_create], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" Padding="12,0"/>
-                                </Grid>
-
-                                <!-- Created Raw Token Display -->
-                                <Border IsVisible="{Binding CreatedRawToken, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                                        Background="{DynamicResource GhostColor}" BorderBrush="#10b981" BorderThickness="1" CornerRadius="6" Padding="10">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="{Binding [users_token_copy_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="#10b981"/>
-                                        <Grid ColumnDefinitions="*, Auto">
-                                            <TextBox Grid.Column="0" Text="{Binding CreatedRawToken}" IsReadOnly="True" Height="28" FontSize="11" FontFamily="Consolas, monospace"/>
-                                            <Button Grid.Column="1" Classes="Outline" Command="{Binding CopyRawTokenCommand}" Content="{Binding [client_copy], Source={x:Static i18n:LocalizationManager.Instance}}" Height="28" FontSize="11" Padding="10,0" Margin="6,0,0,0"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </shadui:Card>
-
                         <!-- Tokens Table -->
-                        <Grid Grid.Row="2">
+                        <Grid Grid.Row="1">
                             <DataGrid
                                 ItemsSource="{Binding Tokens}"
                                 AutoGenerateColumns="False"
@@ -223,6 +162,7 @@
                                     <DataGridTextColumn Header="{Binding [admin_col_type], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding TokenType}" Width="90"/>
                                     <DataGridTextColumn Header="{Binding [admin_col_created], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding CreatedAt}" Width="140"/>
                                     <DataGridTextColumn Header="{Binding [admin_col_expires], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ExpiresAt}" Width="140"/>
+                                    <DataGridTextColumn Header="{Binding [admin_col_last_used], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LastUsed}" Width="140"/>
                                     <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" Width="90">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate x:DataType="vm:TokenRowItem">
@@ -234,7 +174,7 @@
                                                     Height="22"
                                                     FontSize="10"
                                                     Padding="6,0"
-                                                    Foreground="#ef4444"/>
+                                                    Foreground="{DynamicResource DestructiveColor}"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>

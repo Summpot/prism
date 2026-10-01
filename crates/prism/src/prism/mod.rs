@@ -14,6 +14,7 @@ pub mod secrets;
 pub mod storage;
 pub mod telemetry;
 pub mod tunnel;
+pub mod updater;
 
 
 pub async fn run(

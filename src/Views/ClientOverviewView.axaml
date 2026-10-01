@@ -66,7 +66,7 @@
                             <TextBlock
                                 Text="{Binding ServerAddress}"
                                 FontSize="11"
-                                FontFamily="Consolas, monospace"
+                                FontFamily="{DynamicResource MonoFont}"
                                 Foreground="{DynamicResource MutedForegroundColor}"
                                 VerticalAlignment="Center"/>
                             <Button Classes="Ghost" Command="{Binding CopyServerAddressCommand}"
@@ -123,7 +123,7 @@
                                 CornerRadius="6,0,0,6"
                                 FontSize="12"
                                 FontWeight="SemiBold"
-                                FontFamily="Consolas, monospace"
+                                FontFamily="{DynamicResource MonoFont}"
                                 Padding="8,4"
                                 VerticalAlignment="Center"/>
 
@@ -136,7 +136,7 @@
                                 BorderThickness="0"
                                 Background="Transparent"
                                 FontSize="12"
-                                FontFamily="Consolas, monospace"
+                                FontFamily="{DynamicResource MonoFont}"
                                 VerticalAlignment="Center">
                                 <TextBox.InnerRightContent>
                                     <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,4,0" VerticalAlignment="Center">
@@ -309,7 +309,7 @@
                             <TextBlock
                                 Text="{Binding MappingText}"
                                 FontSize="11"
-                                FontFamily="Consolas, monospace"
+                                FontFamily="{DynamicResource MonoFont}"
                                 Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
 
@@ -319,14 +319,14 @@
                             Grid.Column="2"
                             IsVisible="{Binding IsRunning}"
                             Classes="Outline"
-                            BorderBrush="#ef4444"
-                            Foreground="#ef4444"
+                            BorderBrush="{DynamicResource DestructiveColor}"
+                            Foreground="{DynamicResource DestructiveColor}"
                             Command="{Binding ToggleTunnelCommand}"
                             Height="30"
                             Padding="12,0"
                             CornerRadius="6">
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="13" Height="13" Foreground="#ef4444"/>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="13" Height="13" Foreground="{DynamicResource DestructiveColor}"/>
                                 <TextBlock Text="{Binding [client_disconnect_tunnel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Button>
@@ -394,25 +394,25 @@
                                 <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,4,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_uptime], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding UptimeText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding UptimeText}" FontWeight="Bold" FontSize="13" FontFamily="{DynamicResource MonoFont}" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="4,0,4,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding RawBytesText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding RawBytesText}" FontWeight="Bold" FontSize="13" FontFamily="{DynamicResource MonoFont}" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="4,0,4,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding WireBytesText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding WireBytesText}" FontWeight="Bold" FontSize="13" FontFamily="{DynamicResource MonoFont}" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="3" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="4,0,0,0">
                                     <StackPanel HorizontalAlignment="Center">
-                                        <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="#10b981" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding SavedRatioText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" Foreground="#10b981" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding SavedRatioText}" FontWeight="Bold" FontSize="13" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -425,7 +425,7 @@
                                             <TextBlock Text="↑" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource PrimaryColor}"/>
                                             <TextBlock Text="{Binding [traffic_uplink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding UplinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontFamily="Consolas, monospace" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding UplinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold"/>
                                     </Grid>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="4,0,0,0">
@@ -434,15 +434,15 @@
                                             <TextBlock Text="↓" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource PrimaryColor}"/>
                                             <TextBlock Text="{Binding [traffic_downlink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding DownlinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontFamily="Consolas, monospace" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding DownlinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold"/>
                                     </Grid>
                                 </Border>
                             </Grid>
 
                             <!-- Real-time Throughput with Sparkline Graph -->
                             <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4,0,0">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
-                                <TextBlock Text="{Binding ThroughputText}" Foreground="#10b981" FontWeight="Bold" FontSize="11" FontFamily="Consolas, monospace"/>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
+                                <TextBlock Text="{Binding ThroughputText}" Foreground="{DynamicResource SuccessColor}" FontWeight="Bold" FontSize="11" FontFamily="{DynamicResource MonoFont}"/>
                                 <common:SparklineControl
                                     Samples="{Binding ThroughputSamples}"
                                     Width="120"
@@ -509,10 +509,10 @@
                                                 <shadui:Badge Classes="Secondary" Content="{Binding Proto}" Height="16" Padding="4,0" FontSize="9" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="{Binding TargetAddress}" FontSize="11" FontFamily="Consolas, monospace" Foreground="{DynamicResource PrimaryColor}" />
+                                                <TextBlock Text="{Binding TargetAddress}" FontSize="11" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource PrimaryColor}" />
                                                 <TextBlock Text="{Binding MasqueradeHost, StringFormat='({0})'}"
                                                            IsVisible="{Binding MasqueradeHost, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                                                           FontSize="11" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}" />
+                                                           FontSize="11" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" />
                                             </StackPanel>
                                         </StackPanel>
 

@@ -12,6 +12,8 @@ using Prism.Common;
 using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
+using Prism.Views;
+using ShadUI;
 
 namespace Prism.ViewModels;
 
@@ -69,7 +71,12 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     private string _configPath = "";
 
     [ObservableProperty]
+    private string _endpoint = "";
+
+    [ObservableProperty]
     private string _savedRatioText = "0.0%";
+
+    public ObservableCollection<ServiceRowItem> PreviewServices { get; } = new();
 
     [ObservableProperty]
     private string? _reloadMessage;
@@ -144,6 +151,18 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
 
     [RelayCommand]
+    public void OpenConnections() => NavigationService.Instance.NavigateTo("admin.connections");
+
+    [RelayCommand]
+    public void OpenServices() => NavigationService.Instance.NavigateTo("admin.services");
+
+    [RelayCommand]
+    public void OpenTraffic() => NavigationService.Instance.NavigateTo("admin.traffic");
+
+    [RelayCommand]
+    public void OpenConnectors() => NavigationService.Instance.NavigateTo("admin.connectors");
+
+    [RelayCommand]
     public void DismissError() => ErrorMessage = null;
 
     private void StartAutoRefresh()
@@ -169,6 +188,8 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
             ConnectionCount = 0;
             ServiceCount = 0;
             ConfigPath = "";
+            Endpoint = "";
+            PreviewServices.Clear();
             return;
         }
 
@@ -188,10 +209,17 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
             await Task.WhenAll(healthTask, connsTask, servicesTask, configTask, statsTask);
 
             IsHealthy = (await healthTask).Ok;
+            var services = await servicesTask;
             ConnectionCount = (await connsTask).Count;
-            ServiceCount = (await servicesTask).Count;
+            ServiceCount = services.Count;
             var path = (await configTask).Path;
             ConfigPath = string.IsNullOrWhiteSpace(path) ? "" : path;
+            Endpoint = ResolveEndpoint();
+            PreviewServices.Clear();
+            foreach (var row in services.Take(6).Select(ServiceRowItem.FromSnapshot))
+            {
+                PreviewServices.Add(row);
+            }
             try
             {
                 SavedRatioText = Formatters.FormatPercentage((await statsTask).Global.SavedRatio);
@@ -209,6 +237,18 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
         {
             IsLoading = false;
         }
+    }
+
+    private string ResolveEndpoint()
+    {
+        try
+        {
+            var cfg = _client.GetConfig();
+            var management = cfg.ActiveConfig.ManagementUrl;
+            if (!string.IsNullOrWhiteSpace(management)) return management;
+        }
+        catch { }
+        return _client.CurrentStatus?.ServerAddr ?? "";
     }
 
     [RelayCommand]
@@ -243,6 +283,7 @@ public class ConnectionItem : ObservableObject
     public string WireBytes { get; set; } = "0 B";
     public string UplinkText { get; set; } = "";
     public string DownlinkText { get; set; } = "";
+    public string OptimizerText { get; set; } = "";
 }
 
 public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
@@ -399,6 +440,11 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
                     StartedAt = started,
                     RawBytes = raw,
                     WireBytes = wire,
+                    OptimizerText = r.RawBytes == 0
+                        ? "—"
+                        : Formatters.FormatPercentage(r.RawBytes > r.WireBytes
+                            ? (double)(r.RawBytes - r.WireBytes) / r.RawBytes
+                            : 0),
                     UplinkText = $"{Formatters.FormatBytes(r.UplinkRawBytes)} → {Formatters.FormatBytes(r.UplinkWireBytes)}",
                     DownlinkText = $"{Formatters.FormatBytes(r.DownlinkRawBytes)} → {Formatters.FormatBytes(r.DownlinkWireBytes)}"
                 });
@@ -458,6 +504,30 @@ public class ServiceRowItem : ObservableObject
     public bool Primary { get; set; }
     public bool RouteOnly { get; set; }
     public bool IsActive { get; set; } = true;
+    public string RoleText { get; set; } = "";
+    public string RouteText { get; set; } = "";
+    public string ClientDisplay { get; set; } = "";
+
+    public static ServiceRowItem FromSnapshot(AdminServiceSnapshot snap)
+    {
+        var s = snap.Service ?? new AdminRegisteredService();
+        return new ServiceRowItem
+        {
+            Name = s.Name,
+            Proto = string.IsNullOrWhiteSpace(s.Proto) ? "" : s.Proto.ToUpperInvariant(),
+            LocalAddr = s.LocalAddr,
+            RemoteAddr = s.RemoteAddr,
+            Masquerade = string.IsNullOrWhiteSpace(s.MasqueradeHost) ? "—" : s.MasqueradeHost,
+            ClientId = snap.ClientId ?? "",
+            Remote = snap.Remote ?? "",
+            Primary = snap.Primary,
+            RouteOnly = s.RouteOnly,
+            IsActive = true,
+            RoleText = snap.Primary ? I18nText.T("services_primary") : I18nText.T("services_secondary"),
+            RouteText = s.RouteOnly ? I18nText.T("services_route_only") : "",
+            ClientDisplay = string.IsNullOrWhiteSpace(snap.ClientId) ? I18nText.T("admin_unknown") : snap.ClientId
+        };
+    }
 }
 
 public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAware
@@ -465,7 +535,11 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
     private readonly AdminApiClient _api = AdminApiClient.Instance;
     private readonly NativeClientService _client = NativeClientService.Instance;
 
+    private readonly List<ServiceRowItem> _allServices = new();
     public ObservableCollection<ServiceRowItem> Services { get; } = new();
+
+    [ObservableProperty] private string _searchQuery = "";
+    [ObservableProperty] private bool _primaryOnly;
 
     [ObservableProperty]
     private bool _isLoading;
@@ -533,6 +607,32 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
     [RelayCommand]
     public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
 
+    [RelayCommand]
+    public void TogglePrimaryOnly() => PrimaryOnly = !PrimaryOnly;
+
+    partial void OnSearchQueryChanged(string value) => ApplyFilter();
+    partial void OnPrimaryOnlyChanged(bool value) => ApplyFilter();
+
+    private void ApplyFilter()
+    {
+        Services.Clear();
+        var q = SearchQuery.Trim();
+        foreach (var row in _allServices)
+        {
+            if (PrimaryOnly && !row.Primary) continue;
+            if (!string.IsNullOrWhiteSpace(q) &&
+                !row.Name.Contains(q, StringComparison.OrdinalIgnoreCase) &&
+                !row.ClientDisplay.Contains(q, StringComparison.OrdinalIgnoreCase) &&
+                !row.Remote.Contains(q, StringComparison.OrdinalIgnoreCase) &&
+                !row.LocalAddr.Contains(q, StringComparison.OrdinalIgnoreCase) &&
+                !row.RemoteAddr.Contains(q, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            Services.Add(row);
+        }
+    }
+
     private void StartAutoRefresh()
     {
         AutoRefreshHelper.Stop(ref _autoRefreshCts);
@@ -552,6 +652,7 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
             ReadyState = AdminReadyState.Disconnected;
             IsReady = false;
             ErrorMessage = null;
+            _allServices.Clear();
             Services.Clear();
             return;
         }
@@ -564,24 +665,9 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
             IsReady = true;
             var list = await _api.GetTunnelServicesAsync();
 
-            Services.Clear();
-            foreach (var snap in list)
-            {
-                var s = snap.Service;
-                Services.Add(new ServiceRowItem
-                {
-                    Name = s.Name,
-                    Proto = string.IsNullOrWhiteSpace(s.Proto) ? "" : s.Proto.ToUpperInvariant(),
-                    LocalAddr = s.LocalAddr,
-                    RemoteAddr = s.RemoteAddr,
-                    Masquerade = string.IsNullOrWhiteSpace(s.MasqueradeHost) ? "-" : s.MasqueradeHost,
-                    ClientId = snap.ClientId,
-                    Remote = snap.Remote,
-                    Primary = snap.Primary,
-                    RouteOnly = s.RouteOnly,
-                    IsActive = true
-                });
-            }
+            _allServices.Clear();
+            _allServices.AddRange(list.Select(ServiceRowItem.FromSnapshot));
+            ApplyFilter();
         }
         catch (Exception ex)
         {
@@ -618,6 +704,19 @@ public class TokenRowItem : ObservableObject
     public string TokenType { get; set; } = "client";
     public string CreatedAt { get; set; } = "";
     public string ExpiresAt { get; set; } = "";
+    public string LastUsed { get; set; } = "";
+}
+
+public sealed class TokenDialogContext
+{
+    public TokenDialogContext(AdminUsersViewModel owner) => Owner = owner;
+    public AdminUsersViewModel Owner { get; }
+}
+
+public sealed class EditUserDialogContext
+{
+    public EditUserDialogContext(AdminUsersViewModel owner) => Owner = owner;
+    public AdminUsersViewModel Owner { get; }
 }
 
 public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
@@ -625,8 +724,22 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     private readonly AdminApiClient _api = AdminApiClient.Instance;
     private readonly NativeClientService _client = NativeClientService.Instance;
 
+    private readonly List<UserRowItem> _allUsers = new();
+    private readonly List<TokenRowItem> _allTokens = new();
     public ObservableCollection<UserRowItem> Users { get; } = new();
     public ObservableCollection<TokenRowItem> Tokens { get; } = new();
+
+    [ObservableProperty] private string _searchQuery = "";
+    [ObservableProperty] private string _sessionName = "";
+    [ObservableProperty] private string _sessionDetail = "";
+    [ObservableProperty] private bool _hasSession;
+    [ObservableProperty] private bool _sessionIsAdmin;
+    [ObservableProperty] private string _newTokenType = "client";
+    public string[] TokenTypeValues { get; } = ["client", "connector", "admin"];
+
+    private TokenDialogContext? _tokenDialog;
+    private EditUserDialogContext? _editDialog;
+    private static bool _dialogsRegistered;
 
     [ObservableProperty]
     private bool _isLoading;
@@ -687,9 +800,20 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
 
     public AdminUsersViewModel()
     {
+        EnsureDialogs();
         UpdateAutoRefreshText();
         _ = RefreshAsync();
     }
+
+    private static void EnsureDialogs()
+    {
+        if (_dialogsRegistered) return;
+        _dialogsRegistered = true;
+        AppServices.DialogManager.Register<CreateTokenDialog, TokenDialogContext>();
+        AppServices.DialogManager.Register<EditUserDialog, EditUserDialogContext>();
+    }
+
+    partial void OnSearchQueryChanged(string value) => ApplyUserFilter();
 
     public void OnNavigatedTo()
     {
@@ -749,6 +873,9 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             ErrorMessage = null;
             Users.Clear();
             Tokens.Clear();
+            _allUsers.Clear();
+            _allTokens.Clear();
+            HasSession = false;
             return;
         }
 
@@ -761,14 +888,17 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
 
             var usersTask = _api.GetUsersAsync();
             var tokensTask = _api.GetTokensAsync();
+            var sessionTask = _api.GetSessionAsync();
 
-            await Task.WhenAll(usersTask, tokensTask);
+            await Task.WhenAll(usersTask, tokensTask, sessionTask);
 
-            Users.Clear();
+            _allUsers.Clear();
             foreach (var u in await usersTask)
             {
-                string created = DateTimeOffset.FromUnixTimeMilliseconds(u.CreatedAtUnixMs).ToString("yyyy-MM-dd HH:mm");
-                Users.Add(new UserRowItem
+                string created = u.CreatedAtUnixMs > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(u.CreatedAtUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                    : "";
+                _allUsers.Add(new UserRowItem
                 {
                     Id = u.Id,
                     Username = string.IsNullOrWhiteSpace(u.DisplayName) ? u.Username : $"{u.DisplayName} ({u.Username})",
@@ -779,28 +909,41 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
                 });
             }
 
-            if (string.IsNullOrWhiteSpace(SelectedUserId) && Users.Count > 0)
+            if (string.IsNullOrWhiteSpace(SelectedUserId) && _allUsers.Count > 0)
             {
-                SelectedUserId = Users[0].Id;
+                SelectedUserId = _allUsers[0].Id;
             }
 
-            Tokens.Clear();
+            _allTokens.Clear();
             foreach (var t in await tokensTask)
             {
-                string created = DateTimeOffset.FromUnixTimeMilliseconds(t.CreatedAtUnixMs).ToString("yyyy-MM-dd HH:mm");
+                string created = t.CreatedAtUnixMs > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(t.CreatedAtUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                    : "";
                 string expires = t.ExpiresAtUnixMs.HasValue
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToString("yyyy-MM-dd HH:mm")
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
                     : I18nText.T("common_never");
+                string lastUsed = t.LastUsedUnixMs > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(t.LastUsedUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                    : I18nText.T("users_never");
 
-                Tokens.Add(new TokenRowItem
+                _allTokens.Add(new TokenRowItem
                 {
                     Id = t.Id,
                     Name = t.Name,
                     TokenType = t.TokenType.ToUpperInvariant(),
                     CreatedAt = created,
-                    ExpiresAt = expires
+                    ExpiresAt = expires,
+                    LastUsed = lastUsed
                 });
             }
+
+            var session = await sessionTask;
+            HasSession = session.Authenticated;
+            SessionIsAdmin = session.IsAdmin;
+            SessionName = session.DisplayName ?? session.Username ?? "";
+            SessionDetail = session.Username ?? "";
+            ApplyUserFilter();
         }
         catch (Exception ex)
         {
@@ -812,23 +955,61 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         }
     }
 
+    private void ApplyUserFilter()
+    {
+        Users.Clear();
+        Tokens.Clear();
+        var q = SearchQuery.Trim();
+        foreach (var user in _allUsers)
+        {
+            if (string.IsNullOrWhiteSpace(q) ||
+                user.Username.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                user.Role.Contains(q, StringComparison.OrdinalIgnoreCase))
+            {
+                Users.Add(user);
+            }
+        }
+        foreach (var token in _allTokens)
+        {
+            if (string.IsNullOrWhiteSpace(q) ||
+                token.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                token.TokenType.Contains(q, StringComparison.OrdinalIgnoreCase))
+            {
+                Tokens.Add(token);
+            }
+        }
+    }
+
     [RelayCommand]
     public void OpenCreateTokenDialog()
     {
         ShowTokenDialog = true;
         NewTokenName = "";
+        NewTokenType = "client";
         CreatedRawToken = null;
-        if (Users.Count > 0 && string.IsNullOrWhiteSpace(SelectedUserId))
+        if (_allUsers.Count > 0 && string.IsNullOrWhiteSpace(SelectedUserId))
         {
-            SelectedUserId = Users[0].Id;
+            SelectedUserId = _allUsers[0].Id;
         }
+        _tokenDialog = new TokenDialogContext(this);
+        AppServices.DialogManager
+            .CreateDialog(_tokenDialog)
+            .Dismissible()
+            .WithCancelCallback(() => ShowTokenDialog = false)
+            .WithMinWidth(520)
+            .WithMaxWidth(680)
+            .Show();
     }
 
     [RelayCommand]
     public void CloseCreateTokenDialog()
     {
         ShowTokenDialog = false;
-        CreatedRawToken = null;
+        if (_tokenDialog != null)
+        {
+            AppServices.DialogManager.Close(_tokenDialog);
+            _tokenDialog = null;
+        }
     }
 
     [RelayCommand]
@@ -845,30 +1026,38 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
                 return;
             }
             string uid = SelectedUserId;
-            var resp = await _api.CreateTokenAsync(NewTokenName.Trim(), uid, SelectedExpirationDays > 0 ? SelectedExpirationDays : null);
+            var resp = await _api.CreateTokenAsync(NewTokenName.Trim(), uid, NewTokenType, SelectedExpirationDays > 0 ? SelectedExpirationDays : null);
             CreatedRawToken = resp.RawToken;
 
             var t = resp.Token;
-            string created = DateTimeOffset.FromUnixTimeMilliseconds(t.CreatedAtUnixMs).ToString("yyyy-MM-dd HH:mm");
+            string created = t.CreatedAtUnixMs > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(t.CreatedAtUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                : "";
             string expires = t.ExpiresAtUnixMs.HasValue
-                ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToString("yyyy-MM-dd HH:mm")
-                : "Never";
+                ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                : I18nText.T("common_never");
+            string lastUsed = t.LastUsedUnixMs > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(t.LastUsedUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                : I18nText.T("users_never");
 
-            Tokens.Insert(0, new TokenRowItem
+            var row = new TokenRowItem
             {
                 Id = t.Id,
                 Name = t.Name,
-                TokenType = t.TokenType.ToUpperInvariant(),
+                TokenType = string.IsNullOrWhiteSpace(t.TokenType) ? NewTokenType.ToUpperInvariant() : t.TokenType.ToUpperInvariant(),
                 CreatedAt = created,
-                ExpiresAt = expires
-            });
+                ExpiresAt = expires,
+                LastUsed = lastUsed
+            };
+            _allTokens.Insert(0, row);
+            ApplyUserFilter();
 
-            AppServices.ShowSuccess($"Token '{t.Name}' created successfully.", "Token Created");
+            AppServices.ShowSuccess(I18nText.Format("token_created_detail", ("name", t.Name)), I18nText.T("token_created"));
         }
         catch (Exception ex)
         {
             ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, "Token Creation Failed");
+            AppServices.ShowError(ex.Message, I18nText.T("token_create_failed"));
         }
     }
 
@@ -881,12 +1070,14 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         {
             await _api.PutUserAsync(item.Id, newRole, item.ServiceRules);
             item.Role = newRole.ToUpperInvariant();
-            AppServices.ShowSuccess($"Role for {item.Username} changed to {item.Role}.", "Role Updated");
+            AppServices.ShowSuccess(
+                I18nText.Format("users_role_updated", ("username", item.Username), ("role", item.Role)),
+                I18nText.T("users_role_update_title"));
         }
         catch (Exception ex)
         {
             ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, "Role Update Failed");
+            AppServices.ShowError(ex.Message, I18nText.T("users_role_update_failed"));
         }
     }
 
@@ -907,13 +1098,14 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         {
             ErrorMessage = null;
             await _api.RevokeTokenAsync(item.Id);
+            _allTokens.Remove(item);
             Tokens.Remove(item);
-            AppServices.ShowSuccess($"Token '{item.Name}' revoked.", "Token Revoked");
+            AppServices.ShowSuccess(I18nText.Format("token_revoked_detail", ("name", item.Name)), I18nText.T("token_revoked"));
         }
         catch (Exception ex)
         {
             ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, "Revoke Failed");
+            AppServices.ShowError(ex.Message, I18nText.T("token_revoke_failed"));
         }
     }
 
@@ -938,6 +1130,14 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         EditRole = item.Role.ToLowerInvariant();
         EditServiceRules = string.Join(Environment.NewLine, item.ServiceRules);
         ShowEditUserDialog = true;
+        _editDialog = new EditUserDialogContext(this);
+        AppServices.DialogManager
+            .CreateDialog(_editDialog)
+            .Dismissible()
+            .WithCancelCallback(() => ShowEditUserDialog = false)
+            .WithMinWidth(480)
+            .WithMaxWidth(640)
+            .Show();
     }
 
     [RelayCommand]
@@ -945,6 +1145,11 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     {
         ShowEditUserDialog = false;
         EditingUser = null;
+        if (_editDialog != null)
+        {
+            AppServices.DialogManager.Close(_editDialog);
+            _editDialog = null;
+        }
     }
 
     [RelayCommand]
@@ -969,8 +1174,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             AppServices.ShowSuccess(
                 I18nText.Format("user_updated", ("name", EditingUser.Username)),
                 I18nText.T("user_saved"));
-            ShowEditUserDialog = false;
-            EditingUser = null;
+            CloseEditUserDialog();
         }
         catch (Exception ex)
         {
@@ -997,12 +1201,14 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
     [ObservableProperty] private string _uplinkP90 = "0 ms";
     [ObservableProperty] private string _uplinkP99 = "0 ms";
     [ObservableProperty] private string _uplinkMax = "0 ms";
+    [ObservableProperty] private string _uplinkBatching = "0 ms";
 
     [ObservableProperty] private string _downlinkRawWire = "0 B / 0 B (0%)";
     [ObservableProperty] private string _downlinkP50 = "0 ms";
     [ObservableProperty] private string _downlinkP90 = "0 ms";
     [ObservableProperty] private string _downlinkP99 = "0 ms";
     [ObservableProperty] private string _downlinkMax = "0 ms";
+    [ObservableProperty] private string _downlinkBatching = "0 ms";
 
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
@@ -1015,6 +1221,15 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
 
     [RelayCommand]
     public void GoToConnect() => NavigationService.Instance.NavigateTo("client.overview");
+
+    [RelayCommand]
+    public void OpenConnectors() => NavigationService.Instance.NavigateTo("admin.connectors");
+
+    private static string FormatBatching(Quantiles? q)
+    {
+        if (q == null) return "—";
+        return $"{q.P50Us / 1000.0:0.##} / {q.P99Us / 1000.0:0.##} ms";
+    }
 
     public AdminTrafficViewModel()
     {
@@ -1119,6 +1334,7 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
                 UplinkP90 = $"{up.CompressionTime?.P90Us / 1000.0:0.##} ms";
                 UplinkP99 = $"{up.CompressionTime?.P99Us / 1000.0:0.##} ms";
                 UplinkMax = $"{up.CompressionTime?.MaxUs / 1000.0:0.##} ms";
+                UplinkBatching = FormatBatching(up.BatchingDelay);
             }
 
             if (stats.Downlink != null)
@@ -1129,6 +1345,7 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
                 DownlinkP90 = $"{down.CompressionTime?.P90Us / 1000.0:0.##} ms";
                 DownlinkP99 = $"{down.CompressionTime?.P99Us / 1000.0:0.##} ms";
                 DownlinkMax = $"{down.CompressionTime?.MaxUs / 1000.0:0.##} ms";
+                DownlinkBatching = FormatBatching(down.BatchingDelay);
             }
         }
         catch (Exception ex)
@@ -1158,6 +1375,7 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
 
     private readonly List<ConnectorGroupItem> _allConnectors = new();
     public ObservableCollection<ConnectorGroupItem> Connectors { get; } = new();
+    public ObservableCollection<ServiceRowItem> Unattached { get; } = new();
 
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private bool _isLoading;
@@ -1253,6 +1471,7 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
             ErrorMessage = null;
             Connectors.Clear();
             _allConnectors.Clear();
+            Unattached.Clear();
             return;
         }
 
@@ -1265,25 +1484,35 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
             var snapshots = await _api.GetTunnelServicesAsync();
 
             var groups = new Dictionary<string, ConnectorGroupItem>();
+            var unattached = new List<ServiceRowItem>();
             foreach (var s in snapshots)
             {
-                string key = string.IsNullOrWhiteSpace(s.ClientId) ? "default-connector" : s.ClientId;
-                if (!groups.TryGetValue(key, out var grp))
+                if (string.IsNullOrWhiteSpace(s.ClientId))
+                {
+                    unattached.Add(ServiceRowItem.FromSnapshot(s));
+                    continue;
+                }
+                if (!groups.TryGetValue(s.ClientId, out var grp))
                 {
                     grp = new ConnectorGroupItem
                     {
-                        ClientId = key,
+                        ClientId = s.ClientId,
                         RemoteAddr = s.Remote,
                         Primary = s.Primary,
                         Services = new List<AdminRegisteredService>()
                     };
-                    groups[key] = grp;
+                    groups[s.ClientId] = grp;
                 }
                 grp.Services.Add(s.Service);
             }
 
             _allConnectors.Clear();
             _allConnectors.AddRange(groups.Values);
+            Unattached.Clear();
+            foreach (var row in unattached)
+            {
+                Unattached.Add(row);
+            }
             ApplyFilter();
         }
         catch (Exception ex)
@@ -1454,6 +1683,7 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
     private readonly NativeClientService _client = NativeClientService.Instance;
 
     [ObservableProperty] private bool _isHealthy;
+    [ObservableProperty] private string _healthText = "";
     [ObservableProperty] private string _configPath = "";
     [ObservableProperty] private string? _reloadResult;
     [ObservableProperty] private bool _isLoading;
@@ -1531,6 +1761,8 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
             IsReady = false;
             ErrorMessage = null;
             IsHealthy = false;
+            HealthText = "";
+            ConfigPath = "";
             return;
         }
 
@@ -1547,7 +1779,9 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
             await Task.WhenAll(healthTask, pathTask);
 
             IsHealthy = (await healthTask).Ok;
-            ConfigPath = (await pathTask).Path ?? "Managed via in-band $control";
+            HealthText = IsHealthy ? I18nText.T("runtime_health_ok") : I18nText.T("runtime_health_down");
+            var path = (await pathTask).Path;
+            ConfigPath = string.IsNullOrWhiteSpace(path) ? "" : path;
         }
         catch (Exception ex)
         {
@@ -1565,14 +1799,14 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
         try
         {
             var res = await _api.TriggerReloadAsync();
-            ReloadResult = $"Reload command executed successfully (seq {res.Seq}).";
-            AppServices.ShowSuccess(ReloadResult, "Server Reloaded");
+            ReloadResult = I18nText.Format("admin_reload_sent", ("seq", res.Seq));
+            AppServices.ShowSuccess(ReloadResult, I18nText.T("admin_reload"));
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
-            ReloadResult = $"Reload failed: {ex.Message}";
-            AppServices.ShowError(ex.Message, "Reload Failed");
+            ReloadResult = I18nText.Format("admin_reload_failed", ("message", ex.Message));
+            AppServices.ShowError(ex.Message, I18nText.T("reload_failed"));
         }
     }
 }

@@ -103,13 +103,13 @@
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12"/>
                                                 <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Transport}" FontSize="9" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                                    <TextBlock Text="{Binding Transport}" FontSize="9" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                                 </Border>
-                                                <Border IsVisible="{Binding IsActive}" Background="#10b981" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                <Border IsVisible="{Binding IsActive}" Background="{DynamicResource SuccessColor}" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding [client_current], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Bold" Foreground="White"/>
                                                 </Border>
                                             </StackPanel>
-                                            <TextBlock FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}" TextTrimming="CharacterEllipsis">
+                                            <TextBlock FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" TextTrimming="CharacterEllipsis">
                                                 <Run Text="{Binding ServerAddr}"/>
                                                 <Run Text=" • "/>
                                                 <Run Text="{Binding [client_local], Source={x:Static i18n:LocalizationManager.Instance}}"/>
@@ -127,7 +127,7 @@
                                             Width="24"
                                             Padding="4"
                                             ToolTip.Tip="{Binding [client_delete_profile], Source={x:Static i18n:LocalizationManager.Instance}}">
-                                            <common:LucideIcon Data="{x:Static common:AppIcons.Trash2}" Width="12" Height="12" Foreground="#ef4444"/>
+                                            <common:LucideIcon Data="{x:Static common:AppIcons.Trash2}" Width="12" Height="12" Foreground="{DynamicResource DestructiveColor}"/>
                                         </Button>
                                     </Grid>
                                 </DataTemplate>
@@ -166,8 +166,8 @@
                                 <StackPanel Grid.Column="0" Spacing="2">
                                     <TextBlock Text="{Binding EditProfileTitle}" FontWeight="Bold" FontSize="13"/>
                                     <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="{Binding DraftProfile.Id, StringFormat='ID: {0}'}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <Border IsVisible="{Binding IsDirty}" Background="#f59e0b" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DraftProfile.Id, StringFormat='ID: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <Border IsVisible="{Binding IsDirty}" Background="{DynamicResource WarningColor}" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding [client_unsaved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Bold" Foreground="White"/>
                                         </Border>
                                     </StackPanel>
@@ -177,7 +177,7 @@
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                     <TextBlock IsVisible="{Binding PingMs, Converter={x:Static common:Converters.NullToBoolean}}"
                                                Text="{Binding PingMs, StringFormat='Ping: {0} ms'}" FontSize="11" FontWeight="SemiBold"
-                                               Foreground="#10b981" VerticalAlignment="Center"/>
+                                               Foreground="{DynamicResource SuccessColor}" VerticalAlignment="Center"/>
                                     <Button Classes="Outline" Command="{Binding PingServerCommand}" IsEnabled="{Binding !IsPinging}" Height="26" FontSize="10" Padding="8,0">
                                         <StackPanel Orientation="Horizontal" Spacing="4">
                                             <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="11" Height="11"/>
@@ -201,7 +201,7 @@
                                     <TextBlock Text="{Binding [client_relay_address], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     <TextBox Text="{Binding DraftProfile.ServerAddr, Mode=TwoWay}"
                                              PlaceholderText="{Binding [client_relay_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                             Height="32" FontSize="12" FontFamily="Consolas, monospace" CornerRadius="6"/>
+                                             Height="32" FontSize="12" FontFamily="{DynamicResource MonoFont}" CornerRadius="6"/>
                                 </StackPanel>
                             </Grid>
 
@@ -221,7 +221,7 @@
                                     <TextBlock Text="{Binding [client_listen_address], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     <TextBox Text="{Binding DraftProfile.ListenAddr, Mode=TwoWay}"
                                              PlaceholderText="127.0.0.1:25565"
-                                             Height="32" FontSize="12" FontFamily="Consolas, monospace" CornerRadius="6"/>
+                                             Height="32" FontSize="12" FontFamily="{DynamicResource MonoFont}" CornerRadius="6"/>
                                 </StackPanel>
                             </Grid>
 
@@ -260,8 +260,7 @@
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 <TextBox Text="{Binding DraftProfile.ManagementUrl, Mode=TwoWay}"
-                                         PlaceholderText="http://127.0.0.1:8080"
-                                         Height="32" FontSize="12" FontFamily="Consolas, monospace" CornerRadius="6"/>
+                                         Height="32" FontSize="12" FontFamily="{DynamicResource MonoFont}" CornerRadius="6"/>
                             </StackPanel>
 
                             <!-- Footer Actions Bar -->
@@ -270,7 +269,7 @@
                                         Command="{Binding DeleteSelectedProfileCommand}"
                                         Height="32" FontSize="12" Padding="12,0" CornerRadius="6">
                                     <TextBlock Text="{Binding [client_delete_this_profile], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                               Foreground="#ef4444"/>
+                                               Foreground="{DynamicResource DestructiveColor}"/>
                                 </Button>
 
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">

@@ -30,7 +30,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Button Classes="Outline" Command="{Binding GoToTrafficCommand}" Height="28" Padding="10,0">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
                             <TextBlock Text="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
                         </StackPanel>
                     </Button>
@@ -41,8 +41,8 @@
                         </StackPanel>
                     </Button>
                     <StackPanel IsVisible="{Binding SavedNotice}" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="#10b981"/>
-                        <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="#10b981" FontSize="11" FontWeight="Medium"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
+                        <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}" FontSize="11" FontWeight="Medium"/>
                     </StackPanel>
                 </StackPanel>
             </controls:PageHeader>
@@ -129,7 +129,7 @@
                                 <TextBlock Text="{Binding [optimizer_compression_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
                             <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding OptimizerZstdLevel, StringFormat='Level {0}'}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding OptimizerZstdLevel, StringFormat='Level {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </Border>
                         </Grid>
 
@@ -186,7 +186,7 @@
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [optimizer_flush_interval_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="Medium"/>
                                     <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0">
-                                        <TextBlock Text="{Binding OptimizerFlushIntervalMs, StringFormat='{}{0} ms'}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding OptimizerFlushIntervalMs, StringFormat='{}{0} ms'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </Border>
                                 </Grid>
                                 <Slider Minimum="2" Maximum="60" Value="{Binding OptimizerFlushIntervalMs, Mode=TwoWay}"/>
@@ -200,7 +200,7 @@
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [optimizer_buffer_threshold_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="Medium"/>
                                     <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0">
-                                        <TextBlock Text="{Binding OptimizerBufferThreshold, StringFormat='{}{0} B'}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding OptimizerBufferThreshold, StringFormat='{}{0} B'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </Border>
                                 </Grid>
                                 <Slider Minimum="4096" Maximum="262144" SmallChange="4096" LargeChange="16384" Value="{Binding OptimizerBufferThreshold, Mode=TwoWay}"/>

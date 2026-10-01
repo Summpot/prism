@@ -15,7 +15,7 @@
     <Panel>
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
-    <Grid RowDefinitions="Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
+    <Grid RowDefinitions="Auto, Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
         <controls:PageHeader
             Grid.Row="0"
             Title="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -46,8 +46,22 @@
             RetryCommand="{Binding RefreshCommand}"
             Margin="0,0,0,12"/>
 
+        <Grid Grid.Row="2" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+            <TextBox
+                Grid.Column="0"
+                Text="{Binding SearchQuery, Mode=TwoWay}"
+                PlaceholderText="{Binding [admin_services_filter], Source={x:Static i18n:LocalizationManager.Instance}}"
+                Height="28"
+                FontSize="11"
+                Margin="0,0,8,0"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <ToggleSwitch IsChecked="{Binding PrimaryOnly, Mode=TwoWay}" OnContent="" OffContent=""/>
+                <TextBlock Text="{Binding [services_primary_only], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Grid>
+
         <!-- Services Table -->
-        <shadui:Card Grid.Row="2" Padding="12">
+        <shadui:Card Grid.Row="3" Padding="12">
             <Grid>
                 <DataGrid
                     ItemsSource="{Binding Services}"
@@ -58,7 +72,11 @@
                     Background="Transparent">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="{Binding [admin_col_service_name], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Name}" Width="150"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_protocol], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Proto}" Width="90"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_protocol], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Proto}" Width="80"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ClientDisplay}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Remote}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_role], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RoleText}" Width="90"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_route], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RouteText}" Width="90"/>
                         <DataGridTextColumn Header="{Binding [admin_col_local_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LocalAddr}" Width="*"/>
                         <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RemoteAddr}" Width="*"/>
                         <DataGridTextColumn Header="{Binding [admin_col_masquerade_sni], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Masquerade}" Width="*"/>

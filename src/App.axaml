@@ -5,9 +5,45 @@
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
     Name="Prism"
     RequestedThemeVariant="Default">
+    <Application.Resources>
+        <ResourceDictionary>
+            <SolidColorBrush x:Key="SuccessColor" Color="#10b981"/>
+            <SolidColorBrush x:Key="WarningColor" Color="#f59e0b"/>
+            <SolidColorBrush x:Key="DestructiveColor" Color="#ef4444"/>
+            <SolidColorBrush x:Key="DestructiveTint" Color="#20ef4444"/>
+            <SolidColorBrush x:Key="DestructiveBorder" Color="#50ef4444"/>
+            <FontFamily x:Key="MonoFont">Consolas, Menlo, "DejaVu Sans Mono", monospace</FontFamily>
+        </ResourceDictionary>
+    </Application.Resources>
     <Application.Styles>
         <shadui:ShadTheme />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+        <Style Selector="DataGrid">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="VerticalGridLinesBrush" Value="Transparent"/>
+            <Setter Property="RowBackground" Value="Transparent"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style Selector="DataGridColumnHeader">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="SeparatorBrush" Value="{DynamicResource BorderColor}"/>
+        </Style>
+        <Style Selector="DataGridRow">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style Selector="DataGridRow:pointerover">
+            <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
+        </Style>
+        <Style Selector="DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
     </Application.Styles>
     <TrayIcon.Icons>
         <TrayIcons />

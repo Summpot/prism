@@ -57,6 +57,8 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 	"system-proxy",
 	"socks",
 ] }
+minisign-verify = "0.2"
+self-replace = "1.5"
 tokio = { version = "1.53", features = [
 	"macros",
 	"rt-multi-thread",

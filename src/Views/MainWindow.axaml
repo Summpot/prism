@@ -103,14 +103,14 @@
             Grid.Column="0"
             CurrentRoute="{Binding Navigation.CurrentRoute, Mode=TwoWay}"
             Expanded="{Binding IsSidebarExpanded, Mode=TwoWay}"
-            Width="220"
-            MinWidth="60">
+            Width="{Binding IsSidebarExpanded, Converter={x:Static common:Converters.ExpandedSidebarWidth}}"
+            MinWidth="56">
             <shadui:Sidebar.Header>
                 <Grid Margin="4,0">
                     <!-- Expanded Header -->
                     <Grid ColumnDefinitions="Auto, *, Auto" IsVisible="{Binding IsSidebarExpanded}">
                         <Image Grid.Column="0" Source="avares://Prism/Assets/logo192.png" Width="24" Height="24" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="PRISM" FontWeight="Bold" FontSize="14" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="Prism" FontWeight="Bold" FontSize="14" Margin="8,0,0,0" VerticalAlignment="Center"/>
                         <Button Grid.Column="2" Classes="Ghost" Command="{Binding ToggleSidebarCommand}" Width="28" Height="28" Padding="4">
                             <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="14" Height="14"/>
                         </Button>

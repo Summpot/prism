@@ -18,6 +18,7 @@ internal sealed class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // A named mutex and a named pipe are the single-instance path on Windows, Linux, and macOS.
         using var mutex = new Mutex(true, MutexName, out bool isFirstInstance);
         if (!isFirstInstance)
         {

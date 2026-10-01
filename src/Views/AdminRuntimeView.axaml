@@ -52,7 +52,7 @@
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [runtime_health], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="0,6"/>
                         <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="0,6">
                             <shadui:Badge
-                                Content="{Binding IsHealthy, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='HEALTHY|UNHEALTHY'}"
+                                Content="{Binding HealthText}"
                                 Height="20"
                                 Padding="6,0"
                                 FontSize="10"
@@ -61,7 +61,7 @@
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding [runtime_config_path], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="0,6"/>
                         <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="8,4" HorizontalAlignment="Left" Margin="0,6">
-                            <TextBlock Text="{Binding ConfigPath}" FontFamily="Consolas, monospace" FontSize="11" Foreground="{DynamicResource ForegroundColor}"/>
+                            <TextBlock Text="{Binding ConfigPath}" FontFamily="{DynamicResource MonoFont}" FontSize="11" Foreground="{DynamicResource ForegroundColor}"/>
                         </Border>
                     </Grid>
                 </StackPanel>
@@ -82,7 +82,7 @@
                             <TextBlock Text="{Binding [admin_reload], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
                             <TextBlock Text="{Binding [admin_runtime_reload_note], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                             <TextBlock IsVisible="{Binding ReloadResult, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                                       Text="{Binding ReloadResult}" FontSize="11" Foreground="#10b981" Margin="0,4,0,0"/>
+                                       Text="{Binding ReloadResult}" FontSize="11" Foreground="{DynamicResource SuccessColor}" Margin="0,4,0,0"/>
                         </StackPanel>
 
                         <Button Grid.Column="1" Classes="Primary" Command="{Binding TriggerReloadCommand}"

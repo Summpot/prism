@@ -308,7 +308,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            UpdateStatusMessage = $"Check failed: {ex.Message}";
+            UpdateStatusMessage = I18nText.Format("client_update_check_failed", ("error", ex.Message));
         }
         finally
         {
@@ -329,8 +329,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
         catch (Exception ex)
         {
             UpdateStatusMessage = I18nText.Format("client_update_failed", ("error", ex.Message));
-            _client.OpenExternalUrl("https://github.com/Summpot/prism/releases");
-            AppServices.ShowInfo(I18nText.T("client_update_open_releases"));
+            AppServices.ShowError(UpdateStatusMessage, I18nText.T("client_update_prompt_title"));
         }
         finally
         {

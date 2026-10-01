@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::prism::auth::{TokenRecord, UserRecord, UserRole};
+use crate::prism::auth::{TokenRecord, TokenType, UserRecord, UserRole};
 use crate::prism::middleware::MiddlewareConfigSchema;
 use crate::prism::telemetry::SessionInfo;
 use crate::prism::tunnel::manager::ServiceSnapshot;
@@ -88,6 +88,7 @@ pub enum ControlMethod {
     AuthCreateToken {
         user_id: String,
         name: String,
+        token_type: TokenType,
         expires_in_days: Option<u64>,
     },
     AuthRevokeToken {
@@ -119,6 +120,14 @@ pub enum ControlMethod {
     Authenticate {
         token: String,
     },
+}
+
+fn parse_token_type(raw: &str) -> TokenType {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "admin" => TokenType::Admin,
+        "connector" => TokenType::Connector,
+        _ => TokenType::Client,
+    }
 }
 
 impl ControlMethod {
@@ -196,6 +205,11 @@ impl ControlMethod {
             "auth.tokens.create" => Ok(Self::AuthCreateToken {
                 user_id: str_field("user_id")?,
                 name: str_field("name")?,
+                token_type: obj()
+                    .and_then(|o| o.get("token_type"))
+                    .and_then(|v| v.as_str())
+                    .map(parse_token_type)
+                    .unwrap_or(TokenType::Client),
                 expires_in_days: obj()
                     .and_then(|o| o.get("expires_in_days"))
                     .and_then(|v| v.as_u64()),
@@ -535,6 +549,47 @@ impl std::fmt::Display for ControlRpcError {
 }
 
 impl std::error::Error for ControlRpcError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prism::auth::TokenType;
+
+    #[test]
+    fn auth_create_token_reads_token_type() {
+        let payload = serde_json::json!({
+            "user_id": "u1",
+            "name": "edge",
+            "token_type": "connector",
+            "expires_in_days": 7
+        });
+        let method = ControlMethod::from_rpc("auth.tokens.create", &payload).unwrap();
+        assert_eq!(
+            method,
+            ControlMethod::AuthCreateToken {
+                user_id: "u1".into(),
+                name: "edge".into(),
+                token_type: TokenType::Connector,
+                expires_in_days: Some(7),
+            }
+        );
+    }
+
+    #[test]
+    fn auth_create_token_defaults_to_client() {
+        let payload = serde_json::json!({ "user_id": "u1", "name": "player" });
+        let method = ControlMethod::from_rpc("auth.tokens.create", &payload).unwrap();
+        assert_eq!(
+            method,
+            ControlMethod::AuthCreateToken {
+                user_id: "u1".into(),
+                name: "player".into(),
+                token_type: TokenType::Client,
+                expires_in_days: None,
+            }
+        );
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ControlError {

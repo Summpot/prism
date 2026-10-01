@@ -22,7 +22,7 @@
             Margin="0,0,0,12">
             <controls:PageHeader.Badge>
                 <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding StatusCountText}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding StatusCountText}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </Border>
             </controls:PageHeader.Badge>
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -67,7 +67,7 @@
                         FontSize="11"
                         Padding="8,0">
                     <TextBlock Text="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}"
-                               Foreground="#ef4444"/>
+                               Foreground="{DynamicResource DestructiveColor}"/>
                 </Button>
 
                 <!-- Copy All Logs Button -->
@@ -78,7 +78,7 @@
                         Padding="8,0">
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <common:LucideIcon IsVisible="{Binding !CopiedAll}" Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
-                        <common:LucideIcon IsVisible="{Binding CopiedAll}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="#10b981"/>
+                        <common:LucideIcon IsVisible="{Binding CopiedAll}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
                         <TextBlock Text="{Binding CopyButtonText}"/>
                     </StackPanel>
                 </Button>
@@ -129,7 +129,7 @@
                                     Grid.Column="0"
                                     Text="{Binding Timestamp, Converter={x:Static common:Converters.TimestampToTimeStr}}"
                                     FontSize="11"
-                                    FontFamily="Consolas, Cascadia Mono, monospace"
+                                    FontFamily="{DynamicResource MonoFont}"
                                     Foreground="{DynamicResource MutedForegroundColor}"
                                     Margin="0,0,8,0"
                                     VerticalAlignment="Center"/>
@@ -153,7 +153,7 @@
                                     Grid.Column="2"
                                     Text="{Binding Target, StringFormat='{}{0}:'}"
                                     FontSize="11"
-                                    FontFamily="Consolas, Cascadia Mono, monospace"
+                                    FontFamily="{DynamicResource MonoFont}"
                                     FontWeight="SemiBold"
                                     Foreground="{DynamicResource MutedForegroundColor}"
                                     Margin="0,0,6,0"
@@ -164,7 +164,7 @@
                                     Grid.Column="3"
                                     Text="{Binding Message}"
                                     FontSize="11"
-                                    FontFamily="Consolas, Cascadia Mono, monospace"
+                                    FontFamily="{DynamicResource MonoFont}"
                                     TextWrapping="Wrap"
                                     VerticalAlignment="Center"/>
                             </Grid>

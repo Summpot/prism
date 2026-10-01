@@ -21,7 +21,7 @@
                 Icon="{x:Static common:AppIcons.Settings}">
                 <controls:PageHeader.Badge>
                     <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding AppVersion}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding AppVersion}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </Border>
                 </controls:PageHeader.Badge>
             </controls:PageHeader>
@@ -248,16 +248,24 @@
                                 <TextBlock Text="{Binding [settings_management_url_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
                             <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding IsAdmin, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='已登录管理平面|未连接'}"
-                                           FontSize="10"
-                                           FontWeight="SemiBold"
-                                           Foreground="{Binding IsAdmin, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='#10b981|#888888'}"/>
+                                <Panel>
+                                    <TextBlock IsVisible="{Binding IsAdmin}"
+                                               Text="{Binding [settings_admin_connected], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource SuccessColor}"/>
+                                    <TextBlock IsVisible="{Binding !IsAdmin}"
+                                               Text="{Binding [settings_admin_disconnected], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </Panel>
                             </Border>
                         </Grid>
 
                         <Grid ColumnDefinitions="*, Auto" Margin="0,4,0,0">
                             <TextBox Grid.Column="0" Text="{Binding ManagementUrl, Mode=TwoWay}"
-                                     Height="32" FontSize="12" FontFamily="Consolas, monospace" CornerRadius="6" Margin="0,0,8,0"/>
+                                     Height="32" FontSize="12" FontFamily="{DynamicResource MonoFont}" CornerRadius="6" Margin="0,0,8,0"/>
                             <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToAdminCommand}" Height="32" Padding="12,0" CornerRadius="6">
                                 <TextBlock Text="{Binding [nav_admin], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </Button>
@@ -360,13 +368,13 @@
                             <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,4,0">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="{Binding [settings_app_version], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    <TextBlock Text="{Binding VersionChannelText}" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Text="{Binding VersionChannelText}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,0,0">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="{Binding [about_architecture], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    <TextBlock Text="{Binding ArchitectureText}" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Text="{Binding ArchitectureText}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -376,11 +384,11 @@
                             <TextBlock Text="{Binding [settings_device_id], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedForegroundColor}"/>
                             <Grid ColumnDefinitions="*, Auto">
                                 <TextBox Grid.Column="0" Text="{Binding DeviceId}" IsReadOnly="True"
-                                         Height="32" FontSize="11" FontFamily="Consolas, monospace" CornerRadius="6" Margin="0,0,6,0"/>
+                                         Height="32" FontSize="11" FontFamily="{DynamicResource MonoFont}" CornerRadius="6" Margin="0,0,6,0"/>
                                 <Button Grid.Column="1" Classes="Outline" Command="{Binding CopyDeviceIdCommand}" Height="32" Padding="10,0" CornerRadius="6">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <common:LucideIcon IsVisible="{Binding !CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
-                                        <common:LucideIcon IsVisible="{Binding CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="#10b981"/>
+                                        <common:LucideIcon IsVisible="{Binding CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
                                         <TextBlock Text="{Binding CopiedDeviceIdNotice, Converter={x:Static common:Converters.CopiedOrCopyLabel}}"/>
                                     </StackPanel>
                                 </Button>
@@ -395,11 +403,11 @@
                             <Button Grid.Column="0" Classes="Ghost" Command="{Binding OpenGitHubCommand}" HorizontalAlignment="Left" Padding="0">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="14" Height="14"/>
-                                    <TextBlock Text="GitHub Repository" FontSize="12" TextDecorations="Underline"/>
+                                    <TextBlock Text="{Binding [about_repo], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" TextDecorations="Underline"/>
                                     <common:LucideIcon Data="{x:Static common:AppIcons.ExternalLink}" Width="11" Height="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </StackPanel>
                             </Button>
-                            <TextBlock Grid.Column="1" Text="Prism High-Performance Tunnel" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding [brand_tagline], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
                         </Grid>
                     </StackPanel>
                 </shadui:Card>

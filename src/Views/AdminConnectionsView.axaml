@@ -66,11 +66,12 @@
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="{Binding [admin_col_session_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Id}" Width="120"/>
                         <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Client}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_peer_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Host}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_host], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Host}" Width="*"/>
                         <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Upstream}" Width="*"/>
                         <DataGridTextColumn Header="{Binding [admin_col_duration], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Duration}" Width="90"/>
                         <DataGridTextColumn Header="{Binding [admin_col_raw_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RawBytes}" Width="110"/>
                         <DataGridTextColumn Header="{Binding [admin_col_wire_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding WireBytes}" Width="110"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding OptimizerText}" Width="90"/>
                         <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:ConnectionItem">
@@ -78,11 +79,11 @@
                                         Classes="Outline"
                                         Command="{Binding #Root.((vm:AdminConnectionsViewModel)DataContext).DisconnectCommand}"
                                         CommandParameter="{Binding}"
-                                        Content="{Binding [tray_disconnect], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                        Content="{Binding [admin_close], Source={x:Static i18n:LocalizationManager.Instance}}"
                                         Height="24"
                                         FontSize="10"
                                         Padding="6,0"
-                                        Foreground="#ef4444"/>
+                                        Foreground="{DynamicResource DestructiveColor}"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>

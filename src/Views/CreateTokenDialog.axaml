@@ -1,0 +1,73 @@
+<UserControl
+    x:Class="Prism.Views.CreateTokenDialog"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:i18n="clr-namespace:Prism.I18n"
+    x:DataType="vm:TokenDialogContext"
+    MinWidth="480">
+    <StackPanel Spacing="10" Margin="4">
+        <TextBlock Text="{Binding [users_token_modal_description], Source={x:Static i18n:LocalizationManager.Instance}}"
+                   FontSize="11" TextWrapping="Wrap" Opacity="0.75"/>
+
+        <TextBlock Text="{Binding [users_token_name], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+        <TextBox Text="{Binding Owner.NewTokenName, Mode=TwoWay}"
+                 PlaceholderText="{Binding [users_token_name_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
+                 Height="30" FontSize="12"/>
+
+        <Grid ColumnDefinitions="*, 12, *">
+            <StackPanel Grid.Column="0" Spacing="4">
+                <TextBlock Text="{Binding [users_token_type], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+                <ComboBox ItemsSource="{Binding Owner.TokenTypeValues}"
+                          SelectedItem="{Binding Owner.NewTokenType, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch" Height="30" FontSize="11">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Converter={x:Static common:Converters.TokenTypeLabel}}" FontSize="11"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="4">
+                <TextBlock Text="{Binding [users_token_expiry], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+                <ComboBox ItemsSource="{x:Static vm:AdminUsersViewModel.ExpirationOptions}"
+                          SelectedItem="{Binding Owner.SelectedExpirationDays, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch" Height="30" FontSize="11"/>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock Text="{Binding [admin_col_username], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+        <ComboBox ItemsSource="{Binding Owner.Users}"
+                  SelectedValue="{Binding Owner.SelectedUserId, Mode=TwoWay}"
+                  SelectedValueBinding="{Binding Id, x:DataType=vm:UserRowItem}"
+                  DisplayMemberBinding="{Binding Username, x:DataType=vm:UserRowItem}"
+                  HorizontalAlignment="Stretch" Height="30" FontSize="11"/>
+
+        <Border IsVisible="{Binding Owner.CreatedRawToken, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                Background="{DynamicResource GhostColor}"
+                BorderBrush="{DynamicResource SuccessColor}"
+                BorderThickness="1" CornerRadius="6" Padding="10">
+            <StackPanel Spacing="6">
+                <TextBlock Text="{Binding [users_token_copy_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
+                           FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource SuccessColor}"/>
+                <Grid ColumnDefinitions="*, Auto">
+                    <TextBox Grid.Column="0" Text="{Binding Owner.CreatedRawToken}" IsReadOnly="True"
+                             Height="28" FontSize="11" FontFamily="{DynamicResource MonoFont}"/>
+                    <Button Grid.Column="1" Classes="Outline" Command="{Binding Owner.CopyRawTokenCommand}"
+                            Content="{Binding [client_copy], Source={x:Static i18n:LocalizationManager.Instance}}"
+                            Height="28" FontSize="11" Padding="10,0" Margin="6,0,0,0"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button Classes="Outline" Command="{Binding Owner.CloseCreateTokenDialogCommand}"
+                    Content="{Binding [common_cancel], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Height="30" FontSize="11" Padding="12,0"/>
+            <Button Classes="Primary" Command="{Binding Owner.SubmitCreateTokenCommand}"
+                    Content="{Binding [users_token_generate], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Height="30" FontSize="11" Padding="12,0"/>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

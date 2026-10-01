@@ -76,7 +76,7 @@
                                             <TextBlock Text="{Binding [middleware_badge], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="8" FontWeight="Bold" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </Border>
                                     </StackPanel>
-                                    <TextBlock Text="{Binding EffectiveConfig.Count, StringFormat='{}{0}'}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding EffectiveConfig.Count, StringFormat='{}{0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

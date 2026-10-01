@@ -8,8 +8,8 @@
 
     <Border
         IsVisible="{Binding Message, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-        Background="#20ef4444"
-        BorderBrush="#50ef4444"
+        Background="{DynamicResource DestructiveTint}"
+        BorderBrush="{DynamicResource DestructiveBorder}"
         BorderThickness="1"
         CornerRadius="{DynamicResource MdCornerRadius}"
         Padding="12,8">
@@ -19,13 +19,13 @@
                 Data="{x:Static common:AppIcons.AlertTriangle}"
                 Width="14"
                 Height="14"
-                Foreground="#ef4444"
+                Foreground="{DynamicResource DestructiveColor}"
                 Margin="0,0,8,0"
                 VerticalAlignment="Center"/>
             <TextBlock
                 Grid.Column="1"
                 Text="{Binding Message, ElementName=Root}"
-                Foreground="#ef4444"
+                Foreground="{DynamicResource DestructiveColor}"
                 FontSize="12"
                 TextWrapping="Wrap"
                 VerticalAlignment="Center"/>
@@ -46,7 +46,7 @@
                     Padding="4"
                     Height="24"
                     Width="24">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="12" Height="12" Foreground="#ef4444"/>
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="12" Height="12" Foreground="{DynamicResource DestructiveColor}"/>
                 </Button>
             </StackPanel>
         </Grid>

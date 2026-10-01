@@ -28,7 +28,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     private bool _autoScroll = true;
 
     [ObservableProperty]
-    private string _scrollButtonText = "滚动吸附：开启";
+    private string _scrollButtonText = "";
 
     [ObservableProperty]
     private string _statusCountText = "0 / 0";
@@ -43,7 +43,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     private bool _copiedAll;
 
     [ObservableProperty]
-    private string _copyButtonText = "复制全部";
+    private string _copyButtonText = "";
 
     [ObservableProperty]
     private bool _isAtBottom = true;
@@ -59,8 +59,13 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     {
         _client.LogsUpdated += OnLogsUpdated;
         UpdateScrollButtonText();
-        CopyButtonText = LocalizationManager.Instance["client_logs_copy_all"] ?? "复制全部";
         OnLogsUpdated(_client.CurrentLogs);
+    }
+
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateScrollButtonText();
     }
 
     public void OnNavigatedTo()
@@ -79,11 +84,15 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     {
         string stateStr = AutoScroll
             ? (IsAtBottom
-                ? (LocalizationManager.Instance["client_logs_on"] ?? "开启")
-                : (LocalizationManager.Instance["client_logs_paused"] ?? "暂停"))
-            : (LocalizationManager.Instance["client_logs_off"] ?? "关闭");
-        string template = LocalizationManager.Instance["client_logs_scroll"] ?? "滚动吸附：{state}";
+                ? I18nText.T("client_logs_on", "开启")
+                : I18nText.T("client_logs_paused", "暂停"))
+            : I18nText.T("client_logs_off", "关闭");
+        string template = I18nText.T("client_logs_scroll", "滚动吸附：{state}");
         ScrollButtonText = template.Replace("{state}", stateStr);
+        if (!CopiedAll)
+        {
+            CopyButtonText = I18nText.T("client_logs_copy_all", "复制全部");
+        }
     }
 
     private void OnLogsUpdated(List<ClientLogEntry> logs)
@@ -237,20 +246,26 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
             desktop.MainWindow?.Clipboard != null)
         {
-            var sb = new StringBuilder();
-            foreach (var l in FilteredLogs)
+            var logsSnapshot = FilteredLogs.ToList();
+            string text = await Task.Run(() =>
             {
-                sb.AppendLine($"[{l.Timestamp}] [{l.Level}] {l.Target}: {l.Message}");
-            }
-            await desktop.MainWindow.Clipboard.SetTextAsync(sb.ToString());
+                var sb = new StringBuilder();
+                foreach (var l in logsSnapshot)
+                {
+                    sb.AppendLine($"[{l.Timestamp}] [{l.Level}] {l.Target}: {l.Message}");
+                }
+                return sb.ToString();
+            });
+
+            await desktop.MainWindow.Clipboard.SetTextAsync(text);
             CopiedAll = true;
-            CopyButtonText = LocalizationManager.Instance["common_copied"] ?? "已复制";
+            CopyButtonText = I18nText.T("common_copied", "已复制");
             _ = Task.Delay(2000).ContinueWith(_ =>
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     CopiedAll = false;
-                    CopyButtonText = LocalizationManager.Instance["client_logs_copy_all"] ?? "复制全部";
+                    CopyButtonText = I18nText.T("client_logs_copy_all", "复制全部");
                 });
             });
         }

@@ -128,7 +128,12 @@
                                     <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
                                         <Grid ColumnDefinitions="*, Auto">
                                             <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="12"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="12"/>
+                                                    <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                                    </Border>
+                                                </StackPanel>
                                                 <TextBlock
                                                     IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                                                     Text="{Binding Description}"
@@ -144,7 +149,12 @@
                                 <!-- Numeric field template -->
                                 <DataTemplate DataType="vm:NumberMiddlewareFieldViewModel">
                                     <StackPanel Spacing="4" Margin="0,0,0,10">
-                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                            </Border>
+                                        </StackPanel>
                                         <NumericUpDown Value="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12" CornerRadius="6"/>
                                         <TextBlock
                                             IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
@@ -152,13 +162,19 @@
                                             FontSize="10"
                                             Foreground="{DynamicResource MutedForegroundColor}"
                                             TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding DefaultValue, StringFormat='Default: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                 </DataTemplate>
 
-                                <!-- String / generic field template -->
+                                <!-- ListString field template -->
                                 <DataTemplate DataType="vm:ListStringMiddlewareFieldViewModel">
                                     <StackPanel Spacing="4" Margin="0,0,0,10">
-                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                            </Border>
+                                        </StackPanel>
                                         <TextBox Text="{Binding Value, Mode=TwoWay}" MinHeight="64" AcceptsReturn="True" TextWrapping="Wrap" FontSize="12" CornerRadius="6"/>
                                         <TextBlock
                                             IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
@@ -166,11 +182,19 @@
                                             FontSize="10"
                                             Foreground="{DynamicResource MutedForegroundColor}"
                                             TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding DefaultValue, StringFormat='Default: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                 </DataTemplate>
+
+                                <!-- String field template -->
                                 <DataTemplate DataType="vm:StringMiddlewareFieldViewModel">
                                     <StackPanel Spacing="4" Margin="0,0,0,10">
-                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                            </Border>
+                                        </StackPanel>
                                         <TextBox Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12" CornerRadius="6"/>
                                         <TextBlock
                                             IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
@@ -178,6 +202,7 @@
                                             FontSize="10"
                                             Foreground="{DynamicResource MutedForegroundColor}"
                                             TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding DefaultValue, StringFormat='Default: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.DataTemplates>

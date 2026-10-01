@@ -15,7 +15,13 @@
         <TextBlock Text="{Binding [users_role], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
         <ComboBox ItemsSource="{x:Static vm:AdminUsersViewModel.AvailableRoles}"
                   SelectedItem="{Binding Owner.EditRole, Mode=TwoWay}"
-                  HorizontalAlignment="Stretch" Height="30" FontSize="11"/>
+                  HorizontalAlignment="Stretch" Height="30" FontSize="11">
+            <ComboBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding Converter={x:Static common:Converters.RoleLabel}}" FontSize="11"/>
+                </DataTemplate>
+            </ComboBox.ItemTemplate>
+        </ComboBox>
 
         <TextBlock Text="{Binding [users_rules_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
         <TextBox Text="{Binding Owner.EditServiceRules, Mode=TwoWay}"

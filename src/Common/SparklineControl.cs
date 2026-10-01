@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -74,8 +75,44 @@ public class SparklineControl : Control
 
     static SparklineControl()
     {
-        AffectsRender<SparklineControl>(SamplesProperty, StrokeProperty, StrokeThicknessProperty, FillProperty,
-            SecondarySamplesProperty, SecondaryStrokeProperty, SecondaryFillProperty);
+        AffectsRender<SparklineControl>(
+            StrokeProperty, StrokeThicknessProperty, FillProperty,
+            SecondaryStrokeProperty, SecondaryFillProperty);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == SamplesProperty)
+        {
+            if (change.OldValue is INotifyCollectionChanged oldCol)
+                oldCol.CollectionChanged -= OnCollectionChanged;
+            if (change.NewValue is INotifyCollectionChanged newCol)
+                newCol.CollectionChanged += OnCollectionChanged;
+            InvalidateVisual();
+        }
+        else if (change.Property == SecondarySamplesProperty)
+        {
+            if (change.OldValue is INotifyCollectionChanged oldCol)
+                oldCol.CollectionChanged -= OnCollectionChanged;
+            if (change.NewValue is INotifyCollectionChanged newCol)
+                newCol.CollectionChanged += OnCollectionChanged;
+            InvalidateVisual();
+        }
+    }
+
+    private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        InvalidateVisual();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        if (Samples is INotifyCollectionChanged col1)
+            col1.CollectionChanged -= OnCollectionChanged;
+        if (SecondarySamples is INotifyCollectionChanged col2)
+            col2.CollectionChanged -= OnCollectionChanged;
     }
 
     public override void Render(DrawingContext context)
@@ -84,38 +121,54 @@ public class SparklineControl : Control
 
         var list = Samples?.ToList();
         var secList = SecondarySamples?.ToList();
-        if ((list == null || list.Count < 2) && (secList == null || secList.Count < 2)) return;
+        bool hasList = list != null && list.Count > 0;
+        bool hasSec = secList != null && secList.Count > 0;
+        if (!hasList && !hasSec) return;
 
         double w = Bounds.Width;
         double h = Bounds.Height;
         if (w <= 0 || h <= 0) return;
 
-        ulong max1 = list != null && list.Count > 0 ? list.Max() : 0;
-        ulong max2 = secList != null && secList.Count > 0 ? secList.Max() : 0;
+        ulong max1 = hasList ? list!.Max() : 0;
+        ulong max2 = hasSec ? secList!.Max() : 0;
         ulong max = Math.Max(Math.Max(max1, max2), 1024);
 
-        if (list != null && list.Count >= 2)
+        if (hasList)
         {
-            RenderSeries(context, list, max, w, h, Stroke, StrokeThickness, Fill);
+            RenderSeries(context, list!, max, w, h, Stroke, StrokeThickness, Fill);
         }
 
-        if (secList != null && secList.Count >= 2)
+        if (hasSec)
         {
-            RenderSeries(context, secList, max, w, h, SecondaryStroke, StrokeThickness, SecondaryFill);
+            RenderSeries(context, secList!, max, w, h, SecondaryStroke, StrokeThickness, SecondaryFill);
         }
     }
 
     private static void RenderSeries(DrawingContext context, List<ulong> data, ulong max, double w, double h, IBrush? stroke, double thickness, IBrush? fill)
     {
         int count = data.Count;
-        var points = new Point[count];
-        for (int i = 0; i < count; i++)
+        if (count == 0) return;
+
+        Point[] points;
+        if (count == 1)
         {
-            double x = (double)i / (count - 1) * w;
-            double normalizedY = (double)data[i] / max;
+            double normalizedY = (double)data[0] / max;
             double y = h - (normalizedY * (h - 4)) - 2;
-            points[i] = new Point(x, y);
+            points = [new Point(0, y), new Point(w, y)];
         }
+        else
+        {
+            points = new Point[count];
+            for (int i = 0; i < count; i++)
+            {
+                double x = (double)i / (count - 1) * w;
+                double normalizedY = (double)data[i] / max;
+                double y = h - (normalizedY * (h - 4)) - 2;
+                points[i] = new Point(x, y);
+            }
+        }
+
+        int ptCount = points.Length;
 
         if (fill != null)
         {
@@ -123,7 +176,7 @@ public class SparklineControl : Control
             using (var ctx = areaGeometry.Open())
             {
                 ctx.BeginFigure(new Point(0, h), true);
-                for (int i = 0; i < count; i++)
+                for (int i = 0; i < ptCount; i++)
                 {
                     ctx.LineTo(points[i]);
                 }
@@ -139,7 +192,7 @@ public class SparklineControl : Control
             using (var ctx = lineGeometry.Open())
             {
                 ctx.BeginFigure(points[0], false);
-                for (int i = 1; i < count; i++)
+                for (int i = 1; i < ptCount; i++)
                 {
                     ctx.LineTo(points[i]);
                 }

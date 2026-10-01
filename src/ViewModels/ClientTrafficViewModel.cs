@@ -3,14 +3,10 @@ using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using LiveChartsCore;
-using LiveChartsCore.SkiaSharpView;
-using LiveChartsCore.SkiaSharpView.Painting;
 using Prism.Common;
 using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
-using SkiaSharp;
 
 namespace Prism.ViewModels;
 
@@ -50,7 +46,7 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     private string _currentThroughputText = "0 B/s";
 
     [ObservableProperty]
-    private string _sectionTitle = "当前会话";
+    private string _sectionTitle = "";
 
     [ObservableProperty]
     private string? _actualTransport;
@@ -164,25 +160,17 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     [ObservableProperty]
     private string _lifetimeSavedText = "0 B (0.0%)";
 
-    public ObservableCollection<double> ChartValues { get; } = new();
-    public ISeries[] Series { get; }
+    public ObservableCollection<ulong> ThroughputSeries { get; } = new();
 
     public ClientTrafficViewModel()
     {
-        Series = new ISeries[]
-        {
-            new LineSeries<double>
-            {
-                Values = ChartValues,
-                Fill = new SolidColorPaint(new SKColor(16, 185, 129, 25)),
-                Stroke = new SolidColorPaint(new SKColor(16, 185, 129)) { StrokeThickness = 1.5f },
-                GeometrySize = 0,
-                LineSmoothness = 0.65
-            }
-        };
-
         _client.StatusUpdated += OnStatusUpdated;
         _client.ThroughputSampleAdded += OnThroughputSample;
+
+        foreach (var sample in _client.ThroughputHistory)
+        {
+            ThroughputSeries.Add(sample);
+        }
 
         // Initialize state
         if (_client.CurrentStatus != null)
@@ -193,6 +181,12 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
         {
             UpdateProperties(null);
         }
+    }
+
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateProperties(_client.CurrentStatus);
     }
 
     public void OnNavigatedTo()
@@ -213,16 +207,15 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     {
         if (!_isNavigatedTo) return;
         CurrentThroughputText = $"{Formatters.FormatBytes(bps)}/s";
-        ChartValues.Add((double)bps);
-        if (ChartValues.Count > 30)
+        ThroughputSeries.Add(bps);
+        if (ThroughputSeries.Count > 60)
         {
-            ChartValues.RemoveAt(0);
+            ThroughputSeries.RemoveAt(0);
         }
     }
 
     private void OnStatusUpdated(ClientStatusResponse status)
     {
-        if (!_isNavigatedTo && ChartValues.Count > 0) return;
         UpdateProperties(status);
     }
 

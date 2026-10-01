@@ -173,6 +173,21 @@ public static class Converters
             copied
                 ? (Prism.I18n.LocalizationManager.Instance["common_copied"] ?? "Copied")
                 : (Prism.I18n.LocalizationManager.Instance["client_share_config"] ?? "Share"));
+
+    public static readonly IValueConverter ExpirationDaysLabel =
+        new FuncValueConverter<int, string>(days =>
+            string.Equals(Prism.I18n.LocalizationManager.Instance.CurrentLocale, "zh-CN", StringComparison.OrdinalIgnoreCase)
+                ? $"{days} 天"
+                : (days == 1 ? "1 day" : $"{days} days"));
+
+    public static readonly IValueConverter RoleLabel =
+        new FuncValueConverter<string?, string>(r => r?.ToLowerInvariant() switch
+        {
+            "admin" => Prism.I18n.LocalizationManager.Instance["users_session_admin"] ?? "ADMIN",
+            "member" => string.Equals(Prism.I18n.LocalizationManager.Instance.CurrentLocale, "zh-CN", StringComparison.OrdinalIgnoreCase) ? "成员" : "Member",
+            "disabled" => Prism.I18n.LocalizationManager.Instance["status_disabled"] ?? "DISABLED",
+            _ => r?.ToUpperInvariant() ?? ""
+        });
 }
 
 public class LocaleOption

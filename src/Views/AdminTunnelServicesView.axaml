@@ -67,20 +67,21 @@
                     ItemsSource="{Binding Services}"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
+                    CanUserResizeColumns="True"
                     GridLinesVisibility="Horizontal"
                     BorderThickness="0"
                     Background="Transparent">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="{Binding [admin_col_service_name], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Name}" Width="150"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_protocol], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Proto}" Width="80"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ClientDisplay}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_remote_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Remote}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_role], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RoleText}" Width="90"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_route], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RouteText}" Width="90"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_local_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LocalAddr}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RemoteAddr}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_masquerade_sni], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Masquerade}" Width="*"/>
-                        <DataGridTemplateColumn Header="{Binding [admin_col_status], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
+                        <DataGridTextColumn Header="{Binding [admin_col_service_name], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Name}" MinWidth="110" Width="1.2*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_protocol], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Proto}" MinWidth="60" Width="70"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ClientDisplay}" MinWidth="90" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Remote}" MinWidth="100" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_role], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RoleText}" MinWidth="70" Width="80"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_route], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RouteText}" MinWidth="70" Width="80"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_local_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LocalAddr}" MinWidth="100" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RemoteAddr}" MinWidth="110" Width="1.1*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_masquerade_sni], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Masquerade}" MinWidth="90" Width="*"/>
+                        <DataGridTemplateColumn Header="{Binding [admin_col_status], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="80" Width="85">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:ServiceRowItem">
                                     <shadui:Badge Content="{Binding IsActive, Converter={x:Static common:Converters.ActiveStatusToLabel}}"

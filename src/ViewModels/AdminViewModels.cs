@@ -135,12 +135,18 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 
@@ -348,12 +354,18 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 
@@ -595,12 +607,18 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 
@@ -840,12 +858,18 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 
@@ -1262,12 +1286,18 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 
@@ -1421,12 +1451,18 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 
@@ -1618,7 +1654,8 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
                 label: string.IsNullOrWhiteSpace(f.Label) ? f.Key : f.Label,
                 description: f.Description,
                 fieldType: f.FieldType,
-                initialValue: currentVal
+                initialValue: currentVal,
+                defaultValue: f.DefaultValue?.ToString() ?? ""
             ));
         }
     }
@@ -1729,12 +1766,18 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
         else StopAutoRefresh();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? (LocalizationManager.Instance["admin_on"] ?? "开")
-            : (LocalizationManager.Instance["admin_off"] ?? "关");
-        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+            ? I18nText.T("admin_on", "开")
+            : I18nText.T("admin_off", "关");
+        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
         AutoRefreshText = template.Replace("{state}", stateStr);
     }
 

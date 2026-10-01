@@ -42,6 +42,12 @@ public abstract partial class AdminPageViewModelBase : ViewModelBase, INavigatio
         UpdateAutoRefreshText();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateAutoRefreshText();
+    }
+
     public virtual void OnNavigatedTo()
     {
         UpdateAutoRefreshText();

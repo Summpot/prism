@@ -16,7 +16,7 @@ public partial class ClientLogsView : UserControl
     {
         InitializeComponent();
         _logsList = this.FindControl<ListBox>("LogsList");
-        _logsList?.AddHandler(ScrollViewer.ScrollChangedEvent, OnLogsScrollChanged);
+        _logsList?.AddHandler(ScrollViewer.ScrollChangedEvent, OnLogsScrollChanged, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
         DataContextChanged += OnDataContextChanged;
     }
 

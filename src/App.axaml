@@ -8,6 +8,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <SolidColorBrush x:Key="SuccessColor" Color="#10b981"/>
+            <SolidColorBrush x:Key="SuccessTint" Color="#2010b981"/>
             <SolidColorBrush x:Key="WarningColor" Color="#f59e0b"/>
             <SolidColorBrush x:Key="DestructiveColor" Color="#ef4444"/>
             <SolidColorBrush x:Key="DestructiveTint" Color="#20ef4444"/>
@@ -26,6 +27,8 @@
             <Setter Property="VerticalGridLinesBrush" Value="Transparent"/>
             <Setter Property="RowBackground" Value="Transparent"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
         </Style>
         <Style Selector="DataGridColumnHeader">
             <Setter Property="Background" Value="Transparent"/>
@@ -36,13 +39,27 @@
         </Style>
         <Style Selector="DataGridRow">
             <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="MinHeight" Value="32"/>
         </Style>
         <Style Selector="DataGridRow:pointerover">
             <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
         </Style>
+        <Style Selector="DataGridRow:selected">
+            <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
+        </Style>
+        <Style Selector="DataGridRow:selected:pointerover">
+            <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
+        </Style>
+        <Style Selector="DataGridRow:selected DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}"/>
+        </Style>
         <Style Selector="DataGridCell">
             <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="DataGridCell:focus">
+            <Setter Property="FocusAdorner" Value="{x:Null}"/>
         </Style>
     </Application.Styles>
     <TrayIcon.Icons>

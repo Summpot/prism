@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
 
@@ -148,16 +149,49 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
     private bool _isCopied;
 
     [ObservableProperty]
-    private string _profilesCountText = "0 个配置";
+    private string _profilesCountText = "";
 
     [ObservableProperty]
-    private string _editProfileTitle = "编辑配置";
+    private string _editProfileTitle = "";
 
     [ObservableProperty]
     private string _autoConnectPanelHint = "";
 
+    private bool _suppressSelectionChange;
+    private EditableProfile? _previousProfile;
+
+    partial void OnSelectedProfileChanging(EditableProfile? oldValue, EditableProfile? newValue)
+    {
+        if (_suppressSelectionChange) return;
+        _previousProfile = oldValue;
+    }
+
     partial void OnSelectedProfileChanged(EditableProfile? value)
     {
+        if (_suppressSelectionChange) return;
+
+        if (IsDirty && _previousProfile != null && value != _previousProfile)
+        {
+            var prev = _previousProfile;
+            var prevDraft = DraftProfile;
+            Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+            {
+                bool discard = await AppServices.ConfirmAsync(
+                    I18nText.T("nodecfg_unsaved", "未保存的更改"),
+                    I18nText.T("client_discard_prompt", "当前配置存在未保存的修改，确定要放弃修改并切换吗？"),
+                    I18nText.T("common_discard", "放弃"));
+                if (!discard)
+                {
+                    _suppressSelectionChange = true;
+                    SelectedProfile = prev;
+                    DraftProfile = prevDraft;
+                    IsDirty = true;
+                    _suppressSelectionChange = false;
+                    UpdateComputed();
+                }
+            });
+        }
+
         PingMs = null;
         if (value != null)
         {
@@ -178,15 +212,21 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         UpdateComputed();
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateComputed();
+    }
+
     private void UpdateComputed()
     {
-        string tpl = Prism.I18n.LocalizationManager.Instance["client_profile_count"] ?? "{count} 个配置";
+        string tpl = I18nText.T("client_profile_count", "{count} 个配置");
         ProfilesCountText = tpl.Replace("{count}", Profiles.Count.ToString());
 
-        string editTpl = Prism.I18n.LocalizationManager.Instance["client_edit_profile"] ?? "编辑配置：{name}";
+        string editTpl = I18nText.T("client_edit_profile", "编辑配置：{name}");
         EditProfileTitle = editTpl.Replace("{name}", DraftProfile?.Name ?? "");
 
-        string autoSyncTpl = Prism.I18n.LocalizationManager.Instance["client_auto_connect_panel_hint"] ?? "自动同步管理面板与鉴权状态 ({url})";
+        string autoSyncTpl = I18nText.T("client_auto_connect_panel_hint", "自动同步管理面板与鉴权状态 ({url})");
         AutoConnectPanelHint = autoSyncTpl.Replace("{url}", DraftProfile?.ManagementUrl ?? "");
     }
 
@@ -196,10 +236,14 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         if (SelectedProfile != null)
         {
             var draft = SelectedProfile.Clone();
-            draft.PropertyChanged += (_, _) => IsDirty = true;
+            draft.PropertyChanged += (_, _) =>
+            {
+                IsDirty = true;
+                UpdateComputed();
+            };
             DraftProfile = draft;
             IsDirty = false;
-            AppServices.ShowInfo("Reverted changes to saved profile.", "Reverted");
+            AppServices.ShowInfo(I18nText.T("client_reverted_toast", "已放弃对配置的修改"), I18nText.T("common_revert", "已还原"));
         }
     }
 

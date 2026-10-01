@@ -15,11 +15,14 @@ public abstract class MiddlewareFieldViewModel : ObservableObject
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
     public string Description { get; set; } = "";
+    public string DefaultValue { get; set; } = "";
+
+    public bool IsModified => !string.Equals(GetStringValue().Trim(), DefaultValue.Trim(), StringComparison.OrdinalIgnoreCase);
 
     public abstract string GetStringValue();
     public abstract void SetStringValue(string value);
 
-    public static MiddlewareFieldViewModel Create(string key, string label, string description, string fieldType, string initialValue)
+    public static MiddlewareFieldViewModel Create(string key, string label, string description, string fieldType, string initialValue, string defaultValue)
     {
         MiddlewareFieldViewModel vm = fieldType.ToLowerInvariant() switch
         {
@@ -31,6 +34,7 @@ public abstract class MiddlewareFieldViewModel : ObservableObject
         vm.Key = key;
         vm.Label = label;
         vm.Description = description;
+        vm.DefaultValue = defaultValue;
         vm.SetStringValue(initialValue);
         return vm;
     }
@@ -41,6 +45,8 @@ public partial class BoolMiddlewareFieldViewModel : MiddlewareFieldViewModel
     [ObservableProperty]
     private bool _value;
 
+    partial void OnValueChanged(bool value) => OnPropertyChanged(nameof(IsModified));
+
     public override string GetStringValue() => Value ? "true" : "false";
     public override void SetStringValue(string value) => Value = bool.TryParse(value, out var b) && b;
 }
@@ -49,6 +55,8 @@ public partial class NumberMiddlewareFieldViewModel : MiddlewareFieldViewModel
 {
     [ObservableProperty]
     private decimal _value;
+
+    partial void OnValueChanged(decimal value) => OnPropertyChanged(nameof(IsModified));
 
     public override string GetStringValue() => Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
     public override void SetStringValue(string value) => Value = decimal.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0;
@@ -59,6 +67,8 @@ public partial class StringMiddlewareFieldViewModel : MiddlewareFieldViewModel
     [ObservableProperty]
     private string _value = "";
 
+    partial void OnValueChanged(string value) => OnPropertyChanged(nameof(IsModified));
+
     public override string GetStringValue() => Value;
     public override void SetStringValue(string value) => Value = value ?? "";
 }
@@ -67,6 +77,8 @@ public partial class ListStringMiddlewareFieldViewModel : MiddlewareFieldViewMod
 {
     [ObservableProperty]
     private string _value = "";
+
+    partial void OnValueChanged(string value) => OnPropertyChanged(nameof(IsModified));
 
     public override string GetStringValue() => Value;
     public override void SetStringValue(string value) => Value = value ?? "";
@@ -149,7 +161,8 @@ public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
                 label: string.IsNullOrWhiteSpace(f.Label) ? f.Key : f.Label,
                 description: f.Description,
                 fieldType: f.FieldType,
-                initialValue: currentVal
+                initialValue: currentVal,
+                defaultValue: f.DefaultValue
             ));
         }
     }

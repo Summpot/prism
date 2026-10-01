@@ -60,19 +60,20 @@
                     ItemsSource="{Binding Connections}"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
+                    CanUserResizeColumns="True"
                     GridLinesVisibility="Horizontal"
                     BorderThickness="0"
                     Background="Transparent">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="{Binding [admin_col_session_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Id}" Width="120"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Client}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_host], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Host}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Upstream}" Width="*"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_duration], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Duration}" Width="90"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_raw_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RawBytes}" Width="110"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_wire_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding WireBytes}" Width="110"/>
-                        <DataGridTextColumn Header="{Binding [admin_col_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding OptimizerText}" Width="90"/>
-                        <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
+                        <DataGridTextColumn Header="{Binding [admin_col_session_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Id}" MinWidth="90" Width="100"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Client}" MinWidth="110" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_host], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Host}" MinWidth="100" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Upstream}" MinWidth="110" Width="1.2*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_duration], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Duration}" MinWidth="70" Width="80"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_raw_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RawBytes}" MinWidth="85" Width="95"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_wire_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding WireBytes}" MinWidth="85" Width="95"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding OptimizerText}" MinWidth="75" Width="80"/>
+                        <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="80" Width="85">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:ConnectionItem">
                                     <Button

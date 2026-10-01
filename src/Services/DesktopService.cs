@@ -79,6 +79,7 @@ public static class DesktopService
         }
     }
 
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static void RegisterWindowsProtocol(string exePath)
     {
         using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\prism");

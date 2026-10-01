@@ -5,7 +5,6 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
-    xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.Avalonia;assembly=LiveChartsCore.SkiaSharpView.Avalonia"
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:vm="clr-namespace:Prism.ViewModels"
     xmlns:common="clr-namespace:Prism.Common"
@@ -93,10 +92,13 @@
                             </StackPanel>
                             <TextBlock Grid.Column="1" Text="{Binding CurrentThroughputText}" Foreground="{DynamicResource SuccessColor}" FontWeight="Bold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
                         </Grid>
-                        <lvc:CartesianChart
-                            Height="70"
-                            Series="{Binding Series}"
-                            TooltipPosition="Hidden" />
+                        <common:SparklineControl
+                            Height="64"
+                            Samples="{Binding ThroughputSeries}"
+                            Stroke="{DynamicResource SuccessColor}"
+                            Fill="{DynamicResource SuccessTint}"
+                            StrokeThickness="2"
+                            Margin="0,6,0,2"/>
                     </StackPanel>
                 </shadui:Card>
 

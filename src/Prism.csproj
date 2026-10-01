@@ -23,19 +23,23 @@
     <ZeroI18nNamespace>Prism.I18n</ZeroI18nNamespace>
 
     <!-- NativeAOT Static Linking Settings -->
+    <PublishAot>true</PublishAot>
     <StripSymbols>true</StripSymbols>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
   </PropertyGroup>
 
   <!-- NativeAOT Windows System Dependencies for Rust -->
   <ItemGroup Condition="'$(PublishAot)' == 'true'">
-    <CustomLinkerArg Include="ws2_32.lib userenv.lib bcrypt.lib ntdll.lib crypt32.lib secur32.lib ncrypt.lib iphlpapi.lib" />
+    <CustomLinkerArg
+      Include="ws2_32.lib userenv.lib bcrypt.lib ntdll.lib crypt32.lib secur32.lib ncrypt.lib iphlpapi.lib" />
   </ItemGroup>
 
   <!-- Clean up static library intermediate artifacts and redundant DLLs from publish folder -->
-  <Target Name="PruneAotPublishOutputs" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(PublishAot)' == 'true'">
+  <Target Name="PruneAotPublishOutputs" AfterTargets="ComputeResolvedFilesToPublishList"
+    Condition="'$(PublishAot)' == 'true'">
     <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.lib' or '%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Extension)' == '.lib' or '%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp'" />
     </ItemGroup>
   </Target>
 
@@ -57,6 +61,5 @@
     <PackageReference Include="ZeroI18n" Version="1.0.0" />
     <PackageReference Include="Summpot.SkiaSharp.Static" Version="3.119.4-avalonia.12.1.3" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.1.0-dev-292" />
   </ItemGroup>
 </Project>

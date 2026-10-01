@@ -340,6 +340,22 @@
                             </Button>
                         </StackPanel>
 
+                        <!-- Changelog View if UpdateAvailable -->
+                        <Border IsVisible="{Binding UpdateAvailable}"
+                                Background="{DynamicResource GhostColor}"
+                                BorderBrush="{DynamicResource BorderColor}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12"
+                                Margin="0,4,0,0">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding [client_update_prompt_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11"/>
+                                <ScrollViewer MaxHeight="140" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                    <TextBlock Text="{Binding UpdateChangelog}" TextWrapping="Wrap" FontSize="11" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+
                         <!-- Status Message -->
                         <TextBlock IsVisible="{Binding UpdateStatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                                    Text="{Binding UpdateStatusMessage}" FontSize="11" Foreground="{DynamicResource PrimaryColor}"/>

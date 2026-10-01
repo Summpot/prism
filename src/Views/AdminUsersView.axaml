@@ -78,16 +78,17 @@
                                 ItemsSource="{Binding Users}"
                                 AutoGenerateColumns="False"
                                 IsReadOnly="True"
+                                CanUserResizeColumns="True"
                                 GridLinesVisibility="Horizontal"
                                 BorderThickness="0"
                                 Background="Transparent">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="{Binding [admin_col_username], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Username}" Width="180"/>
-                                    <DataGridTemplateColumn Header="{Binding [admin_col_role], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
+                                    <DataGridTextColumn Header="{Binding [admin_col_username], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Username}" MinWidth="120" Width="*"/>
+                                    <DataGridTemplateColumn Header="{Binding [admin_col_role], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="80" Width="90">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate x:DataType="vm:UserRowItem">
                                                 <shadui:Badge
-                                                    Content="{Binding Role}"
+                                                    Content="{Binding Role, Converter={x:Static common:Converters.RoleLabel}}"
                                                     Height="20"
                                                     Padding="6,0"
                                                     FontSize="10"
@@ -95,9 +96,9 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTextColumn Header="{Binding [admin_col_oauth_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding GithubId}" Width="*"/>
-                                    <DataGridTextColumn Header="{Binding [admin_col_created_date], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding CreatedAt}" Width="140"/>
-                                    <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" Width="120">
+                                    <DataGridTextColumn Header="{Binding [admin_col_oauth_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding GithubId}" MinWidth="110" Width="1.2*"/>
+                                    <DataGridTextColumn Header="{Binding [admin_col_created_date], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding CreatedAt}" MinWidth="120" Width="140"/>
+                                    <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="110" Width="120">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate x:DataType="vm:UserRowItem">
                                                 <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
@@ -154,16 +155,24 @@
                                 ItemsSource="{Binding Tokens}"
                                 AutoGenerateColumns="False"
                                 IsReadOnly="True"
+                                CanUserResizeColumns="True"
                                 GridLinesVisibility="Horizontal"
                                 BorderThickness="0"
                                 Background="Transparent">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="{Binding [admin_col_token_name], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Name}" Width="160"/>
-                                    <DataGridTextColumn Header="{Binding [admin_col_type], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding TokenType}" Width="90"/>
-                                    <DataGridTextColumn Header="{Binding [admin_col_created], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding CreatedAt}" Width="140"/>
-                                    <DataGridTextColumn Header="{Binding [admin_col_expires], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ExpiresAt}" Width="140"/>
-                                    <DataGridTextColumn Header="{Binding [admin_col_last_used], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LastUsed}" Width="140"/>
-                                    <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" Width="90">
+                                    <DataGridTextColumn Header="{Binding [admin_col_token_name], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Name}" MinWidth="130" Width="*"/>
+                                    <DataGridTemplateColumn Header="{Binding [admin_col_type], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="80" Width="95">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate x:DataType="vm:TokenRowItem">
+                                                <TextBlock Text="{Binding TokenType, Converter={x:Static common:Converters.TokenTypeLabel}}"
+                                                           FontSize="11" VerticalAlignment="Center"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="{Binding [admin_col_created], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding CreatedAt}" MinWidth="120" Width="135"/>
+                                    <DataGridTextColumn Header="{Binding [admin_col_expires], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ExpiresAt}" MinWidth="120" Width="135"/>
+                                    <DataGridTextColumn Header="{Binding [admin_col_last_used], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LastUsed}" MinWidth="120" Width="135"/>
+                                    <DataGridTemplateColumn Header="{Binding [admin_col_action], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="80" Width="90">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate x:DataType="vm:TokenRowItem">
                                                 <Button

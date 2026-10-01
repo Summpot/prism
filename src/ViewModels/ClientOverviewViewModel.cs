@@ -98,13 +98,23 @@ public partial class ClientOverviewViewModel : ViewModelBase
     private bool _showLoginMethods = true;
 
     [ObservableProperty]
-    private string _discoveredServicesBadgeText = "0 活动";
+    private bool _bypassLogin;
+
+    [RelayCommand]
+    public void DismissLoginMethods()
+    {
+        BypassLogin = true;
+        UpdateComputedProperties();
+    }
 
     [ObservableProperty]
-    private string _discoveredServicesEmptyTitle = "未连接远端服务";
+    private string _discoveredServicesBadgeText = "";
 
     [ObservableProperty]
-    private string _discoveredServicesEmptyHint = "连接后将在此展示远端 Connector 发布的本地映射端口和服务信息";
+    private string _discoveredServicesEmptyTitle = "";
+
+    [ObservableProperty]
+    private string _discoveredServicesEmptyHint = "";
 
     [ObservableProperty]
     private bool _hasCumulativeHistory;
@@ -174,6 +184,15 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isRunning;
+
+    partial void OnIsRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(TunnelButtonText));
+    }
+
+    public string TunnelButtonText => IsRunning
+        ? (I18nText.T("client_disconnect_tunnel", "断开隧道"))
+        : (I18nText.T("client_connect", "连接"));
 
     [ObservableProperty]
     private bool _isConnected;
@@ -307,31 +326,39 @@ public partial class ClientOverviewViewModel : ViewModelBase
         }
     }
 
+    protected override void OnLocaleChanged()
+    {
+        base.OnLocaleChanged();
+        UpdateComputedProperties();
+        OnPropertyChanged(nameof(TunnelButtonText));
+    }
+
     public void UpdateComputedProperties()
     {
         bool liveAuth = IsConnected && IsSessionAuthenticated;
         ShowLoggedInCard = liveAuth;
         ShowConnectAndLoginHero = !liveAuth;
 
-        ShowLoginMethods = !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated && (IsGithubAuthAvailable || IsConnected);
+        ShowLoginMethods = !BypassLogin && !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated && (IsGithubAuthAvailable || IsConnected);
 
         string host = !string.IsNullOrWhiteSpace(ServerAddress) ? ServerAddress : RemoteLinkInput;
         string listen = !string.IsNullOrWhiteSpace(ListenAddress) ? ListenAddress : "127.0.0.1:25565";
         MappingText = $"{host} -> {listen}";
 
-        string activeWord = LocalizationManager.Instance["client_active"] ?? "活动";
+        string activeWord = I18nText.T("client_active", "活动");
         DiscoveredServicesBadgeText = $"{DiscoveredServices.Count} {activeWord}";
 
         if (IsConnected)
         {
-            DiscoveredServicesEmptyTitle = LocalizationManager.Instance["client_waiting_services"] ?? "等待 Connector 发布远端服务…";
+            DiscoveredServicesEmptyTitle = I18nText.T("client_waiting_services", "等待 Connector 发布远端服务…");
             DiscoveredServicesEmptyHint = "";
         }
         else
         {
-            DiscoveredServicesEmptyTitle = LocalizationManager.Instance["client_not_connected_service"] ?? "未连接远端服务";
-            DiscoveredServicesEmptyHint = LocalizationManager.Instance["client_service_hint"] ?? "连接后将在此展示远端 Connector 发布的本地映射端口和服务信息";
+            DiscoveredServicesEmptyTitle = I18nText.T("client_not_connected_service", "未连接远端服务");
+            DiscoveredServicesEmptyHint = I18nText.T("client_service_hint", "连接后将在此展示远端 Connector 发布的本地映射端口和服务信息");
         }
+        OnPropertyChanged(nameof(TunnelButtonText));
     }
 
     partial void OnSelectedProfileChanged(Prism.Native.ClientProfile? value)

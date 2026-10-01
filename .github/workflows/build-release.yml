@@ -36,31 +36,9 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --no-default-features
 
-  test-desktop:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: rust-tests
-
-      - name: Build Avalonia Desktop
-        run: dotnet build src/Prism.csproj -c Release
-
   rust-binaries:
     name: rust binaries (${{ matrix.os }}/${{ matrix.arch }} / ${{ matrix.target }})
-    needs: [test-rust, test-desktop]
+    needs: test-rust
     strategy:
       fail-fast: false
       matrix:

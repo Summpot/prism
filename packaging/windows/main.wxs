@@ -33,7 +33,7 @@
 
         <DirectoryRef Id="INSTALLFOLDER">
             <Component Id="PrismExecutable" Guid="9F2D7B41-4567-4289-A512-3B4C5D6E7F80">
-                <File Id="PrismEXE" Source="$(var.BinPath)" KeyPath="yes">
+                <File Id="PrismEXE" Source="$(var.BinPath)" Name="prism.exe" KeyPath="yes">
                     <Shortcut Id="ApplicationDesktopShortcut"
                               Directory="DesktopFolder"
                               Name="Prism"

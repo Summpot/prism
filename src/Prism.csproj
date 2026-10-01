@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Prism</AssemblyName>
+    <TargetName>prism</TargetName>
     <RootNamespace>Prism</RootNamespace>
     <ApplicationIcon>Assets/favicon.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
@@ -29,9 +30,19 @@
   </PropertyGroup>
 
   <!-- NativeAOT Windows System Dependencies for Rust -->
-  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$([MSBuild]::IsOSPlatform(&quot;Windows&quot;))'">
     <CustomLinkerArg
       Include="ws2_32.lib userenv.lib bcrypt.lib ntdll.lib crypt32.lib secur32.lib ncrypt.lib iphlpapi.lib" />
+  </ItemGroup>
+
+  <!-- NativeAOT macOS System Dependencies for Rust -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$([MSBuild]::IsOSPlatform(&quot;OSX&quot;))'">
+    <CustomLinkerArg Include="-framework Security -framework CoreFoundation -framework SystemConfiguration" />
+  </ItemGroup>
+
+  <!-- NativeAOT Linux System Dependencies for Rust -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$([MSBuild]::IsOSPlatform(&quot;Linux&quot;))'">
+    <CustomLinkerArg Include="-lfontconfig -lfreetype -lpthread -ldl -lm -lrt" />
   </ItemGroup>
 
   <!-- Clean up static library intermediate artifacts and redundant DLLs from publish folder -->
@@ -39,7 +50,7 @@
     Condition="'$(PublishAot)' == 'true'">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-        Condition="'%(Extension)' == '.lib' or '%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp'" />
+        Condition="'%(Extension)' == '.lib' or '%(Extension)' == '.a' or '%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp'" />
     </ItemGroup>
   </Target>
 

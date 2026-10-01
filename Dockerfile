@@ -34,7 +34,7 @@ ARG MUSL_TARGET
 # Docker containers run as headless servers and do not need desktop GUI (Tauri/GTK).
 RUN --mount=type=cache,target=/home/rust/.cargo/registry \
     --mount=type=cache,target=/home/rust/src/target \
-    cargo build --release -p prism --no-default-features --target ${MUSL_TARGET} \
+    cargo build --release -p prism_native --bin prism --no-default-features --target ${MUSL_TARGET} \
     && cp -f /home/rust/src/target/${MUSL_TARGET}/release/prism /home/rust/prism
 
 # ---------- Stage 2: minimal runtime image ----------

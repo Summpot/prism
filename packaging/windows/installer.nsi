@@ -34,6 +34,10 @@ Unicode true
   !define BIN_PATH "target\release\prism.exe"
 !endif
 
+!ifndef BIN_DIR
+  !define BIN_DIR ""
+!endif
+
 !ifndef ICON_PATH
   !define ICON_PATH "crates\prism\icons\icon.ico"
 !endif
@@ -70,8 +74,12 @@ Section "Install" SecInstall
     SetOutPath "$INSTDIR"
     ; Ensure existing running instances are terminated so files can be overwritten without sharing violations
     nsExec::Exec 'taskkill /F /IM prism.exe'
+    nsExec::Exec 'taskkill /F /IM Prism.exe'
     Sleep 500
     File "/oname=prism.exe" "${BIN_PATH}"
+    !if "${BIN_DIR}" != ""
+      File /nonfatal "${BIN_DIR}\av_libglesv2.dll"
+    !endif
     
     ; Create uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -126,6 +134,7 @@ Section "Uninstall"
     
     ; Remove installed files
     Delete "$INSTDIR\prism.exe"
+    Delete "$INSTDIR\av_libglesv2.dll"
     Delete "$INSTDIR\uninstall.exe"
     RMDir "$INSTDIR"
 SectionEnd

@@ -36,34 +36,31 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --no-default-features
 
-  test-frontend:
-    runs-on: ubuntu-latest
+  test-desktop:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: 22
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
 
-      - name: Enable Corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-          pnpm --version
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-tests
 
-      - name: Frontend build
-        run: pnpm build
-
-      - name: Check desktop webview shell
-        run: test -f dist/client/index.html
+      - name: Build Avalonia Desktop
+        run: dotnet build src/Prism.csproj -c Release
 
   rust-binaries:
     name: rust binaries (${{ matrix.os }}/${{ matrix.arch }} / ${{ matrix.target }})
-    needs: test-rust
+    needs: [test-rust, test-desktop]
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +69,7 @@ jobs:
             arch: amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            rid: linux-x64
             desktop: true
             upx: true
             artifact_compression: 0
@@ -79,10 +77,11 @@ jobs:
             arch: arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            rid: linux-arm64
             desktop: true
             upx: true
             artifact_compression: 0
-          # musl stays headless: Tauri/WebKit is not available in the musl images.
+          # musl stays headless
           - os: linux
             arch: amd64
             runner: ubuntu-latest
@@ -103,6 +102,7 @@ jobs:
             arch: amd64
             runner: macos-15-intel
             target: x86_64-apple-darwin
+            rid: osx-x64
             desktop: true
             upx: false
             artifact_compression: 6
@@ -110,6 +110,7 @@ jobs:
             arch: arm64
             runner: macos-latest
             target: aarch64-apple-darwin
+            rid: osx-arm64
             desktop: true
             upx: false
             artifact_compression: 6
@@ -117,6 +118,7 @@ jobs:
             arch: amd64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
+            rid: win-x64
             desktop: true
             upx: true
             artifact_compression: 0
@@ -141,12 +143,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
+            clang \
+            zlib1g-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libx11-dev \
+            libice-dev \
+            libsm-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxrender-dev \
             patchelf \
-            libxdo-dev \
             xdg-utils \
             file \
             squashfs-tools \
@@ -154,40 +163,32 @@ jobs:
             dpkg
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
 
-      - name: Setup Node
+      - name: Setup .NET
         if: matrix.desktop
-        uses: actions/setup-node@v6
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: 22
-
-      - name: Enable Corepack
-        if: matrix.desktop
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-          pnpm --version
-
-      - name: Install frontend deps
-        if: matrix.desktop
-        run: pnpm install --frozen-lockfile
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
 
       - name: Build (release) (headless)
         if: ${{ !matrix.desktop }}
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release -p prism --no-default-features --target "${{ matrix.target }}"
+          cargo build --release -p prism_native --bin prism --no-default-features --target "${{ matrix.target }}"
 
-      - name: Build frontend
-        if: matrix.desktop
-        run: pnpm build
-
-      - name: Build (release) (desktop binary)
+      - name: Build (release) (Avalonia desktop binary)
         if: matrix.desktop
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release -p prism --features desktop,custom-protocol --target "${{ matrix.target }}"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.1.0-dev.${GITHUB_SHA:0:7}"
+          fi
+          CLEAN_VERSION="${VERSION%%-*}"
+          dotnet publish src/Prism.csproj -c Release -r "${{ matrix.rid }}" -p:PublishAot=true -p:Version="${CLEAN_VERSION}" -p:InformationalVersion="${VERSION}" -o desktop_publish
 
       - name: Compress binary with UPX
         if: matrix.upx && !matrix.desktop
@@ -216,7 +217,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $outdir | Out-Null
 
           $target = "${{ matrix.target }}"
-          $binPath = (Resolve-Path "target/$target/release/prism.exe").Path
+          $binDir = (Resolve-Path "desktop_publish").Path
+          $binPath = (Join-Path $binDir "prism.exe")
           $iconPath = (Resolve-Path "crates/prism/icons/icon.ico").Path
 
           Copy-Item -Force -Path $binPath -Destination (Join-Path $outdir "prism_${version}_${target}.exe")
@@ -236,7 +238,7 @@ jobs:
           }
           $nsisOut = [System.IO.Path]::GetFullPath((Join-Path $outdir "Prism_${version}_x64-setup.exe"))
           $installerNsi = (Resolve-Path "packaging/windows/installer.nsi").Path
-          & $makensis /DVERSION="$version" /DARCH="x64" /DOUTFILE="$nsisOut" /DBIN_PATH="$binPath" /DICON_PATH="$iconPath" "$installerNsi"
+          & $makensis /DVERSION="$version" /DARCH="x64" /DOUTFILE="$nsisOut" /DBIN_PATH="$binPath" /DBIN_DIR="$binDir" /DICON_PATH="$iconPath" "$installerNsi"
 
           # 2. WiX Toolset MSI (.msi)
           $env:PATH += ";C:\Program Files (x86)\WiX Toolset v3.11\bin"
@@ -252,7 +254,7 @@ jobs:
             Write-Warning "WiX Toolset not found; skipping MSI build"
           }
 
-          # 3. Updater Zip archive (contains NSIS installer for full compatibility with both old Tauri and new clients)
+          # 3. Updater Zip archive (contains NSIS installer for full compatibility with updater)
           $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
           Compress-Archive -Path $nsisOut -DestinationPath $zipOut -CompressionLevel NoCompression -Force
 
@@ -260,7 +262,7 @@ jobs:
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
             Get-ChildItem -Path $outdir -File | Where-Object { $_.Extension -in '.exe', '.msi', '.zip' } | ForEach-Object {
               Write-Host "Signing $($_.Name)..."
-              pnpm exec tauri signer sign $_.FullName
+              npx --yes @tauri-apps/cli signer sign $_.FullName
             }
           }
 
@@ -283,7 +285,7 @@ jobs:
           mkdir -p "${OUTDIR}"
 
           TARGET="${{ matrix.target }}"
-          BIN_PATH="target/${TARGET}/release/prism"
+          BIN_PATH="desktop_publish/prism"
           cp -v "${BIN_PATH}" "${OUTDIR}/prism_${VERSION}_${TARGET}"
 
           DMG_ARCH="x64"
@@ -329,7 +331,7 @@ jobs:
             for f in "${OUTDIR}"/*.dmg "${OUTDIR}"/*.tar.gz; do
               if [[ -f "$f" ]]; then
                 echo "Signing $f..."
-                pnpm exec tauri signer sign "$f"
+                npx --yes @tauri-apps/cli signer sign "$f"
               fi
             done
           fi
@@ -354,7 +356,7 @@ jobs:
           mkdir -p "${OUTDIR}"
 
           TARGET="${{ matrix.target }}"
-          BIN_PATH="target/${TARGET}/release/prism"
+          BIN_PATH="desktop_publish/prism"
           cp -v "${BIN_PATH}" "${OUTDIR}/prism_${VERSION}_${TARGET}"
 
           ARCH="amd64"
@@ -411,7 +413,13 @@ jobs:
           cp "crates/prism/icons/icon.png" "${APPDIR}/prism.png"
           cp "crates/prism/icons/icon.png" "${APPDIR}/usr/share/icons/hicolor/512x512/apps/prism.png"
 
-          printf '#!/bin/sh\nSELF=$(readlink -f "$0")\nHERE=${SELF%%/*}\nexport PATH="${HERE}/usr/bin:${PATH}"\nexec "${HERE}/usr/bin/prism" "$@"\n' > "${APPDIR}/AppRun"
+          cat << 'EOF' > "${APPDIR}/AppRun"
+#!/bin/sh
+SELF=$(readlink -f "$0")
+HERE="${SELF%/*}"
+export PATH="${HERE}/usr/bin:${PATH}"
+exec "${HERE}/usr/bin/prism" "$@"
+EOF
           chmod +x "${APPDIR}/AppRun"
 
           APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGE_ARCH}.AppImage"
@@ -430,7 +438,7 @@ jobs:
             for f in "${OUTDIR}"/*.AppImage "${OUTDIR}"/*.tar.gz "${OUTDIR}"/*.deb "${OUTDIR}"/*.rpm; do
               if [[ -f "$f" ]]; then
                 echo "Signing $f..."
-                pnpm exec tauri signer sign "$f"
+                npx --yes @tauri-apps/cli signer sign "$f"
               fi
             done
           fi

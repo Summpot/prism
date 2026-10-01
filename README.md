@@ -177,8 +177,6 @@ admin_users = ["your-github-username"]
 | `--config <PATH>`         | `PRISM_CONFIG`         | Auto-detected              | Path to `.toml` / `.yaml` config file. Auto-searches CWD then OS default (`/etc/prism/prism.toml` on Linux). |
 | `--workdir <PATH>`        | `PRISM_WORKDIR`        | `/var/lib/prism` (Linux)   | Runtime working directory for state, certs, and SQLite DB.                                                   |
 | `--middleware-dir <PATH>` | `PRISM_MIDDLEWARE_DIR` | `<config_dir>/middlewares` | Directory containing `.wat` / `.wasm` middleware files.                                                      |
-| `--headless`              | -                      | `false`                    | Run headless without GUI even if desktop support is compiled in.                                             |
-| `--gui`                   | -                      | `false`                    | Force launch Tauri desktop GUI window.                                                                       |
 
 ---
 
@@ -194,24 +192,24 @@ admin_users = ["your-github-username"]
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (2024 edition, MSRV 1.85+)
-- [Node.js](https://nodejs.org/) (v22+) and [pnpm](https://pnpm.io/) (v10+)
+- [.NET SDK](https://dotnet.microsoft.com/) (10.0+)
 
 ### Build Headless CLI / Server
 
 ```bash
-cargo build --release -p prism --no-default-features
+cargo build --release -p prism_native --bin prism --no-default-features
 ```
 
-The binary will be located at `target/release/prism`.
+The binary will be located at `target/release/prism` (or `target/release/prism.exe` on Windows).
 
-### Build Desktop GUI (Tauri v2)
+### Build Desktop GUI (Avalonia + NativeAOT)
 
 ```bash
-# Install frontend dependencies
-pnpm install
+# Run in development mode
+dotnet run --project src/Prism.csproj
 
-# Build desktop application
-pnpm build:desktop
+# Publish standalone NativeAOT binary for your platform
+dotnet publish src/Prism.csproj -c Release -r win-x64 # or linux-x64, osx-arm64, etc.
 ```
 
 ---

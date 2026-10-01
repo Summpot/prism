@@ -177,6 +177,12 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
+    public void GoToTraffic()
+    {
+        NavigationService.Instance.NavigateTo("client.traffic");
+    }
+
+    [RelayCommand]
     public void GoToMiddleware()
     {
         NavigationService.Instance.NavigateTo("client.middleware");

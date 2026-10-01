@@ -12,133 +12,175 @@
     mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
     x:DataType="vm:ClientMiddlewareViewModel">
 
-    <Grid ColumnDefinitions="260, 16, *" Margin="16">
-        <!-- Left: Middlewares List -->
-        <shadui:Card Grid.Column="0" Padding="12">
-            <DockPanel LastChildFill="True">
-                <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
-                    <TextBlock Text="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14"/>
-                    <TextBlock Text="{Binding [client_middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+    <Grid RowDefinitions="Auto, *" Margin="16">
+        <!-- Page Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+            <StackPanel Grid.Column="0" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Sliders}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
+                    <TextBlock Text="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
                 </StackPanel>
+                <TextBlock Text="{Binding [client_middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+            </StackPanel>
 
-                <ListBox
-                    ItemsSource="{Binding Middlewares}"
-                    SelectedItem="{Binding SelectedMiddleware, Mode=TwoWay}"
-                    Background="Transparent">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="native:MiddlewareItem">
-                            <Border Padding="8,6" CornerRadius="6">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13"/>
-                                    <TextBlock Text="{Binding EffectiveConfig.Count, StringFormat='{}{0} settings configured'}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </DockPanel>
-        </shadui:Card>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button Classes="Outline" Command="{Binding ResetConfigCommand}" Height="28" Padding="10,0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                        <TextBlock Text="{Binding [middleware_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                    </StackPanel>
+                </Button>
+                <Button Classes="Primary" Command="{Binding SaveConfigCommand}" Height="28" Padding="12,0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                        <TextBlock Text="{Binding [middleware_apply], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
 
-        <!-- Right: Dynamic Schema Form -->
-        <shadui:Card Grid.Column="2" Padding="16">
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                <StackPanel Spacing="16">
-                    <!-- Header -->
-                    <Grid ColumnDefinitions="*, Auto">
-                        <StackPanel Grid.Column="0" Spacing="2">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="{Binding SelectedMiddleware.Name, FallbackValue='Select a middleware'}" FontWeight="Bold" FontSize="16"/>
-                                <shadui:Badge Content="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
-                                              Background="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"
-                                              Foreground="White" Height="20" Padding="6,0" FontSize="10"/>
-                            </StackPanel>
-                            <TextBlock Text="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-                        </StackPanel>
-                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
+        <!-- 2-Column Content: Middlewares List + Config Form -->
+        <Grid Grid.Row="1" ColumnDefinitions="280, 10, *">
+            <!-- Left: Middlewares List -->
+            <shadui:Card Grid.Column="0" Padding="12">
+                <Grid RowDefinitions="Auto, *">
+                    <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,10">
+                        <TextBlock Text="{Binding [middleware_selector], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                        <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Middlewares.Count, StringFormat='{}{0}'}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </Border>
                     </Grid>
 
-                    <Separator Background="{DynamicResource BorderColor}" Height="1"/>
-
-                    <!-- Empty state -->
-                    <TextBlock
-                        IsVisible="{Binding ConfigFields.Count, Converter={x:Static common:Converters.EqualsZero}}"
-                        Text="{Binding [client_not_connected_service], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='No configurable schema parameters for this middleware.'}"
-                        FontSize="12"
-                        Foreground="{DynamicResource MutedForegroundColor}"/>
-
-                    <!-- Polymorphic Fields ItemsControl with DataTemplates -->
-                    <ItemsControl ItemsSource="{Binding ConfigFields}">
-                        <ItemsControl.DataTemplates>
-                            <!-- Boolean field template -->
-                            <DataTemplate DataType="vm:BoolMiddlewareFieldViewModel">
-                                <StackPanel Spacing="4" Margin="0,0,0,14">
-                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
-                                    <TextBlock
-                                        IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                                        Text="{Binding Description}"
-                                        FontSize="11"
-                                        Foreground="{DynamicResource MutedForegroundColor}"
-                                        TextWrapping="Wrap"/>
-                                    <ToggleSwitch IsChecked="{Binding Value, Mode=TwoWay}"/>
+                    <ListBox
+                        Grid.Row="1"
+                        ItemsSource="{Binding Middlewares}"
+                        SelectedItem="{Binding SelectedMiddleware, Mode=TwoWay}"
+                        Background="Transparent"
+                        BorderThickness="0">
+                        <ListBox.Styles>
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="8,6"/>
+                                <Setter Property="Margin" Value="0,2"/>
+                                <Setter Property="CornerRadius" Value="6"/>
+                                <Setter Property="Background" Value="Transparent"/>
+                            </Style>
+                            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource PrimaryColor}"/>
+                                <Setter Property="BorderThickness" Value="1"/>
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="native:MiddlewareItem">
+                                <StackPanel Spacing="3">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12"/>
+                                        <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                            <TextBlock Text="WASM" FontSize="8" FontWeight="Bold" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding EffectiveConfig.Count, StringFormat='{}{0} 项参数已生效'}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </StackPanel>
                             </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </shadui:Card>
 
-                            <!-- Numeric field template -->
-                            <DataTemplate DataType="vm:NumberMiddlewareFieldViewModel">
-                                <StackPanel Spacing="4" Margin="0,0,0,14">
-                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
-                                    <TextBlock
-                                        IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                                        Text="{Binding Description}"
-                                        FontSize="11"
-                                        Foreground="{DynamicResource MutedForegroundColor}"
-                                        TextWrapping="Wrap"/>
-                                    <NumericUpDown Value="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12"/>
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1" Width="10" Background="Transparent" ResizeDirection="Columns"/>
+
+            <!-- Right: Dynamic Schema Form -->
+            <shadui:Card Grid.Column="2" Padding="16">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="14">
+                        <!-- Middleware Title & Toggle -->
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding SelectedMiddleware.Name, FallbackValue='Select a middleware'}" FontWeight="Bold" FontSize="15"/>
+                                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
+                                    </Border>
                                 </StackPanel>
-                            </DataTemplate>
+                                <TextBlock Text="{Binding [middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
+                        </Grid>
 
-                            <!-- String / generic field template -->
-                            <DataTemplate DataType="vm:StringMiddlewareFieldViewModel">
-                                <StackPanel Spacing="4" Margin="0,0,0,14">
-                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
-                                    <TextBlock
-                                        IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                                        Text="{Binding Description}"
-                                        FontSize="11"
-                                        Foreground="{DynamicResource MutedForegroundColor}"
-                                        TextWrapping="Wrap"/>
-                                    <TextBox Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.DataTemplates>
-                    </ItemsControl>
+                        <Separator Background="{DynamicResource BorderColor}" Height="1" Margin="0,2"/>
 
-                    <!-- Actions -->
-                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                        <Button
-                            Classes="Primary"
-                            Command="{Binding SaveConfigCommand}"
-                            Content="{Binding [middleware_apply], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            Height="32"
+                        <!-- Empty state if no fields -->
+                        <TextBlock
+                            IsVisible="{Binding ConfigFields.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                            Text="{Binding [client_not_connected_service], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='该中间件未导出声明式配置模式。'}"
                             FontSize="12"
-                            Padding="14,0"/>
-                        <Button
-                            Classes="Outline"
-                            Command="{Binding ResetConfigCommand}"
-                            Content="{Binding [middleware_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            Height="32"
-                            FontSize="12"
-                            Padding="14,0"/>
+                            Foreground="{DynamicResource MutedForegroundColor}"/>
+
+                        <!-- Polymorphic Fields ItemsControl with DataTemplates -->
+                        <ItemsControl ItemsSource="{Binding ConfigFields}">
+                            <ItemsControl.DataTemplates>
+                                <!-- Boolean field template -->
+                                <DataTemplate DataType="vm:BoolMiddlewareFieldViewModel">
+                                    <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
+                                        <Grid ColumnDefinitions="*, Auto">
+                                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="12"/>
+                                                <TextBlock
+                                                    IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                                    Text="{Binding Description}"
+                                                    FontSize="10"
+                                                    Foreground="{DynamicResource MutedForegroundColor}"
+                                                    TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding Value, Mode=TwoWay}" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+
+                                <!-- Numeric field template -->
+                                <DataTemplate DataType="vm:NumberMiddlewareFieldViewModel">
+                                    <StackPanel Spacing="4" Margin="0,0,0,10">
+                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <NumericUpDown Value="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12" CornerRadius="6"/>
+                                        <TextBlock
+                                            IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                            Text="{Binding Description}"
+                                            FontSize="10"
+                                            Foreground="{DynamicResource MutedForegroundColor}"
+                                            TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+
+                                <!-- String / generic field template -->
+                                <DataTemplate DataType="vm:StringMiddlewareFieldViewModel">
+                                    <StackPanel Spacing="4" Margin="0,0,0,10">
+                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBox Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12" CornerRadius="6"/>
+                                        <TextBlock
+                                            IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                            Text="{Binding Description}"
+                                            FontSize="10"
+                                            Foreground="{DynamicResource MutedForegroundColor}"
+                                            TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.DataTemplates>
+                        </ItemsControl>
+
+                        <!-- Status Message -->
+                        <TextBlock
+                            IsVisible="{Binding StatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                            Text="{Binding StatusMessage}"
+                            FontSize="11"
+                            Foreground="{DynamicResource PrimaryColor}"
+                            Margin="0,4,0,0"/>
                     </StackPanel>
-
-                    <!-- Status Notification -->
-                    <TextBlock
-                        IsVisible="{Binding StatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                        Text="{Binding StatusMessage}"
-                        Foreground="#10b981"
-                        FontSize="12"/>
-                </StackPanel>
-            </ScrollViewer>
-        </shadui:Card>
+                </ScrollViewer>
+            </shadui:Card>
+        </Grid>
     </Grid>
 </UserControl>

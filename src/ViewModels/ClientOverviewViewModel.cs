@@ -46,18 +46,51 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
     public List<string> SupportedProtocols { get; } = new()
     {
+        "auto://",
         "prism://",
-        "prism-kcp://",
-        "prism-quic://",
-        "prism-ws://",
-        "prism-h3://"
+        "wt://",
+        "quic://",
+        "tcp://",
+        "kcp://",
+        "ws://",
+        "wss://"
     };
 
     [ObservableProperty]
-    private string _selectedProtocol = "prism://";
+    private string _selectedProtocol = "auto://";
 
     [ObservableProperty]
-    private string _remoteLinkInput = "";
+    private string _remoteLinkInput = "mc.627500.xyz";
+
+    [ObservableProperty]
+    private string _listenAddress = "127.0.0.1:25565";
+
+    [ObservableProperty]
+    private string _mappingText = "";
+
+    [ObservableProperty]
+    private bool _showLoggedInCard;
+
+    [ObservableProperty]
+    private bool _showConnectAndLoginHero = true;
+
+    [ObservableProperty]
+    private bool _showLoginMethods = true;
+
+    [ObservableProperty]
+    private string _discoveredServicesBadgeText = "0 活动";
+
+    [ObservableProperty]
+    private string _discoveredServicesEmptyTitle = "未连接远端服务";
+
+    [ObservableProperty]
+    private string _discoveredServicesEmptyHint = "连接后将在此展示远端 Connector 发布的本地映射端口和服务信息";
+
+    [ObservableProperty]
+    private bool _hasCumulativeHistory;
+
+    [ObservableProperty]
+    private string _cumulativeHistoryText = "";
 
     partial void OnRemoteLinkInputChanged(string value)
     {
@@ -103,6 +136,19 @@ public partial class ClientOverviewViewModel : ViewModelBase
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(ServerAddress);
             AppServices.ShowSuccess("Server address copied to clipboard.", "Copied");
+        }
+    }
+
+    [RelayCommand]
+    public async Task CopyConnectionAsync()
+    {
+        string fullUrl = RemoteLinkInput.Contains("://") ? RemoteLinkInput : $"{SelectedProtocol}{RemoteLinkInput}";
+        if (string.IsNullOrWhiteSpace(fullUrl)) return;
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
+            desktop.MainWindow?.Clipboard != null)
+        {
+            await desktop.MainWindow.Clipboard.SetTextAsync(fullUrl);
+            AppServices.ShowSuccess("Connection address copied to clipboard.", "Copied");
         }
     }
 
@@ -192,14 +238,35 @@ public partial class ClientOverviewViewModel : ViewModelBase
         {
             var cfg = _client.GetConfig();
             ProfileName = cfg.ActiveConfig.ProfileName ?? cfg.ActiveProfileId ?? "Default";
-            ServerAddress = cfg.ActiveConfig.ServerAddr;
+            ServerAddress = cfg.ActiveConfig.ServerAddr ?? "";
+            ListenAddress = cfg.ActiveConfig.ListenAddr ?? "127.0.0.1:25565";
             ActiveTransport = (cfg.ActiveConfig.Transport ?? "AUTO").ToUpperInvariant();
 
-            if (!string.IsNullOrWhiteSpace(cfg.ActiveConfig.Username) || !string.IsNullOrWhiteSpace(cfg.ActiveConfig.AuthToken))
+            if (!string.IsNullOrWhiteSpace(ServerAddress))
             {
-                IsSessionAuthenticated = true;
-                SessionUsername = string.IsNullOrWhiteSpace(cfg.ActiveConfig.Username) ? "User" : cfg.ActiveConfig.Username;
+                var idx = ServerAddress.IndexOf("://", StringComparison.Ordinal);
+                if (idx > 0)
+                {
+                    SelectedProtocol = ServerAddress.Substring(0, idx + 3);
+                    RemoteLinkInput = ServerAddress.Substring(idx + 3);
+                }
+                else
+                {
+                    SelectedProtocol = "auto://";
+                    RemoteLinkInput = ServerAddress;
+                }
             }
+            else
+            {
+                SelectedProtocol = "auto://";
+                RemoteLinkInput = "mc.627500.xyz";
+            }
+
+            // In accordance with Tauri selectClientAuthView:
+            // Having a username in config does NOT mean session is live authenticated!
+            // Live authenticated requires active tunnel connected AND session verified.
+            SessionUsername = string.IsNullOrWhiteSpace(cfg.ActiveConfig.Username) ? "User" : cfg.ActiveConfig.Username;
+            IsSessionAuthenticated = false;
 
             _isSwitchingProfile = true;
             AvailableProfiles.Clear();
@@ -210,10 +277,40 @@ public partial class ClientOverviewViewModel : ViewModelBase
             }
             SelectedProfile = AvailableProfiles.FirstOrDefault(p => p.Id == cfg.ActiveProfileId) ?? AvailableProfiles.FirstOrDefault();
             _isSwitchingProfile = false;
+
+            UpdateComputedProperties();
         }
         catch
         {
             _isSwitchingProfile = false;
+            UpdateComputedProperties();
+        }
+    }
+
+    public void UpdateComputedProperties()
+    {
+        bool liveAuth = IsConnected && IsSessionAuthenticated;
+        ShowLoggedInCard = liveAuth;
+        ShowConnectAndLoginHero = !liveAuth;
+
+        ShowLoginMethods = !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated;
+
+        string host = !string.IsNullOrWhiteSpace(ServerAddress) ? ServerAddress : (!string.IsNullOrWhiteSpace(RemoteLinkInput) ? RemoteLinkInput : "mc.627500.xyz");
+        string listen = !string.IsNullOrWhiteSpace(ListenAddress) ? ListenAddress : "127.0.0.1:25565";
+        MappingText = $"{host} -> {listen}";
+
+        string activeWord = LocalizationManager.Instance["client_active"] ?? "活动";
+        DiscoveredServicesBadgeText = $"{DiscoveredServices.Count} {activeWord}";
+
+        if (IsConnected)
+        {
+            DiscoveredServicesEmptyTitle = LocalizationManager.Instance["client_waiting_services"] ?? "等待 Connector 发布远端服务…";
+            DiscoveredServicesEmptyHint = "";
+        }
+        else
+        {
+            DiscoveredServicesEmptyTitle = LocalizationManager.Instance["client_not_connected_service"] ?? "未连接远端服务";
+            DiscoveredServicesEmptyHint = LocalizationManager.Instance["client_service_hint"] ?? "连接后将在此展示远端 Connector 发布的本地映射端口和服务信息";
         }
     }
 
@@ -520,6 +617,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
             ServerAddress = status.ServerAddr;
         }
 
+        if (!string.IsNullOrWhiteSpace(status.ListenAddr))
+        {
+            ListenAddress = status.ListenAddr;
+        }
+
         ActiveTransport = (status.ActualTransport ?? status.Transport ?? "AUTO").ToUpperInvariant();
 
         if (StatsViewMode == "session")
@@ -551,8 +653,22 @@ public partial class ClientOverviewViewModel : ViewModelBase
         UplinkStatsText = $"{Formatters.FormatBytes(status.Stats.Uplink.WireBytes)} ({Formatters.FormatPercentage(status.Stats.Uplink.SavedRatio)})";
         DownlinkStatsText = $"{Formatters.FormatBytes(status.Stats.Downlink.WireBytes)} ({Formatters.FormatPercentage(status.Stats.Downlink.SavedRatio)})";
 
+        // Update cumulative history for disconnected state
+        var cumStat = status.CumulativeStats;
+        if (!IsConnected && cumStat != null && cumStat.RawBytes > 0)
+        {
+            HasCumulativeHistory = true;
+            CumulativeHistoryText = $"{Formatters.FormatBytes(cumStat.RawBytes)} 原始 • {Formatters.FormatBytes(cumStat.WireBytes)} 线路 • {Formatters.FormatPercentage(cumStat.SavedRatio)} 节省 ({cumStat.SessionsCount} 会话)";
+        }
+        else
+        {
+            HasCumulativeHistory = false;
+        }
+
         // Update discovered services with diffing to prevent UI flickering
         SyncDiscoveredServices(status.KnownServices, status.ListenAddr);
+
+        UpdateComputedProperties();
 
         if (status.Running && (!_wasRunning || (DateTime.UtcNow - _lastSessionCheck).TotalSeconds > 30))
         {
@@ -597,6 +713,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
             });
             idx++;
         }
+
+        UpdateComputedProperties();
     }
 
     private static string GetLoopbackTarget(int idx, string listenAddr)
@@ -686,6 +804,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 IsGithubAuthAvailable = providers.GithubEnabled || providers.Providers.Contains("github");
             }
             catch { }
+            UpdateComputedProperties();
         }
         catch
         {
@@ -731,6 +850,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             SessionUsername = "";
             SessionIsAdmin = false;
             SessionRole = "";
+            UpdateComputedProperties();
             if (IsRunning)
             {
                 await _client.StopAsync();

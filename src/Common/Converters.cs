@@ -43,11 +43,43 @@ public static class Converters
             };
         });
 
+    public static readonly IValueConverter LogLevelToBackgroundBrush =
+        new FuncValueConverter<string?, IBrush>(level =>
+        {
+            var l = (level ?? "INFO").ToUpperInvariant();
+            return l switch
+            {
+                "ERROR" => new SolidColorBrush(Color.FromArgb(35, 239, 68, 68)),
+                "WARN" => new SolidColorBrush(Color.FromArgb(35, 245, 158, 11)),
+                "DEBUG" => new SolidColorBrush(Color.FromArgb(25, 107, 114, 128)),
+                _ => new SolidColorBrush(Color.FromArgb(35, 16, 185, 129))
+            };
+        });
+
+    public static readonly IValueConverter TimestampToTimeStr =
+        new FuncValueConverter<string?, string>(ts =>
+        {
+            if (string.IsNullOrEmpty(ts)) return "";
+            if (ts.Length > 8 && ts.Contains('T'))
+            {
+                var parts = ts.Split('T');
+                if (parts.Length > 1 && parts[1].Length >= 8)
+                    return "[" + parts[1].Substring(0, 8) + "]";
+            }
+            return "[" + ts + "]";
+        });
+
     public static readonly IValueConverter RunningToTunnelText =
         new FuncValueConverter<bool, string>(running =>
             running
                 ? (Prism.I18n.LocalizationManager.Instance["client_disconnect_tunnel"] ?? "断开隧道")
                 : (Prism.I18n.LocalizationManager.Instance["client_connect"] ?? "连接"));
+
+    public static readonly IValueConverter LocaleToShortLabel =
+        new FuncValueConverter<string?, string>(locale =>
+            string.Equals(locale, "zh-CN", StringComparison.OrdinalIgnoreCase)
+                ? (Prism.I18n.LocalizationManager.Instance["language_chinese_short"] ?? "简中")
+                : (Prism.I18n.LocalizationManager.Instance["language_english_short"] ?? "EN"));
 
     public static readonly IValueConverter StatusToLabel =
         new FuncValueConverter<bool, string>(running => running ? "RUNNING" : "IDLE");

@@ -108,6 +108,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             AutoCheckUpdate = cfg.ActiveConfig.AutoCheckUpdate;
             Autostart = DesktopService.IsAutostartEnabled() || cfg.ActiveConfig.Autostart;
             SilentAutostart = cfg.ActiveConfig.SilentAutostart;
+            IsAdmin = AdminApiClient.Instance.CurrentSession?.IsAdmin == true;
         }
         catch
         {
@@ -203,6 +204,48 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     partial void OnAutoCheckUpdateChanged(bool value) => SaveConfig();
     partial void OnManagementUrlChanged(string value) => SaveConfig();
 
+    [ObservableProperty]
+    private bool _isAdmin;
+
+    [ObservableProperty]
+    private bool _copiedDeviceIdNotice;
+
+    [RelayCommand]
+    public void SelectTab(string tab)
+    {
+        ActiveTab = tab;
+    }
+
+    [RelayCommand]
+    public void SelectTheme(string theme)
+    {
+        SelectedTheme = theme;
+    }
+
+    [RelayCommand]
+    public void SelectLocale(string locale)
+    {
+        CurrentLocale = locale;
+    }
+
+    [RelayCommand]
+    public void GoToProfiles()
+    {
+        NavigationService.Instance.NavigateTo("client.profiles");
+    }
+
+    [RelayCommand]
+    public void GoToAdmin()
+    {
+        NavigationService.Instance.NavigateTo("admin.overview");
+    }
+
+    [RelayCommand]
+    public void OpenGitHub()
+    {
+        _client.OpenExternalUrl("https://github.com/Summpot/prism");
+    }
+
     [RelayCommand]
     public async Task CopyDeviceIdAsync()
     {
@@ -210,6 +253,11 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(DeviceId);
+            CopiedDeviceIdNotice = true;
+            _ = Task.Delay(2000).ContinueWith(_ =>
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => CopiedDeviceIdNotice = false);
+            });
         }
     }
 

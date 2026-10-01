@@ -11,224 +11,402 @@
     mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
     x:DataType="vm:SettingsViewModel">
 
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="20">
-        <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
-            <!-- Header -->
-            <StackPanel Spacing="4">
-                <TextBlock Text="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
-                <TextBlock Text="{Binding [settings_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="960" Spacing="14" Margin="16">
+
+            <!-- Page Header -->
+            <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
+                        <TextBlock Text="{Binding [settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
+                        <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                            <TextBlock Text="v0.1.0" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding [settings_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Navigation Tabs Bar -->
+            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="3" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button Classes="Ghost"
+                            Classes.Primary="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=general}"
+                            Command="{Binding SelectTabCommand}" CommandParameter="general"
+                            Height="28" FontSize="11" Padding="12,0" CornerRadius="6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Palette}" Width="13" Height="13"/>
+                            <TextBlock Text="{Binding [settings_tab_general], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="Ghost"
+                            Classes.Primary="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=connection}"
+                            Command="{Binding SelectTabCommand}" CommandParameter="connection"
+                            Height="28" FontSize="11" Padding="12,0" CornerRadius="6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="13" Height="13"/>
+                            <TextBlock Text="{Binding [settings_tab_connection], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="Ghost"
+                            Classes.Primary="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=updates}"
+                            Command="{Binding SelectTabCommand}" CommandParameter="updates"
+                            Height="28" FontSize="11" Padding="12,0" CornerRadius="6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.ArrowUpCircle}" Width="13" Height="13"/>
+                            <TextBlock Text="{Binding [settings_tab_updates], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="Ghost"
+                            Classes.Primary="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=about}"
+                            Command="{Binding SelectTabCommand}" CommandParameter="about"
+                            Height="28" FontSize="11" Padding="12,0" CornerRadius="6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Info}" Width="13" Height="13"/>
+                            <TextBlock Text="{Binding [settings_tab_about], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- Tab 1: General & Appearance -->
+            <StackPanel IsVisible="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=general}" Spacing="12">
+                <!-- Theme Card -->
+                <shadui:Card Padding="16">
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Palette}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                                <TextBlock Text="{Binding [settings_theme], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding [settings_theme_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="*, *, *">
+                            <!-- System Theme -->
+                            <Button Classes="Outline"
+                                    Classes.Primary="{Binding SelectedTheme, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=Default}"
+                                    Command="{Binding SelectThemeCommand}" CommandParameter="Default"
+                                    Grid.Column="0" Margin="0,0,4,0" Padding="12,10" CornerRadius="8" HorizontalAlignment="Stretch">
+                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Monitor}" Width="14" Height="14"/>
+                                    <TextBlock Text="{Binding [settings_theme_system], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                </StackPanel>
+                            </Button>
+
+                            <!-- Light Theme -->
+                            <Button Classes="Outline"
+                                    Classes.Primary="{Binding SelectedTheme, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=Light}"
+                                    Command="{Binding SelectThemeCommand}" CommandParameter="Light"
+                                    Grid.Column="1" Margin="4,0,4,0" Padding="12,10" CornerRadius="8" HorizontalAlignment="Stretch">
+                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Sun}" Width="14" Height="14"/>
+                                    <TextBlock Text="{Binding [settings_theme_light], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                </StackPanel>
+                            </Button>
+
+                            <!-- Dark Theme -->
+                            <Button Classes="Outline"
+                                    Classes.Primary="{Binding SelectedTheme, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=Dark}"
+                                    Command="{Binding SelectThemeCommand}" CommandParameter="Dark"
+                                    Grid.Column="2" Margin="4,0,0,0" Padding="12,10" CornerRadius="8" HorizontalAlignment="Stretch">
+                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Moon}" Width="14" Height="14"/>
+                                    <TextBlock Text="{Binding [settings_theme_dark], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </shadui:Card>
+
+                <!-- Language Card -->
+                <shadui:Card Padding="16">
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Languages}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                                <TextBlock Text="{Binding [settings_language], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding [settings_language_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="*, *">
+                            <!-- Simplified Chinese -->
+                            <Button Classes="Outline"
+                                    Classes.Primary="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=zh-CN}"
+                                    Command="{Binding SelectLocaleCommand}" CommandParameter="zh-CN"
+                                    Grid.Column="0" Margin="0,0,4,0" Padding="14,10" CornerRadius="8" HorizontalAlignment="Stretch">
+                                <Grid ColumnDefinitions="*, Auto" HorizontalAlignment="Stretch">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="简体中文" FontSize="12" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Chinese (Simplified)" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <common:LucideIcon Grid.Column="1"
+                                                       IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=zh-CN}"
+                                                       Data="{x:Static common:AppIcons.Check}" Width="14" Height="14" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Button>
+
+                            <!-- English -->
+                            <Button Classes="Outline"
+                                    Classes.Primary="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=en}"
+                                    Command="{Binding SelectLocaleCommand}" CommandParameter="en"
+                                    Grid.Column="1" Margin="4,0,0,0" Padding="14,10" CornerRadius="8" HorizontalAlignment="Stretch">
+                                <Grid ColumnDefinitions="*, Auto" HorizontalAlignment="Stretch">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="English" FontSize="12" FontWeight="SemiBold"/>
+                                        <TextBlock Text="English (US)" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <common:LucideIcon Grid.Column="1"
+                                                       IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=en}"
+                                                       Data="{x:Static common:AppIcons.Check}" Width="14" Height="14" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </shadui:Card>
             </StackPanel>
 
-            <TabControl Margin="0,8,0,0">
-                <!-- Tab 1: General -->
-                <TabItem Header="{Binding [settings_tab_general], Source={x:Static i18n:LocalizationManager.Instance}}">
-                    <StackPanel Spacing="16" Margin="0,16,0,0">
-                        <!-- Language Card -->
-                        <shadui:Card Padding="16">
-                            <Grid ColumnDefinitions="*, Auto">
-                                <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="{Binding [settings_language], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                    <TextBlock Text="{Binding [settings_language_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                </StackPanel>
-                                <ComboBox
-                                    Grid.Column="1"
-                                    ItemsSource="{x:Static vm:SettingsViewModel.AvailableLanguages}"
-                                    SelectedValue="{Binding CurrentLocale, Mode=TwoWay}"
-                                    SelectedValueBinding="{Binding Key, x:DataType=common:LocaleOption}"
-                                    DisplayMemberBinding="{Binding Value, x:DataType=common:LocaleOption}"
-                                    Width="160"
-                                    Height="32"
-                                    FontSize="12"/>
-                            </Grid>
-                        </shadui:Card>
+            <!-- Tab 2: Startup & Connection -->
+            <StackPanel IsVisible="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=connection}" Spacing="12">
+                <!-- Behavior Switches -->
+                <shadui:Card Padding="16">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                            <TextBlock Text="{Binding [settings_tab_connection], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                        </StackPanel>
 
-                        <!-- Theme Card -->
-                        <shadui:Card Padding="16">
-                            <Grid ColumnDefinitions="*, Auto">
-                                <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="{Binding [settings_theme], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                    <TextBlock Text="{Binding [settings_theme_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                </StackPanel>
-                                <ComboBox
-                                    Grid.Column="1"
-                                    ItemsSource="{x:Static vm:SettingsViewModel.AvailableThemes}"
-                                    SelectedItem="{Binding SelectedTheme, Mode=TwoWay}"
-                                    Width="160"
-                                    Height="32"
-                                    FontSize="12"/>
-                            </Grid>
-                        </shadui:Card>
-
-                        <!-- Launch Options Card -->
-                        <shadui:Card Padding="16">
-                            <StackPanel Spacing="14">
-                                <TextBlock Text="Startup &amp; Behavior" FontWeight="SemiBold" FontSize="13"/>
-
-                                <!-- Autostart -->
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [client_autostart], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
-                                        <TextBlock Text="{Binding [client_autostart_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    </StackPanel>
-                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding Autostart, Mode=TwoWay}"/>
-                                </Grid>
-
-                                <!-- Silent Autostart -->
-                                <Grid ColumnDefinitions="*, Auto" IsEnabled="{Binding Autostart}">
-                                    <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [client_silent_autostart], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
-                                        <TextBlock Text="{Binding [client_silent_autostart_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    </StackPanel>
-                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding SilentAutostart, Mode=TwoWay}"/>
-                                </Grid>
-
-                                <Separator Background="{DynamicResource BorderColor}" Height="1"/>
-                                
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [client_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
-                                        <TextBlock Text="{Binding [client_auto_connect_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    </StackPanel>
-                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnect, Mode=TwoWay}"/>
-                                </Grid>
-
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [client_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
-                                        <TextBlock Text="{Binding [client_auto_connect_panel_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    </StackPanel>
-                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnectPanel, Mode=TwoWay}"/>
-                                </Grid>
-                            </StackPanel>
-                        </shadui:Card>
-                    </StackPanel>
-                </TabItem>
-
-                <!-- Tab 2: Connection -->
-                <TabItem Header="{Binding [settings_tab_connection], Source={x:Static i18n:LocalizationManager.Instance}}">
-                    <StackPanel Spacing="16" Margin="0,16,0,0">
-                        <!-- Management URL -->
-                        <shadui:Card Padding="16">
-                            <StackPanel Spacing="6">
-                                <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                <TextBlock Text="{Binding [settings_management_url_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                <TextBox Text="{Binding ManagementUrl, Mode=TwoWay}" Height="32" FontSize="12" Margin="0,4,0,0"/>
-                            </StackPanel>
-                        </shadui:Card>
-
-                        <!-- Device Identifier -->
-                        <shadui:Card Padding="16">
-                            <StackPanel Spacing="6">
-                                <TextBlock Text="{Binding [settings_device_id], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                <TextBlock Text="{Binding [settings_device_id_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                <Grid ColumnDefinitions="*, 8, Auto" Margin="0,4,0,0">
-                                    <TextBox Grid.Column="0" Text="{Binding DeviceId}" IsReadOnly="True" Height="32" FontSize="12"/>
-                                    <Button Grid.Column="2" Classes="Outline" Command="{Binding CopyDeviceIdCommand}" Content="{Binding [client_copy], Source={x:Static i18n:LocalizationManager.Instance}}" Height="32" FontSize="11" Padding="12,0"/>
-                                </Grid>
-                            </StackPanel>
-                        </shadui:Card>
-
-                        <!-- Fake LAN -->
-                        <shadui:Card Padding="16">
-                            <Grid ColumnDefinitions="*, Auto">
-                                <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="{Binding [client_lan_broadcast], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                    <TextBlock Text="{Binding [client_lan_broadcast_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                </StackPanel>
-                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding FakeLanBroadcast, Mode=TwoWay}"/>
-                            </Grid>
-                        </shadui:Card>
-                    </StackPanel>
-                </TabItem>
-
-                <!-- Tab 3: Updates -->
-                <TabItem Header="{Binding [settings_tab_updates], Source={x:Static i18n:LocalizationManager.Instance}}">
-                    <StackPanel Spacing="16" Margin="0,16,0,0">
-                        <shadui:Card Padding="16">
-                            <StackPanel Spacing="14">
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2">
-                                        <TextBlock Text="{Binding [client_update_channel], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                        <TextBlock Text="Select update release channel" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    </StackPanel>
-                                    <ComboBox Grid.Column="1"
-                                        ItemsSource="{x:Static vm:SettingsViewModel.AvailableUpdateChannels}"
-                                        SelectedItem="{Binding UpdateChannel, Mode=TwoWay}"
-                                        Width="140"
-                                        Height="32"
-                                        FontSize="12"/>
-                                </Grid>
-
-                                <Separator Background="{DynamicResource BorderColor}" Height="1"/>
-
+                        <StackPanel Spacing="8">
+                            <!-- Auto Connect -->
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding UpdateStatusMessage, FallbackValue='Prism is up to date'}" FontSize="12"/>
+                                        <TextBlock Text="{Binding [client_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                        <TextBlock Text="{Binding [client_auto_connect_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        Classes="Primary"
-                                        Command="{Binding CheckUpdateCommand}"
-                                        IsEnabled="{Binding IsCheckingUpdate, Converter={x:Static common:Converters.BooleanNegation}}"
-                                        Content="{Binding [client_update_check_btn], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                        Height="32"
-                                        FontSize="12"
-                                        Padding="14,0"/>
+                                    <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding AutoConnect, Mode=TwoWay}"/>
                                 </Grid>
+                            </Border>
 
-                                <StackPanel IsVisible="{Binding UpdateAvailable}" Spacing="8" Margin="0,8,0,0">
-                                    <Grid ColumnDefinitions="*, Auto">
-                                        <shadui:Badge Grid.Column="0" Content="{Binding LatestVersion, StringFormat='New Version: {0}'}" Height="24" Padding="8,0" HorizontalAlignment="Left"/>
-                                        <Button Grid.Column="1" Classes="Primary" Command="{Binding InstallUpdateCommand}"
-                                                IsEnabled="{Binding IsInstallingUpdate, Converter={x:Static common:Converters.BooleanNegation}}"
-                                                Content="{Binding [client_update_install_btn], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                                Height="28" FontSize="11" Padding="12,0"/>
-                                    </Grid>
-                                    <TextBlock Text="{Binding UpdateChangelog}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </shadui:Card>
-                    </StackPanel>
-                </TabItem>
-
-                <!-- Tab 4: About -->
-                <TabItem Header="{Binding [settings_tab_about], Source={x:Static i18n:LocalizationManager.Instance}}">
-                    <StackPanel Spacing="16" Margin="0,16,0,0">
-                        <shadui:Card Padding="24">
-                            <StackPanel Spacing="16" HorizontalAlignment="Center">
-                                <Image Source="avares://Prism/Assets/logo192.png" Width="72" Height="72" HorizontalAlignment="Center"/>
-                                <TextBlock Text="Prism Desktop" FontWeight="Bold" FontSize="20" HorizontalAlignment="Center"/>
-                                <TextBlock Text="Cross-Platform High-Performance Tunnel &amp; Game Accelerator" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                
-                                <Border Background="{DynamicResource CardBackgroundColor}" CornerRadius="8" Padding="16" Margin="0,10">
-                                    <StackPanel Spacing="8">
-                                        <Grid ColumnDefinitions="140, *">
-                                            <TextBlock Grid.Column="0" Text="UI Framework:" FontWeight="SemiBold" FontSize="11"/>
-                                            <TextBlock Grid.Column="1" Text="Avalonia 12.1.3 + ShadUI" FontSize="11"/>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="140, *">
-                                            <TextBlock Grid.Column="0" Text="Core Engine:" FontWeight="SemiBold" FontSize="11"/>
-                                            <TextBlock Grid.Column="1" Text="Rust native core (prism_native)" FontSize="11"/>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="140, *">
-                                            <TextBlock Grid.Column="0" Text="FFI Bridge:" FontWeight="SemiBold" FontSize="11"/>
-                                            <TextBlock Grid.Column="1" Text="UniFFISharp 0.1.0" FontSize="11"/>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="140, *">
-                                            <TextBlock Grid.Column="0" Text="Localization:" FontWeight="SemiBold" FontSize="11"/>
-                                            <TextBlock Grid.Column="1" Text="ZeroI18n 1.0.0" FontSize="11"/>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="140, *">
-                                            <TextBlock Grid.Column="0" Text="Compilation:" FontWeight="SemiBold" FontSize="11"/>
-                                            <TextBlock Grid.Column="1" Text=".NET 10 NativeAOT + SkiaSharp.Static" FontSize="11"/>
-                                        </Grid>
+                            <!-- Autostart -->
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding [client_autostart], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                        <TextBlock Text="{Binding [client_autostart_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </shadui:Card>
+                                    <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding Autostart, Mode=TwoWay}"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Silent Autostart -->
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8"
+                                    IsEnabled="{Binding Autostart}" Opacity="{Binding Autostart, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='1.0|0.5'}">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding [client_silent_autostart], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                        <TextBlock Text="{Binding [client_silent_autostart_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding SilentAutostart, Mode=TwoWay}"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Auto Connect Panel -->
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding [client_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                        <TextBlock Text="{Binding [client_auto_connect_panel_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding AutoConnectPanel, Mode=TwoWay}"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Fake LAN Broadcast -->
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding [client_lan_broadcast], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                        <TextBlock Text="{Binding [client_lan_broadcast_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding FakeLanBroadcast, Mode=TwoWay}"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
-                </TabItem>
-            </TabControl>
+                </shadui:Card>
+
+                <!-- Backend Management URL Card -->
+                <shadui:Card Padding="16">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel Grid.Column="0" Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding [settings_management_url_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            </StackPanel>
+                            <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding IsAdmin, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='已登录管理平面|未连接'}"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding IsAdmin, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='#10b981|#888888'}"/>
+                            </Border>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*, Auto" Margin="0,4,0,0">
+                            <TextBox Grid.Column="0" Text="{Binding ManagementUrl, Mode=TwoWay}"
+                                     Height="32" FontSize="12" FontFamily="Consolas, monospace" CornerRadius="6" Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToAdminCommand}" Height="32" Padding="12,0" CornerRadius="6">
+                                <TextBlock Text="{Binding [nav_admin], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </shadui:Card>
+
+                <!-- Tunnel Profiles Shortcut Card -->
+                <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="16">
+                    <Grid ColumnDefinitions="*, Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                                <TextBlock Text="{Binding [settings_profiles_link_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding [settings_profiles_link_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToProfilesCommand}" Height="28" Padding="12,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding [settings_profiles_link_btn], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                        </Button>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- Tab 3: Software Updates -->
+            <StackPanel IsVisible="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=updates}" Spacing="12">
+                <shadui:Card Padding="16">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.ArrowUpCircle}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                            <TextBlock Text="{Binding [settings_tab_updates], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                        </StackPanel>
+
+                        <!-- Auto Check Updates Switch -->
+                        <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding [settings_auto_check_update], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                    <TextBlock Text="{Binding [settings_auto_check_update_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding AutoCheckUpdate, Mode=TwoWay}"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Channel Selection -->
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding [settings_update_channel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
+                                <TextBlock Text="{Binding [settings_update_channel_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            </StackPanel>
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{x:Static vm:SettingsViewModel.AvailableUpdateChannels}"
+                                      SelectedItem="{Binding UpdateChannel, Mode=TwoWay}"
+                                      Width="120" Height="30" FontSize="12" CornerRadius="6"/>
+                        </Grid>
+
+                        <Separator Background="{DynamicResource BorderColor}" Height="1"/>
+
+                        <!-- Action Buttons -->
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Classes="Outline" Command="{Binding CheckUpdateCommand}" IsEnabled="{Binding !IsCheckingUpdate}" Height="30" Padding="12,0" CornerRadius="6">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                                    <TextBlock Text="{Binding [settings_check_now], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Classes="Primary" IsVisible="{Binding UpdateAvailable}" Command="{Binding InstallUpdateCommand}" IsEnabled="{Binding !IsInstallingUpdate}" Height="30" Padding="14,0" CornerRadius="6">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Download}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                                    <TextBlock Text="{Binding [client_update_install_now], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- Status Message -->
+                        <TextBlock IsVisible="{Binding UpdateStatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                   Text="{Binding UpdateStatusMessage}" FontSize="11" Foreground="{DynamicResource PrimaryColor}"/>
+                    </StackPanel>
+                </shadui:Card>
+            </StackPanel>
+
+            <!-- Tab 4: About & System Info -->
+            <StackPanel IsVisible="{Binding ActiveTab, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=about}" Spacing="12">
+                <shadui:Card Padding="16">
+                    <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="Auto, *">
+                            <Border Grid.Column="0" Background="{DynamicResource PrimaryColor}" CornerRadius="10" Width="44" Height="44" Margin="0,0,12,0">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="22" Height="22" Foreground="{DynamicResource PrimaryForegroundColor}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock Text="Prism" FontWeight="Bold" FontSize="16"/>
+                                <TextBlock Text="{Binding [brand_tagline], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Separator Background="{DynamicResource BorderColor}" Height="1"/>
+
+                        <!-- Version & Channel -->
+                        <Grid ColumnDefinitions="*, *">
+                            <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,4,0">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="{Binding [settings_app_version], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding UpdateChannel, StringFormat='v0.1.0 ({0})'}" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,0,0">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Target Architecture" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="NativeAOT Windows x64" FontWeight="SemiBold" FontSize="12" FontFamily="Consolas, monospace"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Device ID -->
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{Binding [settings_device_id], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <Grid ColumnDefinitions="*, Auto">
+                                <TextBox Grid.Column="0" Text="{Binding DeviceId}" IsReadOnly="True"
+                                         Height="32" FontSize="11" FontFamily="Consolas, monospace" CornerRadius="6" Margin="0,0,6,0"/>
+                                <Button Grid.Column="1" Classes="Outline" Command="{Binding CopyDeviceIdCommand}" Height="32" Padding="10,0" CornerRadius="6">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <common:LucideIcon IsVisible="{Binding !CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
+                                        <common:LucideIcon IsVisible="{Binding CopiedDeviceIdNotice}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="#10b981"/>
+                                        <TextBlock Text="{Binding CopiedDeviceIdNotice, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='已复制|复制'}"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <TextBlock Text="{Binding [settings_device_id_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+
+                        <Separator Background="{DynamicResource BorderColor}" Height="1"/>
+
+                        <!-- Links & Credits -->
+                        <Grid ColumnDefinitions="*, Auto">
+                            <Button Grid.Column="0" Classes="Ghost" Command="{Binding OpenGitHubCommand}" HorizontalAlignment="Left" Padding="0">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="14" Height="14"/>
+                                    <TextBlock Text="GitHub Repository" FontSize="12" TextDecorations="Underline"/>
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.ExternalLink}" Width="11" Height="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                </StackPanel>
+                            </Button>
+                            <TextBlock Grid.Column="1" Text="Prism High-Performance Tunnel" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+                </shadui:Card>
+            </StackPanel>
+
         </StackPanel>
     </ScrollViewer>
 </UserControl>

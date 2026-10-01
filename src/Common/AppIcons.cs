@@ -41,4 +41,12 @@ public static class AppIcons
     public static readonly StreamGeometry WindowMaximize = Parse("M1.5 1.5h9v9h-9z");
     public static readonly StreamGeometry WindowRestore = Parse("M3.5 2.5V1.5h7v7H9.5M.5 3.5h7v7h-7z");
     public static readonly StreamGeometry WindowClose = Parse("M2.5 2.5l7 7m0-7l-7 7");
+    public static readonly StreamGeometry Languages = Parse("M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6");
+    public static readonly StreamGeometry Palette = Parse("M12 2C6.5 2 2 6.5 2 12c0 3.6 2 6.8 5 8.2.5.2 1.1-.1 1.1-.7v-1.1c0-.5.4-1 1-1h1.5c3.6 0 6.5-2.9 6.5-6.4 0-4.4-4-8-9.1-8z");
+    public static readonly StreamGeometry ArrowUpCircle = Parse("M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zm0-6V8m-4 4l4-4 4 4");
+    public static readonly StreamGeometry Info = Parse("M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zm0-8v4m0-8h.01");
+    public static readonly StreamGeometry Monitor = Parse("M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm8 14v4m-4 0h8");
+    public static readonly StreamGeometry Sun = Parse("M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42m12.72-12.72l1.42-1.42M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z");
+    public static readonly StreamGeometry Moon = Parse("M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z");
+    public static readonly StreamGeometry ExternalLink = Parse("M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3");
 }

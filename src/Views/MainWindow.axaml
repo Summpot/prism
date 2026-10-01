@@ -73,17 +73,27 @@
 
     <shadui:Window.RightWindowTitleBarContent>
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,0" VerticalAlignment="Center">
-            <!-- Language Switcher Dropdown -->
-            <ComboBox
-                ItemsSource="{x:Static vm:MainWindowViewModel.AvailableLocales}"
-                SelectedValue="{Binding CurrentLocale, Mode=TwoWay}"
-                SelectedValueBinding="{Binding Key, x:DataType=common:LocaleOption}"
-                DisplayMemberBinding="{Binding Value, x:DataType=common:LocaleOption}"
-                Width="105"
-                Height="28"
-                FontSize="11"
-                Padding="6,2"/>
-
+            <!-- Language Switcher Flyout Button -->
+            <Button Classes="Ghost" Height="26" Padding="6,2" CornerRadius="4">
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Languages}" Width="13" Height="13" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding CurrentLocale, Converter={x:Static common:Converters.LocaleToShortLabel}}" FontSize="11" FontWeight="Medium" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                        <MenuItem Header="简体中文" Command="{Binding SelectLocaleCommand}" CommandParameter="zh-CN">
+                            <MenuItem.Icon>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=zh-CN}"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="English" Command="{Binding SelectLocaleCommand}" CommandParameter="en">
+                            <MenuItem.Icon>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=en}"/>
+                            </MenuItem.Icon>
+                        </MenuItem>
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
         </StackPanel>
     </shadui:Window.RightWindowTitleBarContent>
 
@@ -131,17 +141,17 @@
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.traffic">
                     <shadui:SidebarItem.Icon>
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDownUp}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
 
                 <shadui:SidebarItem 
-                    Route="client.optimizer" 
-                    Content="{Binding [nav_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Route="client.logs" 
+                    Content="{Binding [nav_logs], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
-                    CommandParameter="client.optimizer">
+                    CommandParameter="client.logs">
                     <shadui:SidebarItem.Icon>
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
 
@@ -166,12 +176,12 @@
                 </shadui:SidebarItem>
 
                 <shadui:SidebarItem 
-                    Route="client.logs" 
-                    Content="{Binding [nav_logs], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Route="client.optimizer" 
+                    Content="{Binding [nav_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
-                    CommandParameter="client.logs">
+                    CommandParameter="client.optimizer">
                     <shadui:SidebarItem.Icon>
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16"/>
                     </shadui:SidebarItem.Icon>
                 </shadui:SidebarItem>
 
@@ -262,31 +272,15 @@
             </StackPanel>
 
             <shadui:Sidebar.Footer>
-                <StackPanel Spacing="4">
-                    <shadui:SidebarItem 
-                        Route="settings" 
-                        Content="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}"
-                        Command="{Binding NavigateCommand}"
-                        CommandParameter="settings">
-                        <shadui:SidebarItem.Icon>
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16"/>
-                        </shadui:SidebarItem.Icon>
-                    </shadui:SidebarItem>
-
-                    <!-- Status & Connection state -->
-                    <Border Padding="6,8" Background="Transparent">
-                        <Grid ColumnDefinitions="Auto, *">
-                            <Ellipse Grid.Column="0" Width="8" Height="8" Margin="4,0,8,0"
-                                Fill="{Binding NativeClient.CurrentStatus.Running, Converter={x:Static common:Converters.StatusToBrush}, FallbackValue='#6b7280'}"/>
-                            <TextBlock Grid.Column="1"
-                                Text="{Binding NativeClient.CurrentStatus.State, FallbackValue='IDLE'}"
-                                FontSize="11"
-                                FontWeight="SemiBold"
-                                VerticalAlignment="Center"
-                                IsVisible="{Binding IsSidebarExpanded}"/>
-                        </Grid>
-                    </Border>
-                </StackPanel>
+                <shadui:SidebarItem 
+                    Route="settings" 
+                    Content="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    Command="{Binding NavigateCommand}"
+                    CommandParameter="settings">
+                    <shadui:SidebarItem.Icon>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16"/>
+                    </shadui:SidebarItem.Icon>
+                </shadui:SidebarItem>
             </shadui:Sidebar.Footer>
         </shadui:Sidebar>
 

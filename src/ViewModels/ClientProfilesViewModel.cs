@@ -143,13 +143,23 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
     [ObservableProperty]
     private bool _isDirty;
 
+    [ObservableProperty]
+    private string _profilesCountText = "0 个配置";
+
+    [ObservableProperty]
+    private string _editProfileTitle = "编辑配置";
+
     partial void OnSelectedProfileChanged(EditableProfile? value)
     {
         PingMs = null;
         if (value != null)
         {
             var draft = value.Clone();
-            draft.PropertyChanged += (_, _) => IsDirty = true;
+            draft.PropertyChanged += (_, _) =>
+            {
+                IsDirty = true;
+                UpdateComputed();
+            };
             DraftProfile = draft;
             IsDirty = false;
         }
@@ -158,6 +168,16 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
             DraftProfile = null;
             IsDirty = false;
         }
+        UpdateComputed();
+    }
+
+    private void UpdateComputed()
+    {
+        string tpl = Prism.I18n.LocalizationManager.Instance["client_profile_count"] ?? "{count} 个配置";
+        ProfilesCountText = tpl.Replace("{count}", Profiles.Count.ToString());
+
+        string editTpl = Prism.I18n.LocalizationManager.Instance["client_edit_profile"] ?? "编辑配置：{name}";
+        EditProfileTitle = editTpl.Replace("{name}", DraftProfile?.Name ?? "");
     }
 
     [RelayCommand]
@@ -233,6 +253,7 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
             SelectedProfile = (prevSelectedId != null ? Profiles.FirstOrDefault(p => p.Id == prevSelectedId) : null)
                 ?? Profiles.FirstOrDefault(p => p.IsActive)
                 ?? Profiles.FirstOrDefault();
+            UpdateComputed();
         }
         catch (Exception ex)
         {

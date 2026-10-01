@@ -18,13 +18,15 @@
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
                 <TextBlock Text="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="16"/>
-                <shadui:Badge Content="{Binding StatusCountText}" Height="20" Padding="6,0" FontSize="10"/>
+                <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding StatusCountText}" FontSize="10" FontFamily="Consolas, monospace" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </Border>
             </StackPanel>
 
-            <!-- Filters -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+            <!-- Filters and Actions -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <!-- Level Filter Group (Segmented) -->
-                <Border Background="{DynamicResource GhostColor}" CornerRadius="6" Padding="2" Margin="0,0,4,0">
+                <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="2">
                     <StackPanel Orientation="Horizontal" Spacing="2">
                         <Button Classes="Ghost"
                                 Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ALL}"
@@ -45,73 +47,135 @@
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [client_logs_filter], Source={x:Static i18n:LocalizationManager.Instance}}"
-                    Width="140"
+                    Width="130"
                     Height="26"
                     FontSize="11" />
 
-                <!-- AutoScroll Toggle -->
-                <CheckBox IsChecked="{Binding AutoScroll, Mode=TwoWay}" Content="{Binding [client_logs_auto_scroll], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Margin="4,0"/>
+                <!-- Auto-Scroll Button -->
+                <Button Classes="Outline"
+                        Command="{Binding ToggleAutoScrollCommand}"
+                        Content="{Binding ScrollButtonText}"
+                        Height="26"
+                        FontSize="11"
+                        Padding="8,0"/>
 
-                <!-- Clear Logs -->
-                <Button Classes="Outline" Command="{Binding ClearLogsCommand}" Content="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
+                <!-- Clear Logs Button -->
+                <Button Classes="Outline"
+                        Command="{Binding ClearLogsCommand}"
+                        Height="26"
+                        FontSize="11"
+                        Padding="8,0">
+                    <TextBlock Text="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}"
+                               Foreground="#ef4444"/>
+                </Button>
 
-                <!-- Copy All Logs -->
-                <Button Classes="Outline" Command="{Binding CopyAllLogsCommand}" Content="{Binding [client_logs_copy_all], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
+                <!-- Copy All Logs Button -->
+                <Button Classes="Outline"
+                        Command="{Binding CopyAllLogsCommand}"
+                        Height="26"
+                        FontSize="11"
+                        Padding="8,0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <common:LucideIcon IsVisible="{Binding !CopiedAll}" Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
+                        <common:LucideIcon IsVisible="{Binding CopiedAll}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="#10b981"/>
+                        <TextBlock Text="{Binding CopyButtonText}"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Grid>
 
-        <!-- Terminal Log Window -->
-        <shadui:Card Grid.Row="1" Padding="4">
-            <ListBox
-                x:Name="LogsList"
-                ItemsSource="{Binding FilteredLogs}"
-                Background="Transparent"
-                BorderThickness="0"
-                Padding="4">
-                <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="native:ClientLogEntry">
-                        <Grid ColumnDefinitions="Auto, Auto, Auto, *" Margin="0,2">
-                            <!-- Timestamp -->
-                            <TextBlock
-                                Grid.Column="0"
-                                Text="{Binding Timestamp}"
-                                FontSize="11"
-                                FontFamily="Consolas, Courier New, monospace"
-                                Foreground="{DynamicResource MutedForegroundColor}"
-                                Margin="0,0,8,0" />
+        <!-- Terminal Viewport Card -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource CardColor}"
+                BorderBrush="{DynamicResource BorderColor}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="6"
+                ClipToBounds="True">
+            <Panel>
+                <!-- Empty State -->
+                <StackPanel IsVisible="{Binding IsEmpty}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="32" Height="32" Foreground="{DynamicResource MutedForegroundColor}" Opacity="0.4" HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding [client_logs_empty], Source={x:Static i18n:LocalizationManager.Instance}}"
+                               FontSize="12" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                </StackPanel>
 
-                            <!-- Level Badge -->
-                            <Border
-                                Grid.Column="1"
-                                CornerRadius="3"
-                                Background="{Binding Level, Converter={x:Static common:Converters.LogLevelToBrush}}"
-                                Padding="4,1"
-                                Margin="0,0,8,0"
-                                VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold" Foreground="White"/>
-                            </Border>
+                <!-- Logs List Stream -->
+                <ListBox
+                    x:Name="LogsList"
+                    IsVisible="{Binding HasLogs}"
+                    ItemsSource="{Binding FilteredLogs}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Padding="4">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="4,2"/>
+                            <Setter Property="MinHeight" Value="0"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="#10888888"/>
+                        </Style>
+                        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                            <Setter Property="Background" Value="#08888888"/>
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="native:ClientLogEntry">
+                            <Grid ColumnDefinitions="Auto, Auto, Auto, *" Margin="0,1">
+                                <!-- Timestamp -->
+                                <TextBlock
+                                    Grid.Column="0"
+                                    Text="{Binding Timestamp, Converter={x:Static common:Converters.TimestampToTimeStr}}"
+                                    FontSize="11"
+                                    FontFamily="Consolas, Cascadia Mono, monospace"
+                                    Foreground="{DynamicResource MutedForegroundColor}"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Center"/>
 
-                            <!-- Target -->
-                            <TextBlock
-                                Grid.Column="2"
-                                Text="{Binding Target}"
-                                FontSize="11"
-                                FontFamily="Consolas, Courier New, monospace"
-                                FontWeight="SemiBold"
-                                Foreground="{DynamicResource MutedForegroundColor}"
-                                Margin="0,0,6,0" />
+                                <!-- Level Badge -->
+                                <Border
+                                    Grid.Column="1"
+                                    CornerRadius="3"
+                                    Background="{Binding Level, Converter={x:Static common:Converters.LogLevelToBackgroundBrush}}"
+                                    BorderBrush="{Binding Level, Converter={x:Static common:Converters.LogLevelToBrush}}"
+                                    BorderThickness="1"
+                                    Padding="4,0"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold"
+                                               Foreground="{Binding Level, Converter={x:Static common:Converters.LogLevelToBrush}}"/>
+                                </Border>
 
-                            <!-- Message -->
-                            <TextBlock
-                                Grid.Column="3"
-                                Text="{Binding Message}"
-                                FontSize="11"
-                                FontFamily="Consolas, Courier New, monospace"
-                                TextWrapping="Wrap" />
-                        </Grid>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </shadui:Card>
+                                <!-- Target -->
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Text="{Binding Target, StringFormat='{}{0}:'}"
+                                    FontSize="11"
+                                    FontFamily="Consolas, Cascadia Mono, monospace"
+                                    FontWeight="SemiBold"
+                                    Foreground="{DynamicResource MutedForegroundColor}"
+                                    Margin="0,0,6,0"
+                                    VerticalAlignment="Center"/>
+
+                                <!-- Message -->
+                                <TextBlock
+                                    Grid.Column="3"
+                                    Text="{Binding Message}"
+                                    FontSize="11"
+                                    FontFamily="Consolas, Cascadia Mono, monospace"
+                                    TextWrapping="Wrap"
+                                    VerticalAlignment="Center"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Panel>
+        </Border>
     </Grid>
 </UserControl>

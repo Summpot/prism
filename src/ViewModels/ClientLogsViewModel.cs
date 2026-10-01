@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
 
@@ -27,13 +28,30 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     private bool _autoScroll = true;
 
     [ObservableProperty]
+    private string _scrollButtonText = "滚动吸附：开启";
+
+    [ObservableProperty]
     private string _statusCountText = "0 / 0";
+
+    [ObservableProperty]
+    private bool _hasLogs;
+
+    [ObservableProperty]
+    private bool _isEmpty = true;
+
+    [ObservableProperty]
+    private bool _copiedAll;
+
+    [ObservableProperty]
+    private string _copyButtonText = "复制全部";
 
     public ObservableCollection<ClientLogEntry> FilteredLogs { get; } = new();
 
     public ClientLogsViewModel()
     {
         _client.LogsUpdated += OnLogsUpdated;
+        UpdateScrollButtonText();
+        CopyButtonText = LocalizationManager.Instance["client_logs_copy_all"] ?? "复制全部";
         OnLogsUpdated(_client.CurrentLogs);
     }
 
@@ -48,6 +66,15 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
 
     private string _lastFilter = "";
     private string _lastSearch = "";
+
+    private void UpdateScrollButtonText()
+    {
+        string stateStr = AutoScroll
+            ? (LocalizationManager.Instance["client_logs_on"] ?? "开启")
+            : (LocalizationManager.Instance["client_logs_off"] ?? "关闭");
+        string template = LocalizationManager.Instance["client_logs_scroll"] ?? "滚动吸附：{state}";
+        ScrollButtonText = template.Replace("{state}", stateStr);
+    }
 
     private void OnLogsUpdated(List<ClientLogEntry> logs)
     {
@@ -87,11 +114,10 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
                 lastExisting.Message == lastNew.Message &&
                 lastExisting.Target == lastNew.Target)
             {
-                // No new logs, do nothing
+                // No new logs
             }
             else
             {
-                // Find matching index of the last known item in list
                 int matchIdx = -1;
                 for (int i = list.Count - 1; i >= 0; i--)
                 {
@@ -110,7 +136,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
                     {
                         FilteredLogs.Add(list[i]);
                     }
-                    while (FilteredLogs.Count > 300)
+                    while (FilteredLogs.Count > 400)
                     {
                         FilteredLogs.RemoveAt(0);
                     }
@@ -126,6 +152,8 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
             }
         }
 
+        HasLogs = FilteredLogs.Count > 0;
+        IsEmpty = !HasLogs;
         StatusCountText = $"{FilteredLogs.Count} / {logs.Count}";
     }
 
@@ -139,10 +167,21 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         OnLogsUpdated(_client.CurrentLogs);
     }
 
+    partial void OnAutoScrollChanged(bool value)
+    {
+        UpdateScrollButtonText();
+    }
+
     [RelayCommand]
     public void SetFilter(string level)
     {
         FilterLevel = level;
+    }
+
+    [RelayCommand]
+    public void ToggleAutoScroll()
+    {
+        AutoScroll = !AutoScroll;
     }
 
     [RelayCommand]
@@ -164,7 +203,16 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
                 sb.AppendLine($"[{l.Timestamp}] [{l.Level}] {l.Target}: {l.Message}");
             }
             await desktop.MainWindow.Clipboard.SetTextAsync(sb.ToString());
-            AppServices.ShowSuccess("All logs copied to clipboard.", "Copied");
+            CopiedAll = true;
+            CopyButtonText = LocalizationManager.Instance["common_copied"] ?? "已复制";
+            _ = Task.Delay(2000).ContinueWith(_ =>
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    CopiedAll = false;
+                    CopyButtonText = LocalizationManager.Instance["client_logs_copy_all"] ?? "复制全部";
+                });
+            });
         }
     }
 }

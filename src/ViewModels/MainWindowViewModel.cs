@@ -36,7 +36,13 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [ObservableProperty]
-    private bool _isAdmin = true;
+    private bool _isAdmin = false;
+
+    [RelayCommand]
+    public void SelectLocale(string locale)
+    {
+        CurrentLocale = locale;
+    }
 
     [ObservableProperty]
     private ViewModelBase _currentPageViewModel;
@@ -99,7 +105,11 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 if (!status.Running)
                 {
-                    IsAdmin = true;
+                    IsAdmin = false;
+                    if (Navigation.CurrentRoute.StartsWith("admin."))
+                    {
+                        Navigation.NavigateTo("client.overview");
+                    }
                 }
             });
         };

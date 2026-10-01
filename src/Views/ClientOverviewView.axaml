@@ -41,282 +41,358 @@
                 </Grid>
             </Border>
 
-            <!-- 1. Hero Card: Connect to Remote & Login -->
-            <shadui:Card Padding="14">
-                <StackPanel Spacing="10">
-                    <!-- Branch A: Authenticated Card -->
-                    <Grid
-                        IsVisible="{Binding IsSessionAuthenticated}"
-                        ColumnDefinitions="Auto, *, Auto">
-                        <Border
-                            Grid.Column="0"
-                            Width="36"
-                            Height="36"
-                            CornerRadius="18"
-                            Background="{DynamicResource PrimaryColor}"
-                            Margin="0,0,12,0">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="18" Height="18" Foreground="{DynamicResource PrimaryForegroundColor}"/>
-                        </Border>
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock
-                                    Text="{Binding SessionUsername}"
-                                    FontWeight="Bold"
-                                    FontSize="13" />
-                                <shadui:Badge
-                                    Content="{Binding [client_admin], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                    IsVisible="{Binding SessionIsAdmin}"
-                                    Height="18"
-                                    Padding="6,0"
-                                    FontSize="10" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock
-                                    Text="{Binding ServerAddress}"
-                                    FontSize="11"
-                                    Foreground="{DynamicResource MutedForegroundColor}"
-                                    VerticalAlignment="Center"/>
-                                <Button Classes="Ghost" Command="{Binding CopyServerAddressCommand}"
-                                        Width="20" Height="20" Padding="2" ToolTip.Tip="{Binding [common_copy], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                        VerticalAlignment="Center">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Copy}" Width="10" Height="10"/>
-                                </Button>
-                            </StackPanel>
+            <!-- 1. Hero Card: Branch A - Authenticated User Identity Card (Shown ONLY when connected and authenticated) -->
+            <shadui:Card IsVisible="{Binding ShowLoggedInCard}" Padding="14">
+                <Grid ColumnDefinitions="Auto, *, Auto">
+                    <Border
+                        Grid.Column="0"
+                        Width="36"
+                        Height="36"
+                        CornerRadius="18"
+                        Background="{DynamicResource PrimaryColor}"
+                        Margin="0,0,12,0">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="18" Height="18" Foreground="{DynamicResource PrimaryForegroundColor}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                Text="{Binding SessionUsername}"
+                                FontWeight="Bold"
+                                FontSize="13" />
+                            <shadui:Badge
+                                Content="{Binding [client_admin], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                IsVisible="{Binding SessionIsAdmin}"
+                                Classes="Secondary"
+                                Height="18"
+                                Padding="6,0"
+                                FontSize="10" />
+                            <shadui:Badge
+                                Content="{Binding [client_member], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                IsVisible="{Binding !SessionIsAdmin}"
+                                Classes="Secondary"
+                                Height="18"
+                                Padding="6,0"
+                                FontSize="10" />
                         </StackPanel>
-                        <Button
-                            Grid.Column="2"
-                            Classes="Outline"
-                            Command="{Binding SignOutCommand}"
-                            Content="{Binding [client_sign_out], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            Height="28"
-                            FontSize="11" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock
+                                Text="{Binding ServerAddress}"
+                                FontSize="11"
+                                FontFamily="Consolas, monospace"
+                                Foreground="{DynamicResource MutedForegroundColor}"
+                                VerticalAlignment="Center"/>
+                            <Button Classes="Ghost" Command="{Binding CopyServerAddressCommand}"
+                                    Width="20" Height="20" Padding="2" ToolTip.Tip="{Binding [common_copy], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                    VerticalAlignment="Center">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Copy}" Width="10" Height="10"/>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                    <Button
+                        Grid.Column="2"
+                        Classes="Outline"
+                        Command="{Binding SignOutCommand}"
+                        Content="{Binding [client_sign_out], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        Height="28"
+                        FontSize="11" />
+                </Grid>
+            </shadui:Card>
+
+            <!-- 1. Hero Card: Branch B - Connect & Login Card (Matches Image 2) -->
+            <shadui:Card IsVisible="{Binding ShowConnectAndLoginHero}" Padding="14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*, Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}" />
+                            <TextBlock
+                                Text="{Binding [client_connect_and_login], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                FontWeight="Bold"
+                                FontSize="12" />
+                        </StackPanel>
+                        <TextBlock
+                            Grid.Column="1"
+                            Text="{Binding [client_anonymous_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
+                            FontSize="11"
+                            Foreground="{DynamicResource MutedForegroundColor}"
+                            VerticalAlignment="Center"/>
                     </Grid>
 
-                    <!-- Branch B: Anonymous / Connect Input -->
-                    <StackPanel IsVisible="{Binding IsSessionAuthenticated, Converter={x:Static common:Converters.BooleanNegation}}" Spacing="8">
-                        <Grid ColumnDefinitions="*, Auto">
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}" />
-                                <TextBlock
-                                    Text="{Binding [client_connect_and_login], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                    FontWeight="Bold"
-                                    FontSize="12" />
-                            </StackPanel>
-                            <TextBlock
+                    <!-- Unified Address Bar (一体化输入条) -->
+                    <Border Background="{DynamicResource CardBackgroundColor}"
+                            BorderBrush="{DynamicResource BorderColor}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="2">
+                        <Grid ColumnDefinitions="Auto, *, Auto">
+                            <!-- Protocol Dropdown -->
+                            <ComboBox
+                                Grid.Column="0"
+                                ItemsSource="{Binding SupportedProtocols}"
+                                SelectedItem="{Binding SelectedProtocol}"
+                                Height="30"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                CornerRadius="6,0,0,6"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                FontFamily="Consolas, monospace"
+                                Padding="8,4"
+                                VerticalAlignment="Center"/>
+
+                            <!-- Address Input Box with inner Copy and Clear buttons -->
+                            <TextBox
                                 Grid.Column="1"
-                                Text="{Binding [client_anonymous_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                FontSize="11"
-                                Foreground="{DynamicResource MutedForegroundColor}" />
-                        </Grid>
-
-                        <!-- Unified Address Bar (一体化地址栏) -->
-                        <Border Background="{DynamicResource CardBackgroundColor}"
-                                BorderBrush="{DynamicResource BorderColor}"
-                                BorderThickness="1"
-                                CornerRadius="8"
-                                Padding="3"
-                                Margin="0,4,0,0">
-                            <Grid ColumnDefinitions="Auto, Auto, *, Auto">
-                                <!-- Protocol Dropdown -->
-                                <ComboBox
-                                    Grid.Column="0"
-                                    ItemsSource="{Binding SupportedProtocols}"
-                                    SelectedItem="{Binding SelectedProtocol}"
-                                    Height="32"
-                                    BorderThickness="0"
-                                    Background="Transparent"
-                                    CornerRadius="6,0,0,6"
-                                    FontSize="12"
-                                    VerticalAlignment="Center"/>
-
-                                <Separator Grid.Column="1" Width="1" Height="18" Background="{DynamicResource BorderColor}" Margin="2,0"/>
-
-                                <!-- Remote Address Input -->
-                                <TextBox
-                                    Grid.Column="2"
-                                    Classes="Clearable"
-                                    Text="{Binding RemoteLinkInput, Mode=TwoWay}"
-                                    PlaceholderText="{Binding [client_remote_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                    Height="32"
-                                    BorderThickness="0"
-                                    Background="Transparent"
-                                    FontSize="12"
-                                    VerticalAlignment="Center">
-                                    <TextBox.InnerRightContent>
-                                        <Button Classes="Ghost" Command="{Binding PasteToRemoteLinkInputCommand}"
-                                                Width="24" Height="24" Padding="3" Margin="2,0"
-                                                ToolTip.Tip="{Binding [client_paste_tooltip], Source={x:Static i18n:LocalizationManager.Instance}}" VerticalAlignment="Center">
+                                Text="{Binding RemoteLinkInput, Mode=TwoWay}"
+                                PlaceholderText="{Binding [client_remote_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                Height="30"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                FontSize="12"
+                                FontFamily="Consolas, monospace"
+                                VerticalAlignment="Center">
+                                <TextBox.InnerRightContent>
+                                    <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,4,0" VerticalAlignment="Center">
+                                        <Button Classes="Ghost" Command="{Binding CopyConnectionCommand}"
+                                                Width="24" Height="24" Padding="3"
+                                                ToolTip.Tip="{Binding [client_copy_connection], Source={x:Static i18n:LocalizationManager.Instance}}">
                                             <common:LucideIcon Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
                                         </Button>
-                                    </TextBox.InnerRightContent>
-                                </TextBox>
+                                        <Button Classes="Ghost" Command="{Binding ClearRemoteLinkInputCommand}"
+                                                Width="24" Height="24" Padding="3"
+                                                ToolTip.Tip="{Binding [client_clear], Source={x:Static i18n:LocalizationManager.Instance}}">
+                                            <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="12" Height="12"/>
+                                        </Button>
+                                    </StackPanel>
+                                </TextBox.InnerRightContent>
+                            </TextBox>
 
-                                <!-- Action Buttons docked on right -->
-                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="0,0,2,0">
-                                    <Button
-                                        Classes="Primary"
-                                        Command="{Binding ConnectFromLinkCommand}"
-                                        Height="30"
-                                        CornerRadius="6"
-                                        Padding="14,0">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
-                                            <TextBlock Text="{Binding [client_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" />
-                                        </StackPanel>
-                                    </Button>
+                            <!-- Connect Action Button -->
+                            <Button
+                                Grid.Column="2"
+                                Classes="Primary"
+                                Command="{Binding ConnectFromLinkCommand}"
+                                Height="30"
+                                CornerRadius="6"
+                                Padding="14,0"
+                                Margin="2,0,0,0">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                                    <TextBlock Text="{Binding [client_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </Border>
 
-                                    <Button
-                                        Classes="Outline"
-                                        Command="{Binding StartGitHubLoginCommand}"
-                                        IsVisible="{Binding IsGithubAuthAvailable}"
-                                        Height="30"
-                                        CornerRadius="6"
-                                        Padding="10,0"
-                                        ToolTip.Tip="{Binding [client_github_login], Source={x:Static i18n:LocalizationManager.Instance}}">
-                                        <StackPanel Orientation="Horizontal" Spacing="5">
-                                            <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="13" Height="13"/>
-                                            <TextBlock Text="GitHub" FontSize="11"/>
-                                        </StackPanel>
-                                    </Button>
+                    <!-- Detected Login Methods (已探测到该节点支持的登录方式) -->
+                    <StackPanel IsVisible="{Binding ShowLoginMethods}" Spacing="8" Margin="0,4,0,0">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock
+                                Grid.Column="0"
+                                Text="{Binding [client_login_methods_detected], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                VerticalAlignment="Center"/>
+                            <shadui:Badge
+                                Grid.Column="1"
+                                Classes="Outline"
+                                Content="{Binding [client_waiting_for_login], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                Height="18"
+                                Padding="6,0"
+                                FontSize="10"/>
+                        </Grid>
+
+                        <!-- GitHub Login Card Button -->
+                        <Button
+                            Classes="Outline"
+                            Command="{Binding StartGitHubLoginCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            Padding="12,10"
+                            CornerRadius="8"
+                            BorderBrush="{DynamicResource BorderColor}">
+                            <Grid ColumnDefinitions="Auto, *">
+                                <!-- Black rounded icon box -->
+                                <Border
+                                    Grid.Column="0"
+                                    Width="32"
+                                    Height="32"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource PrimaryColor}"
+                                    Margin="0,0,12,0"
+                                    VerticalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="16" Height="16" Foreground="{DynamicResource PrimaryForegroundColor}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding [client_github_login], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="12"/>
+                                        <shadui:Badge Classes="Secondary" Content="{Binding [client_recommended], Source={x:Static i18n:LocalizationManager.Instance}}" Height="16" Padding="4,0" FontSize="9"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding [client_identity_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </StackPanel>
                             </Grid>
-                        </Border>
-
-                        <!-- OAuth Waiting Box -->
-                        <Border
-                            IsVisible="{Binding ShowOAuthWaiting}"
-                            Background="{DynamicResource GhostColor}"
-                            BorderBrush="{DynamicResource BorderColor}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="12"
-                            Margin="0,6,0,0">
-                            <StackPanel Spacing="8">
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
-                                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
-                                        <TextBlock Text="{Binding [client_wait_github], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="12"/>
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Classes="Ghost" Command="{Binding CancelOAuthCommand}" Content="{Binding [common_cancel], Source={x:Static i18n:LocalizationManager.Instance}}" Height="22" FontSize="11" Padding="6,0"/>
-                                </Grid>
-                                <TextBlock Text="{Binding [client_github_browser_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
-                                <Grid ColumnDefinitions="*, Auto" Margin="0,2,0,0">
-                                    <TextBox Grid.Column="0" Text="{Binding ManualCallbackInput, Mode=TwoWay}" PlaceholderText="{Binding [client_callback_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="6" Margin="0,0,8,0"/>
-                                    <Button Grid.Column="1" Classes="Primary" Command="{Binding VerifyManualCallbackCommand}" Content="{Binding [client_verify], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="6" Padding="12,0"/>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- OAuth Exchanging Indicator -->
-                        <Border
-                            IsVisible="{Binding ShowOAuthExchanging}"
-                            Background="{DynamicResource GhostColor}"
-                            BorderBrush="{DynamicResource BorderColor}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="10"
-                            Margin="0,6,0,0">
-                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
-                                <TextBlock Text="{Binding [client_exchange_github], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </Border>
+                        </Button>
                     </StackPanel>
+
+                    <!-- OAuth Waiting Box -->
+                    <Border
+                        IsVisible="{Binding ShowOAuthWaiting}"
+                        Background="{DynamicResource GhostColor}"
+                        BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="12"
+                        Margin="0,4,0,0">
+                        <StackPanel Spacing="8">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <TextBlock Text="{Binding [client_wait_github], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="12"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Classes="Ghost" Command="{Binding CancelOAuthCommand}" Content="{Binding [common_cancel], Source={x:Static i18n:LocalizationManager.Instance}}" Height="22" FontSize="11" Padding="6,0"/>
+                            </Grid>
+                            <TextBlock Text="{Binding [client_github_browser_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                            <Grid ColumnDefinitions="*, Auto" Margin="0,2,0,0">
+                                <TextBox Grid.Column="0" Text="{Binding ManualCallbackInput, Mode=TwoWay}" PlaceholderText="{Binding [client_callback_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="6" Margin="0,0,8,0"/>
+                                <Button Grid.Column="1" Classes="Primary" Command="{Binding VerifyManualCallbackCommand}" Content="{Binding [client_verify], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="6" Padding="12,0"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- OAuth Exchanging Indicator -->
+                    <Border
+                        IsVisible="{Binding ShowOAuthExchanging}"
+                        Background="{DynamicResource GhostColor}"
+                        BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="10"
+                        Margin="0,4,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                            <TextBlock Text="{Binding [client_exchange_github], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </shadui:Card>
 
-            <!-- 2. Active Tunnel Status Card -->
+            <!-- 2. Active Tunnel Status Card (Matches Image 2) -->
             <shadui:Card Padding="14">
                 <StackPanel Spacing="12">
                     <!-- Tunnel Header Status Row -->
                     <Grid ColumnDefinitions="Auto, *, Auto">
+                        <!-- Left Status Icon Box -->
                         <Border
                             Grid.Column="0"
                             Width="36"
                             Height="36"
-                            CornerRadius="{DynamicResource MdCornerRadius}"
-                            Background="{DynamicResource GhostColor}"
-                            BorderBrush="{DynamicResource BorderColor}"
-                            BorderThickness="1"
+                            CornerRadius="6"
+                            Background="{Binding IsConnected, Converter={x:Static common:Converters.StatusToBrush}}"
                             Margin="0,0,12,0">
                             <common:LucideIcon
-                                Data="{x:Static common:AppIcons.Power}"
+                                Data="{x:Static common:AppIcons.Radio}"
                                 Width="18"
                                 Height="18"
-                                Foreground="{Binding IsConnected, Converter={x:Static common:Converters.StatusToBrush}}" />
+                                Foreground="White"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"/>
                         </Border>
 
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                        <!-- Middle Info -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <ComboBox
-                                    ItemsSource="{Binding AvailableProfiles}"
-                                    SelectedItem="{Binding SelectedProfile, Mode=TwoWay}"
-                                    DisplayMemberBinding="{Binding Name}"
-                                    Height="28"
-                                    FontSize="13"
+                                <TextBlock
+                                    Text="{Binding ProfileName}"
                                     FontWeight="Bold"
-                                    MinWidth="140"/>
+                                    FontSize="13"
+                                    VerticalAlignment="Center"/>
                                 <shadui:Badge
+                                    Classes="Secondary"
                                     Content="{Binding ActiveTransport}"
                                     Height="18"
                                     Padding="6,0"
                                     FontSize="10" />
                             </StackPanel>
                             <TextBlock
-                                Text="{Binding ServerAddress}"
+                                Text="{Binding MappingText}"
                                 FontSize="11"
+                                FontFamily="Consolas, monospace"
                                 Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
 
-                        <!-- Power Toggle Button -->
+                        <!-- Power Toggle Action Button -->
+                        <!-- When Running: Red Outline Button "断开隧道" -->
                         <Button
                             Grid.Column="2"
+                            IsVisible="{Binding IsRunning}"
+                            Classes="Outline"
+                            BorderBrush="#ef4444"
+                            Foreground="#ef4444"
+                            Command="{Binding ToggleTunnelCommand}"
+                            Height="30"
+                            Padding="12,0"
+                            CornerRadius="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="13" Height="13" Foreground="#ef4444"/>
+                                <TextBlock Text="{Binding [client_disconnect_tunnel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Button>
+
+                        <!-- When Not Running: Primary Button "启动连接" -->
+                        <Button
+                            Grid.Column="2"
+                            IsVisible="{Binding !IsRunning}"
                             Classes="Primary"
                             Command="{Binding ToggleTunnelCommand}"
-                            Height="32"
-                            Padding="14,0">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="14" Height="14" Foreground="{DynamicResource PrimaryForegroundColor}" />
-                                <TextBlock Text="{Binding IsRunning, Converter={x:Static common:Converters.RunningToTunnelText}}" VerticalAlignment="Center"/>
+                            Height="30"
+                            Padding="14,0"
+                            CornerRadius="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="13" Height="13" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                                <TextBlock Text="{Binding [client_start_connection], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
                             </StackPanel>
                         </Button>
                     </Grid>
 
-                    <!-- Connected Statistics Metrics Strip -->
+                    <!-- Connected Statistics Metrics Strip (Visible when IsConnected) -->
                     <Border
                         IsVisible="{Binding IsConnected}"
                         BorderBrush="{DynamicResource BorderColor}"
                         BorderThickness="0,1,0,0"
                         Padding="0,10,0,0">
                         <StackPanel Spacing="10">
-                            <!-- Toggle Mode Row -->
+                            <!-- Toggle Mode Row: "当前会话" vs "会话 | 生命周期" -->
                             <Grid ColumnDefinitions="*, Auto">
                                 <TextBlock
                                     Grid.Column="0"
-                                    Text="{Binding [client_active], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                    Text="{Binding [client_active], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='当前会话'}"
                                     FontWeight="SemiBold"
-                                    FontSize="12"
+                                    FontSize="11"
+                                    Foreground="{DynamicResource MutedForegroundColor}"
                                     VerticalAlignment="Center" />
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                                    <Button
-                                        Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
-                                        Classes.Outline="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
-                                        Command="{Binding SetStatsModeCommand}"
-                                        CommandParameter="session"
-                                        Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                        Height="24"
-                                        FontSize="11"
-                                        Padding="8,0" />
-                                    <Button
-                                        Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
-                                        Classes.Outline="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
-                                        Command="{Binding SetStatsModeCommand}"
-                                        CommandParameter="lifetime"
-                                        Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                        Height="24"
-                                        FontSize="11"
-                                        Padding="8,0" />
-                                </StackPanel>
+                                <Border Grid.Column="1" Background="{DynamicResource GhostColor}" CornerRadius="6" Padding="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <Button
+                                            Classes="Ghost"
+                                            Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
+                                            Command="{Binding SetStatsModeCommand}"
+                                            CommandParameter="session"
+                                            Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                            Height="22"
+                                            FontSize="10"
+                                            Padding="8,0"
+                                            CornerRadius="4"/>
+                                        <Button
+                                            Classes="Ghost"
+                                            Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
+                                            Command="{Binding SetStatsModeCommand}"
+                                            CommandParameter="lifetime"
+                                            Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                            Height="22"
+                                            FontSize="10"
+                                            Padding="8,0"
+                                            CornerRadius="4"/>
+                                    </StackPanel>
+                                </Border>
                             </Grid>
 
                             <!-- 4-Column Metric Grid -->
@@ -324,25 +400,25 @@
                                 <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,4,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_uptime], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding UptimeText}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding UptimeText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="4,0,4,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding RawBytesText}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding RawBytesText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="4,0,4,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding WireBytesText}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding WireBytesText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="3" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="4,0,0,0">
                                     <StackPanel HorizontalAlignment="Center">
                                         <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="#10b981" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding SavedRatioText}" FontWeight="Bold" FontSize="13" Foreground="#10b981" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding SavedRatioText}" FontWeight="Bold" FontSize="13" FontFamily="Consolas, monospace" Foreground="#10b981" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -352,41 +428,51 @@
                                 <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,4,0">
                                     <Grid ColumnDefinitions="Auto, *">
                                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
-                                            <TextBlock Text="↑" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="↑" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource PrimaryColor}"/>
                                             <TextBlock Text="{Binding [traffic_uplink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding UplinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding UplinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontFamily="Consolas, monospace" FontWeight="SemiBold"/>
                                     </Grid>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="4,0,0,0">
                                     <Grid ColumnDefinitions="Auto, *">
                                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
-                                            <TextBlock Text="↓" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="↓" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource PrimaryColor}"/>
                                             <TextBlock Text="{Binding [traffic_downlink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding DownlinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding DownlinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontFamily="Consolas, monospace" FontWeight="SemiBold"/>
                                     </Grid>
                                 </Border>
                             </Grid>
 
                             <!-- Real-time Throughput with Sparkline Graph -->
-                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,4,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4,0,0">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
+                                <TextBlock Text="{Binding ThroughputText}" Foreground="#10b981" FontWeight="Bold" FontSize="11" FontFamily="Consolas, monospace"/>
                                 <common:SparklineControl
                                     Samples="{Binding ThroughputSamples}"
                                     Width="120"
-                                    Height="18"
+                                    Height="16"
                                     VerticalAlignment="Center"/>
-                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="#10b981"/>
-                                    <TextBlock Text="{Binding ThroughputText}" Foreground="#10b981" FontWeight="Bold" FontSize="12"/>
-                                </StackPanel>
                             </StackPanel>
                         </StackPanel>
+                    </Border>
+
+                    <!-- History Stats (when disconnected but has cumulative stats) -->
+                    <Border
+                        IsVisible="{Binding HasCumulativeHistory}"
+                        BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="0,1,0,0"
+                        Padding="0,8,0,0">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding CumulativeHistoryText}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Classes="Ghost" Command="{Binding ResetStatsCommand}" Content="{Binding [client_reset], Source={x:Static i18n:LocalizationManager.Instance}}" Height="24" FontSize="10" Padding="6,0"/>
+                        </Grid>
                     </Border>
                 </StackPanel>
             </shadui:Card>
 
-            <!-- 3. Discovered Remote Services Card -->
+            <!-- 3. Discovered Remote Services Card (Matches Image 2) -->
             <shadui:Card Padding="14">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*, Auto">
@@ -398,13 +484,14 @@
                             VerticalAlignment="Center" />
                         <shadui:Badge
                             Grid.Column="1"
-                            Content="{Binding DiscoveredServices.Count}"
+                            Classes="Outline"
+                            Content="{Binding DiscoveredServicesBadgeText}"
                             Height="20"
                             Padding="8,0"
-                            FontSize="11" />
+                            FontSize="10" />
                     </Grid>
 
-                    <Separator Height="1" Background="{DynamicResource BorderColor}" Margin="0,4" />
+                    <Separator Height="1" Background="{DynamicResource BorderColor}" Margin="0,2" />
 
                     <!-- Discovered Services Items -->
                     <ItemsControl ItemsSource="{Binding DiscoveredServices}">
@@ -419,15 +506,15 @@
                                             CornerRadius="6"
                                             Background="{DynamicResource GhostColor}"
                                             Margin="0,0,10,0">
-                                            <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="12" Height="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                            <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="12" Height="12" Foreground="{DynamicResource PrimaryColor}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
 
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" />
-                                                <shadui:Badge Content="{Binding Proto}" Height="16" Padding="4,0" FontSize="9" />
+                                                <shadui:Badge Classes="Secondary" Content="{Binding Proto}" Height="16" Padding="4,0" FontSize="9" />
                                             </StackPanel>
-                                            <TextBlock Text="{Binding TargetAddress}" FontSize="11" Foreground="{DynamicResource PrimaryColor}" />
+                                            <TextBlock Text="{Binding TargetAddress}" FontSize="11" FontFamily="Consolas, monospace" Foreground="{DynamicResource PrimaryColor}" />
                                         </StackPanel>
 
                                         <!-- Copy Button -->
@@ -437,7 +524,7 @@
                                             Command="{Binding $parent[UserControl].((vm:ClientOverviewViewModel)DataContext).CopyTargetCommand}"
                                             CommandParameter="{Binding}"
                                             Height="26"
-                                            FontSize="11"
+                                            FontSize="10"
                                             Padding="8,0">
                                             <StackPanel Orientation="Horizontal" Spacing="4">
                                                 <common:LucideIcon Data="{x:Static common:AppIcons.Copy}" Width="11" Height="11"/>
@@ -454,12 +541,19 @@
                     <StackPanel
                         IsVisible="{Binding DiscoveredServices.Count, Converter={x:Static common:Converters.EqualsZero}}"
                         HorizontalAlignment="Center"
-                        Spacing="8"
-                        Margin="0,16">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.WifiOff}" Width="24" Height="24" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        Spacing="6"
+                        Margin="0,20">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.WifiOff}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
                         <TextBlock
-                            Text="{Binding [client_not_connected_service], Source={x:Static i18n:LocalizationManager.Instance}}"
+                            Text="{Binding DiscoveredServicesEmptyTitle}"
                             FontSize="12"
+                            FontWeight="Medium"
+                            Foreground="{DynamicResource MutedForegroundColor}"
+                            HorizontalAlignment="Center" />
+                        <TextBlock
+                            IsVisible="{Binding DiscoveredServicesEmptyHint, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                            Text="{Binding DiscoveredServicesEmptyHint}"
+                            FontSize="11"
                             Foreground="{DynamicResource MutedForegroundColor}"
                             HorizontalAlignment="Center" />
                     </StackPanel>

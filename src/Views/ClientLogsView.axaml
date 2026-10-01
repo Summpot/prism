@@ -97,7 +97,9 @@
                 <controls:EmptyState
                     IsVisible="{Binding IsEmpty}"
                     Icon="{x:Static common:AppIcons.Terminal}"
-                    Title="{Binding [client_logs_empty], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                    Title="{Binding [client_logs_empty], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"/>
 
                 <!-- Logs List Stream -->
                 <ListBox

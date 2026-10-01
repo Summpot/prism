@@ -97,6 +97,12 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
 
     private void OnLogsUpdated(List<ClientLogEntry> logs)
     {
+        if (!Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => OnLogsUpdated(logs));
+            return;
+        }
+
         var filtered = logs.AsEnumerable();
 
         if (FilterLevel != "ALL")

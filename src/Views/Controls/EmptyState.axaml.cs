@@ -1,12 +1,11 @@
 using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Metadata;
 
 namespace Prism.Views.Controls;
 
-public partial class EmptyState : UserControl
+public class EmptyState : TemplatedControl
 {
     public static readonly StyledProperty<Geometry?> IconProperty =
         AvaloniaProperty.Register<EmptyState, Geometry?>(nameof(Icon));
@@ -43,15 +42,5 @@ public partial class EmptyState : UserControl
     {
         get => GetValue(ActionsProperty);
         set => SetValue(ActionsProperty, value);
-    }
-
-    public EmptyState()
-    {
-        InitializeComponent();
-    }
-
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
     }
 }

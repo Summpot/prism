@@ -1,11 +1,10 @@
 using System.Windows.Input;
 using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
+using Avalonia.Controls.Primitives;
 
 namespace Prism.Views.Controls;
 
-public partial class ErrorBanner : UserControl
+public class ErrorBanner : TemplatedControl
 {
     public static readonly StyledProperty<string?> MessageProperty =
         AvaloniaProperty.Register<ErrorBanner, string?>(nameof(Message));
@@ -32,15 +31,5 @@ public partial class ErrorBanner : UserControl
     {
         get => GetValue(DismissCommandProperty);
         set => SetValue(DismissCommandProperty, value);
-    }
-
-    public ErrorBanner()
-    {
-        InitializeComponent();
-    }
-
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
     }
 }

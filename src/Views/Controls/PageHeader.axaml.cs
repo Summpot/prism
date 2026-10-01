@@ -1,12 +1,11 @@
 using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Metadata;
 
 namespace Prism.Views.Controls;
 
-public partial class PageHeader : UserControl
+public class PageHeader : TemplatedControl
 {
     public static readonly StyledProperty<string> TitleProperty =
         AvaloniaProperty.Register<PageHeader, string>(nameof(Title), "");
@@ -61,15 +60,5 @@ public partial class PageHeader : UserControl
     {
         get => GetValue(BadgeProperty);
         set => SetValue(BadgeProperty, value);
-    }
-
-    public PageHeader()
-    {
-        InitializeComponent();
-    }
-
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
     }
 }

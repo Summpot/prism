@@ -1,54 +1,59 @@
-<UserControl
-    x:Class="Prism.Views.Controls.ErrorBanner"
+<ResourceDictionary
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
     xmlns:common="clr-namespace:Prism.Common"
-    xmlns:i18n="clr-namespace:Prism.I18n"
-    x:Name="Root">
+    xmlns:i18n="clr-namespace:Prism.I18n">
 
-    <Border
-        IsVisible="{Binding Message, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-        Background="{DynamicResource DestructiveTint}"
-        BorderBrush="{DynamicResource DestructiveBorder}"
-        BorderThickness="1"
-        CornerRadius="{DynamicResource MdCornerRadius}"
-        Padding="12,8">
-        <Grid ColumnDefinitions="Auto, *, Auto">
-            <common:LucideIcon
-                Grid.Column="0"
-                Data="{x:Static common:AppIcons.AlertTriangle}"
-                Width="14"
-                Height="14"
-                Foreground="{DynamicResource DestructiveColor}"
-                Margin="0,0,8,0"
-                VerticalAlignment="Center"/>
-            <TextBlock
-                Grid.Column="1"
-                Text="{Binding Message, ElementName=Root}"
-                Foreground="{DynamicResource DestructiveColor}"
-                FontSize="12"
-                TextWrapping="Wrap"
-                VerticalAlignment="Center"/>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="8,0,0,0">
-                <Button
-                    Classes="Outline"
-                    Command="{Binding RetryCommand, ElementName=Root}"
-                    IsVisible="{Binding RetryCommand, ElementName=Root, Converter={x:Static common:Converters.NotNullToBoolean}}"
-                    Height="24"
-                    Padding="8,0"
-                    FontSize="11">
-                    <TextBlock Text="{Binding [common_retry], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                </Button>
-                <Button
-                    Classes="Ghost"
-                    Command="{Binding DismissCommand, ElementName=Root}"
-                    IsVisible="{Binding DismissCommand, ElementName=Root, Converter={x:Static common:Converters.NotNullToBoolean}}"
-                    Padding="4"
-                    Height="24"
-                    Width="24">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="12" Height="12" Foreground="{DynamicResource DestructiveColor}"/>
-                </Button>
-            </StackPanel>
-        </Grid>
-    </Border>
-</UserControl>
+    <ControlTheme x:Key="{x:Type controls:ErrorBanner}" TargetType="controls:ErrorBanner">
+        <Setter Property="Template">
+            <ControlTemplate TargetType="controls:ErrorBanner">
+                <Border
+                    IsVisible="{TemplateBinding Message, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                    Background="{DynamicResource DestructiveTint}"
+                    BorderBrush="{DynamicResource DestructiveBorder}"
+                    BorderThickness="1"
+                    CornerRadius="{DynamicResource MdCornerRadius}"
+                    Padding="12,8">
+                    <Grid ColumnDefinitions="Auto, *, Auto">
+                        <common:LucideIcon
+                            Grid.Column="0"
+                            Data="{x:Static common:AppIcons.AlertTriangle}"
+                            Width="14"
+                            Height="14"
+                            Foreground="{DynamicResource DestructiveColor}"
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center"/>
+                        <TextBlock
+                            Grid.Column="1"
+                            Text="{TemplateBinding Message}"
+                            Foreground="{DynamicResource DestructiveColor}"
+                            FontSize="12"
+                            TextWrapping="Wrap"
+                            VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="8,0,0,0">
+                            <Button
+                                Classes="Outline"
+                                Command="{TemplateBinding RetryCommand}"
+                                IsVisible="{TemplateBinding RetryCommand, Converter={x:Static common:Converters.NotNullToBoolean}}"
+                                Height="24"
+                                Padding="8,0"
+                                FontSize="11">
+                                <TextBlock Text="{Binding [common_retry], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                            </Button>
+                            <Button
+                                Classes="Ghost"
+                                Command="{TemplateBinding DismissCommand}"
+                                IsVisible="{TemplateBinding DismissCommand, Converter={x:Static common:Converters.NotNullToBoolean}}"
+                                Padding="4"
+                                Height="24"
+                                Width="24">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="12" Height="12" Foreground="{DynamicResource DestructiveColor}"/>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </ControlTheme>
+</ResourceDictionary>

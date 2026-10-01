@@ -1,49 +1,56 @@
-<UserControl
-    x:Class="Prism.Views.Controls.PageHeader"
+<ResourceDictionary
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:common="clr-namespace:Prism.Common"
-    x:Name="Root">
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
+    xmlns:common="clr-namespace:Prism.Common">
 
-    <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
-        <StackPanel Grid.Column="0" Spacing="2" MinWidth="0">
-            <TextBlock
-                Text="{Binding Eyebrow, ElementName=Root}"
-                FontSize="10"
-                FontWeight="SemiBold"
-                Opacity="0.8"
-                Foreground="{DynamicResource MutedForegroundColor}"
-                IsVisible="{Binding Eyebrow, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
-            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <common:LucideIcon
-                    Data="{Binding Icon, ElementName=Root}"
-                    Width="16"
-                    Height="16"
-                    Foreground="{DynamicResource PrimaryColor}"
-                    IsVisible="{Binding Icon, ElementName=Root, Converter={x:Static common:Converters.NotNullToBoolean}}"
-                    VerticalAlignment="Center"/>
-                <TextBlock
-                    Text="{Binding Title, ElementName=Root}"
-                    FontWeight="Bold"
-                    FontSize="16"
-                    VerticalAlignment="Center"
-                    TextTrimming="CharacterEllipsis"/>
-                <ContentPresenter
-                    Content="{Binding Badge, ElementName=Root}"
-                    VerticalAlignment="Center"/>
-            </StackPanel>
-            <TextBlock
-                Text="{Binding Description, ElementName=Root}"
-                FontSize="12"
-                Foreground="{DynamicResource MutedForegroundColor}"
-                TextWrapping="Wrap"
-                IsVisible="{Binding Description, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
-        </StackPanel>
-        <ContentPresenter
-            Grid.Column="1"
-            Content="{Binding Actions, ElementName=Root}"
-            VerticalAlignment="Center"
-            HorizontalAlignment="Right"
-            Margin="12,0,0,0"/>
-    </Grid>
-</UserControl>
+    <ControlTheme x:Key="{x:Type controls:PageHeader}" TargetType="controls:PageHeader">
+        <Setter Property="Template">
+            <ControlTemplate TargetType="controls:PageHeader">
+                <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
+                    <StackPanel Grid.Column="0" Spacing="2" MinWidth="0">
+                        <TextBlock
+                            Text="{TemplateBinding Eyebrow}"
+                            FontSize="10"
+                            FontWeight="SemiBold"
+                            Opacity="0.8"
+                            Foreground="{DynamicResource MutedForegroundColor}"
+                            IsVisible="{TemplateBinding Eyebrow, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <common:LucideIcon
+                                Data="{TemplateBinding Icon}"
+                                Width="16"
+                                Height="16"
+                                Foreground="{DynamicResource PrimaryColor}"
+                                IsVisible="{TemplateBinding Icon, Converter={x:Static common:Converters.NotNullToBoolean}}"
+                                VerticalAlignment="Center"/>
+                            <TextBlock
+                                Text="{TemplateBinding Title}"
+                                FontWeight="Bold"
+                                FontSize="16"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis"/>
+                            <ContentPresenter
+                                Content="{TemplateBinding Badge}"
+                                VerticalAlignment="Center"
+                                IsVisible="{TemplateBinding Badge, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
+                        </StackPanel>
+                        <TextBlock
+                            Text="{TemplateBinding Description}"
+                            FontSize="12"
+                            Foreground="{DynamicResource MutedForegroundColor}"
+                            TextWrapping="Wrap"
+                            IsVisible="{TemplateBinding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+                    </StackPanel>
+                    <ContentPresenter
+                        Grid.Column="1"
+                        Content="{TemplateBinding Actions}"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right"
+                        Margin="12,0,0,0"
+                        IsVisible="{TemplateBinding Actions, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </ControlTheme>
+</ResourceDictionary>

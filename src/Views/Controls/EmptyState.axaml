@@ -1,49 +1,55 @@
-<UserControl
-    x:Class="Prism.Views.Controls.EmptyState"
+<ResourceDictionary
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:common="clr-namespace:Prism.Common"
-    x:Name="Root">
+    xmlns:controls="clr-namespace:Prism.Views.Controls"
+    xmlns:common="clr-namespace:Prism.Common">
 
-    <Border
-        BorderBrush="{DynamicResource BorderColor}"
-        BorderThickness="1"
-        CornerRadius="12"
-        Padding="24,28"
-        Background="{DynamicResource GhostColor}">
-        <StackPanel Spacing="8" HorizontalAlignment="Center" MaxWidth="420">
-            <Border
-                Width="40"
-                Height="40"
-                CornerRadius="8"
-                Background="{DynamicResource MutedColor}"
-                HorizontalAlignment="Center"
-                IsVisible="{Binding Icon, ElementName=Root, Converter={x:Static common:Converters.NotNullToBoolean}}">
-                <common:LucideIcon
-                    Data="{Binding Icon, ElementName=Root}"
-                    Width="18"
-                    Height="18"
-                    Foreground="{DynamicResource MutedForegroundColor}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"/>
-            </Border>
-            <TextBlock
-                Text="{Binding Title, ElementName=Root}"
-                FontWeight="SemiBold"
-                FontSize="13"
-                TextAlignment="Center"
-                IsVisible="{Binding Title, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
-            <TextBlock
-                Text="{Binding Description, ElementName=Root}"
-                FontSize="12"
-                Foreground="{DynamicResource MutedForegroundColor}"
-                TextAlignment="Center"
-                TextWrapping="Wrap"
-                IsVisible="{Binding Description, ElementName=Root, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
-            <ContentPresenter
-                Content="{Binding Actions, ElementName=Root}"
-                HorizontalAlignment="Center"
-                Margin="0,6,0,0"/>
-        </StackPanel>
-    </Border>
-</UserControl>
+    <ControlTheme x:Key="{x:Type controls:EmptyState}" TargetType="controls:EmptyState">
+        <Setter Property="Template">
+            <ControlTemplate TargetType="controls:EmptyState">
+                <Border
+                    BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="24,28"
+                    Background="{DynamicResource GhostColor}">
+                    <StackPanel Spacing="8" HorizontalAlignment="Center" MaxWidth="420">
+                        <Border
+                            Width="40"
+                            Height="40"
+                            CornerRadius="8"
+                            Background="{DynamicResource MutedColor}"
+                            HorizontalAlignment="Center"
+                            IsVisible="{TemplateBinding Icon, Converter={x:Static common:Converters.NotNullToBoolean}}">
+                            <common:LucideIcon
+                                Data="{TemplateBinding Icon}"
+                                Width="18"
+                                Height="18"
+                                Foreground="{DynamicResource MutedForegroundColor}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock
+                            Text="{TemplateBinding Title}"
+                            FontWeight="SemiBold"
+                            FontSize="13"
+                            TextAlignment="Center"
+                            IsVisible="{TemplateBinding Title, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+                        <TextBlock
+                            Text="{TemplateBinding Description}"
+                            FontSize="12"
+                            Foreground="{DynamicResource MutedForegroundColor}"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap"
+                            IsVisible="{TemplateBinding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
+                        <ContentPresenter
+                            Content="{TemplateBinding Actions}"
+                            HorizontalAlignment="Center"
+                            Margin="0,6,0,0"
+                            IsVisible="{TemplateBinding Actions, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
+                    </StackPanel>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </ControlTheme>
+</ResourceDictionary>

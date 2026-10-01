@@ -10,8 +10,8 @@
             <ControlTemplate TargetType="controls:ErrorBanner">
                 <Border
                     IsVisible="{TemplateBinding Message, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
-                    Background="{DynamicResource DestructiveTint}"
-                    BorderBrush="{DynamicResource DestructiveBorder}"
+                    Background="{DynamicResource DestructiveColor10}"
+                    BorderBrush="{DynamicResource DestructiveColor50}"
                     BorderThickness="1"
                     CornerRadius="{DynamicResource MdCornerRadius}"
                     Padding="12,8">
@@ -19,36 +19,33 @@
                         <common:LucideIcon
                             Grid.Column="0"
                             Data="{x:Static common:AppIcons.AlertTriangle}"
-                            Width="14"
-                            Height="14"
+                            Width="16"
+                            Height="16"
                             Foreground="{DynamicResource DestructiveColor}"
                             Margin="0,0,8,0"
                             VerticalAlignment="Center"/>
                         <TextBlock
                             Grid.Column="1"
                             Text="{TemplateBinding Message}"
+                            Classes="Small"
                             Foreground="{DynamicResource DestructiveColor}"
-                            FontSize="12"
                             TextWrapping="Wrap"
                             VerticalAlignment="Center"/>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="12,0,0,0">
                             <Button
                                 Classes="Outline"
                                 Command="{TemplateBinding RetryCommand}"
-                                IsVisible="{TemplateBinding RetryCommand, Converter={x:Static common:Converters.NotNullToBoolean}}"
-                                Height="24"
-                                Padding="8,0"
-                                FontSize="11">
+                                IsVisible="{TemplateBinding RetryCommand, Converter={x:Static common:Converters.NotNullToBoolean}}">
                                 <TextBlock Text="{Binding [common_retry], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </Button>
                             <Button
                                 Classes="Ghost"
                                 Command="{TemplateBinding DismissCommand}"
                                 IsVisible="{TemplateBinding DismissCommand, Converter={x:Static common:Converters.NotNullToBoolean}}"
-                                Padding="4"
-                                Height="24"
-                                Width="24">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="12" Height="12" Foreground="{DynamicResource DestructiveColor}"/>
+                                Width="32"
+                                Height="32"
+                                Padding="0">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="16" Height="16" Foreground="{DynamicResource DestructiveColor}"/>
                             </Button>
                         </StackPanel>
                     </Grid>

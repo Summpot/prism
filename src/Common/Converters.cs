@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Data.Converters;
@@ -32,6 +33,26 @@ public static class Converters
         new FuncValueConverter<int, string>(c =>
             Prism.I18n.I18nText.Format("middleware_settings_count", ("count", c)));
 
+    public static readonly IValueConverter AvatarInitials =
+        new FuncValueConverter<string?, string>(name =>
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return "?";
+            }
+
+            var trimmed = name.Trim();
+            var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2 && parts[0].Length > 0 && parts[1].Length > 0)
+            {
+                return string.Concat(char.ToUpperInvariant(parts[0][0]), char.ToUpperInvariant(parts[1][0]));
+            }
+
+            return trimmed.Length <= 2
+                ? trimmed.ToUpperInvariant()
+                : trimmed[..2].ToUpperInvariant();
+        });
+
     public static readonly IValueConverter BoolToCopyOrCheckIcon =
         new FuncValueConverter<bool, Geometry>(copied => copied ? AppIcons.Check : AppIcons.Copy);
 
@@ -56,9 +77,6 @@ public static class Converters
             _ => value ?? ""
         });
 
-    public static readonly IValueConverter ExpandedSidebarWidth =
-        new FuncValueConverter<bool, double>(expanded => expanded ? 240 : 56);
-
     public static readonly IValueConverter IntEquals =
         new FuncValueConverter<int, string, bool>((val, param) =>
             int.TryParse(param, out var target) && val == target);
@@ -82,11 +100,24 @@ public static class Converters
             var l = (level ?? "INFO").ToUpperInvariant();
             return l switch
             {
-                "ERROR" => new SolidColorBrush(Color.FromArgb(35, 239, 68, 68)),
-                "WARN" => new SolidColorBrush(Color.FromArgb(35, 245, 158, 11)),
-                "DEBUG" => new SolidColorBrush(Color.FromArgb(25, 107, 114, 128)),
-                _ => new SolidColorBrush(Color.FromArgb(35, 16, 185, 129))
+                "ERROR" => ThemeBrushAlpha("DestructiveColor", 0x23, "#ef4444"),
+                "WARN" => ThemeBrushAlpha("WarningColor", 0x23, "#f59e0b"),
+                "DEBUG" => ThemeBrushAlpha("MutedColor", 0x19, "#6b7280"),
+                _ => ThemeBrushAlpha("SuccessColor", 0x23, "#10b981")
             };
+        });
+
+    public static readonly IMultiValueConverter MiddlewareDefaultLabel =
+        new FuncMultiValueConverter<object?, string?>((IReadOnlyList<object?> values) =>
+        {
+            var value = values.Count > 0 ? values[0]?.ToString() ?? "" : "";
+            var template = values.Count > 1 ? values[1]?.ToString() : null;
+            if (string.IsNullOrEmpty(template))
+            {
+                template = Prism.I18n.I18nText.T("middleware_default", "Default: {value}");
+            }
+
+            return template.Replace("{value}", value);
         });
 
     public static readonly IValueConverter TimestampToTimeStr =
@@ -132,9 +163,6 @@ public static class Converters
                 ? (Prism.I18n.LocalizationManager.Instance["status_healthy"] ?? "HEALTHY")
                 : (Prism.I18n.LocalizationManager.Instance["status_unhealthy"] ?? "UNHEALTHY"));
 
-    public static readonly IValueConverter BooleanToOpacity =
-        new FuncValueConverter<bool, double>(enabled => enabled ? 1.0 : 0.5);
-
     public static readonly IValueConverter PrimaryStandbyLabel =
         new FuncValueConverter<bool, string>(primary =>
             primary
@@ -147,11 +175,46 @@ public static class Converters
 
     private static IBrush ThemeBrush(string key, string fallbackHex)
     {
+        if (TryGetThemeColor(key, out var color))
+        {
+            return new SolidColorBrush(color);
+        }
+
         if (Application.Current?.TryGetResource(key, null, out var value) == true && value is IBrush brush)
         {
             return brush;
         }
+
         return new SolidColorBrush(Color.Parse(fallbackHex));
+    }
+
+    private static IBrush ThemeBrushAlpha(string key, byte alpha, string fallbackHex)
+    {
+        var color = TryGetThemeColor(key, out var theme)
+            ? theme
+            : Color.Parse(fallbackHex);
+        return new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
+    }
+
+    private static bool TryGetThemeColor(string key, out Color color)
+    {
+        color = default;
+        if (Application.Current?.TryGetResource(key, null, out var value) != true || value == null)
+        {
+            return false;
+        }
+
+        switch (value)
+        {
+            case Color direct:
+                color = direct;
+                return true;
+            case ISolidColorBrush solid:
+                color = solid.Color;
+                return true;
+            default:
+                return false;
+        }
     }
 
     public static readonly IValueConverter BooleanToString =

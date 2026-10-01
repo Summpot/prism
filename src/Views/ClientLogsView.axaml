@@ -13,7 +13,7 @@
     x:DataType="vm:ClientLogsViewModel"
     mc:Ignorable="d">
 
-    <Grid RowDefinitions="Auto, *" Margin="16">
+    <Grid RowDefinitions="Auto, *" Margin="{DynamicResource PageMargin}">
         <controls:PageHeader
             Grid.Row="0"
             Title="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -22,63 +22,50 @@
             Margin="0,0,0,12">
             <controls:PageHeader.Badge>
                 <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding StatusCountText}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding StatusCountText}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </Border>
             </controls:PageHeader.Badge>
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <!-- Level Filter Group (Segmented) -->
-                <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="2">
-                    <StackPanel Orientation="Horizontal" Spacing="2">
-                        <Button Classes="Ghost"
-                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ALL}"
-                                Command="{Binding SetFilterCommand}" CommandParameter="ALL" Content="ALL" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
-                        <Button Classes="Ghost"
-                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=INFO}"
-                                Command="{Binding SetFilterCommand}" CommandParameter="INFO" Content="INFO" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
-                        <Button Classes="Ghost"
-                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=WARN}"
-                                Command="{Binding SetFilterCommand}" CommandParameter="WARN" Content="WARN" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
-                        <Button Classes="Ghost"
-                                Classes.Primary="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ERROR}"
-                                Command="{Binding SetFilterCommand}" CommandParameter="ERROR" Content="ERROR" Height="24" FontSize="10" Padding="8,0" CornerRadius="4"/>
-                    </StackPanel>
-                </Border>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ToggleButton Classes="Segment"
+                                  IsChecked="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ALL, Mode=OneWay}"
+                                  Command="{Binding SetFilterCommand}" CommandParameter="ALL" Content="ALL"/>
+                    <ToggleButton Classes="Segment"
+                                  IsChecked="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=INFO, Mode=OneWay}"
+                                  Command="{Binding SetFilterCommand}" CommandParameter="INFO" Content="INFO"/>
+                    <ToggleButton Classes="Segment"
+                                  IsChecked="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=WARN, Mode=OneWay}"
+                                  Command="{Binding SetFilterCommand}" CommandParameter="WARN" Content="WARN"/>
+                    <ToggleButton Classes="Segment"
+                                  IsChecked="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ERROR, Mode=OneWay}"
+                                  Command="{Binding SetFilterCommand}" CommandParameter="ERROR" Content="ERROR"/>
+                </StackPanel>
 
                 <!-- Search Input -->
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [client_logs_filter], Source={x:Static i18n:LocalizationManager.Instance}}"
-                    Width="130"
-                    Height="26"
-                    FontSize="11" />
+                    Width="130" />
 
                 <!-- Auto-Scroll Button -->
                 <Button Classes="Outline"
                         Command="{Binding ToggleAutoScrollCommand}"
-                        Content="{Binding ScrollButtonText}"
-                        Height="26"
-                        FontSize="11"
-                        Padding="8,0"/>
+                        Content="{Binding ScrollButtonText}"/>
 
                 <!-- Clear Logs Button -->
                 <Button Classes="Outline"
-                        Command="{Binding ClearLogsCommand}"
-                        Height="26"
-                        FontSize="11"
-                        Padding="8,0">
+                        Command="{Binding ClearLogsCommand}">
                     <TextBlock Text="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}"
                                Foreground="{DynamicResource DestructiveColor}"/>
                 </Button>
 
                 <!-- Copy All Logs Button -->
                 <Button Classes="Outline"
-                        Command="{Binding CopyAllLogsCommand}"
-                        Height="26"
-                        FontSize="11"
-                        Padding="8,0">
+                        Command="{Binding CopyAllLogsCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <common:LucideIcon IsVisible="{Binding !CopiedAll}" Data="{x:Static common:AppIcons.Copy}" Width="12" Height="12"/>
-                        <common:LucideIcon IsVisible="{Binding CopiedAll}" Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
+                        <common:LucideIcon IsVisible="{Binding !CopiedAll}" Data="{x:Static common:AppIcons.Copy}" Width="16" Height="16"/>
+                        <common:LucideIcon IsVisible="{Binding CopiedAll}" Data="{x:Static common:AppIcons.Check}" Width="16" Height="16" Foreground="{DynamicResource SuccessColor}"/>
                         <TextBlock Text="{Binding CopyButtonText}"/>
                     </StackPanel>
                 </Button>
@@ -87,10 +74,10 @@
 
         <!-- Terminal Viewport Card -->
         <Border Grid.Row="1"
-                Background="{DynamicResource CardColor}"
+                Background="{DynamicResource CardBackgroundColor}"
                 BorderBrush="{DynamicResource BorderColor}"
                 BorderThickness="1"
-                CornerRadius="8"
+                CornerRadius="{DynamicResource XlCornerRadius}"
                 Padding="6"
                 ClipToBounds="True">
             <Panel>
@@ -104,25 +91,11 @@
                 <!-- Logs List Stream -->
                 <ListBox
                     x:Name="LogsList"
+                    Classes="LogList"
                     IsVisible="{Binding HasLogs}"
                     ItemsSource="{Binding FilteredLogs}"
                     Background="Transparent"
-                    BorderThickness="0"
-                    Padding="4">
-                    <ListBox.Styles>
-                        <Style Selector="ListBoxItem">
-                            <Setter Property="Padding" Value="4,2"/>
-                            <Setter Property="MinHeight" Value="0"/>
-                            <Setter Property="Background" Value="Transparent"/>
-                            <Setter Property="CornerRadius" Value="4"/>
-                        </Style>
-                        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-                            <Setter Property="Background" Value="#10888888"/>
-                        </Style>
-                        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
-                            <Setter Property="Background" Value="#08888888"/>
-                        </Style>
-                    </ListBox.Styles>
+                    BorderThickness="0">
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="native:ClientLogEntry">
                             <Grid ColumnDefinitions="Auto, Auto, Auto, *" Margin="0,1">
@@ -130,7 +103,6 @@
                                 <TextBlock
                                     Grid.Column="0"
                                     Text="{Binding Timestamp, Converter={x:Static common:Converters.TimestampToTimeStr}}"
-                                    FontSize="11"
                                     FontFamily="{DynamicResource MonoFont}"
                                     Foreground="{DynamicResource MutedForegroundColor}"
                                     Margin="0,0,8,0"
@@ -146,7 +118,7 @@
                                     Padding="4,0"
                                     Margin="0,0,8,0"
                                     VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Level}" FontSize="9" FontWeight="Bold"
+                                    <TextBlock Text="{Binding Level}" FontWeight="Bold"
                                                Foreground="{Binding Level, Converter={x:Static common:Converters.LogLevelToBrush}}"/>
                                 </Border>
 
@@ -154,7 +126,6 @@
                                 <TextBlock
                                     Grid.Column="2"
                                     Text="{Binding Target, StringFormat='{}{0}:'}"
-                                    FontSize="11"
                                     FontFamily="{DynamicResource MonoFont}"
                                     FontWeight="SemiBold"
                                     Foreground="{DynamicResource MutedForegroundColor}"
@@ -165,7 +136,6 @@
                                 <TextBlock
                                     Grid.Column="3"
                                     Text="{Binding Message}"
-                                    FontSize="11"
                                     FontFamily="{DynamicResource MonoFont}"
                                     TextWrapping="Wrap"
                                     VerticalAlignment="Center"/>
@@ -181,13 +151,10 @@
                     Classes="Primary"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
-                    Margin="0,0,16,16"
-                    CornerRadius="14"
-                    Height="28"
-                    Padding="10,0">
+                    Margin="0,0,16,16">
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
-                        <TextBlock Text="{Binding [client_logs_latest], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="16" Height="16" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                        <TextBlock Text="{Binding [client_logs_latest], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                     </StackPanel>
                 </Button>
             </Panel>

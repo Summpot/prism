@@ -13,33 +13,29 @@
     mc:Ignorable="d">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="960" Spacing="12" Margin="16">
+        <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageMargin}">
 
             <controls:PageHeader
                 Title="{Binding [client_traffic_title], Source={x:Static i18n:LocalizationManager.Instance}}"
                 Description="{Binding [client_traffic_description], Source={x:Static i18n:LocalizationManager.Instance}}"
                 Icon="{x:Static common:AppIcons.ArrowDownUp}">
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="2">
-                        <StackPanel Orientation="Horizontal" Spacing="2">
-                            <Button
-                                Classes="Ghost"
-                                Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session}"
-                                Command="{Binding SetStatsModeCommand}" CommandParameter="session"
-                                Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                Height="24" FontSize="11" Padding="8,0" CornerRadius="4"/>
-                            <Button
-                                Classes="Ghost"
-                                Classes.Primary="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime}"
-                                Command="{Binding SetStatsModeCommand}" CommandParameter="lifetime"
-                                Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                Height="24" FontSize="11" Padding="8,0" CornerRadius="4"/>
-                        </StackPanel>
-                    </Border>
-                    <Button Classes="Outline" Command="{Binding ResetStatsCommand}" Height="28" Padding="8,0" ToolTip.Tip="{Binding [client_reset_stats], Source={x:Static i18n:LocalizationManager.Instance}}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ToggleButton
+                            Classes="Segment"
+                            IsChecked="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=session, Mode=OneWay}"
+                            Command="{Binding SetStatsModeCommand}" CommandParameter="session"
+                            Content="{Binding [client_session], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                        <ToggleButton
+                            Classes="Segment"
+                            IsChecked="{Binding StatsViewMode, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=lifetime, Mode=OneWay}"
+                            Command="{Binding SetStatsModeCommand}" CommandParameter="lifetime"
+                            Content="{Binding [client_lifetime], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                    </StackPanel>
+                    <Button Classes="Outline" Command="{Binding ResetStatsCommand}" ToolTip.Tip="{Binding [client_reset_stats], Source={x:Static i18n:LocalizationManager.Instance}}">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                            <TextBlock Text="{Binding [client_reset], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
+                            <TextBlock Text="{Binding [client_reset], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -56,60 +52,60 @@
 
                 <!-- 4 High-Level Metric Tiles -->
                 <Grid ColumnDefinitions="*, *, *, *">
-                    <shadui:Card Grid.Column="0" Margin="0,0,4,0" Padding="12">
+                    <shadui:Card Grid.Column="0" Margin="0,0,4,0">
                         <StackPanel Spacing="3" HorizontalAlignment="Center">
-                            <TextBlock Text="{Binding Metric1Title}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding Metric1Title}" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
                             <TextBlock Text="{Binding Metric1Value}" FontWeight="Bold" FontSize="14" FontFamily="{DynamicResource MonoFont}" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </shadui:Card>
-                    <shadui:Card Grid.Column="1" Margin="4,0,4,0" Padding="12">
+                    <shadui:Card Grid.Column="1" Margin="4,0,4,0">
                         <StackPanel Spacing="3" HorizontalAlignment="Center">
-                            <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
                             <TextBlock Text="{Binding RawBytesText}" FontWeight="Bold" FontSize="14" FontFamily="{DynamicResource MonoFont}" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </shadui:Card>
-                    <shadui:Card Grid.Column="2" Margin="4,0,4,0" Padding="12">
+                    <shadui:Card Grid.Column="2" Margin="4,0,4,0">
                         <StackPanel Spacing="3" HorizontalAlignment="Center">
-                            <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
                             <TextBlock Text="{Binding WireBytesText}" FontWeight="Bold" FontSize="14" FontFamily="{DynamicResource MonoFont}" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </shadui:Card>
-                    <shadui:Card Grid.Column="3" Margin="4,0,0,0" Padding="12">
+                    <shadui:Card Grid.Column="3" Margin="4,0,0,0">
                         <StackPanel Spacing="3" HorizontalAlignment="Center">
-                            <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Center"/>
                             <TextBlock Text="{Binding SavedRatioText}" FontWeight="Bold" FontSize="14" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </shadui:Card>
                 </Grid>
 
                 <!-- Real-Time Throughput Graph (Connected only) -->
-                <shadui:Card IsVisible="{Binding IsConnected}" Padding="12">
+                <shadui:Card IsVisible="{Binding IsConnected}">
                     <StackPanel Spacing="6">
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="13" Height="13" Foreground="{DynamicResource SuccessColor}"/>
-                                <TextBlock Text="{Binding [traffic_throughput], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11"/>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16" Foreground="{DynamicResource SuccessColor}"/>
+                                <TextBlock Text="{Binding [traffic_throughput], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="{Binding CurrentThroughputText}" Foreground="{DynamicResource SuccessColor}" FontWeight="Bold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                            <TextBlock Grid.Column="1" Text="{Binding CurrentThroughputText}" Foreground="{DynamicResource SuccessColor}" FontWeight="Bold" FontFamily="{DynamicResource MonoFont}"/>
                         </Grid>
                         <common:SparklineControl
                             Height="64"
                             Samples="{Binding ThroughputSeries}"
-                            Stroke="{DynamicResource SuccessColor}"
-                            Fill="{DynamicResource SuccessTint}"
+                            Stroke="{DynamicResource StatusSuccessBrush}"
+                            Fill="{DynamicResource StatusSuccessFillBrush}"
                             StrokeThickness="2"
                             Margin="0,6,0,2"/>
                     </StackPanel>
                 </shadui:Card>
 
                 <!-- Detailed Section Card (Session or Lifetime) -->
-                <shadui:Card Padding="14">
+                <shadui:Card>
                     <StackPanel Spacing="12">
                         <!-- Card Header -->
                         <Grid ColumnDefinitions="*, Auto">
-                            <TextBlock Grid.Column="0" Text="{Binding SectionTitle}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="{Binding SectionTitle}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             <Border Grid.Column="1" IsVisible="{Binding HasTransport}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding ActualTransport}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding ActualTransport}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </Border>
                         </Grid>
 
@@ -119,26 +115,26 @@
                             <Grid ColumnDefinitions="*, *, *, *">
                                 <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,4,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <TextBlock Text="{Binding SessionRawBytes}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                        <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding SessionRawBytes}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,4,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <TextBlock Text="{Binding SessionWireBytes}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                        <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding SessionWireBytes}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,4,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource SuccessColor}"/>
-                                        <TextBlock Text="{Binding SessionSavedText}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
+                                        <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}"/>
+                                        <TextBlock Text="{Binding SessionSavedText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="3" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,0,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [traffic_link_rate], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <TextBlock Text="{Binding SessionLinkRate}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                        <TextBlock Text="{Binding [traffic_link_rate], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding SessionLinkRate}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -147,20 +143,20 @@
                             <Grid ColumnDefinitions="*, *, *">
                                 <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,4,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [traffic_batches_urgent], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <TextBlock Text="{Binding UrgentBatchesText}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                        <TextBlock Text="{Binding [traffic_batches_urgent], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding UrgentBatchesText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,4,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [traffic_batches_timer], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <TextBlock Text="{Binding TimerBatchesText}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                        <TextBlock Text="{Binding [traffic_batches_timer], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding TimerBatchesText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="4,0,0,0">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding [traffic_batches_threshold], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                        <TextBlock Text="{Binding ThresholdBatchesText}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                        <TextBlock Text="{Binding [traffic_batches_threshold], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding ThresholdBatchesText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -172,81 +168,81 @@
                                     <StackPanel Spacing="10">
                                         <Grid ColumnDefinitions="*, Auto">
                                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                                <TextBlock Text="↑" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
-                                                <TextBlock Text="{Binding [traffic_uplink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="↑" FontWeight="Bold" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="{Binding [traffic_uplink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryColor}"/>
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" Text="{Binding UplinkRawWireText}" FontSize="11" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding UplinkRawWireText}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
                                         </Grid>
 
                                         <Grid ColumnDefinitions="*, *">
-                                            <Border Grid.Column="0" Background="{DynamicResource CardColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,3,0">
+                                            <Border Grid.Column="0" Background="{DynamicResource CardBackgroundColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,3,0">
                                                 <StackPanel Spacing="2">
-                                                    <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource SuccessColor}"/>
-                                                    <TextBlock Text="{Binding UplinkSavedRatio}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
+                                                    <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}"/>
+                                                    <TextBlock Text="{Binding UplinkSavedRatio}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="1" Background="{DynamicResource CardColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="3,0,0,0">
+                                            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="3,0,0,0">
                                                 <StackPanel Spacing="2">
-                                                    <TextBlock Text="{Binding [traffic_batches], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                                    <TextBlock Text="{Binding UplinkBatches}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                                    <TextBlock Text="{Binding [traffic_batches], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                                    <TextBlock Text="{Binding UplinkBatches}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
 
                                         <!-- Quantile Row: Batching -->
                                         <Grid ColumnDefinitions="50, *, *, *, *" VerticalAlignment="Center">
-                                            <TextBlock Grid.Column="0" Text="{Binding [client_batching], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="1" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <TextBlock Grid.Column="0" Text="{Binding [client_batching], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P50" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkBatchingP50}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P50" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkBatchingP50}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="2" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="2" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P90" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkBatchingP90}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P90" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkBatchingP90}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="3" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="3" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P99" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkBatchingP99}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P99" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkBatchingP99}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="4" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="4" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="MAX" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkBatchingMax}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="MAX" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkBatchingMax}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
 
                                         <!-- Quantile Row: Compression -->
                                         <Grid ColumnDefinitions="50, *, *, *, *" VerticalAlignment="Center">
-                                            <TextBlock Grid.Column="0" Text="{Binding [client_compression], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="1" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <TextBlock Grid.Column="0" Text="{Binding [client_compression], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P50" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkCompP50}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P50" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkCompP50}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="2" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="2" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P90" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkCompP90}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P90" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkCompP90}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="3" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="3" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P99" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkCompP99}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P99" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkCompP99}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="4" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="4" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="MAX" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding UplinkCompMax}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="MAX" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UplinkCompMax}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
@@ -258,81 +254,81 @@
                                     <StackPanel Spacing="10">
                                         <Grid ColumnDefinitions="*, Auto">
                                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                                <TextBlock Text="↓" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
-                                                <TextBlock Text="{Binding [traffic_downlink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="↓" FontWeight="Bold" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="{Binding [traffic_downlink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryColor}"/>
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" Text="{Binding DownlinkRawWireText}" FontSize="11" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding DownlinkRawWireText}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
                                         </Grid>
 
                                         <Grid ColumnDefinitions="*, *">
-                                            <Border Grid.Column="0" Background="{DynamicResource CardColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,3,0">
+                                            <Border Grid.Column="0" Background="{DynamicResource CardBackgroundColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,3,0">
                                                 <StackPanel Spacing="2">
-                                                    <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource SuccessColor}"/>
-                                                    <TextBlock Text="{Binding DownlinkSavedRatio}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
+                                                    <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}"/>
+                                                    <TextBlock Text="{Binding DownlinkSavedRatio}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="1" Background="{DynamicResource CardColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="3,0,0,0">
+                                            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="3,0,0,0">
                                                 <StackPanel Spacing="2">
-                                                    <TextBlock Text="{Binding [traffic_batches], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                                    <TextBlock Text="{Binding DownlinkBatches}" FontWeight="SemiBold" FontSize="12" FontFamily="{DynamicResource MonoFont}"/>
+                                                    <TextBlock Text="{Binding [traffic_batches], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                                    <TextBlock Text="{Binding DownlinkBatches}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
 
                                         <!-- Quantile Row: Batching -->
                                         <Grid ColumnDefinitions="50, *, *, *, *" VerticalAlignment="Center">
-                                            <TextBlock Grid.Column="0" Text="{Binding [client_batching], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="1" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <TextBlock Grid.Column="0" Text="{Binding [client_batching], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P50" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkBatchingP50}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P50" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkBatchingP50}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="2" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="2" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P90" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkBatchingP90}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P90" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkBatchingP90}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="3" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="3" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P99" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkBatchingP99}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P99" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkBatchingP99}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="4" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="4" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="MAX" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkBatchingMax}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="MAX" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkBatchingMax}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
 
                                         <!-- Quantile Row: Compression -->
                                         <Grid ColumnDefinitions="50, *, *, *, *" VerticalAlignment="Center">
-                                            <TextBlock Grid.Column="0" Text="{Binding [client_compression], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="1" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <TextBlock Grid.Column="0" Text="{Binding [client_compression], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P50" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkCompP50}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P50" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkCompP50}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="2" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="2" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P90" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkCompP90}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P90" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkCompP90}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="3" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="3" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="P99" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkCompP99}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="P99" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkCompP99}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="4" Background="{DynamicResource CardColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
+                                            <Border Grid.Column="4" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="4,2" Margin="2,0">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock Text="MAX" FontSize="8" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding DownlinkCompMax}" FontSize="9" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="MAX" Foreground="{DynamicResource MutedForegroundColor}" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding DownlinkCompMax}" FontFamily="{DynamicResource MonoFont}" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
                                         </Grid>
@@ -345,20 +341,20 @@
                         <Grid IsVisible="{Binding IsLifetimeMode}" ColumnDefinitions="*, *, *">
                             <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,0,4,0">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    <TextBlock Text="{Binding LifetimeRawText}" FontWeight="SemiBold" FontSize="13" FontFamily="{DynamicResource MonoFont}"/>
+                                    <TextBlock Text="{Binding [client_raw], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding LifetimeRawText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="4,0,4,0">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    <TextBlock Text="{Binding LifetimeWireText}" FontWeight="SemiBold" FontSize="13" FontFamily="{DynamicResource MonoFont}"/>
+                                    <TextBlock Text="{Binding [client_wire], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding LifetimeWireText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"/>
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="4,0,0,0">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" Foreground="{DynamicResource SuccessColor}"/>
-                                    <TextBlock Text="{Binding LifetimeSavedText}" FontWeight="SemiBold" FontSize="13" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
+                                    <TextBlock Text="{Binding [client_saved], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}"/>
+                                    <TextBlock Text="{Binding LifetimeSavedText}" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource SuccessColor}"/>
                                 </StackPanel>
                             </Border>
                         </Grid>

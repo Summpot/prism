@@ -13,7 +13,7 @@
     mc:Ignorable="d">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="960" Spacing="12" Margin="16">
+        <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageMargin}">
 
             <controls:PageHeader
                 Title="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -22,71 +22,70 @@
                 <controls:PageHeader.Badge>
                     <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
                         <TextBlock Text="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
-                                   FontSize="10"
                                    FontWeight="SemiBold"
                                    Foreground="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
                     </Border>
                 </controls:PageHeader.Badge>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Classes="Outline" Command="{Binding GoToTrafficCommand}" Height="28" Padding="10,0">
+                    <Button Classes="Outline" Command="{Binding GoToTrafficCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
-                            <TextBlock Text="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16" Foreground="{DynamicResource SuccessColor}"/>
+                            <TextBlock Text="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                         </StackPanel>
                     </Button>
-                    <Button Classes="Outline" Command="{Binding ResetDefaultsCommand}" Height="28" Padding="10,0">
+                    <Button Classes="Outline" Command="{Binding ResetDefaultsCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                            <TextBlock Text="{Binding [client_reset], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
+                            <TextBlock Text="{Binding [client_reset], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                         </StackPanel>
                     </Button>
                     <StackPanel IsVisible="{Binding SavedNotice}" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource SuccessColor}"/>
-                        <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}" FontSize="11" FontWeight="Medium"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="16" Height="16" Foreground="{DynamicResource SuccessColor}"/>
+                        <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}" FontWeight="Medium"/>
                     </StackPanel>
                 </StackPanel>
             </controls:PageHeader>
 
             <!-- Card 0: Quick Presets -->
-            <shadui:Card Padding="14">
+            <shadui:Card>
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding [optimizer_presets_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                        <TextBlock Text="{Binding [optimizer_presets_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [optimizer_presets_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding [optimizer_presets_desc], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <Button Classes="Outline"
-                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=gaming}"
-                                Command="{Binding ApplyPresetCommand}" CommandParameter="gaming" Height="28" FontSize="11" Padding="10,0">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="12" Height="12"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <ToggleButton Classes="Segment"
+                                      IsChecked="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=gaming, Mode=OneWay}"
+                                      Command="{Binding ApplyPresetCommand}" CommandParameter="gaming">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding [optimizer_preset_gaming], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
-                        </Button>
-                        <Button Classes="Outline"
-                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=low_latency}"
-                                Command="{Binding ApplyPresetCommand}" CommandParameter="low_latency" Height="28" FontSize="11" Padding="10,0">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="12" Height="12"/>
+                        </ToggleButton>
+                        <ToggleButton Classes="Segment"
+                                      IsChecked="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=low_latency, Mode=OneWay}"
+                                      Command="{Binding ApplyPresetCommand}" CommandParameter="low_latency">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding [optimizer_preset_low_latency], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
-                        </Button>
-                        <Button Classes="Outline"
-                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=balanced}"
-                                Command="{Binding ApplyPresetCommand}" CommandParameter="balanced" Height="28" FontSize="11" Padding="10,0">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12"/>
+                        </ToggleButton>
+                        <ToggleButton Classes="Segment"
+                                      IsChecked="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=balanced, Mode=OneWay}"
+                                      Command="{Binding ApplyPresetCommand}" CommandParameter="balanced">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding [optimizer_preset_balanced], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
-                        </Button>
-                        <Button Classes="Outline"
-                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=max_compression}"
-                                Command="{Binding ApplyPresetCommand}" CommandParameter="max_compression" Height="28" FontSize="11" Padding="10,0">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="12" Height="12"/>
+                        </ToggleButton>
+                        <ToggleButton Classes="Segment"
+                                      IsChecked="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=max_compression, Mode=OneWay}"
+                                      Command="{Binding ApplyPresetCommand}" CommandParameter="max_compression">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding [optimizer_preset_max_save], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
-                        </Button>
+                        </ToggleButton>
                     </StackPanel>
                 </Grid>
             </shadui:Card>
@@ -94,22 +93,21 @@
             <!-- 2-Column: Master Switch Card & Compression Level Card -->
             <Grid ColumnDefinitions="*, 10, *">
                 <!-- Left: Master Switch Card -->
-                <shadui:Card Grid.Column="0" Padding="14">
+                <shadui:Card Grid.Column="0">
                     <StackPanel Spacing="10">
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
-                                    <TextBlock Text="{Binding [optimizer_general_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <TextBlock Text="{Binding [optimizer_general_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding [optimizer_general_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding [optimizer_general_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
                             <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding OptimizerEnabled, Mode=TwoWay}"/>
                         </Grid>
 
                         <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,4,0,0">
                             <TextBlock Text="{Binding [optimizer_enabled_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                       FontSize="11"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap"
                                        LineHeight="16"/>
@@ -118,53 +116,50 @@
                 </shadui:Card>
 
                 <!-- Right: Zstandard Compression Level Card -->
-                <shadui:Card Grid.Column="2" Padding="14" IsEnabled="{Binding OptimizerEnabled}" Opacity="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanToOpacity}}">
+                <shadui:Card Grid.Column="2" IsEnabled="{Binding OptimizerEnabled}">
                     <StackPanel Spacing="10">
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Cpu}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
-                                    <TextBlock Text="{Binding [optimizer_compression_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Cpu}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <TextBlock Text="{Binding [optimizer_compression_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding [optimizer_compression_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding [optimizer_compression_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
-                            <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding OptimizerZstdLevel, StringFormat='Level {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
-                            </Border>
+                            <TextBlock Grid.Column="1" Classes="Large" FontFamily="{DynamicResource MonoFont}" VerticalAlignment="Center"
+                                       Text="{Binding OptimizerZstdLevel}"/>
                         </Grid>
 
-                        <Grid ColumnDefinitions="*, Auto" Margin="0,4,0,0">
-                            <TextBlock Grid.Column="0" Text="{Binding [optimizer_level_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                                <Button Classes="Outline"
-                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=1}"
-                                        Command="{Binding SetLevelCommand}" CommandParameter="1" Content="1 (Fast)" Height="22" FontSize="10" Padding="6,0"/>
-                                <Button Classes="Outline"
-                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=3}"
-                                        Command="{Binding SetLevelCommand}" CommandParameter="3" Content="3 (Balanced)" Height="22" FontSize="10" Padding="6,0"/>
-                                <Button Classes="Outline"
-                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=5}"
-                                        Command="{Binding SetLevelCommand}" CommandParameter="5" Content="5" Height="22" FontSize="10" Padding="6,0"/>
-                                <Button Classes="Outline"
-                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=9}"
-                                        Command="{Binding SetLevelCommand}" CommandParameter="9" Content="9" Height="22" FontSize="10" Padding="6,0"/>
-                            </StackPanel>
-                        </Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="{Binding [optimizer_level_label], Source={x:Static i18n:LocalizationManager.Instance}}" VerticalAlignment="Center"/>
+                            <ToggleButton Classes="Segment"
+                                          IsChecked="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=1, Mode=OneWay}"
+                                          Command="{Binding SetLevelCommand}" CommandParameter="1" Content="1"/>
+                            <ToggleButton Classes="Segment"
+                                          IsChecked="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=3, Mode=OneWay}"
+                                          Command="{Binding SetLevelCommand}" CommandParameter="3" Content="3"/>
+                            <ToggleButton Classes="Segment"
+                                          IsChecked="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=5, Mode=OneWay}"
+                                          Command="{Binding SetLevelCommand}" CommandParameter="5" Content="5"/>
+                            <ToggleButton Classes="Segment"
+                                          IsChecked="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=9, Mode=OneWay}"
+                                          Command="{Binding SetLevelCommand}" CommandParameter="9" Content="9"/>
+                        </StackPanel>
 
                         <Slider Minimum="1" Maximum="19" Value="{Binding OptimizerZstdLevel, Mode=TwoWay}"/>
-                        <TextBlock Text="{Binding [optimizer_level_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [optimizer_level_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
                 </shadui:Card>
             </Grid>
 
             <!-- Card 3: Batching & Latency Control Card -->
-            <shadui:Card Padding="14" IsEnabled="{Binding OptimizerEnabled}" Opacity="{Binding OptimizerEnabled, Converter={x:Static common:Converters.BooleanToOpacity}}">
+            <shadui:Card IsEnabled="{Binding OptimizerEnabled}">
                 <StackPanel Spacing="12">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Gauge}" Width="14" Height="14" Foreground="{DynamicResource PrimaryColor}"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Gauge}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
                         <StackPanel Spacing="1">
-                            <TextBlock Text="{Binding [optimizer_batching_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                            <TextBlock Text="{Binding [optimizer_batching_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="{Binding [optimizer_batching_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding [optimizer_batching_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
                     </StackPanel>
 
@@ -173,10 +168,10 @@
                         <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12">
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <TextBlock Grid.Column="0" Text="{Binding [optimizer_adaptive_flush_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="Medium" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="{Binding [optimizer_adaptive_flush_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" VerticalAlignment="Center"/>
                                     <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding OptimizerAdaptiveFlush, Mode=TwoWay}"/>
                                 </Grid>
-                                <TextBlock Text="{Binding [optimizer_adaptive_flush_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding [optimizer_adaptive_flush_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
@@ -184,13 +179,13 @@
                         <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12">
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <TextBlock Grid.Column="0" Text="{Binding [optimizer_flush_interval_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="Medium"/>
+                                    <TextBlock Grid.Column="0" Text="{Binding [optimizer_flush_interval_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
                                     <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0">
-                                        <TextBlock Text="{Binding OptimizerFlushIntervalMs, StringFormat='{}{0} ms'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding OptimizerFlushIntervalMs, StringFormat='{}{0} ms'}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </Border>
                                 </Grid>
                                 <Slider Minimum="2" Maximum="60" Value="{Binding OptimizerFlushIntervalMs, Mode=TwoWay}"/>
-                                <TextBlock Text="{Binding [optimizer_flush_interval_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding [optimizer_flush_interval_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
@@ -198,13 +193,13 @@
                         <Border Grid.Column="4" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12">
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <TextBlock Grid.Column="0" Text="{Binding [optimizer_buffer_threshold_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="Medium"/>
+                                    <TextBlock Grid.Column="0" Text="{Binding [optimizer_buffer_threshold_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
                                     <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0">
-                                        <TextBlock Text="{Binding OptimizerBufferThreshold, StringFormat='{}{0} B'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding OptimizerBufferThreshold, StringFormat='{}{0} B'}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </Border>
                                 </Grid>
                                 <Slider Minimum="4096" Maximum="262144" SmallChange="4096" LargeChange="16384" Value="{Binding OptimizerBufferThreshold, Mode=TwoWay}"/>
-                                <TextBlock Text="{Binding [optimizer_buffer_threshold_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding [optimizer_buffer_threshold_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -212,14 +207,14 @@
             </shadui:Card>
 
             <!-- Card 4: Protocol Middleware Multi-Lane Integration -->
-            <shadui:Card Padding="14">
+            <shadui:Card>
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                        <TextBlock Text="{Binding [optimizer_middleware_lanes_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [optimizer_middleware_lanes_desc], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
-                    <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToMiddlewareCommand}" Height="28" FontSize="11" Padding="12,0" VerticalAlignment="Center">
+                    <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToMiddlewareCommand}" VerticalAlignment="Center">
                         <TextBlock Text="{Binding [optimizer_go_to_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </Button>
                 </Grid>

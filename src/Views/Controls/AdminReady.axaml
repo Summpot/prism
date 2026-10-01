@@ -20,10 +20,7 @@
             Description="{Binding [admin_not_connected_hint], Source={x:Static i18n:LocalizationManager.Instance}}">
             <Button
                 Classes="Primary"
-                Command="{Binding ConnectCommand, ElementName=Root}"
-                Height="28"
-                Padding="12,0"
-                FontSize="12">
+                Command="{Binding ConnectCommand, ElementName=Root}">
                 <TextBlock Text="{Binding [admin_go_connect], Source={x:Static i18n:LocalizationManager.Instance}}"/>
             </Button>
         </controls:EmptyState>
@@ -35,10 +32,7 @@
             Description="{Binding [admin_access_denied_hint], Source={x:Static i18n:LocalizationManager.Instance}}">
             <Button
                 Classes="Outline"
-                Command="{Binding ConnectCommand, ElementName=Root}"
-                Height="28"
-                Padding="12,0"
-                FontSize="12">
+                Command="{Binding ConnectCommand, ElementName=Root}">
                 <TextBlock Text="{Binding [admin_go_connect], Source={x:Static i18n:LocalizationManager.Instance}}"/>
             </Button>
         </controls:EmptyState>

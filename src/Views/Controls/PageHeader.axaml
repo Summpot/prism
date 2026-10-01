@@ -7,27 +7,23 @@
     <ControlTheme x:Key="{x:Type controls:PageHeader}" TargetType="controls:PageHeader">
         <Setter Property="Template">
             <ControlTemplate TargetType="controls:PageHeader">
-                <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
-                    <StackPanel Grid.Column="0" Spacing="2" MinWidth="0">
+                <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,8">
+                    <StackPanel Grid.Column="0" Spacing="4" MinWidth="0">
                         <TextBlock
                             Text="{TemplateBinding Eyebrow}"
-                            FontSize="10"
-                            FontWeight="SemiBold"
-                            Opacity="0.8"
-                            Foreground="{DynamicResource MutedForegroundColor}"
+                            Classes="Caption Muted"
                             IsVisible="{TemplateBinding Eyebrow, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <common:LucideIcon
                                 Data="{TemplateBinding Icon}"
                                 Width="16"
                                 Height="16"
-                                Foreground="{DynamicResource PrimaryColor}"
+                                Foreground="{DynamicResource ForegroundColor}"
                                 IsVisible="{TemplateBinding Icon, Converter={x:Static common:Converters.NotNullToBoolean}}"
                                 VerticalAlignment="Center"/>
                             <TextBlock
                                 Text="{TemplateBinding Title}"
-                                FontWeight="Bold"
-                                FontSize="16"
+                                Classes="h4"
                                 VerticalAlignment="Center"
                                 TextTrimming="CharacterEllipsis"/>
                             <ContentPresenter
@@ -37,8 +33,7 @@
                         </StackPanel>
                         <TextBlock
                             Text="{TemplateBinding Description}"
-                            FontSize="12"
-                            Foreground="{DynamicResource MutedForegroundColor}"
+                            Classes="Caption Muted"
                             TextWrapping="Wrap"
                             IsVisible="{TemplateBinding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
                     </StackPanel>
@@ -47,7 +42,7 @@
                         Content="{TemplateBinding Actions}"
                         VerticalAlignment="Center"
                         HorizontalAlignment="Right"
-                        Margin="12,0,0,0"
+                        Margin="16,0,0,0"
                         IsVisible="{TemplateBinding Actions, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
                 </Grid>
             </ControlTemplate>

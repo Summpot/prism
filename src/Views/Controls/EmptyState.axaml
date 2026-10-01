@@ -10,42 +10,41 @@
                 <Border
                     BorderBrush="{DynamicResource BorderColor}"
                     BorderThickness="1"
-                    CornerRadius="12"
+                    CornerRadius="{DynamicResource XlCornerRadius}"
                     Padding="24,28"
-                    Background="{DynamicResource GhostColor}">
+                    Background="{DynamicResource CardBackgroundColor}">
                     <StackPanel Spacing="8" HorizontalAlignment="Center" MaxWidth="420">
                         <Border
                             Width="40"
                             Height="40"
-                            CornerRadius="8"
-                            Background="{DynamicResource MutedColor}"
+                            CornerRadius="{DynamicResource LgCornerRadius}"
+                            Background="{DynamicResource GhostColor}"
                             HorizontalAlignment="Center"
                             IsVisible="{TemplateBinding Icon, Converter={x:Static common:Converters.NotNullToBoolean}}">
                             <common:LucideIcon
                                 Data="{TemplateBinding Icon}"
-                                Width="18"
-                                Height="18"
+                                Width="16"
+                                Height="16"
                                 Foreground="{DynamicResource MutedForegroundColor}"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock
                             Text="{TemplateBinding Title}"
+                            Classes="Small"
                             FontWeight="SemiBold"
-                            FontSize="13"
                             TextAlignment="Center"
                             IsVisible="{TemplateBinding Title, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
                         <TextBlock
                             Text="{TemplateBinding Description}"
-                            FontSize="12"
-                            Foreground="{DynamicResource MutedForegroundColor}"
+                            Classes="Caption Muted"
                             TextAlignment="Center"
                             TextWrapping="Wrap"
                             IsVisible="{TemplateBinding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"/>
                         <ContentPresenter
                             Content="{TemplateBinding Actions}"
                             HorizontalAlignment="Center"
-                            Margin="0,6,0,0"
+                            Margin="0,8,0,0"
                             IsVisible="{TemplateBinding Actions, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
                     </StackPanel>
                 </Border>

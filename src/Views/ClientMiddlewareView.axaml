@@ -13,7 +13,7 @@
     mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
     x:DataType="vm:ClientMiddlewareViewModel">
 
-    <Grid RowDefinitions="Auto, *" Margin="16">
+    <Grid RowDefinitions="Auto, *" Margin="{DynamicResource PageMargin}">
         <controls:PageHeader
             Grid.Row="0"
             Title="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -21,16 +21,16 @@
             Icon="{x:Static common:AppIcons.Sliders}"
             Margin="0,0,0,12">
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                <Button Classes="Outline" Command="{Binding ResetConfigCommand}" Height="28" Padding="10,0">
+                <Button Classes="Outline" Command="{Binding ResetConfigCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                        <TextBlock Text="{Binding [middleware_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
+                        <TextBlock Text="{Binding [middleware_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>
                 </Button>
-                <Button Classes="Primary" Command="{Binding SaveConfigCommand}" Height="28" Padding="12,0">
+                <Button Classes="Primary" Command="{Binding SaveConfigCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
-                        <TextBlock Text="{Binding [middleware_apply], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="16" Height="16" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                        <TextBlock Text="{Binding [middleware_apply], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -39,12 +39,12 @@
         <!-- 2-Column Content: Middlewares List + Config Form -->
         <Grid Grid.Row="1" ColumnDefinitions="280, 10, *">
             <!-- Left: Middlewares List -->
-            <shadui:Card Grid.Column="0" Padding="12">
+            <shadui:Card Grid.Column="0">
                 <Grid RowDefinitions="Auto, *">
                     <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,10">
-                        <TextBlock Text="{Binding [middleware_selector], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding [middleware_selector], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Middlewares.Count, StringFormat='{}{0}'}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="{Binding Middlewares.Count, StringFormat='{}{0}'}" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </Border>
                     </Grid>
 
@@ -71,12 +71,12 @@
                             <DataTemplate x:DataType="native:MiddlewareItem">
                                 <StackPanel Spacing="3">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12"/>
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
                                         <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding [middleware_badge], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="8" FontWeight="Bold" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="{Binding [middleware_badge], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </Border>
                                     </StackPanel>
-                                    <TextBlock Text="{Binding EffectiveConfig.Count, StringFormat='{}{0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding EffectiveConfig.Count, StringFormat='{}{0}'}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -88,25 +88,24 @@
             <GridSplitter Grid.Column="1" Width="10" Background="Transparent" ResizeDirection="Columns"/>
 
             <!-- Right: Dynamic Schema Form -->
-            <shadui:Card Grid.Column="2" Padding="16">
+            <shadui:Card Grid.Column="2">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="14">
                         <!-- Middleware Title & Toggle -->
                         <Grid ColumnDefinitions="*, Auto">
                             <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="{Binding SelectedMiddleware.Name}" FontWeight="Bold" FontSize="15"
+                                    <TextBlock Text="{Binding SelectedMiddleware.Name}" FontWeight="Bold"
                                                IsVisible="{Binding SelectedMiddleware, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
-                                    <TextBlock Text="{Binding [middleware_select_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="15"
+                                    <TextBlock Text="{Binding [middleware_select_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold"
                                                IsVisible="{Binding SelectedMiddleware, Converter={x:Static common:Converters.NullToTrue}}"/>
                                     <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
-                                                   FontSize="10"
                                                    FontWeight="SemiBold"
                                                    Foreground="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
                                     </Border>
                                 </StackPanel>
-                                <TextBlock Text="{Binding [middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding [middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                             </StackPanel>
                             <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
                         </Grid>
@@ -117,7 +116,6 @@
                         <TextBlock
                             IsVisible="{Binding ConfigFields.Count, Converter={x:Static common:Converters.EqualsZero}}"
                             Text="{Binding [middleware_no_schema_generic], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            FontSize="12"
                             Foreground="{DynamicResource MutedForegroundColor}"/>
 
                         <!-- Polymorphic Fields ItemsControl with DataTemplates -->
@@ -129,15 +127,14 @@
                                         <Grid ColumnDefinitions="*, Auto">
                                             <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="12"/>
+                                                    <TextBlock Text="{Binding Label}" FontWeight="Medium"/>
                                                     <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                                        <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                                     </Border>
                                                 </StackPanel>
                                                 <TextBlock
                                                     IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                                                     Text="{Binding Description}"
-                                                    FontSize="10"
                                                     Foreground="{DynamicResource MutedForegroundColor}"
                                                     TextWrapping="Wrap"/>
                                             </StackPanel>
@@ -150,19 +147,25 @@
                                 <DataTemplate DataType="vm:NumberMiddlewareFieldViewModel">
                                     <StackPanel Spacing="4" Margin="0,0,0,10">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource MutedForegroundColor}"/>
                                             <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                             </Border>
                                         </StackPanel>
-                                        <NumericUpDown Value="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12" CornerRadius="6"/>
+                                        <NumericUpDown Value="{Binding Value, Mode=TwoWay}"/>
                                         <TextBlock
                                             IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                                             Text="{Binding Description}"
-                                            FontSize="10"
                                             Foreground="{DynamicResource MutedForegroundColor}"
                                             TextWrapping="Wrap"/>
-                                        <TextBlock Text="{Binding DefaultValue, StringFormat='Default: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Classes="Caption Muted" FontFamily="{DynamicResource MonoFont}">
+                                            <TextBlock.Text>
+                                                <MultiBinding Converter="{x:Static common:Converters.MiddlewareDefaultLabel}">
+                                                    <Binding Path="DefaultValue"/>
+                                                    <Binding Path="[middleware_default]" Source="{x:Static i18n:LocalizationManager.Instance}"/>
+                                                </MultiBinding>
+                                            </TextBlock.Text>
+                                        </TextBlock>
                                     </StackPanel>
                                 </DataTemplate>
 
@@ -170,19 +173,25 @@
                                 <DataTemplate DataType="vm:ListStringMiddlewareFieldViewModel">
                                     <StackPanel Spacing="4" Margin="0,0,0,10">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource MutedForegroundColor}"/>
                                             <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                             </Border>
                                         </StackPanel>
-                                        <TextBox Text="{Binding Value, Mode=TwoWay}" MinHeight="64" AcceptsReturn="True" TextWrapping="Wrap" FontSize="12" CornerRadius="6"/>
+                                        <TextBox Text="{Binding Value, Mode=TwoWay}" MinHeight="64" AcceptsReturn="True" TextWrapping="Wrap"/>
                                         <TextBlock
                                             IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                                             Text="{Binding Description}"
-                                            FontSize="10"
                                             Foreground="{DynamicResource MutedForegroundColor}"
                                             TextWrapping="Wrap"/>
-                                        <TextBlock Text="{Binding DefaultValue, StringFormat='Default: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Classes="Caption Muted" FontFamily="{DynamicResource MonoFont}">
+                                            <TextBlock.Text>
+                                                <MultiBinding Converter="{x:Static common:Converters.MiddlewareDefaultLabel}">
+                                                    <Binding Path="DefaultValue"/>
+                                                    <Binding Path="[middleware_default]" Source="{x:Static i18n:LocalizationManager.Instance}"/>
+                                                </MultiBinding>
+                                            </TextBlock.Text>
+                                        </TextBlock>
                                     </StackPanel>
                                 </DataTemplate>
 
@@ -190,19 +199,25 @@
                                 <DataTemplate DataType="vm:StringMiddlewareFieldViewModel">
                                     <StackPanel Spacing="4" Margin="0,0,0,10">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource MutedForegroundColor}"/>
                                             <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="9" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
+                                                <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                             </Border>
                                         </StackPanel>
-                                        <TextBox Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12" CornerRadius="6"/>
+                                        <TextBox Text="{Binding Value, Mode=TwoWay}"/>
                                         <TextBlock
                                             IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                                             Text="{Binding Description}"
-                                            FontSize="10"
                                             Foreground="{DynamicResource MutedForegroundColor}"
                                             TextWrapping="Wrap"/>
-                                        <TextBlock Text="{Binding DefaultValue, StringFormat='Default: {0}'}" FontSize="10" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Classes="Caption Muted" FontFamily="{DynamicResource MonoFont}">
+                                            <TextBlock.Text>
+                                                <MultiBinding Converter="{x:Static common:Converters.MiddlewareDefaultLabel}">
+                                                    <Binding Path="DefaultValue"/>
+                                                    <Binding Path="[middleware_default]" Source="{x:Static i18n:LocalizationManager.Instance}"/>
+                                                </MultiBinding>
+                                            </TextBlock.Text>
+                                        </TextBlock>
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.DataTemplates>
@@ -212,7 +227,6 @@
                         <TextBlock
                             IsVisible="{Binding StatusMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
                             Text="{Binding StatusMessage}"
-                            FontSize="11"
                             Foreground="{DynamicResource PrimaryColor}"
                             Margin="0,4,0,0"/>
                     </StackPanel>

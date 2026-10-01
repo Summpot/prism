@@ -14,6 +14,7 @@
     Height="740"
     MinWidth="880"
     MinHeight="600"
+    SaveWindowState="True"
     WindowStartupLocation="CenterScreen"
     mc:Ignorable="d"
     x:DataType="vm:MainWindowViewModel">
@@ -74,21 +75,24 @@
     <shadui:Window.RightWindowTitleBarContent>
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,0" VerticalAlignment="Center">
             <!-- Language Switcher Flyout Button -->
-            <Button Classes="Ghost" Height="26" Padding="6,2" CornerRadius="4">
-                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Languages}" Width="13" Height="13" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    <TextBlock Text="{Binding CurrentLocale, Converter={x:Static common:Converters.LocaleToShortLabel}}" FontSize="11" FontWeight="Medium" VerticalAlignment="Center"/>
-                </StackPanel>
+            <Button
+                Classes="Ghost"
+                Width="30"
+                Height="30"
+                Padding="0"
+                CornerRadius="{DynamicResource MdCornerRadius}"
+                ToolTip.Tip="{Binding CurrentLocale, Converter={x:Static common:Converters.LocaleToShortLabel}}">
+                <common:LucideIcon Data="{x:Static common:AppIcons.Languages}" Width="16" Height="16"/>
                 <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
                         <MenuItem Header="{Binding [language_chinese], Source={x:Static i18n:LocalizationManager.Instance}}" Command="{Binding SelectLocaleCommand}" CommandParameter="zh-CN">
                             <MenuItem.Icon>
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=zh-CN}"/>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="16" Height="16" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=zh-CN}"/>
                             </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="{Binding [language_english], Source={x:Static i18n:LocalizationManager.Instance}}" Command="{Binding SelectLocaleCommand}" CommandParameter="en">
                             <MenuItem.Icon>
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=en}"/>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="16" Height="16" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=en}"/>
                             </MenuItem.Icon>
                         </MenuItem>
                     </MenuFlyout>
@@ -103,22 +107,30 @@
             Grid.Column="0"
             CurrentRoute="{Binding Navigation.CurrentRoute, Mode=TwoWay}"
             Expanded="{Binding IsSidebarExpanded, Mode=TwoWay}"
-            Width="{Binding IsSidebarExpanded, Converter={x:Static common:Converters.ExpandedSidebarWidth}}"
-            MinWidth="56">
+            Width="240"
+            MinWidth="60">
             <shadui:Sidebar.Header>
-                <Grid Margin="4,0">
-                    <!-- Expanded Header -->
-                    <Grid ColumnDefinitions="Auto, *, Auto" IsVisible="{Binding IsSidebarExpanded}">
-                        <Image Grid.Column="0" Source="avares://Prism/Assets/logo192.png" Width="24" Height="24" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="Prism" FontWeight="Bold" FontSize="14" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                        <Button Grid.Column="2" Classes="Ghost" Command="{Binding ToggleSidebarCommand}" Width="28" Height="28" Padding="4">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="14" Height="14"/>
-                        </Button>
-                    </Grid>
-                    <!-- Collapsed Header -->
-                    <Button Classes="Ghost" Command="{Binding ToggleSidebarCommand}" Width="32" Height="32" Padding="4" HorizontalAlignment="Center" IsVisible="{Binding !IsSidebarExpanded}">
-                        <Image Source="avares://Prism/Assets/logo192.png" Width="22" Height="22"/>
-                    </Button>
+                <Grid ColumnDefinitions="Auto, *" Margin="4,0">
+                    <ToggleButton
+                        Theme="{DynamicResource SideTogglerTheme}"
+                        IsChecked="{Binding IsSidebarExpanded, Mode=TwoWay}"
+                        Width="32"
+                        Height="32"
+                        Padding="8"
+                        CornerRadius="{DynamicResource LgCornerRadius}"
+                        HorizontalAlignment="Left">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="16" Height="16"/>
+                    </ToggleButton>
+                    <StackPanel
+                        Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        Margin="8,0,0,0"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding IsSidebarExpanded}">
+                        <Image Source="avares://Prism/Assets/logo192.png" Width="24" Height="24"/>
+                        <TextBlock Text="Prism" Classes="Large" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
                 </Grid>
             </shadui:Sidebar.Header>
 
@@ -128,6 +140,7 @@
                 <shadui:SidebarItem 
                     Route="client.overview" 
                     Content="{Binding [nav_connection], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_connection], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.overview">
                     <shadui:SidebarItem.Icon>
@@ -138,6 +151,7 @@
                 <shadui:SidebarItem 
                     Route="client.traffic" 
                     Content="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.traffic">
                     <shadui:SidebarItem.Icon>
@@ -148,6 +162,7 @@
                 <shadui:SidebarItem 
                     Route="client.logs" 
                     Content="{Binding [nav_logs], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_logs], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.logs">
                     <shadui:SidebarItem.Icon>
@@ -158,6 +173,7 @@
                 <shadui:SidebarItem 
                     Route="client.profiles" 
                     Content="{Binding [nav_tunnel_config], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_tunnel_config], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.profiles">
                     <shadui:SidebarItem.Icon>
@@ -168,6 +184,7 @@
                 <shadui:SidebarItem 
                     Route="client.middleware" 
                     Content="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.middleware">
                     <shadui:SidebarItem.Icon>
@@ -178,6 +195,7 @@
                 <shadui:SidebarItem 
                     Route="client.optimizer" 
                     Content="{Binding [nav_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_optimizer], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="client.optimizer">
                     <shadui:SidebarItem.Icon>
@@ -192,6 +210,7 @@
                     <shadui:SidebarItem 
                         Route="admin.overview" 
                         Content="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.overview">
                         <shadui:SidebarItem.Icon>
@@ -202,6 +221,7 @@
                     <shadui:SidebarItem 
                         Route="admin.connections" 
                         Content="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.connections">
                         <shadui:SidebarItem.Icon>
@@ -212,6 +232,7 @@
                     <shadui:SidebarItem 
                         Route="admin.services" 
                         Content="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.services">
                         <shadui:SidebarItem.Icon>
@@ -222,6 +243,7 @@
                     <shadui:SidebarItem 
                         Route="admin.traffic" 
                         Content="{Binding [nav_server_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_server_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.traffic">
                         <shadui:SidebarItem.Icon>
@@ -232,6 +254,7 @@
                     <shadui:SidebarItem 
                         Route="admin.connectors" 
                         Content="{Binding [nav_connector_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_connector_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.connectors">
                         <shadui:SidebarItem.Icon>
@@ -242,6 +265,7 @@
                     <shadui:SidebarItem 
                         Route="admin.middleware" 
                         Content="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.middleware">
                         <shadui:SidebarItem.Icon>
@@ -252,6 +276,7 @@
                     <shadui:SidebarItem 
                         Route="admin.runtime" 
                         Content="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.runtime">
                         <shadui:SidebarItem.Icon>
@@ -262,6 +287,7 @@
                     <shadui:SidebarItem 
                         Route="admin.users" 
                         Content="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}"
+                        ToolTip.Tip="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="admin.users">
                         <shadui:SidebarItem.Icon>
@@ -275,6 +301,7 @@
                 <shadui:SidebarItem 
                     Route="settings" 
                     Content="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}"
+                    ToolTip.Tip="{Binding [nav_settings], Source={x:Static i18n:LocalizationManager.Instance}}"
                     Command="{Binding NavigateCommand}"
                     CommandParameter="settings">
                     <shadui:SidebarItem.Icon>

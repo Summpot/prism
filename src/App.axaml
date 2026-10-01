@@ -12,59 +12,48 @@
                 <ResourceInclude Source="avares://Prism/Views/Controls/EmptyState.axaml"/>
                 <ResourceInclude Source="avares://Prism/Views/Controls/ErrorBanner.axaml"/>
             </ResourceDictionary.MergedDictionaries>
-            <SolidColorBrush x:Key="SuccessColor" Color="#10b981"/>
-            <SolidColorBrush x:Key="SuccessTint" Color="#2010b981"/>
-            <SolidColorBrush x:Key="WarningColor" Color="#f59e0b"/>
-            <SolidColorBrush x:Key="DestructiveColor" Color="#ef4444"/>
-            <SolidColorBrush x:Key="DestructiveTint" Color="#20ef4444"/>
-            <SolidColorBrush x:Key="DestructiveBorder" Color="#50ef4444"/>
+            <!-- MutedForegroundColor is not a theme key. Alias the theme muted color so existing bindings follow light and dark. -->
+            <SolidColorBrush x:Key="MutedForegroundColor" Color="{DynamicResource MutedColor}"/>
+            <!-- Sparkline properties are IBrush. Theme status keys are Color, so these brushes track them without replacing the theme keys. -->
+            <SolidColorBrush x:Key="StatusSuccessBrush" Color="{DynamicResource SuccessColor}"/>
+            <SolidColorBrush x:Key="StatusSuccessFillBrush" Color="{DynamicResource SuccessColor10}"/>
+            <SolidColorBrush x:Key="StatusWarningBrush" Color="{DynamicResource WarningColor}"/>
+            <SolidColorBrush x:Key="StatusDestructiveBrush" Color="{DynamicResource DestructiveColor}"/>
             <FontFamily x:Key="MonoFont">Consolas, Menlo, "DejaVu Sans Mono", monospace</FontFamily>
+            <Thickness x:Key="PageMargin">24,20</Thickness>
+            <x:Double x:Key="PageMaxWidth">960</x:Double>
         </ResourceDictionary>
     </Application.Resources>
     <Application.Styles>
         <shadui:ShadTheme />
-        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
-        <Style Selector="DataGrid">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderColor}"/>
-            <Setter Property="VerticalGridLinesBrush" Value="Transparent"/>
-            <Setter Property="RowBackground" Value="Transparent"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-            <Setter Property="HeadersVisibility" Value="Column"/>
-        </Style>
-        <Style Selector="DataGridColumnHeader">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Medium"/>
-            <Setter Property="SeparatorBrush" Value="{DynamicResource BorderColor}"/>
-        </Style>
-        <Style Selector="DataGridRow">
-            <Setter Property="Background" Value="Transparent"/>
+        <!-- Library ToggleButton has no selected fill. Segment is the app's choice-group look. -->
+        <Style Selector="ToggleButton.Segment">
             <Setter Property="MinHeight" Value="32"/>
-        </Style>
-        <Style Selector="DataGridRow:pointerover">
-            <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
-        </Style>
-        <Style Selector="DataGridRow:selected">
-            <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
-        </Style>
-        <Style Selector="DataGridRow:selected:pointerover">
-            <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
-        </Style>
-        <Style Selector="DataGridRow:selected DataGridCell">
-            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}"/>
-        </Style>
-        <Style Selector="DataGridCell">
-            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource MdCornerRadius}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
-        <Style Selector="DataGridCell:focus">
-            <Setter Property="FocusAdorner" Value="{x:Null}"/>
+        <Style Selector="ToggleButton.Segment:checked">
+            <Setter Property="Background" Value="{DynamicResource PrimaryColor}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource PrimaryColor}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryForegroundColor}"/>
+        </Style>
+        <Style Selector="ToggleButton.Segment:checked /template/ Border#NameBaseBackground">
+            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="Background" Value="{DynamicResource PrimaryColor}"/>
+        </Style>
+        <Style Selector="ToggleButton.Segment:checked /template/ Border#NameHoverBackground">
+            <Setter Property="Opacity" Value="0"/>
+        </Style>
+        <Style Selector="ToggleButton.Segment:pointerover:not(:checked) /template/ Border#NameHoverBackground">
+            <Setter Property="Opacity" Value="1"/>
+        </Style>
+        <Style Selector="ListBox.LogList ListBoxItem:selected">
+            <Setter Property="Background" Value="{DynamicResource GhostHoverColor}"/>
         </Style>
     </Application.Styles>
     <TrayIcon.Icons>

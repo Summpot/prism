@@ -16,7 +16,7 @@
     <Panel>
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
-    <Grid RowDefinitions="Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
+    <Grid RowDefinitions="Auto, Auto, *" Margin="{DynamicResource PageMargin}" IsVisible="{Binding IsReady}">
         <controls:PageHeader
             Grid.Row="0"
             Title="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -24,24 +24,21 @@
             Icon="{x:Static common:AppIcons.Cable}"
             Margin="0,0,0,16">
             <controls:PageHeader.Badge>
-                <shadui:Badge Content="{Binding Connections.Count}" Height="20" Padding="6,0" FontSize="10" VerticalAlignment="Center"/>
+                <shadui:Badge Content="{Binding Connections.Count}" VerticalAlignment="Center"/>
             </controls:PageHeader.Badge>
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [admin_filter_connections], Source={x:Static i18n:LocalizationManager.Instance}}"
-                    Width="180"
-                    Height="28"
-                    FontSize="11"/>
-                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
-                    <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
+                    Width="180"/>
+                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}">
+                    <TextBlock Text="{Binding AutoRefreshText}"/>
                 </Button>
                 <Button Classes="Outline" Command="{Binding RefreshCommand}"
-                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
-                        Height="28" Padding="10,0">
+                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
+                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -54,8 +51,7 @@
             Margin="0,0,0,12"/>
 
         <!-- Connections Table -->
-        <shadui:Card Grid.Row="2" Padding="12">
-            <Grid>
+        <Grid Grid.Row="2">
                 <DataGrid
                     ItemsSource="{Binding Connections}"
                     AutoGenerateColumns="False"
@@ -81,9 +77,6 @@
                                         Command="{Binding #Root.((vm:AdminConnectionsViewModel)DataContext).DisconnectCommand}"
                                         CommandParameter="{Binding}"
                                         Content="{Binding [admin_close], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                        Height="24"
-                                        FontSize="10"
-                                        Padding="6,0"
                                         Foreground="{DynamicResource DestructiveColor}"/>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
@@ -98,8 +91,7 @@
                     Margin="0,24"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"/>
-            </Grid>
-        </shadui:Card>
+        </Grid>
     </Grid>
     </Panel>
 </UserControl>

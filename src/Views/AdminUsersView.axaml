@@ -16,7 +16,7 @@
     <Panel>
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
-    <Grid RowDefinitions="Auto, Auto, Auto, *" Margin="16" IsVisible="{Binding IsReady}">
+    <Grid RowDefinitions="Auto, Auto, Auto, *" Margin="{DynamicResource PageMargin}" IsVisible="{Binding IsReady}">
         <controls:PageHeader
             Grid.Row="0"
             Title="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -27,18 +27,15 @@
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [admin_users_search], Source={x:Static i18n:LocalizationManager.Instance}}"
-                    Width="200"
-                    Height="28"
-                    FontSize="11"/>
-                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
-                    <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
+                    Width="200"/>
+                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}">
+                    <TextBlock Text="{Binding AutoRefreshText}"/>
                 </Button>
                 <Button Classes="Outline" Command="{Binding RefreshCommand}"
-                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
-                        Height="28" Padding="10,0">
+                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
+                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -50,20 +47,17 @@
             RetryCommand="{Binding RefreshCommand}"
             Margin="0,0,0,12"/>
 
-        <shadui:Card Grid.Row="2" Padding="12" Margin="0,0,0,12" IsVisible="{Binding HasSession}">
+        <shadui:Card Grid.Row="2" Margin="0,0,0,12" IsVisible="{Binding HasSession}">
             <Grid ColumnDefinitions="*, Auto">
                 <StackPanel Spacing="2">
-                    <TextBlock Text="{Binding [session_logged_in], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    <TextBlock Text="{Binding SessionName}" FontWeight="SemiBold" FontSize="13"/>
-                    <TextBlock Text="{Binding SessionDetail}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding [session_logged_in], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding SessionName}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding SessionDetail}" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </StackPanel>
                 <shadui:Badge
                     Grid.Column="1"
                     IsVisible="{Binding SessionIsAdmin}"
                     Content="{Binding [users_session_admin], Source={x:Static i18n:LocalizationManager.Instance}}"
-                    Height="20"
-                    Padding="6,0"
-                    FontSize="10"
                     VerticalAlignment="Center"/>
             </Grid>
         </shadui:Card>
@@ -72,8 +66,7 @@
         <TabControl Grid.Row="3">
             <!-- Tab 1: Users -->
             <TabItem Header="{Binding [users_title], Source={x:Static i18n:LocalizationManager.Instance}}">
-                <shadui:Card Margin="0,8,0,0" Padding="12">
-                    <Grid>
+                <Grid Margin="0,16,0,0">
                             <DataGrid
                                 ItemsSource="{Binding Users}"
                                 AutoGenerateColumns="False"
@@ -89,9 +82,6 @@
                                             <DataTemplate x:DataType="vm:UserRowItem">
                                                 <shadui:Badge
                                                     Content="{Binding Role, Converter={x:Static common:Converters.RoleLabel}}"
-                                                    Height="20"
-                                                    Padding="6,0"
-                                                    FontSize="10"
                                                     VerticalAlignment="Center"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
@@ -106,15 +96,13 @@
                                                         Classes="Outline"
                                                         Command="{Binding #Root.((vm:AdminUsersViewModel)DataContext).OpenEditUserDialogCommand}"
                                                         CommandParameter="{Binding}"
-                                                        Content="{Binding [common_edit], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='编辑'}"
-                                                        Height="22" FontSize="10" Padding="6,0"/>
+                                                        Content="{Binding [common_edit], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='编辑'}"/>
                                                     <Button
                                                         Classes="Ghost"
                                                         Command="{Binding #Root.((vm:AdminUsersViewModel)DataContext).ToggleUserRoleCommand}"
                                                         CommandParameter="{Binding}"
-                                                        ToolTip.Tip="{Binding [users_toggle_role], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                                        Height="22" Width="22" Padding="2">
-                                                        <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="11" Height="11"/>
+                                                        ToolTip.Tip="{Binding [users_toggle_role], Source={x:Static i18n:LocalizationManager.Instance}}" Width="22">
+                                                        <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="16" Height="16"/>
                                                     </Button>
                                                 </StackPanel>
                                             </DataTemplate>
@@ -131,20 +119,18 @@
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"/>
                     </Grid>
-                </shadui:Card>
             </TabItem>
 
             <!-- Tab 2: Access Tokens -->
             <TabItem Header="{Binding [admin_col_access_tokens], Source={x:Static i18n:LocalizationManager.Instance}}">
-                <shadui:Card Margin="0,8,0,0" Padding="12">
-                    <Grid RowDefinitions="Auto, *">
+                <Grid RowDefinitions="Auto, *" Margin="0,16,0,0">
                         <!-- Toolbar -->
                         <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
-                            <TextBlock Text="{Binding [admin_users_active_tokens], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
-                            <Button Grid.Column="1" Classes="Primary" Command="{Binding OpenCreateTokenDialogCommand}" Height="28" Padding="10,0">
+                            <TextBlock Text="{Binding [admin_users_active_tokens], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Classes="Primary" Command="{Binding OpenCreateTokenDialogCommand}">
                                 <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <common:LucideIcon Data="{x:Static common:AppIcons.Plus}" Width="11" Height="11" Foreground="{DynamicResource PrimaryForegroundColor}"/>
-                                    <TextBlock Text="{Binding [users_generate_token], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Plus}" Width="16" Height="16" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                                    <TextBlock Text="{Binding [users_generate_token], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                                 </StackPanel>
                             </Button>
                         </Grid>
@@ -164,8 +150,7 @@
                                     <DataGridTemplateColumn Header="{Binding [admin_col_type], Source={x:Static i18n:LocalizationManager.Instance}}" MinWidth="80" Width="95">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate x:DataType="vm:TokenRowItem">
-                                                <TextBlock Text="{Binding TokenType, Converter={x:Static common:Converters.TokenTypeLabel}}"
-                                                           FontSize="11" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding TokenType, Converter={x:Static common:Converters.TokenTypeLabel}}" VerticalAlignment="Center"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -180,9 +165,6 @@
                                                     Command="{Binding #Root.((vm:AdminUsersViewModel)DataContext).RevokeTokenCommand}"
                                                     CommandParameter="{Binding}"
                                                     Content="{Binding [users_revoke], Source={x:Static i18n:LocalizationManager.Instance}}"
-                                                    Height="22"
-                                                    FontSize="10"
-                                                    Padding="6,0"
                                                     Foreground="{DynamicResource DestructiveColor}"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
@@ -199,7 +181,6 @@
                                 VerticalAlignment="Center"/>
                         </Grid>
                     </Grid>
-                </shadui:Card>
             </TabItem>
         </TabControl>
     </Grid>

@@ -44,6 +44,26 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [ObservableProperty]
     private string _sessionRole = "";
 
+    [ObservableProperty]
+    private string? _sessionAvatarUrl;
+
+    [ObservableProperty]
+    private Avalonia.Media.Imaging.Bitmap? _userAvatarBitmap;
+
+    private async Task LoadAvatarBitmapAsync(string url)
+    {
+        try
+        {
+            var bytes = await _httpClient.GetByteArrayAsync(url);
+            using var ms = new System.IO.MemoryStream(bytes);
+            UserAvatarBitmap = new Avalonia.Media.Imaging.Bitmap(ms);
+        }
+        catch
+        {
+            UserAvatarBitmap = null;
+        }
+    }
+
     public List<string> SupportedProtocols { get; } = new()
     {
         "auto://",
@@ -430,22 +450,47 @@ public partial class ClientOverviewViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public void StartGitHubLogin()
+    public async Task StartGitHubLoginAsync()
     {
         try
         {
             ErrorMessage = null;
-            string? baseUrl = ResolveManagementBaseUrl();
-            if (string.IsNullOrWhiteSpace(baseUrl))
+            string state = Guid.NewGuid().ToString("N");
+            string? targetUrl = null;
+
+            // 1. If connected, prefer in-band control RPC
+            if (IsConnected)
             {
-                ErrorMessage = "GitHub OAuth requires a Management URL. Please configure it in Settings or import a profile with Management URL.";
+                try
+                {
+                    var resp = await AdminApiClient.Instance.GetGitHubLoginUrlAsync(state);
+                    if (!string.IsNullOrWhiteSpace(resp.Url))
+                    {
+                        targetUrl = resp.Url;
+                    }
+                }
+                catch { }
+            }
+
+            // 2. Fallback to Management URL if available
+            if (string.IsNullOrWhiteSpace(targetUrl))
+            {
+                string? baseUrl = ResolveManagementBaseUrl();
+                if (!string.IsNullOrWhiteSpace(baseUrl))
+                {
+                    targetUrl = $"{baseUrl}/auth/github/login?state={state}";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(targetUrl))
+            {
+                ErrorMessage = "Cannot start GitHub OAuth: tunnel is not connected and Management URL is not configured.";
                 return;
             }
 
-            string authUrl = $"{baseUrl}/auth/github/login";
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = authUrl,
+                FileName = targetUrl,
                 UseShellExecute = true
             });
 
@@ -453,7 +498,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to open browser: {ex.Message}";
+            ErrorMessage = $"Failed to open browser for OAuth: {ex.Message}";
         }
     }
 
@@ -505,82 +550,125 @@ public partial class ClientOverviewViewModel : ViewModelBase
         ShowOAuthExchanging = true;
         try
         {
-            string? baseUrl = ResolveManagementBaseUrl();
-            if (string.IsNullOrWhiteSpace(baseUrl))
+            var cfg = _client.GetConfig();
+            string? deviceId = cfg?.DeviceId;
+
+            string token = "";
+            string username = "GitHub User";
+            string? avatarUrl = null;
+            bool isAdmin = false;
+            string? role = null;
+            string? tokenId = null;
+
+            // 1. If connected, exchange via in-band control RPC
+            if (IsConnected)
             {
-                ErrorMessage = "Management URL is not configured. Cannot exchange OAuth token.";
+                try
+                {
+                    var exchangeResp = await AdminApiClient.Instance.ExchangeGitHubCodeAsync(code, deviceId);
+                    token = exchangeResp.Token;
+                    tokenId = exchangeResp.TokenId;
+                    if (exchangeResp.User != null)
+                    {
+                        username = !string.IsNullOrWhiteSpace(exchangeResp.User.DisplayName) ? exchangeResp.User.DisplayName : exchangeResp.User.Username;
+                        avatarUrl = exchangeResp.User.AvatarUrl;
+                        role = exchangeResp.User.Role;
+                        isAdmin = string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                catch { }
+            }
+
+            // 2. Fallback to HTTP if token is still empty and management url exists
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                string? baseUrl = ResolveManagementBaseUrl();
+                if (!string.IsNullOrWhiteSpace(baseUrl))
+                {
+                    string exchangeUrl = $"{baseUrl}/auth/github/exchange";
+                    var payload = new OAuthExchangeRequest { Code = code, State = state };
+                    var json = System.Text.Json.JsonSerializer.Serialize(payload, AdminJsonContext.Default.OAuthExchangeRequest);
+                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                    var resp = await _httpClient.PostAsync(exchangeUrl, content);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        var body = await resp.Content.ReadAsStringAsync();
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        token = doc.RootElement.GetProperty("token").GetString() ?? "";
+                        if (doc.RootElement.TryGetProperty("token_id", out var tid)) tokenId = tid.GetString();
+                        if (doc.RootElement.TryGetProperty("user", out var userElem))
+                        {
+                            if (userElem.TryGetProperty("username", out var u) || userElem.TryGetProperty("login", out u))
+                            {
+                                username = u.GetString() ?? username;
+                            }
+                            if (userElem.TryGetProperty("avatar_url", out var av))
+                            {
+                                avatarUrl = av.GetString();
+                            }
+                            if (userElem.TryGetProperty("role", out var r))
+                            {
+                                role = r.GetString();
+                                isAdmin = string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                ErrorMessage = "OAuth exchange failed: server did not return a valid token.";
                 return;
             }
 
-            string exchangeUrl = $"{baseUrl}/auth/github/exchange";
-            var payload = new OAuthExchangeRequest { Code = code, State = state };
-            var json = System.Text.Json.JsonSerializer.Serialize(payload, AdminJsonContext.Default.OAuthExchangeRequest);
-            var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
-            var resp = await _httpClient.PostAsync(exchangeUrl, content);
-            if (resp.IsSuccessStatusCode)
+            try
             {
-                var body = await resp.Content.ReadAsStringAsync();
-                using var doc = System.Text.Json.JsonDocument.Parse(body);
-                string token = doc.RootElement.GetProperty("token").GetString() ?? "";
-                string username = "GitHub User";
-                bool isAdmin = false;
-
-                if (doc.RootElement.TryGetProperty("user", out var userElem))
-                {
-                    if (userElem.TryGetProperty("username", out var u) || userElem.TryGetProperty("login", out u))
-                    {
-                        username = u.GetString() ?? username;
-                    }
-                    if (userElem.TryGetProperty("role", out var r))
-                    {
-                        isAdmin = string.Equals(r.GetString(), "admin", StringComparison.OrdinalIgnoreCase);
-                    }
-                }
-
-                try
-                {
-                    var patch = new ClientConfigPatch(
-                        ProfileName: null,
-                        ServerAddr: null,
-                        Transport: null,
-                        AuthToken: token,
-                        ListenAddr: null,
-                        FakeLanBroadcast: null,
-                        AutoConnectPanel: null,
-                        AutoConnect: null,
-                        ManagementUrl: null,
-                        TokenId: null,
-                        TokenType: null,
-                        UserId: null,
-                        Username: username,
-                        ExpiresAt: null,
-                        AutoCheckUpdate: null,
-                        UpdateChannel: null,
-                        Autostart: null,
-                        SilentAutostart: null,
-                        OptimizerEnabled: null,
-                        OptimizerZstdLevel: null,
-                        OptimizerAdaptiveFlush: null,
-                        OptimizerFlushIntervalMs: null,
-                        OptimizerBufferThreshold: null
-                    );
-                    _client.SaveConfig(new SaveConfigRequest(
-                        ActiveProfileId: null,
-                        ActiveConfig: patch
-                    ));
-                }
-                catch { }
-
-                IsSessionAuthenticated = true;
-                SessionUsername = username;
-                SessionIsAdmin = isAdmin;
-                ShowOAuthWaiting = false;
-                ManualCallbackInput = "";
+                var patch = new ClientConfigPatch(
+                    ProfileName: null,
+                    ServerAddr: null,
+                    Transport: null,
+                    AuthToken: token,
+                    ListenAddr: null,
+                    FakeLanBroadcast: null,
+                    AutoConnectPanel: null,
+                    AutoConnect: null,
+                    ManagementUrl: null,
+                    TokenId: tokenId ?? cfg?.ActiveConfig?.TokenId,
+                    TokenType: null,
+                    UserId: null,
+                    Username: username,
+                    ExpiresAt: null,
+                    AutoCheckUpdate: null,
+                    UpdateChannel: null,
+                    Autostart: null,
+                    SilentAutostart: null,
+                    OptimizerEnabled: null,
+                    OptimizerZstdLevel: null,
+                    OptimizerAdaptiveFlush: null,
+                    OptimizerFlushIntervalMs: null,
+                    OptimizerBufferThreshold: null
+                );
+                _client.SaveConfig(new SaveConfigRequest(
+                    ActiveProfileId: null,
+                    ActiveConfig: patch
+                ));
             }
-            else
+            catch { }
+
+            IsSessionAuthenticated = true;
+            SessionUsername = username;
+            SessionAvatarUrl = avatarUrl;
+            SessionRole = role ?? "";
+            SessionIsAdmin = isAdmin;
+            ShowOAuthWaiting = false;
+            ShowOAuthExchanging = false;
+            ManualCallbackInput = "";
+
+            if (!string.IsNullOrWhiteSpace(avatarUrl))
             {
-                ErrorMessage = $"OAuth exchange failed with HTTP {resp.StatusCode}.";
+                _ = LoadAvatarBitmapAsync(avatarUrl);
             }
         }
         catch (Exception ex)
@@ -758,10 +846,58 @@ public partial class ClientOverviewViewModel : ViewModelBase
         try
         {
             ErrorMessage = null;
-            string fullUrl = RemoteLinkInput.Contains("://") ? RemoteLinkInput : $"{SelectedProtocol}{RemoteLinkInput}";
+            string raw = RemoteLinkInput.Contains("://") ? RemoteLinkInput : $"{SelectedProtocol}{RemoteLinkInput}";
             
-            // Start with link address override
-            await _client.StartAsync(serverAddr: fullUrl);
+            var parsed = PrismLinkService.Parse(raw);
+            string serverAddr = parsed?.ServerAddr ?? raw;
+            string transport = parsed?.Transport ?? "auto";
+            string listen = parsed?.ListenAddr ?? ListenAddress;
+            string? token = !string.IsNullOrWhiteSpace(parsed?.AuthToken) ? parsed.AuthToken : null;
+            string? name = parsed?.Name;
+
+            var patch = new ClientConfigPatch(
+                ProfileName: name,
+                ServerAddr: serverAddr,
+                Transport: transport,
+                AuthToken: token,
+                ListenAddr: listen,
+                FakeLanBroadcast: parsed?.FakeLanBroadcast,
+                AutoConnectPanel: null,
+                AutoConnect: null,
+                ManagementUrl: parsed?.ManagementUrl,
+                TokenId: null,
+                TokenType: null,
+                UserId: null,
+                Username: null,
+                ExpiresAt: null,
+                AutoCheckUpdate: null,
+                UpdateChannel: null,
+                Autostart: null,
+                SilentAutostart: null,
+                OptimizerEnabled: null,
+                OptimizerZstdLevel: null,
+                OptimizerAdaptiveFlush: null,
+                OptimizerFlushIntervalMs: null,
+                OptimizerBufferThreshold: null
+            );
+            _client.SaveConfig(new SaveConfigRequest(
+                ActiveProfileId: null,
+                ActiveConfig: patch
+            ));
+
+            await _client.StartAsync(
+                serverAddr: serverAddr,
+                transport: transport,
+                authToken: token,
+                listenAddr: listen,
+                profileName: name
+            );
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
+                await RefreshControlSessionAsync();
+            });
         }
         catch (Exception ex)
         {
@@ -796,6 +932,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 SessionUsername = session.Username ?? session.DisplayName ?? "User";
                 SessionIsAdmin = session.IsAdmin;
                 SessionRole = session.Role ?? "";
+                if (!string.IsNullOrWhiteSpace(session.AvatarUrl) && session.AvatarUrl != SessionAvatarUrl)
+                {
+                    SessionAvatarUrl = session.AvatarUrl;
+                    _ = LoadAvatarBitmapAsync(session.AvatarUrl);
+                }
             }
 
             try
@@ -846,6 +987,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 ActiveProfileId: null,
                 ActiveConfig: patch
             ));
+            UserAvatarBitmap = null;
+            SessionAvatarUrl = null;
             IsSessionAuthenticated = false;
             SessionUsername = "";
             SessionIsAdmin = false;
@@ -871,12 +1014,13 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [RelayCommand]
     public async Task CopyTargetAsync(DiscoveredServiceItem item)
     {
+        if (item == null) return;
         if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(item.TargetAddress);
             item.IsCopied = true;
-            await Task.Delay(1500);
+            await Task.Delay(2000);
             item.IsCopied = false;
         }
     }

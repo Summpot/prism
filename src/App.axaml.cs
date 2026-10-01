@@ -26,6 +26,15 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        string savedTheme = DesktopService.GetUiTheme();
+        RequestedThemeVariant = savedTheme switch
+        {
+            "Light" => Avalonia.Styling.ThemeVariant.Light,
+            "Dark" => Avalonia.Styling.ThemeVariant.Dark,
+            _ => Avalonia.Styling.ThemeVariant.Default
+        };
+        I18n.LocalizationManager.Instance.CurrentLocale = DesktopService.GetUiLocale();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var mainWindow = new MainWindow
@@ -90,11 +99,11 @@ public partial class App : Application
 
             var menu = new NativeMenu();
 
-            var showItem = new NativeMenuItem("打开主界面");
+            var showItem = new NativeMenuItem(I18n.LocalizationManager.Instance["tray_open"]);
             showItem.Click += (s, e) => ToggleMainWindow(mainWindow);
             menu.Items.Add(showItem);
 
-            _toggleTunnelItem = new NativeMenuItem("启动连接");
+            _toggleTunnelItem = new NativeMenuItem(I18n.LocalizationManager.Instance["tray_connect"]);
             _toggleTunnelItem.Click += async (s, e) =>
             {
                 try
@@ -118,7 +127,7 @@ public partial class App : Application
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
-            var exitItem = new NativeMenuItem("退出 Prism");
+            var exitItem = new NativeMenuItem(I18n.LocalizationManager.Instance["tray_exit"]);
             exitItem.Click += (s, e) => ExitApp(desktop);
             menu.Items.Add(exitItem);
 
@@ -127,23 +136,29 @@ public partial class App : Application
 
             trayIcons.Add(_trayIcon);
 
-            // React to status changes
-            NativeClientService.Instance.StatusUpdated += status =>
+            Action updateTrayTexts = () =>
             {
-                Dispatcher.UIThread.Post(() =>
+                var status = NativeClientService.Instance.CurrentStatus;
+                bool isRunning = status?.Running == true;
+                showItem.Header = I18n.LocalizationManager.Instance["tray_open"];
+                exitItem.Header = I18n.LocalizationManager.Instance["tray_exit"];
+                if (_toggleTunnelItem != null)
                 {
-                    if (_trayIcon != null)
-                    {
-                        _trayIcon.ToolTipText = status.Running
-                            ? $"Prism - 运行中 ({status.ServerAddr})"
-                            : "Prism - 空闲";
-                    }
-                    if (_toggleTunnelItem != null)
-                    {
-                        _toggleTunnelItem.Header = status.Running ? "断开连接" : "启动连接";
-                    }
-                });
+                    _toggleTunnelItem.Header = isRunning
+                        ? I18n.LocalizationManager.Instance["tray_disconnect"]
+                        : I18n.LocalizationManager.Instance["tray_connect"];
+                }
+                if (_trayIcon != null)
+                {
+                    _trayIcon.ToolTipText = isRunning
+                        ? string.Format(I18n.LocalizationManager.Instance["tray_running"], status?.ServerAddr ?? "")
+                        : I18n.LocalizationManager.Instance["tray_idle"];
+                }
             };
+
+            updateTrayTexts();
+            I18n.Messages.CurrentLocaleChanged += () => Dispatcher.UIThread.Post(updateTrayTexts);
+            NativeClientService.Instance.StatusUpdated += _ => Dispatcher.UIThread.Post(updateTrayTexts);
         }
         catch (Exception ex)
         {
@@ -185,7 +200,7 @@ public partial class App : Application
 
             foreach (var a in args)
             {
-                if (a.StartsWith("prism://", StringComparison.OrdinalIgnoreCase))
+                if (a.StartsWith("prism://", StringComparison.OrdinalIgnoreCase) || PrismLinkService.Parse(a) != null)
                 {
                     DesktopService.TriggerDeepLink(a);
                 }

@@ -19,6 +19,19 @@ public class ParsedPrismLink
 
 public static class PrismLinkService
 {
+    public static string NormalizeTransport(string? transport)
+    {
+        return transport?.ToLowerInvariant().Trim() switch
+        {
+            "wt" or "webtransport" => "webtransport",
+            "ws" or "wss" or "websocket" => "websocket",
+            "quic" => "quic",
+            "tcp" => "tcp",
+            "kcp" => "kcp",
+            _ => "auto"
+        };
+    }
+
     public static string Encode(string name, string serverAddr, string transport, string listenAddr, bool fakeLanBroadcast, string? authToken = null)
     {
         var server = string.IsNullOrWhiteSpace(serverAddr) ? "127.0.0.1:7000" : serverAddr.Trim();
@@ -54,8 +67,37 @@ public static class PrismLinkService
         if (string.IsNullOrWhiteSpace(raw)) return null;
         var trimmed = raw.Trim();
 
+        // 0. Base64 encoded JSON link
+        if (trimmed.StartsWith("prism://base64/", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var b64 = trimmed.Substring("prism://base64/".Length);
+                var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+                var serverMatch = System.Text.RegularExpressions.Regex.Match(json, @"""server_addr""\s*:\s*""([^""]+)""");
+                if (serverMatch.Success)
+                {
+                    var nameMatch = System.Text.RegularExpressions.Regex.Match(json, @"""name""\s*:\s*""([^""]+)""");
+                    var transMatch = System.Text.RegularExpressions.Regex.Match(json, @"""transport""\s*:\s*""([^""]+)""");
+                    var tokenMatch = System.Text.RegularExpressions.Regex.Match(json, @"""auth_token""\s*:\s*""([^""]+)""");
+                    var listenMatch = System.Text.RegularExpressions.Regex.Match(json, @"""listen_addr""\s*:\s*""([^""]+)""");
+                    return new ParsedPrismLink
+                    {
+                        Name = nameMatch.Success ? nameMatch.Groups[1].Value : serverMatch.Groups[1].Value,
+                        ServerAddr = serverMatch.Groups[1].Value,
+                        Transport = transMatch.Success ? NormalizeTransport(transMatch.Groups[1].Value) : "auto",
+                        AuthToken = tokenMatch.Success ? tokenMatch.Groups[1].Value : "",
+                        ListenAddr = listenMatch.Success ? listenMatch.Groups[1].Value : "127.0.0.1:25565",
+                        FakeLanBroadcast = !json.Contains(@"""fake_lan_broadcast"":false"),
+                        ManagementUrl = null
+                    };
+                }
+            }
+            catch { }
+        }
+
         // 1. prism:// or scheme:// link
-        var match = System.Text.RegularExpressions.Regex.Match(trimmed, @"^(prism|auto|wt|webtransport|quic|tcp|kcp|ws|wss)://(?<rest>.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var match = System.Text.RegularExpressions.Regex.Match(trimmed, @"^(prism|auto|wt|webtransport|quic|tcp|kcp|ws|wss|websocket)://(?<rest>.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (match.Success)
         {
             var scheme = match.Groups[1].Value.ToLowerInvariant();
@@ -80,11 +122,12 @@ public static class PrismLinkService
             {
                 "prism" or "auto" => "auto",
                 "wt" or "webtransport" => "webtransport",
-                "ws" or "wss" => "ws",
+                "ws" or "wss" or "websocket" => "websocket",
                 _ => scheme
             };
 
-            var transport = query["transport"] ?? defaultTransport;
+            var rawTransport = query["transport"] ?? defaultTransport;
+            var transport = NormalizeTransport(rawTransport);
             var name = query["name"] ?? hostAndPort;
             var listen = query["listen"] ?? "127.0.0.1:25565";
             var token = query["token"] ?? "";

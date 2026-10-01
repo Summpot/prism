@@ -157,6 +157,56 @@ public class AdminOptimizerOverviewResponse
     [JsonPropertyName("services")] public Dictionary<string, OptimizerStatsSnapshot> Services { get; set; } = new();
 }
 
+public class AdminGitHubLoginUrlResponse
+{
+    [JsonPropertyName("url")] public string Url { get; set; } = "";
+    [JsonPropertyName("state")] public string? State { get; set; }
+}
+
+public class AdminGitHubExchangeResponse
+{
+    [JsonPropertyName("token")] public string Token { get; set; } = "";
+    [JsonPropertyName("token_id")] public string TokenId { get; set; } = "";
+    [JsonPropertyName("user")] public AdminUserRecord? User { get; set; }
+    [JsonPropertyName("expires_at_unix_ms")] public long? ExpiresAtUnixMs { get; set; }
+}
+
+public class AdminMiddlewareConfigField
+{
+    [JsonPropertyName("key")] public string Key { get; set; } = "";
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("field_type")] public string FieldType { get; set; } = "string";
+    [JsonPropertyName("default_value")] public object? DefaultValue { get; set; }
+    [JsonPropertyName("description")] public string Description { get; set; } = "";
+}
+
+public class AdminMiddlewareConfigSchema
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("fields")] public List<AdminMiddlewareConfigField> Fields { get; set; } = new();
+}
+
+public class AdminMiddlewareItem
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("schema")] public AdminMiddlewareConfigSchema? Schema { get; set; }
+    [JsonPropertyName("effective_config")] public Dictionary<string, object> EffectiveConfig { get; set; } = new();
+}
+
+public class AdminUpdateMiddlewareResponse
+{
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("config")] public Dictionary<string, object> Config { get; set; } = new();
+}
+
+public class AdminResetMiddlewareResponse
+{
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("reset")] public bool Reset { get; set; }
+}
+
 public class AdminApiClient
 {
     private static readonly Lazy<AdminApiClient> _instance = new(() => new AdminApiClient());
@@ -300,6 +350,47 @@ public class AdminApiClient
             parameters["service_rules"] = JsonSerializer.Serialize(serviceRules, AdminJsonContext.Default.ListString);
         }
         await InvokeControlRpcAsync<object>("auth.user.put", parameters, AdminJsonContext.Default.Object);
+    }
+
+    public async Task<AdminGitHubLoginUrlResponse> GetGitHubLoginUrlAsync(string? state = null)
+    {
+        var parameters = !string.IsNullOrWhiteSpace(state) ? new Dictionary<string, string> { ["state"] = state } : null;
+        return await InvokeControlRpcAsync("auth.github.login", parameters, AdminJsonContext.Default.AdminGitHubLoginUrlResponse);
+    }
+
+    public async Task<AdminGitHubExchangeResponse> ExchangeGitHubCodeAsync(string code, string? deviceId = null)
+    {
+        var parameters = new Dictionary<string, string> { ["code"] = code };
+        if (!string.IsNullOrWhiteSpace(deviceId))
+        {
+            parameters["device_id"] = deviceId;
+        }
+        return await InvokeControlRpcAsync("auth.github.exchange", parameters, AdminJsonContext.Default.AdminGitHubExchangeResponse);
+    }
+
+    public async Task<List<AdminMiddlewareItem>> GetMiddlewaresAsync()
+    {
+        return await InvokeControlRpcAsync("middlewares.list", null, AdminJsonContext.Default.ListAdminMiddlewareItem);
+    }
+
+    public async Task<AdminMiddlewareConfigSchema> GetMiddlewareSchemaAsync(string name)
+    {
+        return await InvokeControlRpcAsync("middlewares.schema", new Dictionary<string, string> { ["name"] = name }, AdminJsonContext.Default.AdminMiddlewareConfigSchema);
+    }
+
+    public async Task<AdminUpdateMiddlewareResponse> UpdateMiddlewareConfigAsync(string name, Dictionary<string, string> config)
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["name"] = name,
+            ["config"] = JsonSerializer.Serialize(config, AdminJsonContext.Default.DictionaryStringString)
+        };
+        return await InvokeControlRpcAsync("middlewares.config.put", parameters, AdminJsonContext.Default.AdminUpdateMiddlewareResponse);
+    }
+
+    public async Task<AdminResetMiddlewareResponse> ResetMiddlewareConfigAsync(string name)
+    {
+        return await InvokeControlRpcAsync("middlewares.config.reset", new Dictionary<string, string> { ["name"] = name }, AdminJsonContext.Default.AdminResetMiddlewareResponse);
     }
 
     public async Task CloseConnectionAsync(string id)

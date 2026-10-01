@@ -19,17 +19,22 @@
                     <TextBlock Text="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
                     <shadui:Badge Content="{Binding Services.Count}" Height="20" Padding="6,0" FontSize="10" VerticalAlignment="Center"/>
                 </StackPanel>
-                <TextBlock Text="Configured route targets and virtual local/remote port mappings loaded from prism.toml" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                <TextBlock Text="{Binding [admin_services_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
             </StackPanel>
             
-            <Button Grid.Column="1" Classes="Outline" Command="{Binding RefreshCommand}"
-                    IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
-                    Height="28" Padding="10,0">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                    <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
-                </StackPanel>
-            </Button>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
+                    <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
+                </Button>
+                <Button Classes="Outline" Command="{Binding RefreshCommand}"
+                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
+                        Height="28" Padding="10,0">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
 
         <!-- Error Banner -->
@@ -56,12 +61,12 @@
                     BorderThickness="0"
                     Background="Transparent">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Service Name" Binding="{Binding Name}" Width="150"/>
-                        <DataGridTextColumn Header="Protocol" Binding="{Binding Proto}" Width="90"/>
-                        <DataGridTextColumn Header="Local Address" Binding="{Binding LocalAddr}" Width="*"/>
-                        <DataGridTextColumn Header="Remote Target" Binding="{Binding RemoteAddr}" Width="*"/>
-                        <DataGridTextColumn Header="Masquerade SNI" Binding="{Binding Masquerade}" Width="*"/>
-                        <DataGridTemplateColumn Header="Status" Width="100">
+                        <DataGridTextColumn Header="{Binding [admin_col_service_name], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Name}" Width="150"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_protocol], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Proto}" Width="90"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_local_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding LocalAddr}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_target], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RemoteAddr}" Width="*"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_masquerade_sni], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding Masquerade}" Width="*"/>
+                        <DataGridTemplateColumn Header="{Binding [admin_col_status], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:ServiceRowItem">
                                     <shadui:Badge Content="ACTIVE" Background="#10b981" Foreground="White" Height="18" Padding="6,0" FontSize="10" HorizontalAlignment="Center"/>
@@ -79,7 +84,7 @@
                     Spacing="8"
                     Margin="0,40">
                     <common:LucideIcon Data="{x:Static common:AppIcons.Server}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    <TextBlock Text="No configured tunnel services found" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding [admin_no_services_found], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </StackPanel>
             </Grid>
         </shadui:Card>

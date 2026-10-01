@@ -27,6 +27,9 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
     private int _optimizerBufferThreshold = 65536;
 
     [ObservableProperty]
+    private string _activePreset = "balanced";
+
+    [ObservableProperty]
     private bool _savedNotice;
 
     public ClientOptimizerViewModel()
@@ -43,6 +46,20 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
     {
     }
 
+    private void DetectActivePreset()
+    {
+        if (OptimizerZstdLevel == 1 && !OptimizerAdaptiveFlush && OptimizerFlushIntervalMs == 5 && OptimizerBufferThreshold == 16384)
+            ActivePreset = "gaming";
+        else if (OptimizerZstdLevel == 1 && OptimizerAdaptiveFlush && OptimizerFlushIntervalMs == 10 && OptimizerBufferThreshold == 32768)
+            ActivePreset = "low_latency";
+        else if (OptimizerZstdLevel == 3 && OptimizerAdaptiveFlush && OptimizerFlushIntervalMs == 20 && OptimizerBufferThreshold == 65536)
+            ActivePreset = "balanced";
+        else if (OptimizerZstdLevel == 9 && OptimizerAdaptiveFlush && OptimizerFlushIntervalMs == 50 && OptimizerBufferThreshold == 131072)
+            ActivePreset = "max_compression";
+        else
+            ActivePreset = "custom";
+    }
+
     private void LoadConfig()
     {
         try
@@ -54,6 +71,7 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
             OptimizerAdaptiveFlush = cfg.ActiveConfig.OptimizerAdaptiveFlush;
             OptimizerFlushIntervalMs = (int)cfg.ActiveConfig.OptimizerFlushIntervalMs;
             OptimizerBufferThreshold = (int)cfg.ActiveConfig.OptimizerBufferThreshold;
+            DetectActivePreset();
         }
         catch
         {
@@ -173,6 +191,7 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
         {
             _isLoading = false;
         }
+        DetectActivePreset();
         SaveConfig();
     }
 
@@ -189,9 +208,17 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
-    public void SetLevel(int level)
+    public void SetLevel(object? param)
     {
-        OptimizerZstdLevel = level;
+        if (param is int lvl)
+        {
+            OptimizerZstdLevel = lvl;
+        }
+        else if (param != null && int.TryParse(param.ToString(), out var parsed))
+        {
+            OptimizerZstdLevel = parsed;
+        }
+        DetectActivePreset();
         SaveConfig();
     }
 
@@ -201,9 +228,9 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
         ApplyPreset("balanced");
     }
 
-    partial void OnOptimizerEnabledChanged(bool value) => DebouncedSaveConfig();
-    partial void OnOptimizerZstdLevelChanged(int value) => DebouncedSaveConfig();
-    partial void OnOptimizerAdaptiveFlushChanged(bool value) => DebouncedSaveConfig();
-    partial void OnOptimizerFlushIntervalMsChanged(int value) => DebouncedSaveConfig();
-    partial void OnOptimizerBufferThresholdChanged(int value) => DebouncedSaveConfig();
+    partial void OnOptimizerEnabledChanged(bool value) { DetectActivePreset(); DebouncedSaveConfig(); }
+    partial void OnOptimizerZstdLevelChanged(int value) { DetectActivePreset(); DebouncedSaveConfig(); }
+    partial void OnOptimizerAdaptiveFlushChanged(bool value) { DetectActivePreset(); DebouncedSaveConfig(); }
+    partial void OnOptimizerFlushIntervalMsChanged(int value) { DetectActivePreset(); DebouncedSaveConfig(); }
+    partial void OnOptimizerBufferThresholdChanged(int value) { DetectActivePreset(); DebouncedSaveConfig(); }
 }

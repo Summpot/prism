@@ -81,12 +81,12 @@
                 </StackPanel>
                 <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
-                        <MenuItem Header="简体中文" Command="{Binding SelectLocaleCommand}" CommandParameter="zh-CN">
+                        <MenuItem Header="{Binding [language_chinese], Source={x:Static i18n:LocalizationManager.Instance}}" Command="{Binding SelectLocaleCommand}" CommandParameter="zh-CN">
                             <MenuItem.Icon>
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=zh-CN}"/>
                             </MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="English" Command="{Binding SelectLocaleCommand}" CommandParameter="en">
+                        <MenuItem Header="{Binding [language_english], Source={x:Static i18n:LocalizationManager.Instance}}" Command="{Binding SelectLocaleCommand}" CommandParameter="en">
                             <MenuItem.Icon>
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Check}" Width="12" Height="12" IsVisible="{Binding CurrentLocale, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=en}"/>
                             </MenuItem.Icon>

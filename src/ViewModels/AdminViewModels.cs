@@ -2,16 +2,57 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Prism.Common;
+using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
 
 namespace Prism.ViewModels;
+
+internal static class AutoRefreshHelper
+{
+    public static CancellationTokenSource? Start(Func<Task> action, TimeSpan interval, Func<bool> canRun)
+    {
+        var cts = new CancellationTokenSource();
+        var token = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(interval);
+            try
+            {
+                while (await timer.WaitForNextTickAsync(token))
+                {
+                    if (canRun())
+                    {
+                        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+                        {
+                            try
+                            {
+                                await action();
+                            }
+                            catch { }
+                        });
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+        return cts;
+    }
+
+    public static void Stop(ref CancellationTokenSource? cts)
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+        cts = null;
+    }
+}
 
 public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
 {
@@ -39,20 +80,67 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     [ObservableProperty]
     private bool _isHealthy;
 
+    [ObservableProperty]
+    private bool _autoRefresh = true;
+
+    [ObservableProperty]
+    private string _autoRefreshText = "自动刷新：开";
+
+    private CancellationTokenSource? _autoRefreshCts;
+
     public AdminOverviewViewModel()
     {
+        UpdateAutoRefreshText();
         _ = LoadDataAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = LoadDataAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(LoadDataAsync, TimeSpan.FromSeconds(8), () => _client.CurrentStatus?.Running == true && !IsLoading);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     [RelayCommand]
     public async Task LoadDataAsync()
@@ -138,20 +226,67 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
     [ObservableProperty]
     private string? _errorMessage;
 
+    [ObservableProperty]
+    private bool _autoRefresh = true;
+
+    [ObservableProperty]
+    private string _autoRefreshText = "自动刷新：开";
+
+    private CancellationTokenSource? _autoRefreshCts;
+
     public AdminConnectionsViewModel()
     {
+        UpdateAutoRefreshText();
         _ = RefreshAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = RefreshAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(RefreshAsync, TimeSpan.FromSeconds(3), () => _client.CurrentStatus?.Running == true && !IsLoading);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     partial void OnSearchQueryChanged(string value)
     {
@@ -264,20 +399,67 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
     [ObservableProperty]
     private string? _errorMessage;
 
+    [ObservableProperty]
+    private bool _autoRefresh = true;
+
+    [ObservableProperty]
+    private string _autoRefreshText = "自动刷新：开";
+
+    private CancellationTokenSource? _autoRefreshCts;
+
     public AdminTunnelServicesViewModel()
     {
+        UpdateAutoRefreshText();
         _ = RefreshAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = RefreshAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(RefreshAsync, TimeSpan.FromSeconds(5), () => _client.CurrentStatus?.Running == true && !IsLoading);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -361,6 +543,14 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     private string? _errorMessage;
 
     [ObservableProperty]
+    private bool _autoRefresh = true;
+
+    [ObservableProperty]
+    private string _autoRefreshText = "自动刷新：开";
+
+    private CancellationTokenSource? _autoRefreshCts;
+
+    [ObservableProperty]
     private bool _showTokenDialog;
 
     [ObservableProperty]
@@ -377,20 +567,73 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     [ObservableProperty]
     private string? _createdRawToken;
 
+    [ObservableProperty]
+    private UserRowItem? _editingUser;
+
+    [ObservableProperty]
+    private string _editRole = "member";
+
+    [ObservableProperty]
+    private string _editServiceRules = "";
+
+    [ObservableProperty]
+    private bool _showEditUserDialog;
+
+    public static readonly string[] AvailableRoles = ["admin", "member", "disabled"];
+
     public AdminUsersViewModel()
     {
+        UpdateAutoRefreshText();
         _ = RefreshAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = RefreshAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(RefreshAsync, TimeSpan.FromSeconds(5), () => _client.CurrentStatus?.Running == true && !IsLoading && !ShowEditUserDialog && !ShowTokenDialog);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -564,6 +807,53 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             AppServices.ShowSuccess("Token copied to clipboard.", "Copied");
         }
     }
+
+    [RelayCommand]
+    public void OpenEditUserDialog(UserRowItem? item)
+    {
+        if (item == null) return;
+        EditingUser = item;
+        EditRole = item.Role.ToLowerInvariant();
+        EditServiceRules = string.Join(Environment.NewLine, item.ServiceRules);
+        ShowEditUserDialog = true;
+    }
+
+    [RelayCommand]
+    public void CloseEditUserDialog()
+    {
+        ShowEditUserDialog = false;
+        EditingUser = null;
+    }
+
+    [RelayCommand]
+    public async Task SaveUserChangesAsync()
+    {
+        if (EditingUser == null) return;
+
+        try
+        {
+            ErrorMessage = null;
+            var rules = EditServiceRules
+                .Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(r => r.Trim())
+                .Where(r => !string.IsNullOrWhiteSpace(r))
+                .ToList();
+
+            await _api.PutUserAsync(EditingUser.Id, EditRole, rules);
+
+            EditingUser.Role = EditRole.ToUpperInvariant();
+            EditingUser.ServiceRules = rules;
+
+            AppServices.ShowSuccess($"User '{EditingUser.Username}' updated.", "User Saved");
+            ShowEditUserDialog = false;
+            EditingUser = null;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to save user: {ex.Message}";
+            AppServices.ShowError(ex.Message, "Save Failed");
+        }
+    }
 }
 
 public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
@@ -593,20 +883,63 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
 
+    [ObservableProperty] private bool _autoRefresh = true;
+    [ObservableProperty] private string _autoRefreshText = "自动刷新：开";
+    private CancellationTokenSource? _autoRefreshCts;
+
     public AdminTrafficViewModel()
     {
+        UpdateAutoRefreshText();
         _ = RefreshAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = RefreshAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(RefreshAsync, TimeSpan.FromSeconds(3), () => _client.CurrentStatus?.Running == true && !IsLoading);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -697,20 +1030,63 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
 
+    [ObservableProperty] private bool _autoRefresh = true;
+    [ObservableProperty] private string _autoRefreshText = "自动刷新：开";
+    private CancellationTokenSource? _autoRefreshCts;
+
     public AdminConnectorsViewModel()
     {
+        UpdateAutoRefreshText();
         _ = RefreshAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = RefreshAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(RefreshAsync, TimeSpan.FromSeconds(4), () => _client.CurrentStatus?.Running == true && !IsLoading);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     partial void OnSearchQueryChanged(string value) => ApplyFilter();
 
@@ -781,29 +1157,41 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
 
 public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
 {
+    private readonly AdminApiClient _api = AdminApiClient.Instance;
     private readonly NativeClientService _client = NativeClientService.Instance;
 
-    public ObservableCollection<Prism.Native.MiddlewareItem> Middlewares { get; } = new();
+    public ObservableCollection<AdminMiddlewareItem> Middlewares { get; } = new();
     public ObservableCollection<MiddlewareFieldViewModel> ConfigFields { get; } = new();
 
-    [ObservableProperty] private Prism.Native.MiddlewareItem? _selectedMiddleware;
+    [ObservableProperty] private AdminMiddlewareItem? _selectedMiddleware;
     [ObservableProperty] private bool _isMiddlewareEnabled = true;
     [ObservableProperty] private string? _statusMessage;
+    [ObservableProperty] private bool _isLoading;
 
     public AdminMiddlewareViewModel()
     {
-        LoadData();
+        _ = LoadDataAsync();
     }
 
-    public void OnNavigatedTo() => LoadData(SelectedMiddleware?.Name);
+    public void OnNavigatedTo() => _ = LoadDataAsync(SelectedMiddleware?.Name);
     public void OnNavigatedFrom() { }
 
-    public void LoadData(string? preserveName = null)
+    public async Task LoadDataAsync(string? preserveName = null)
     {
+        if (_client.CurrentStatus?.Running != true)
+        {
+            StatusMessage = "Tunnel is not connected. Connect in the Overview tab to manage server middlewares.";
+            Middlewares.Clear();
+            SelectedMiddleware = null;
+            return;
+        }
+
         Middlewares.Clear();
         try
         {
-            var list = _client.ListMiddlewares();
+            IsLoading = true;
+            StatusMessage = null;
+            var list = await _api.GetMiddlewaresAsync();
             foreach (var item in list)
             {
                 Middlewares.Add(item);
@@ -816,16 +1204,20 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
         {
             StatusMessage = ex.Message;
         }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
-    partial void OnSelectedMiddlewareChanged(Prism.Native.MiddlewareItem? value)
+    partial void OnSelectedMiddlewareChanged(AdminMiddlewareItem? value)
     {
         ConfigFields.Clear();
         if (value == null) return;
 
         if (value.EffectiveConfig.TryGetValue("enabled", out var en))
         {
-            IsMiddlewareEnabled = !string.Equals(en, "false", StringComparison.OrdinalIgnoreCase);
+            IsMiddlewareEnabled = !string.Equals(en?.ToString(), "false", StringComparison.OrdinalIgnoreCase);
         }
         else
         {
@@ -838,7 +1230,7 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
         {
             if (f.Key.Equals("enabled", StringComparison.OrdinalIgnoreCase)) continue;
 
-            string currentVal = value.EffectiveConfig.TryGetValue(f.Key, out var v) ? v : f.DefaultValue;
+            string currentVal = (value.EffectiveConfig.TryGetValue(f.Key, out var v) ? v?.ToString() : f.DefaultValue?.ToString()) ?? "";
 
             ConfigFields.Add(MiddlewareFieldViewModel.Create(
                 key: f.Key,
@@ -851,44 +1243,55 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
-    public void SaveConfig()
+    public async Task SaveConfigAsync()
     {
         if (SelectedMiddleware == null) return;
 
         try
         {
+            IsLoading = true;
             var dict = ConfigFields.ToDictionary(f => f.Key, f => f.GetStringValue());
             dict["enabled"] = IsMiddlewareEnabled ? "true" : "false";
 
             string currentName = SelectedMiddleware.Name;
-            var updated = _client.UpdateMiddlewareConfig(currentName, dict);
-            StatusMessage = $"Config for {updated.Name} saved successfully.";
-            AppServices.ShowSuccess($"Middleware {updated.Name} updated.", "Saved");
-            LoadData(currentName);
+            var updated = await _api.UpdateMiddlewareConfigAsync(currentName, dict);
+            StatusMessage = $"Config for {currentName} saved successfully.";
+            AppServices.ShowSuccess($"Middleware {currentName} updated.", "Saved");
+            await LoadDataAsync(currentName);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
             AppServices.ShowError(ex.Message, "Save Failed");
         }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     [RelayCommand]
-    public void ResetConfig()
+    public async Task ResetConfigAsync()
     {
         if (SelectedMiddleware == null) return;
 
         try
         {
+            IsLoading = true;
             string currentName = SelectedMiddleware.Name;
-            var reset = _client.ResetMiddlewareConfig(currentName);
-            StatusMessage = $"Config for {reset.Name} reset to default.";
-            AppServices.ShowSuccess($"Middleware {reset.Name} reset to defaults.", "Reset Defaults");
-            LoadData(currentName);
+            var reset = await _api.ResetMiddlewareConfigAsync(currentName);
+            StatusMessage = $"Config for {currentName} reset to default.";
+            AppServices.ShowSuccess($"Middleware {currentName} reset to defaults.", "Reset Defaults");
+            await LoadDataAsync(currentName);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
+            AppServices.ShowError(ex.Message, "Reset Failed");
+        }
+        finally
+        {
+            IsLoading = false;
         }
     }
 }
@@ -904,20 +1307,63 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
 
+    [ObservableProperty] private bool _autoRefresh = true;
+    [ObservableProperty] private string _autoRefreshText = "自动刷新：开";
+    private CancellationTokenSource? _autoRefreshCts;
+
     public AdminRuntimeViewModel()
     {
+        UpdateAutoRefreshText();
         _ = LoadDataAsync();
     }
 
     public void OnNavigatedTo()
     {
+        UpdateAutoRefreshText();
         if (_client.CurrentStatus?.Running == true)
         {
             _ = LoadDataAsync();
         }
+        if (AutoRefresh)
+        {
+            StartAutoRefresh();
+        }
     }
 
-    public void OnNavigatedFrom() { }
+    public void OnNavigatedFrom()
+    {
+        StopAutoRefresh();
+    }
+
+    partial void OnAutoRefreshChanged(bool value)
+    {
+        UpdateAutoRefreshText();
+        if (value) StartAutoRefresh();
+        else StopAutoRefresh();
+    }
+
+    private void UpdateAutoRefreshText()
+    {
+        string stateStr = AutoRefresh
+            ? (LocalizationManager.Instance["admin_on"] ?? "开")
+            : (LocalizationManager.Instance["admin_off"] ?? "关");
+        string template = LocalizationManager.Instance["admin_auto_refresh"] ?? "自动刷新：{state}";
+        AutoRefreshText = template.Replace("{state}", stateStr);
+    }
+
+    [RelayCommand]
+    public void ToggleAutoRefresh() => AutoRefresh = !AutoRefresh;
+
+    private void StartAutoRefresh()
+    {
+        AutoRefreshHelper.Stop(ref _autoRefreshCts);
+        if (AutoRefresh)
+        {
+            _autoRefreshCts = AutoRefreshHelper.Start(LoadDataAsync, TimeSpan.FromSeconds(5), () => _client.CurrentStatus?.Running == true && !IsLoading);
+        }
+    }
+
+    private void StopAutoRefresh() => AutoRefreshHelper.Stop(ref _autoRefreshCts);
 
     [RelayCommand]
     public async Task LoadDataAsync()

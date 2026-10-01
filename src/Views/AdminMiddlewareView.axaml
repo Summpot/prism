@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:services="clr-namespace:Prism.Services"
     xmlns:native="clr-namespace:Prism.Native"
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:common="clr-namespace:Prism.Common"
@@ -18,7 +19,7 @@
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
                     <TextBlock Text="{Binding [nav_middleware], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14"/>
-                    <TextBlock Text="Server pipeline middleware and filter configuration" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding [admin_middleware_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <ListBox
@@ -26,7 +27,7 @@
                     SelectedItem="{Binding SelectedMiddleware, Mode=TwoWay}"
                     Background="Transparent">
                     <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="native:MiddlewareItem">
+                        <DataTemplate x:DataType="services:AdminMiddlewareItem">
                             <Border Padding="8,6" CornerRadius="6">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13"/>
@@ -52,7 +53,7 @@
                                               Background="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"
                                               Foreground="White" Height="20" Padding="6,0" FontSize="10"/>
                             </StackPanel>
-                            <TextBlock Text="Dynamic middleware schema options and parameters" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="{Binding [admin_middleware_schema_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
                         <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
                     </Grid>

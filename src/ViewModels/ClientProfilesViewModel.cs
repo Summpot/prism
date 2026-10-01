@@ -126,10 +126,11 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
     public List<string> AvailableTransports { get; } = new()
     {
         "auto",
+        "webtransport",
         "tcp",
         "kcp",
         "quic",
-        "ws"
+        "websocket"
     };
 
     public ObservableCollection<EditableProfile> Profiles { get; } = new();
@@ -144,10 +145,16 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
     private bool _isDirty;
 
     [ObservableProperty]
+    private bool _isCopied;
+
+    [ObservableProperty]
     private string _profilesCountText = "0 个配置";
 
     [ObservableProperty]
     private string _editProfileTitle = "编辑配置";
+
+    [ObservableProperty]
+    private string _autoConnectPanelHint = "";
 
     partial void OnSelectedProfileChanged(EditableProfile? value)
     {
@@ -178,6 +185,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 
         string editTpl = Prism.I18n.LocalizationManager.Instance["client_edit_profile"] ?? "编辑配置：{name}";
         EditProfileTitle = editTpl.Replace("{name}", DraftProfile?.Name ?? "");
+
+        string autoSyncTpl = Prism.I18n.LocalizationManager.Instance["client_auto_connect_panel_hint"] ?? "自动同步管理面板与鉴权状态 ({url})";
+        AutoConnectPanelHint = autoSyncTpl.Replace("{url}", DraftProfile?.ManagementUrl ?? "");
     }
 
     [RelayCommand]
@@ -316,6 +326,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(link);
             StatusMessage = "Prism link copied to clipboard!";
+            IsCopied = true;
+            await Task.Delay(2000);
+            IsCopied = false;
         }
     }
 
@@ -426,6 +439,39 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 
                 _client.SaveConfig(new SaveConfigRequest(
                     ActiveProfileId: SelectedProfile.Id,
+                    ActiveConfig: patch
+                ));
+            }
+            else
+            {
+                var patch = new ClientConfigPatch(
+                    ProfileName: null,
+                    ServerAddr: null,
+                    Transport: null,
+                    AuthToken: null,
+                    ListenAddr: null,
+                    FakeLanBroadcast: null,
+                    AutoConnectPanel: SelectedProfile.AutoConnectPanel,
+                    AutoConnect: SelectedProfile.AutoConnect,
+                    ManagementUrl: string.IsNullOrWhiteSpace(SelectedProfile.ManagementUrl) ? null : SelectedProfile.ManagementUrl,
+                    TokenId: null,
+                    TokenType: null,
+                    UserId: null,
+                    Username: null,
+                    ExpiresAt: null,
+                    AutoCheckUpdate: null,
+                    UpdateChannel: null,
+                    Autostart: null,
+                    SilentAutostart: null,
+                    OptimizerEnabled: null,
+                    OptimizerZstdLevel: null,
+                    OptimizerAdaptiveFlush: null,
+                    OptimizerFlushIntervalMs: null,
+                    OptimizerBufferThreshold: null
+                );
+
+                _client.SaveConfig(new SaveConfigRequest(
+                    ActiveProfileId: null,
                     ActiveConfig: patch
                 ));
             }

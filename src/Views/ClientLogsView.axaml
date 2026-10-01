@@ -175,6 +175,23 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
+
+                <!-- Floating Jump to Latest Button -->
+                <Button
+                    IsVisible="{Binding ShowScrollToBottom}"
+                    Command="{Binding ScrollToBottomCommand}"
+                    Classes="Primary"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,16,16"
+                    CornerRadius="14"
+                    Height="28"
+                    Padding="10,0">
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                        <TextBlock Text="{Binding [client_logs_latest], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" FontWeight="SemiBold"/>
+                    </StackPanel>
+                </Button>
             </Panel>
         </Border>
     </Grid>

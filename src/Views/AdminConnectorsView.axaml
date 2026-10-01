@@ -30,6 +30,9 @@
                     Width="180"
                     Height="28"
                     FontSize="11"/>
+                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
+                    <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
+                </Button>
                 <Button Classes="Outline" Command="{Binding RefreshCommand}"
                         IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
                         Height="28" Padding="10,0">
@@ -65,9 +68,9 @@
                     BorderThickness="0"
                     Background="Transparent">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Client ID" Binding="{Binding ClientId}" Width="160"/>
-                        <DataGridTextColumn Header="Remote Address" Binding="{Binding RemoteAddr}" Width="*"/>
-                        <DataGridTemplateColumn Header="Role" Width="100">
+                        <DataGridTextColumn Header="{Binding [admin_col_client_id], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ClientId}" Width="160"/>
+                        <DataGridTextColumn Header="{Binding [admin_col_remote_addr], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding RemoteAddr}" Width="*"/>
+                        <DataGridTemplateColumn Header="{Binding [admin_col_role], Source={x:Static i18n:LocalizationManager.Instance}}" Width="100">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:ConnectorGroupItem">
                                     <shadui:Badge
@@ -79,8 +82,8 @@
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn Header="Services" Binding="{Binding ServiceCount}" Width="80"/>
-                        <DataGridTemplateColumn Header="Published Services" Width="200">
+                        <DataGridTextColumn Header="{Binding [admin_col_services], Source={x:Static i18n:LocalizationManager.Instance}}" Binding="{Binding ServiceCount}" Width="80"/>
+                        <DataGridTemplateColumn Header="{Binding [admin_col_published_services], Source={x:Static i18n:LocalizationManager.Instance}}" Width="200">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:ConnectorGroupItem">
                                     <ItemsControl ItemsSource="{Binding Services}" Margin="0,4">
@@ -107,7 +110,7 @@
                     Spacing="8"
                     Margin="0,40">
                     <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    <TextBlock Text="No active connectors found" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding [admin_no_active_connectors], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </StackPanel>
             </Grid>
         </shadui:Card>

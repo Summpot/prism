@@ -59,25 +59,33 @@
                         <TextBlock Text="{Binding [optimizer_presets_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="gaming" Height="28" FontSize="11" Padding="10,0">
+                        <Button Classes="Outline"
+                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=gaming}"
+                                Command="{Binding ApplyPresetCommand}" CommandParameter="gaming" Height="28" FontSize="11" Padding="10,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="12" Height="12"/>
                                 <TextBlock Text="{Binding [optimizer_preset_gaming], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
-                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="low_latency" Height="28" FontSize="11" Padding="10,0">
+                        <Button Classes="Outline"
+                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=low_latency}"
+                                Command="{Binding ApplyPresetCommand}" CommandParameter="low_latency" Height="28" FontSize="11" Padding="10,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="12" Height="12"/>
                                 <TextBlock Text="{Binding [optimizer_preset_low_latency], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
-                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="balanced" Height="28" FontSize="11" Padding="10,0">
+                        <Button Classes="Outline"
+                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=balanced}"
+                                Command="{Binding ApplyPresetCommand}" CommandParameter="balanced" Height="28" FontSize="11" Padding="10,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12"/>
                                 <TextBlock Text="{Binding [optimizer_preset_balanced], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
-                        <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="max_compression" Height="28" FontSize="11" Padding="10,0">
+                        <Button Classes="Outline"
+                                Classes.Primary="{Binding ActivePreset, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=max_compression}"
+                                Command="{Binding ApplyPresetCommand}" CommandParameter="max_compression" Height="28" FontSize="11" Padding="10,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="12" Height="12"/>
                                 <TextBlock Text="{Binding [optimizer_preset_max_save], Source={x:Static i18n:LocalizationManager.Instance}}"/>
@@ -132,10 +140,18 @@
                         <Grid ColumnDefinitions="*, Auto" Margin="0,4,0,0">
                             <TextBlock Grid.Column="0" Text="{Binding [optimizer_level_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" VerticalAlignment="Center"/>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                                <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="1" Content="1 (Fast)" Height="22" FontSize="10" Padding="6,0"/>
-                                <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="3" Content="3 (Balanced)" Height="22" FontSize="10" Padding="6,0"/>
-                                <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="5" Content="5" Height="22" FontSize="10" Padding="6,0"/>
-                                <Button Classes="Outline" Command="{Binding SetLevelCommand}" CommandParameter="9" Content="9" Height="22" FontSize="10" Padding="6,0"/>
+                                <Button Classes="Outline"
+                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=1}"
+                                        Command="{Binding SetLevelCommand}" CommandParameter="1" Content="1 (Fast)" Height="22" FontSize="10" Padding="6,0"/>
+                                <Button Classes="Outline"
+                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=3}"
+                                        Command="{Binding SetLevelCommand}" CommandParameter="3" Content="3 (Balanced)" Height="22" FontSize="10" Padding="6,0"/>
+                                <Button Classes="Outline"
+                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=5}"
+                                        Command="{Binding SetLevelCommand}" CommandParameter="5" Content="5" Height="22" FontSize="10" Padding="6,0"/>
+                                <Button Classes="Outline"
+                                        Classes.Primary="{Binding OptimizerZstdLevel, Converter={x:Static common:Converters.IntEquals}, ConverterParameter=9}"
+                                        Command="{Binding SetLevelCommand}" CommandParameter="9" Content="9" Height="22" FontSize="10" Padding="6,0"/>
                             </StackPanel>
                         </Grid>
 

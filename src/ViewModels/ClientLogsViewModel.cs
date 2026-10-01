@@ -45,6 +45,14 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     [ObservableProperty]
     private string _copyButtonText = "复制全部";
 
+    [ObservableProperty]
+    private bool _isAtBottom = true;
+
+    [ObservableProperty]
+    private bool _showScrollToBottom;
+
+    public event Action? ScrollToBottomRequested;
+
     public ObservableCollection<ClientLogEntry> FilteredLogs { get; } = new();
 
     public ClientLogsViewModel()
@@ -70,7 +78,9 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     private void UpdateScrollButtonText()
     {
         string stateStr = AutoScroll
-            ? (LocalizationManager.Instance["client_logs_on"] ?? "开启")
+            ? (IsAtBottom
+                ? (LocalizationManager.Instance["client_logs_on"] ?? "开启")
+                : (LocalizationManager.Instance["client_logs_paused"] ?? "暂停"))
             : (LocalizationManager.Instance["client_logs_off"] ?? "关闭");
         string template = LocalizationManager.Instance["client_logs_scroll"] ?? "滚动吸附：{state}";
         ScrollButtonText = template.Replace("{state}", stateStr);
@@ -154,6 +164,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
 
         HasLogs = FilteredLogs.Count > 0;
         IsEmpty = !HasLogs;
+        ShowScrollToBottom = !IsAtBottom && HasLogs;
         StatusCountText = $"{FilteredLogs.Count} / {logs.Count}";
     }
 
@@ -172,6 +183,12 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         UpdateScrollButtonText();
     }
 
+    partial void OnIsAtBottomChanged(bool value)
+    {
+        UpdateScrollButtonText();
+        ShowScrollToBottom = !value && FilteredLogs.Count > 0;
+    }
+
     [RelayCommand]
     public void SetFilter(string level)
     {
@@ -181,7 +198,22 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     [RelayCommand]
     public void ToggleAutoScroll()
     {
-        AutoScroll = !AutoScroll;
+        if (AutoScroll && IsAtBottom)
+        {
+            AutoScroll = false;
+        }
+        else
+        {
+            AutoScroll = true;
+            ScrollToBottomRequested?.Invoke();
+        }
+    }
+
+    [RelayCommand]
+    public void ScrollToBottom()
+    {
+        AutoScroll = true;
+        ScrollToBottomRequested?.Invoke();
     }
 
     [RelayCommand]

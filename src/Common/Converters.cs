@@ -16,11 +16,20 @@ public static class Converters
     public static readonly IValueConverter NullToBoolean =
         new FuncValueConverter<object?, bool>(o => o != null);
 
+    public static readonly IValueConverter NotNullToBoolean = NullToBoolean;
+
     public static readonly IValueConverter NullToTrue =
         new FuncValueConverter<object?, bool>(o => o == null);
 
     public static readonly IValueConverter NullOrEmptyToBoolean =
         new FuncValueConverter<string?, bool>(s => !string.IsNullOrWhiteSpace(s));
+
+    public static readonly IValueConverter BoolToCopyOrCheckIcon =
+        new FuncValueConverter<bool, Geometry>(copied => copied ? AppIcons.Check : AppIcons.Copy);
+
+    public static readonly IValueConverter BoolToCopyOrCheckBrush =
+        new FuncValueConverter<bool, IBrush>(copied =>
+            copied ? new SolidColorBrush(Color.Parse("#10b981")) : new SolidColorBrush(Color.Parse("#9ca3af")));
 
     public static readonly IValueConverter StatusToBrush =
         new FuncValueConverter<bool, IBrush>(running =>
@@ -29,6 +38,10 @@ public static class Converters
     public static readonly IValueConverter RouteEquals =
         new FuncValueConverter<string?, string, bool>((current, target) =>
             string.Equals(current, target, StringComparison.OrdinalIgnoreCase));
+
+    public static readonly IValueConverter IntEquals =
+        new FuncValueConverter<int, string, bool>((val, param) =>
+            int.TryParse(param, out var target) && val == target);
 
     public static readonly IValueConverter LogLevelToBrush =
         new FuncValueConverter<string?, IBrush>(level =>

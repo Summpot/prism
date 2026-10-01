@@ -19,14 +19,19 @@
                     <TextBlock Text="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
                     <TextBlock Text="{Binding [dashboard_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                 </StackPanel>
-                <Button Grid.Column="1" Classes="Outline" Command="{Binding LoadDataCommand}"
-                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
-                        Height="28" Padding="10,0">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
-                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
-                    </StackPanel>
-                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}" Height="28" Padding="10,0">
+                        <TextBlock Text="{Binding AutoRefreshText}" FontSize="11"/>
+                    </Button>
+                    <Button Classes="Outline" Command="{Binding LoadDataCommand}"
+                            IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
+                            Height="28" Padding="10,0">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                            <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
             </Grid>
 
             <!-- Error Banner -->
@@ -47,7 +52,7 @@
                     <StackPanel Spacing="6">
                         <TextBlock Text="{Binding [dashboard_active_connections], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                         <TextBlock Text="{Binding ConnectionCount}" FontWeight="Bold" FontSize="24"/>
-                        <TextBlock Text="Total client tunnels attached" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [admin_overview_total_tunnels], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
                 </shadui:Card>
 
@@ -56,14 +61,14 @@
                     <StackPanel Spacing="6">
                         <TextBlock Text="{Binding [dashboard_tunnel_services], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                         <TextBlock Text="{Binding ServiceCount}" FontWeight="Bold" FontSize="24"/>
-                        <TextBlock Text="TCP / UDP route targets" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [admin_overview_route_targets], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
                 </shadui:Card>
 
                 <!-- Server Status -->
                 <shadui:Card Grid.Column="4" Padding="16">
                     <StackPanel Spacing="6">
-                        <TextBlock Text="Node State" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [admin_overview_node_state], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <Ellipse Width="8" Height="8"
                                      Fill="{Binding IsHealthy, Converter={x:Static common:Converters.StatusToBrush}}"
@@ -74,7 +79,7 @@
                                 FontSize="18"
                                 Foreground="{Binding IsHealthy, Converter={x:Static common:Converters.StatusToBrush}}"/>
                         </StackPanel>
-                        <TextBlock Text="Control plane active" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [admin_overview_control_active], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
                 </shadui:Card>
             </Grid>
@@ -82,7 +87,7 @@
             <!-- Configuration Card -->
             <shadui:Card Padding="16">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="Configuration &amp; Runtime Operations" FontWeight="SemiBold" FontSize="14"/>
+                    <TextBlock Text="{Binding [admin_overview_config_ops], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="14"/>
                     
                     <Grid ColumnDefinitions="140, *">
                         <TextBlock Grid.Column="0" Text="Config File:" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
@@ -93,14 +98,14 @@
 
                     <Grid ColumnDefinitions="*, Auto">
                         <StackPanel Grid.Column="0" Spacing="2">
-                            <TextBlock Text="Hot Reload Configuration" FontWeight="SemiBold" FontSize="12"/>
-                            <TextBlock Text="Reload prism.toml and refresh tunnel routes without dropping active connections" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="{Binding [admin_overview_hot_reload], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="12"/>
+                            <TextBlock Text="{Binding [admin_overview_hot_reload_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
                         <Button
                             Grid.Column="1"
                             Classes="Outline"
                             Command="{Binding ReloadServerCommand}"
-                            Content="Reload Config"
+                            Content="{Binding [admin_reload], Source={x:Static i18n:LocalizationManager.Instance}}"
                             Height="32"
                             FontSize="12"
                             Padding="14,0"/>

@@ -24,6 +24,7 @@ public static class AppIcons
     public static readonly StreamGeometry Plug = Parse("M12 2v6m4-6v6M9 8h6a3 3 0 0 1 3 3v2a6 6 0 0 1-6 6v3m-3-3a6 6 0 0 1-6-6v-2a3 3 0 0 1 3-3h6");
     public static readonly StreamGeometry Power = Parse("M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10");
     public static readonly StreamGeometry Check = Parse("M20 6L9 17l-5-5");
+    public static readonly StreamGeometry ChevronDown = Parse("M6 9l6 6 6-6");
     public static readonly StreamGeometry Copy = Parse("M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M16 4h2a2 2 0 0 1 2 2v4M8 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z");
     public static readonly StreamGeometry Plus = Parse("M12 5v14m-7-7h14");
     public static readonly StreamGeometry Download = Parse("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5l5 5 5-5m-5 5V3");

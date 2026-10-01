@@ -39,8 +39,10 @@
                 </Button>
                 <Button Classes="Outline" Command="{Binding ShareLinkCommand}" Height="28" Padding="10,0">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.Share2}" Width="12" Height="12" Foreground="{DynamicResource PrimaryColor}"/>
-                        <TextBlock Text="{Binding [client_share_config], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                        <common:LucideIcon Data="{Binding IsCopied, Converter={x:Static common:Converters.BoolToCopyOrCheckIcon}}"
+                                           Foreground="{Binding IsCopied, Converter={x:Static common:Converters.BoolToCopyOrCheckBrush}}"
+                                           Width="12" Height="12"/>
+                        <TextBlock Text="{Binding IsCopied, Converter={x:Static common:Converters.BooleanToString}, ConverterParameter='已复制|分享配置'}" FontSize="11"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -252,7 +254,7 @@
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding [client_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" FontWeight="Medium"/>
-                                        <TextBlock Text="{Binding DraftProfile.ManagementUrl, StringFormat='自动同步管理面板与鉴权状态 ({0})'}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding AutoConnectPanelHint}" FontSize="10" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding DraftProfile.AutoConnectPanel, Mode=TwoWay}"/>
                                 </Grid>

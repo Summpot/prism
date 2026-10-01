@@ -124,13 +124,13 @@ public class NativeClientService
         return s;
     }
 
-    public async Task StartAsync(string? profileId = null, string? serverAddr = null, string? transport = null, string? authToken = null)
+    public async Task StartAsync(string? profileId = null, string? serverAddr = null, string? transport = null, string? authToken = null, string? listenAddr = null, string? profileName = null)
     {
         var cfg = GetConfig();
         string activeServer = serverAddr ?? cfg.ActiveConfig.ServerAddr;
         string activeTransport = transport ?? cfg.ActiveConfig.Transport;
         string activeAuth = authToken ?? cfg.ActiveConfig.AuthToken;
-        string activeListen = cfg.ActiveConfig.ListenAddr;
+        string activeListen = listenAddr ?? cfg.ActiveConfig.ListenAddr;
         bool activeFakeLan = cfg.ActiveConfig.FakeLanBroadcast;
 
         var opt = new ClientOptimizerConfig(
@@ -151,7 +151,7 @@ public class NativeClientService
             MotdPrefix: "[Prism]",
             Optimizer: opt,
             ProfileId: profileId,
-            ProfileName: cfg.ActiveConfig.ProfileName
+            ProfileName: profileName ?? cfg.ActiveConfig.ProfileName
         );
 
         await PrismNativeMethods.ClientStartAsync(req);

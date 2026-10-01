@@ -73,19 +73,21 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     ];
 
     public static readonly string[] AvailableThemes = ["Default", "Light", "Dark"];
-    public static readonly string[] AvailableUpdateChannels = ["stable", "beta"];
+    public static readonly string[] AvailableUpdateChannels = ["stable", "beta", "alpha", "dev"];
 
     private bool _isLoading;
 
     public SettingsViewModel()
     {
         CurrentLocale = LocalizationManager.Instance.CurrentLocale;
+        SelectedTheme = DesktopService.GetUiTheme();
         LoadConfig();
     }
 
     public void OnNavigatedTo()
     {
         CurrentLocale = LocalizationManager.Instance.CurrentLocale;
+        SelectedTheme = DesktopService.GetUiTheme();
         LoadConfig();
     }
 
@@ -102,7 +104,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             AutoConnect = cfg.ActiveConfig.AutoConnect;
             AutoConnectPanel = cfg.ActiveConfig.AutoConnectPanel;
             FakeLanBroadcast = cfg.ActiveConfig.FakeLanBroadcast;
-            DeviceId = !string.IsNullOrWhiteSpace(cfg.ActiveConfig.TokenId) ? cfg.ActiveConfig.TokenId : Guid.NewGuid().ToString("N")[..16];
+            DeviceId = !string.IsNullOrWhiteSpace(cfg.DeviceId) ? cfg.DeviceId : Guid.NewGuid().ToString("N")[..16];
             ManagementUrl = cfg.ActiveConfig.ManagementUrl ?? "";
             UpdateChannel = string.IsNullOrWhiteSpace(cfg.ActiveConfig.UpdateChannel) ? "stable" : cfg.ActiveConfig.UpdateChannel;
             AutoCheckUpdate = cfg.ActiveConfig.AutoCheckUpdate;
@@ -136,7 +138,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
                 AutoConnectPanel: AutoConnectPanel,
                 AutoConnect: AutoConnect,
                 ManagementUrl: string.IsNullOrWhiteSpace(ManagementUrl) ? null : ManagementUrl,
-                TokenId: DeviceId,
+                TokenId: cfg.ActiveConfig.TokenId,
                 TokenType: null,
                 UserId: null,
                 Username: null,
@@ -165,10 +167,12 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     partial void OnCurrentLocaleChanged(string value)
     {
         LocalizationManager.Instance.CurrentLocale = value;
+        DesktopService.SetUiLocale(value);
     }
 
     partial void OnSelectedThemeChanged(string value)
     {
+        DesktopService.SetUiTheme(value);
         if (Application.Current != null)
         {
             Application.Current.RequestedThemeVariant = value switch

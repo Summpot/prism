@@ -148,13 +148,6 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
-      - name: Fetch UniFFISharp fallback package
-        if: matrix.desktop
-        shell: bash
-        run: |
-          mkdir -p nuget-local
-          curl -sSLf "https://github.com/Summpot/UniFFISharp/releases/download/v0.1.2/UniFFISharp.0.1.2.nupkg" -o "nuget-local/UniFFISharp.0.1.2.nupkg" || true
-
       - name: Build (release) (headless)
         if: ${{ !matrix.desktop }}
         shell: bash

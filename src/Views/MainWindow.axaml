@@ -94,7 +94,7 @@
             </shadui:Sidebar.Header>
 
             <StackPanel Spacing="3">
-                <shadui:SidebarItemLabel AsSeparator="True" Text="Client" />
+                <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_client], Source={x:Static i18n:LocalizationManager.Instance}}" />
                 <shadui:SidebarItem Route="client.overview" Content="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}">
                     <shadui:SidebarItem.Icon>
                         <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="16" Height="16"/>
@@ -133,23 +133,23 @@
 
                 <!-- Admin Section -->
                 <StackPanel Spacing="3">
-                    <shadui:SidebarItemLabel AsSeparator="True" Text="Management" />
-                    <shadui:SidebarItem Route="admin.overview" Content="Overview">
+                    <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_admin], Source={x:Static i18n:LocalizationManager.Instance}}" />
+                    <shadui:SidebarItem Route="admin.overview" Content="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}">
                         <shadui:SidebarItem.Icon>
                             <common:LucideIcon Data="{x:Static common:AppIcons.Shield}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
                     </shadui:SidebarItem>
-                    <shadui:SidebarItem Route="admin.connections" Content="Connections">
+                    <shadui:SidebarItem Route="admin.connections" Content="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}">
                         <shadui:SidebarItem.Icon>
                             <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
                     </shadui:SidebarItem>
-                    <shadui:SidebarItem Route="admin.services" Content="Services">
+                    <shadui:SidebarItem Route="admin.services" Content="{Binding [nav_services], Source={x:Static i18n:LocalizationManager.Instance}}">
                         <shadui:SidebarItem.Icon>
                             <common:LucideIcon Data="{x:Static common:AppIcons.Server}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>
                     </shadui:SidebarItem>
-                    <shadui:SidebarItem Route="admin.users" Content="Users">
+                    <shadui:SidebarItem Route="admin.users" Content="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}">
                         <shadui:SidebarItem.Icon>
                             <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="16" Height="16"/>
                         </shadui:SidebarItem.Icon>

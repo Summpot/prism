@@ -74,9 +74,11 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void OnNavigated(string route)
     {
-        CurrentPageViewModel = route switch
+        (CurrentPageViewModel as INavigationAware)?.OnNavigatedFrom();
+
+        var newVm = route switch
         {
-            "client.overview" => _clientOverview,
+            "client.overview" => (ViewModelBase)_clientOverview,
             "client.traffic" => _clientTraffic,
             "client.logs" => _clientLogs,
             "client.profiles" => _clientProfiles,
@@ -89,6 +91,9 @@ public partial class MainWindowViewModel : ViewModelBase
             "admin.users" => _adminUsers,
             _ => _clientOverview
         };
+
+        CurrentPageViewModel = newVm;
+        (newVm as INavigationAware)?.OnNavigatedTo();
     }
 
     [RelayCommand]

@@ -51,6 +51,30 @@ public class AdminUserRecord
     [JsonPropertyName("last_login_unix_ms")] public long LastLoginUnixMs { get; set; }
 }
 
+public class AdminTokenRecord
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("user_id")] public string UserId { get; set; } = "";
+    [JsonPropertyName("token_type")] public string TokenType { get; set; } = "client";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("device_id")] public string? DeviceId { get; set; }
+    [JsonPropertyName("service_rules")] public List<string>? ServiceRules { get; set; }
+    [JsonPropertyName("created_at_unix_ms")] public long CreatedAtUnixMs { get; set; }
+    [JsonPropertyName("expires_at_unix_ms")] public long? ExpiresAtUnixMs { get; set; }
+    [JsonPropertyName("last_used_unix_ms")] public long LastUsedUnixMs { get; set; }
+}
+
+public class AdminCreateTokenResponse
+{
+    [JsonPropertyName("raw_token")] public string RawToken { get; set; } = "";
+    [JsonPropertyName("token")] public AdminTokenRecord Token { get; set; } = new();
+}
+
+public class AdminRevokeTokenResponse
+{
+    [JsonPropertyName("revoked")] public bool Revoked { get; set; }
+}
+
 public class AdminHealthResponse
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
@@ -150,12 +174,48 @@ public class AdminApiClient
         return await InvokeControlRpcAsync("auth.session", null, AdminJsonContext.Default.AdminSessionResponse);
     }
 
+    public async Task<List<AdminTokenRecord>> GetTokensAsync()
+    {
+        return await InvokeControlRpcAsync("auth.tokens.list", null, AdminJsonContext.Default.ListAdminTokenRecord);
+    }
+
+    public async Task<AdminCreateTokenResponse> CreateTokenAsync(string name, string userId, int? expiresInDays = null)
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["name"] = name,
+            ["user_id"] = userId
+        };
+        if (expiresInDays.HasValue)
+        {
+            parameters["expires_in_days"] = expiresInDays.Value.ToString();
+        }
+        return await InvokeControlRpcAsync("auth.tokens.create", parameters, AdminJsonContext.Default.AdminCreateTokenResponse);
+    }
+
+    public async Task<AdminRevokeTokenResponse> RevokeTokenAsync(string tokenId)
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["token_id"] = tokenId
+        };
+        return await InvokeControlRpcAsync("auth.tokens.revoke", parameters, AdminJsonContext.Default.AdminRevokeTokenResponse);
+    }
+
     public async Task CloseConnectionAsync(string id)
     {
+        string? token = null;
+        try
+        {
+            var cfg = _client.GetConfig();
+            token = cfg?.ActiveConfig?.AuthToken;
+        }
+        catch { }
+
         var rpcReq = new AdminRpcRequest(
             Method: "connections.close",
             Params: new Dictionary<string, string> { ["id"] = id },
-            Token: null
+            Token: string.IsNullOrWhiteSpace(token) ? null : token.Trim()
         );
         await _client.ControlRpcAsync(rpcReq);
     }

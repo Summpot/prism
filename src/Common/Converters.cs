@@ -16,6 +16,9 @@ public static class Converters
     public static readonly IValueConverter NullToBoolean =
         new FuncValueConverter<object?, bool>(o => o != null);
 
+    public static readonly IValueConverter NullToTrue =
+        new FuncValueConverter<object?, bool>(o => o == null);
+
     public static readonly IValueConverter NullOrEmptyToBoolean =
         new FuncValueConverter<string?, bool>(s => !string.IsNullOrWhiteSpace(s));
 

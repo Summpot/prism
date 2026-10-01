@@ -28,7 +28,7 @@ public partial class ClientLogsView : UserControl
                     {
                         if (vm.FilteredLogs.Count > 0)
                         {
-                            _logsList.ScrollIntoView(vm.FilteredLogs.Count - 1);
+                            _logsList.ScrollIntoView(vm.FilteredLogs[^1]);
                         }
                     });
                 }

@@ -87,7 +87,7 @@
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2">
                                         <TextBlock Text="{Binding [settings_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
-                                        <TextBlock Text="Automatically connect to active profile on startup" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding [client_auto_connect_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnect, Mode=TwoWay}"/>
                                 </Grid>
@@ -95,7 +95,7 @@
                                 <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Spacing="2">
                                         <TextBlock Text="{Binding [settings_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12"/>
-                                        <TextBlock Text="Automatically login and sync with management node" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <TextBlock Text="{Binding [client_auto_connect_panel_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnectPanel, Mode=TwoWay}"/>
                                 </Grid>
@@ -111,7 +111,7 @@
                         <shadui:Card Padding="16">
                             <StackPanel Spacing="6">
                                 <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                <TextBlock Text="Prism server control API URL" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding [settings_management_url_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 <TextBox Text="{Binding ManagementUrl, Mode=TwoWay}" Height="32" FontSize="12" Margin="0,4,0,0"/>
                             </StackPanel>
                         </shadui:Card>
@@ -120,10 +120,10 @@
                         <shadui:Card Padding="16">
                             <StackPanel Spacing="6">
                                 <TextBlock Text="{Binding [settings_device_id], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
-                                <TextBlock Text="Unique client identifier registered on management panel" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding [settings_device_id_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 <Grid ColumnDefinitions="*, 8, Auto" Margin="0,4,0,0">
                                     <TextBox Grid.Column="0" Text="{Binding DeviceId}" IsReadOnly="True" Height="32" FontSize="12"/>
-                                    <Button Grid.Column="2" Classes="Outline" Command="{Binding CopyDeviceIdCommand}" Content="Copy ID" Height="32" FontSize="11" Padding="12,0"/>
+                                    <Button Grid.Column="2" Classes="Outline" Command="{Binding CopyDeviceIdCommand}" Content="{Binding [client_copy], Source={x:Static i18n:LocalizationManager.Instance}}" Height="32" FontSize="11" Padding="12,0"/>
                                 </Grid>
                             </StackPanel>
                         </shadui:Card>
@@ -132,8 +132,8 @@
                         <shadui:Card Padding="16">
                             <Grid ColumnDefinitions="*, Auto">
                                 <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="Fake LAN Broadcast" FontWeight="SemiBold" FontSize="13"/>
-                                    <TextBlock Text="Broadcast virtual LAN presence for Minecraft multiplayer discovery" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                    <TextBlock Text="{Binding [client_lan_broadcast], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="{Binding [client_lan_broadcast_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding FakeLanBroadcast, Mode=TwoWay}"/>
                             </Grid>
@@ -170,14 +170,20 @@
                                         Classes="Primary"
                                         Command="{Binding CheckUpdateCommand}"
                                         IsEnabled="{Binding IsCheckingUpdate, Converter={x:Static common:Converters.BooleanNegation}}"
-                                        Content="Check for Updates"
+                                        Content="{Binding [client_update_check_btn], Source={x:Static i18n:LocalizationManager.Instance}}"
                                         Height="32"
                                         FontSize="12"
                                         Padding="14,0"/>
                                 </Grid>
 
-                                <StackPanel IsVisible="{Binding UpdateAvailable}" Spacing="8">
-                                    <shadui:Badge Content="{Binding LatestVersion, StringFormat='New Version: {0}'}" Height="24" Padding="8,0"/>
+                                <StackPanel IsVisible="{Binding UpdateAvailable}" Spacing="8" Margin="0,8,0,0">
+                                    <Grid ColumnDefinitions="*, Auto">
+                                        <shadui:Badge Grid.Column="0" Content="{Binding LatestVersion, StringFormat='New Version: {0}'}" Height="24" Padding="8,0" HorizontalAlignment="Left"/>
+                                        <Button Grid.Column="1" Classes="Primary" Command="{Binding InstallUpdateCommand}"
+                                                IsEnabled="{Binding IsInstallingUpdate, Converter={x:Static common:Converters.BooleanNegation}}"
+                                                Content="{Binding [client_update_install_btn], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                                Height="28" FontSize="11" Padding="12,0"/>
+                                    </Grid>
                                     <TextBlock Text="{Binding UpdateChangelog}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </StackPanel>

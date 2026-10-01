@@ -120,6 +120,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
     private static readonly System.Net.Http.HttpClient _httpClient = new();
     private bool _isSwitchingProfile;
+    private bool _wasRunning;
+    private DateTime _lastSessionCheck = DateTime.MinValue;
 
     public ObservableCollection<DiscoveredServiceItem> DiscoveredServices { get; } = new();
 
@@ -489,12 +491,43 @@ public partial class ClientOverviewViewModel : ViewModelBase
         UplinkStatsText = $"{Formatters.FormatBytes(status.Stats.Uplink.WireBytes)} ({Formatters.FormatPercentage(status.Stats.Uplink.SavedRatio)})";
         DownlinkStatsText = $"{Formatters.FormatBytes(status.Stats.Downlink.WireBytes)} ({Formatters.FormatPercentage(status.Stats.Downlink.SavedRatio)})";
 
-        // Update discovered services
+        // Update discovered services with diffing to prevent UI flickering
+        SyncDiscoveredServices(status.KnownServices, status.ListenAddr);
+
+        if (status.Running && (!_wasRunning || (DateTime.UtcNow - _lastSessionCheck).TotalSeconds > 30))
+        {
+            _lastSessionCheck = DateTime.UtcNow;
+            _ = RefreshControlSessionAsync();
+        }
+        _wasRunning = status.Running;
+    }
+
+    private void SyncDiscoveredServices(IReadOnlyList<ClientRegisteredService> knownServices, string listenAddr)
+    {
+        bool identical = knownServices.Count == DiscoveredServices.Count;
+        if (identical)
+        {
+            for (int i = 0; i < knownServices.Count; i++)
+            {
+                var s = knownServices[i];
+                var existing = DiscoveredServices[i];
+                string loopback = GetLoopbackTarget(i, listenAddr);
+                if (existing.Name != s.Name || existing.Proto != s.Proto ||
+                    existing.TargetAddress != loopback || existing.MasqueradeHost != s.MasqueradeHost)
+                {
+                    identical = false;
+                    break;
+                }
+            }
+        }
+
+        if (identical) return;
+
         DiscoveredServices.Clear();
         int idx = 0;
-        foreach (var s in status.KnownServices)
+        foreach (var s in knownServices)
         {
-            string loopback = GetLoopbackTarget(idx, status.ListenAddr);
+            string loopback = GetLoopbackTarget(idx, listenAddr);
             DiscoveredServices.Add(new DiscoveredServiceItem
             {
                 Name = s.Name,
@@ -503,11 +536,6 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 MasqueradeHost = s.MasqueradeHost
             });
             idx++;
-        }
-
-        if (status.Running)
-        {
-            _ = RefreshControlSessionAsync();
         }
     }
 

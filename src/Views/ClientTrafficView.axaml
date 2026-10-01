@@ -90,7 +90,10 @@
                         <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,6,0">
                             <StackPanel Spacing="6">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <TextBlock Text="↑ Uplink" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="↑" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                        <TextBlock Text="{Binding [traffic_uplink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                    </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding UplinkRawWireText}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </Grid>
                                 <Grid ColumnDefinitions="*, *, *, *" Margin="0,4,0,0">
@@ -118,7 +121,10 @@
                         <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="6,0,0,0">
                             <StackPanel Spacing="6">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <TextBlock Text="↓ Downlink" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="↓" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                        <TextBlock Text="{Binding [traffic_downlink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource PrimaryColor}"/>
+                                    </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding DownlinkRawWireText}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                                 </Grid>
                                 <Grid ColumnDefinitions="*, *, *, *" Margin="0,4,0,0">

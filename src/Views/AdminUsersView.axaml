@@ -5,33 +5,166 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="clr-namespace:Prism.ViewModels"
+    xmlns:common="clr-namespace:Prism.Common"
+    xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
     mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
     x:DataType="vm:AdminUsersViewModel">
 
-    <Grid RowDefinitions="Auto, *" Margin="20">
+    <Grid RowDefinitions="Auto, Auto, *" Margin="20">
         <!-- Header -->
-        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
-            <TextBlock Text="User &amp; Access Management" FontWeight="Bold" FontSize="20"/>
-            <TextBlock Text="Authenticated client identities, roles, and OAuth account bindings" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-        </StackPanel>
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
+            <StackPanel Grid.Column="0" Spacing="4">
+                <TextBlock Text="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
+                <TextBlock Text="Authenticated client identities, roles, and client bearer tokens" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+            </StackPanel>
 
-        <!-- Users Table -->
-        <shadui:Card Grid.Row="1" Padding="12">
-            <DataGrid
-                ItemsSource="{Binding Users}"
-                AutoGenerateColumns="False"
-                IsReadOnly="True"
-                GridLinesVisibility="Horizontal"
-                BorderThickness="0"
-                Background="Transparent">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Username" Binding="{Binding Username}" Width="160"/>
-                    <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="110"/>
-                    <DataGridTextColumn Header="OAuth Identifier" Binding="{Binding GithubId}" Width="*"/>
-                    <DataGridTextColumn Header="Created Date" Binding="{Binding CreatedAt}" Width="140"/>
-                </DataGrid.Columns>
-            </DataGrid>
-        </shadui:Card>
+            <Button Grid.Column="1" Classes="Outline" Command="{Binding RefreshCommand}"
+                    IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
+                    Height="28" Padding="10,0">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                    <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Error Banner -->
+        <Border
+            Grid.Row="1"
+            IsVisible="{Binding ErrorMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+            Background="#20ef4444"
+            BorderBrush="#50ef4444"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource MdCornerRadius}"
+            Padding="12,8"
+            Margin="0,0,0,12">
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="#ef4444" FontSize="12"/>
+        </Border>
+
+        <!-- Tabbed User & Token Content -->
+        <TabControl Grid.Row="2">
+            <!-- Tab 1: Users -->
+            <TabItem Header="{Binding [users_title], Source={x:Static i18n:LocalizationManager.Instance}}">
+                <shadui:Card Margin="0,8,0,0" Padding="12">
+                    <Grid>
+                        <DataGrid
+                            ItemsSource="{Binding Users}"
+                            AutoGenerateColumns="False"
+                            IsReadOnly="True"
+                            GridLinesVisibility="Horizontal"
+                            BorderThickness="0"
+                            Background="Transparent">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Username" Binding="{Binding Username}" Width="180"/>
+                                <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="110"/>
+                                <DataGridTextColumn Header="OAuth Identifier" Binding="{Binding GithubId}" Width="*"/>
+                                <DataGridTextColumn Header="Created Date" Binding="{Binding CreatedAt}" Width="140"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <StackPanel
+                            IsVisible="{Binding Users.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8"
+                            Margin="0,40">
+                            <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="{Binding [users_no_users_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        </StackPanel>
+                    </Grid>
+                </shadui:Card>
+            </TabItem>
+
+            <!-- Tab 2: Access Tokens -->
+            <TabItem Header="Access Tokens">
+                <shadui:Card Margin="0,8,0,0" Padding="12">
+                    <Grid RowDefinitions="Auto, Auto, *">
+                        <!-- Toolbar -->
+                        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+                            <TextBlock Text="Active Bearer Tokens" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Classes="Primary" Command="{Binding OpenCreateTokenDialogCommand}" Height="28" Padding="10,0">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <common:LucideIcon Data="{x:Static common:AppIcons.Plus}" Width="11" Height="11" Foreground="{DynamicResource PrimaryForegroundColor}"/>
+                                    <TextBlock Text="{Binding [users_generate_token], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Create Token Modal Card -->
+                        <shadui:Card Grid.Row="1" IsVisible="{Binding ShowTokenDialog}" Margin="0,0,0,12" Padding="12">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Text="{Binding [users_token_modal_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="12"/>
+                                    <Button Grid.Column="1" Classes="Ghost" Command="{Binding CloseCreateTokenDialogCommand}" Height="22" Width="22" Padding="2">
+                                        <common:LucideIcon Data="{x:Static common:AppIcons.Close}" Width="11" Height="11"/>
+                                    </Button>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*, 8, Auto">
+                                    <TextBox Grid.Column="0" Text="{Binding NewTokenName, Mode=TwoWay}" PlaceholderText="{Binding [users_token_name_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="12"/>
+                                    <Button Grid.Column="2" Classes="Primary" Command="{Binding SubmitCreateTokenCommand}" Content="{Binding [common_create], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" Padding="12,0"/>
+                                </Grid>
+
+                                <!-- Created Raw Token Display -->
+                                <Border IsVisible="{Binding CreatedRawToken, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                        Background="{DynamicResource GhostColor}" BorderBrush="#10b981" BorderThickness="1" CornerRadius="6" Padding="10">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{Binding [users_token_copy_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="#10b981"/>
+                                        <Grid ColumnDefinitions="*, Auto">
+                                            <TextBox Grid.Column="0" Text="{Binding CreatedRawToken}" IsReadOnly="True" Height="28" FontSize="11" FontFamily="Consolas, monospace"/>
+                                            <Button Grid.Column="1" Classes="Outline" Command="{Binding CopyRawTokenCommand}" Content="{Binding [client_copy], Source={x:Static i18n:LocalizationManager.Instance}}" Height="28" FontSize="11" Padding="10,0" Margin="6,0,0,0"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </shadui:Card>
+
+                        <!-- Tokens Table -->
+                        <Grid Grid.Row="2">
+                            <DataGrid
+                                ItemsSource="{Binding Tokens}"
+                                AutoGenerateColumns="False"
+                                IsReadOnly="True"
+                                GridLinesVisibility="Horizontal"
+                                BorderThickness="0"
+                                Background="Transparent">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Token Name" Binding="{Binding Name}" Width="160"/>
+                                    <DataGridTextColumn Header="Type" Binding="{Binding TokenType}" Width="90"/>
+                                    <DataGridTextColumn Header="Created" Binding="{Binding CreatedAt}" Width="140"/>
+                                    <DataGridTextColumn Header="Expires" Binding="{Binding ExpiresAt}" Width="140"/>
+                                    <DataGridTemplateColumn Header="Action" Width="90">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate x:DataType="vm:TokenRowItem">
+                                                <Button
+                                                    Classes="Outline"
+                                                    Command="{Binding ((vm:AdminUsersViewModel)DataContext).RevokeTokenCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Content="{Binding [users_revoke], Source={x:Static i18n:LocalizationManager.Instance}}"
+                                                    Height="22"
+                                                    FontSize="10"
+                                                    Padding="6,0"
+                                                    Foreground="#ef4444"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <StackPanel
+                                IsVisible="{Binding Tokens.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="8"
+                                Margin="0,40">
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Shield}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                <TextBlock Text="{Binding [users_no_tokens_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </shadui:Card>
+            </TabItem>
+        </TabControl>
     </Grid>
 </UserControl>

@@ -40,7 +40,7 @@
                     FontSize="11" />
 
                 <!-- AutoScroll Toggle -->
-                <CheckBox IsChecked="{Binding AutoScroll, Mode=TwoWay}" Content="Auto-scroll" FontSize="11" Margin="4,0"/>
+                <CheckBox IsChecked="{Binding AutoScroll, Mode=TwoWay}" Content="{Binding [client_logs_auto_scroll], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Margin="4,0"/>
 
                 <!-- Clear Logs -->
                 <Button Classes="Outline" Command="{Binding ClearLogsCommand}" Content="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>

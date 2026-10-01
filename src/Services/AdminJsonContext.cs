@@ -21,6 +21,10 @@ public class OAuthExchangeRequest
 [JsonSerializable(typeof(AdminUserRecord))]
 [JsonSerializable(typeof(List<AdminUserRecord>))]
 [JsonSerializable(typeof(AdminSessionResponse))]
+[JsonSerializable(typeof(AdminTokenRecord))]
+[JsonSerializable(typeof(List<AdminTokenRecord>))]
+[JsonSerializable(typeof(AdminCreateTokenResponse))]
+[JsonSerializable(typeof(AdminRevokeTokenResponse))]
 public partial class AdminJsonContext : JsonSerializerContext
 {
 }

@@ -9,50 +9,64 @@ using Prism.Services;
 
 namespace Prism.ViewModels;
 
-public class MiddlewareFieldItem : ObservableObject
+public abstract class MiddlewareFieldViewModel : ObservableObject
 {
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
     public string Description { get; set; } = "";
-    public string FieldType { get; set; } = "string";
 
-    public bool IsBool => FieldType.Equals("bool", StringComparison.OrdinalIgnoreCase) || FieldType.Equals("boolean", StringComparison.OrdinalIgnoreCase);
-    public bool IsNumber => FieldType.Equals("number", StringComparison.OrdinalIgnoreCase) || FieldType.Equals("int", StringComparison.OrdinalIgnoreCase) || FieldType.Equals("integer", StringComparison.OrdinalIgnoreCase) || FieldType.Equals("float", StringComparison.OrdinalIgnoreCase);
-    public bool IsString => !IsBool && !IsNumber;
+    public abstract string GetStringValue();
+    public abstract void SetStringValue(string value);
 
-    private string _value = "";
-    public string Value
+    public static MiddlewareFieldViewModel Create(string key, string label, string description, string fieldType, string initialValue)
     {
-        get => _value;
-        set
+        MiddlewareFieldViewModel vm = fieldType.ToLowerInvariant() switch
         {
-            if (SetProperty(ref _value, value))
-            {
-                OnPropertyChanged(nameof(BoolValue));
-                OnPropertyChanged(nameof(NumberValue));
-            }
-        }
-    }
-
-    public bool BoolValue
-    {
-        get => bool.TryParse(_value, out var b) && b;
-        set => Value = value.ToString().ToLowerInvariant();
-    }
-
-    public decimal NumberValue
-    {
-        get => decimal.TryParse(_value, out var d) ? d : 0;
-        set => Value = value.ToString();
+            "bool" or "boolean" => new BoolMiddlewareFieldViewModel(),
+            "number" or "int" or "integer" or "float" => new NumberMiddlewareFieldViewModel(),
+            _ => new StringMiddlewareFieldViewModel()
+        };
+        vm.Key = key;
+        vm.Label = label;
+        vm.Description = description;
+        vm.SetStringValue(initialValue);
+        return vm;
     }
 }
 
-public partial class ClientMiddlewareViewModel : ViewModelBase
+public partial class BoolMiddlewareFieldViewModel : MiddlewareFieldViewModel
+{
+    [ObservableProperty]
+    private bool _value;
+
+    public override string GetStringValue() => Value ? "true" : "false";
+    public override void SetStringValue(string value) => Value = bool.TryParse(value, out var b) && b;
+}
+
+public partial class NumberMiddlewareFieldViewModel : MiddlewareFieldViewModel
+{
+    [ObservableProperty]
+    private decimal _value;
+
+    public override string GetStringValue() => Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public override void SetStringValue(string value) => Value = decimal.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0;
+}
+
+public partial class StringMiddlewareFieldViewModel : MiddlewareFieldViewModel
+{
+    [ObservableProperty]
+    private string _value = "";
+
+    public override string GetStringValue() => Value;
+    public override void SetStringValue(string value) => Value = value ?? "";
+}
+
+public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
 
     public ObservableCollection<Prism.Native.MiddlewareItem> Middlewares { get; } = new();
-    public ObservableCollection<MiddlewareFieldItem> ConfigFields { get; } = new();
+    public ObservableCollection<MiddlewareFieldViewModel> ConfigFields { get; } = new();
 
     [ObservableProperty]
     private Prism.Native.MiddlewareItem? _selectedMiddleware;
@@ -68,7 +82,16 @@ public partial class ClientMiddlewareViewModel : ViewModelBase
         LoadData();
     }
 
-    public void LoadData()
+    public void OnNavigatedTo()
+    {
+        LoadData(SelectedMiddleware?.Name);
+    }
+
+    public void OnNavigatedFrom()
+    {
+    }
+
+    public void LoadData(string? preserveName = null)
     {
         Middlewares.Clear();
         try
@@ -78,7 +101,9 @@ public partial class ClientMiddlewareViewModel : ViewModelBase
             {
                 Middlewares.Add(item);
             }
-            SelectedMiddleware = Middlewares.FirstOrDefault();
+            SelectedMiddleware = (!string.IsNullOrWhiteSpace(preserveName)
+                ? Middlewares.FirstOrDefault(m => string.Equals(m.Name, preserveName, StringComparison.OrdinalIgnoreCase))
+                : null) ?? Middlewares.FirstOrDefault();
         }
         catch (Exception ex)
         {
@@ -106,24 +131,15 @@ public partial class ClientMiddlewareViewModel : ViewModelBase
         {
             if (f.Key.Equals("enabled", StringComparison.OrdinalIgnoreCase)) continue;
 
-            string currentVal = "";
-            if (value.EffectiveConfig.TryGetValue(f.Key, out var v))
-            {
-                currentVal = v;
-            }
-            else
-            {
-                currentVal = f.DefaultValue;
-            }
+            string currentVal = value.EffectiveConfig.TryGetValue(f.Key, out var v) ? v : f.DefaultValue;
 
-            ConfigFields.Add(new MiddlewareFieldItem
-            {
-                Key = f.Key,
-                Label = string.IsNullOrWhiteSpace(f.Label) ? f.Key : f.Label,
-                Description = f.Description,
-                FieldType = f.FieldType,
-                Value = currentVal
-            });
+            ConfigFields.Add(MiddlewareFieldViewModel.Create(
+                key: f.Key,
+                label: string.IsNullOrWhiteSpace(f.Label) ? f.Key : f.Label,
+                description: f.Description,
+                fieldType: f.FieldType,
+                initialValue: currentVal
+            ));
         }
     }
 
@@ -134,12 +150,13 @@ public partial class ClientMiddlewareViewModel : ViewModelBase
 
         try
         {
-            var dict = ConfigFields.ToDictionary(f => f.Key, f => f.Value);
+            var dict = ConfigFields.ToDictionary(f => f.Key, f => f.GetStringValue());
             dict["enabled"] = IsMiddlewareEnabled ? "true" : "false";
 
-            var updated = _client.UpdateMiddlewareConfig(SelectedMiddleware.Name, dict);
+            string currentName = SelectedMiddleware.Name;
+            var updated = _client.UpdateMiddlewareConfig(currentName, dict);
             StatusMessage = $"Config for {updated.Name} saved successfully.";
-            LoadData();
+            LoadData(currentName);
         }
         catch (Exception ex)
         {
@@ -154,9 +171,10 @@ public partial class ClientMiddlewareViewModel : ViewModelBase
 
         try
         {
-            var reset = _client.ResetMiddlewareConfig(SelectedMiddleware.Name);
+            string currentName = SelectedMiddleware.Name;
+            var reset = _client.ResetMiddlewareConfig(currentName);
             StatusMessage = $"Config for {reset.Name} reset to default.";
-            LoadData();
+            LoadData(currentName);
         }
         catch (Exception ex)
         {

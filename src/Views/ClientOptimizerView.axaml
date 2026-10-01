@@ -29,7 +29,7 @@
 
                 <!-- Actions: Reset defaults -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Classes="Outline" Command="{Binding ResetDefaultsCommand}" Content="Reset Defaults" Height="26" FontSize="11" Padding="8,0"/>
+                    <Button Classes="Outline" Command="{Binding ResetDefaultsCommand}" Content="{Binding [optimizer_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}" Height="26" FontSize="11" Padding="8,0"/>
                     <TextBlock IsVisible="{Binding SavedNotice}" Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="#10b981" FontSize="11" VerticalAlignment="Center"/>
                 </StackPanel>
             </Grid>
@@ -38,32 +38,32 @@
             <shadui:Card Padding="14">
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel Grid.Column="0" Spacing="2">
-                        <TextBlock Text="加速策略预设 (Presets)" FontWeight="Bold" FontSize="13"/>
-                        <TextBlock Text="快速应用经过针对性测试的网络优化配置组合" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                        <TextBlock Text="{Binding [optimizer_presets_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="13"/>
+                        <TextBlock Text="{Binding [optimizer_presets_desc], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                         <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="gaming" Height="28" FontSize="11" Padding="8,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Gamepad2}" Width="12" Height="12"/>
-                                <TextBlock Text="Gaming (5ms)"/>
+                                <TextBlock Text="{Binding [optimizer_preset_gaming], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
                         <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="low_latency" Height="28" FontSize="11" Padding="8,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="12" Height="12"/>
-                                <TextBlock Text="Low Latency (10ms)"/>
+                                <TextBlock Text="{Binding [optimizer_preset_low_latency], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
                         <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="balanced" Height="28" FontSize="11" Padding="8,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="12" Height="12"/>
-                                <TextBlock Text="Balanced (20ms)"/>
+                                <TextBlock Text="{Binding [optimizer_preset_balanced], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
                         <Button Classes="Outline" Command="{Binding ApplyPresetCommand}" CommandParameter="max_compression" Height="28" FontSize="11" Padding="8,0">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDown}" Width="12" Height="12"/>
-                                <TextBlock Text="Max Save (50ms)"/>
+                                <TextBlock Text="{Binding [optimizer_preset_max_save], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
                         </Button>
                     </StackPanel>

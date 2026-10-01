@@ -108,8 +108,8 @@
                                 ItemsSource="{Binding SupportedProtocols}"
                                 SelectedItem="{Binding SelectedProtocol}"
                                 Height="32"
-                                CornerRadius="6,0,0,6"
-                                BorderThickness="1,1,0,1"
+                                CornerRadius="6"
+                                Margin="0,0,8,0"
                                 FontSize="12" />
 
                             <!-- Remote Address Input -->
@@ -118,7 +118,8 @@
                                 Text="{Binding RemoteLinkInput, Mode=TwoWay}"
                                 PlaceholderText="{Binding [client_remote_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
                                 Height="32"
-                                CornerRadius="0"
+                                CornerRadius="6"
+                                Margin="0,0,8,0"
                                 FontSize="12" />
 
                             <!-- Connect Button -->
@@ -127,9 +128,9 @@
                                 Classes="Primary"
                                 Command="{Binding ConnectFromLinkCommand}"
                                 Height="32"
-                                CornerRadius="0"
-                                Padding="12,0"
-                                Margin="0">
+                                CornerRadius="6"
+                                Margin="0,0,8,0"
+                                Padding="14,0">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="12" Height="12" Foreground="{DynamicResource PrimaryForegroundColor}"/>
                                     <TextBlock Text="{Binding [client_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" />
@@ -142,11 +143,10 @@
                                 Classes="Outline"
                                 Command="{Binding StartGitHubLoginCommand}"
                                 Height="32"
-                                CornerRadius="0,6,6,0"
-                                Padding="10,0"
-                                Margin="0"
+                                CornerRadius="6"
+                                Padding="12,0"
                                 ToolTip.Tip="{Binding [client_github_login], Source={x:Static i18n:LocalizationManager.Instance}}">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
                                     <common:LucideIcon Data="{x:Static common:AppIcons.Github}" Width="13" Height="13"/>
                                     <TextBlock Text="GitHub" FontSize="11"/>
                                 </StackPanel>
@@ -172,8 +172,8 @@
                                 </Grid>
                                 <TextBlock Text="{Binding [client_github_browser_hint], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                                 <Grid ColumnDefinitions="*, Auto" Margin="0,2,0,0">
-                                    <TextBox Grid.Column="0" Text="{Binding ManualCallbackInput, Mode=TwoWay}" PlaceholderText="{Binding [client_callback_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="4,0,0,4"/>
-                                    <Button Grid.Column="1" Classes="Primary" Command="{Binding VerifyManualCallbackCommand}" Content="{Binding [client_verify], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="0,4,4,0" Padding="12,0"/>
+                                    <TextBox Grid.Column="0" Text="{Binding ManualCallbackInput, Mode=TwoWay}" PlaceholderText="{Binding [client_callback_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="6" Margin="0,0,8,0"/>
+                                    <Button Grid.Column="1" Classes="Primary" Command="{Binding VerifyManualCallbackCommand}" Content="{Binding [client_verify], Source={x:Static i18n:LocalizationManager.Instance}}" Height="30" FontSize="11" CornerRadius="6" Padding="12,0"/>
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -320,13 +320,19 @@
                             <Grid ColumnDefinitions="*, *" Margin="0,4,0,0">
                                 <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,4,0">
                                     <Grid ColumnDefinitions="Auto, *">
-                                        <TextBlock Grid.Column="0" Text="↑ Uplink" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                            <TextBlock Text="↑" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="{Binding [traffic_uplink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        </StackPanel>
                                         <TextBlock Grid.Column="1" Text="{Binding UplinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontWeight="SemiBold"/>
                                     </Grid>
                                 </Border>
                                 <Border Grid.Column="1" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="4,0,0,0">
                                     <Grid ColumnDefinitions="Auto, *">
-                                        <TextBlock Grid.Column="0" Text="↓ Downlink" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                            <TextBlock Text="↓" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                            <TextBlock Text="{Binding [traffic_downlink], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                                        </StackPanel>
                                         <TextBlock Grid.Column="1" Text="{Binding DownlinkStatsText}" HorizontalAlignment="Right" FontSize="11" FontWeight="SemiBold"/>
                                     </Grid>
                                 </Border>
@@ -408,7 +414,7 @@
 
                     <!-- Empty Services View -->
                     <StackPanel
-                        IsVisible="{Binding DiscoveredServices.Count, Converter={x:Static common:Converters.BooleanNegation}}"
+                        IsVisible="{Binding DiscoveredServices.Count, Converter={x:Static common:Converters.EqualsZero}}"
                         HorizontalAlignment="Center"
                         Spacing="8"
                         Margin="0,16">

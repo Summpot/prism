@@ -93,14 +93,28 @@ public class NativeClientService
                 _lastWireBytes = 0;
             }
 
-            var logs = await PrismNativeMethods.ClientLogsAsync(200);
-            CurrentLogs = logs;
-            LogsUpdated?.Invoke(logs);
+            if (LogsUpdated != null && (NavigationService.Instance.CurrentRoute == "client.logs" || CurrentLogs.Count == 0))
+            {
+                var logs = await PrismNativeMethods.ClientLogsAsync(200);
+                CurrentLogs = logs;
+                LogsUpdated?.Invoke(logs);
+            }
         }
         catch
         {
             // Suppress background poll errors
         }
+    }
+
+    public async Task RefreshLogsAsync()
+    {
+        try
+        {
+            var logs = await PrismNativeMethods.ClientLogsAsync(200);
+            CurrentLogs = logs;
+            LogsUpdated?.Invoke(logs);
+        }
+        catch { }
     }
 
     public async Task<ClientStatusResponse> GetStatusAsync()

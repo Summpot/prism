@@ -13,7 +13,7 @@ using Prism.Services;
 
 namespace Prism.ViewModels;
 
-public partial class ClientLogsViewModel : ViewModelBase
+public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
 
@@ -35,6 +35,15 @@ public partial class ClientLogsViewModel : ViewModelBase
     {
         _client.LogsUpdated += OnLogsUpdated;
         OnLogsUpdated(_client.CurrentLogs);
+    }
+
+    public void OnNavigatedTo()
+    {
+        _ = _client.RefreshLogsAsync();
+    }
+
+    public void OnNavigatedFrom()
+    {
     }
 
     private string _lastFilter = "";
@@ -62,7 +71,7 @@ public partial class ClientLogsViewModel : ViewModelBase
         _lastFilter = FilterLevel;
         _lastSearch = SearchQuery;
 
-        if (filterChanged || list.Count < FilteredLogs.Count)
+        if (filterChanged || FilteredLogs.Count == 0 || list.Count == 0)
         {
             FilteredLogs.Clear();
             foreach (var entry in list)
@@ -70,12 +79,50 @@ public partial class ClientLogsViewModel : ViewModelBase
                 FilteredLogs.Add(entry);
             }
         }
-        else if (list.Count > FilteredLogs.Count)
+        else
         {
-            int existing = FilteredLogs.Count;
-            for (int i = existing; i < list.Count; i++)
+            var lastExisting = FilteredLogs[^1];
+            var lastNew = list[^1];
+            if (lastExisting.Timestamp == lastNew.Timestamp &&
+                lastExisting.Message == lastNew.Message &&
+                lastExisting.Target == lastNew.Target)
             {
-                FilteredLogs.Add(list[i]);
+                // No new logs, do nothing
+            }
+            else
+            {
+                // Find matching index of the last known item in list
+                int matchIdx = -1;
+                for (int i = list.Count - 1; i >= 0; i--)
+                {
+                    if (list[i].Timestamp == lastExisting.Timestamp &&
+                        list[i].Message == lastExisting.Message &&
+                        list[i].Target == lastExisting.Target)
+                    {
+                        matchIdx = i;
+                        break;
+                    }
+                }
+
+                if (matchIdx >= 0)
+                {
+                    for (int i = matchIdx + 1; i < list.Count; i++)
+                    {
+                        FilteredLogs.Add(list[i]);
+                    }
+                    while (FilteredLogs.Count > 300)
+                    {
+                        FilteredLogs.RemoveAt(0);
+                    }
+                }
+                else
+                {
+                    FilteredLogs.Clear();
+                    foreach (var entry in list)
+                    {
+                        FilteredLogs.Add(entry);
+                    }
+                }
             }
         }
 

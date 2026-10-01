@@ -11,7 +11,7 @@ using Prism.Services;
 
 namespace Prism.ViewModels;
 
-public partial class SettingsViewModel : ViewModelBase
+public partial class SettingsViewModel : ViewModelBase, INavigationAware
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
 
@@ -81,6 +81,16 @@ public partial class SettingsViewModel : ViewModelBase
     {
         CurrentLocale = LocalizationManager.Instance.CurrentLocale;
         LoadConfig();
+    }
+
+    public void OnNavigatedTo()
+    {
+        CurrentLocale = LocalizationManager.Instance.CurrentLocale;
+        LoadConfig();
+    }
+
+    public void OnNavigatedFrom()
+    {
     }
 
     private void LoadConfig()
@@ -203,21 +213,27 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    [ObservableProperty]
+    private bool _isInstallingUpdate;
+
     [RelayCommand]
     public async Task CheckUpdateAsync()
     {
         try
         {
             IsCheckingUpdate = true;
-            UpdateStatusMessage = "Checking for updates...";
+            UpdateStatusMessage = LocalizationManager.Instance["client_update_checking"] ?? "Checking for updates...";
             var res = await _client.CheckUpdateAsync(UpdateChannel);
+            UpdateAvailable = res.Available;
+            LatestVersion = res.Version ?? "";
+            UpdateChangelog = res.Body ?? "";
             if (res.Available)
             {
                 UpdateStatusMessage = $"Update available: {res.Version}";
             }
             else
             {
-                UpdateStatusMessage = "You are already using the latest version.";
+                UpdateStatusMessage = LocalizationManager.Instance["client_update_up_to_date"] ?? "You are already using the latest version.";
             }
         }
         catch (Exception ex)
@@ -227,6 +243,26 @@ public partial class SettingsViewModel : ViewModelBase
         finally
         {
             IsCheckingUpdate = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task InstallUpdateAsync()
+    {
+        try
+        {
+            IsInstallingUpdate = true;
+            UpdateStatusMessage = LocalizationManager.Instance["client_update_installing"] ?? "Downloading and applying update...";
+            await _client.InstallUpdateAsync(UpdateChannel);
+            UpdateStatusMessage = "Update downloaded. Restart Prism to complete installation.";
+        }
+        catch (Exception ex)
+        {
+            UpdateStatusMessage = $"Update installation failed: {ex.Message}";
+        }
+        finally
+        {
+            IsInstallingUpdate = false;
         }
     }
 }

@@ -6,50 +6,99 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="clr-namespace:Prism.ViewModels"
     xmlns:common="clr-namespace:Prism.Common"
+    xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:shadui="clr-namespace:ShadUI;assembly=ShadUI"
     mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
     x:DataType="vm:AdminConnectionsViewModel">
 
-    <Grid RowDefinitions="Auto, *" Margin="20">
+    <Grid RowDefinitions="Auto, Auto, *" Margin="20">
         <!-- Header -->
-        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
-            <TextBlock Text="Active Connections" FontWeight="Bold" FontSize="20"/>
-            <TextBlock Text="Live active client connections and tunnel sessions attached to this node" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
-        </StackPanel>
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
+            <StackPanel Grid.Column="0" Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding [nav_connections], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="20"/>
+                    <shadui:Badge Content="{Binding Connections.Count}" Height="20" Padding="6,0" FontSize="10" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock Text="Live active client connections and tunnel sessions attached to this node" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+            </StackPanel>
+            
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBox
+                    Text="{Binding SearchQuery, Mode=TwoWay}"
+                    PlaceholderText="Search by ID or address..."
+                    Width="180"
+                    Height="28"
+                    FontSize="11"/>
+                <Button Classes="Outline" Command="{Binding RefreshCommand}"
+                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
+                        Height="28" Padding="10,0">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="12" Height="12"/>
+                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Error Banner -->
+        <Border
+            Grid.Row="1"
+            IsVisible="{Binding ErrorMessage, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+            Background="#20ef4444"
+            BorderBrush="#50ef4444"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource MdCornerRadius}"
+            Padding="12,8"
+            Margin="0,0,0,12">
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="#ef4444" FontSize="12"/>
+        </Border>
 
         <!-- Connections Table -->
-        <shadui:Card Grid.Row="1" Padding="12">
-            <DataGrid
-                ItemsSource="{Binding Connections}"
-                AutoGenerateColumns="False"
-                IsReadOnly="True"
-                GridLinesVisibility="Horizontal"
-                BorderThickness="0"
-                Background="Transparent">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Session ID" Binding="{Binding Id}" Width="120"/>
-                    <DataGridTextColumn Header="Peer Address" Binding="{Binding PeerAddr}" Width="*"/>
-                    <DataGridTextColumn Header="Protocol" Binding="{Binding Proto}" Width="90"/>
-                    <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="100"/>
-                    <DataGridTextColumn Header="Raw Traffic" Binding="{Binding RawBytes}" Width="110"/>
-                    <DataGridTextColumn Header="Wire Traffic" Binding="{Binding WireBytes}" Width="110"/>
-                    <DataGridTemplateColumn Header="Action" Width="100">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate x:DataType="vm:ConnectionItem">
-                                <Button
-                                    Classes="Outline"
-                                    Command="{Binding ((vm:AdminConnectionsViewModel)DataContext).DisconnectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    CommandParameter="{Binding}"
-                                    Content="Disconnect"
-                                    Height="24"
-                                    FontSize="10"
-                                    Padding="6,0"
-                                    Foreground="#ef4444"/>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                </DataGrid.Columns>
-            </DataGrid>
+        <shadui:Card Grid.Row="2" Padding="12">
+            <Grid>
+                <DataGrid
+                    ItemsSource="{Binding Connections}"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    GridLinesVisibility="Horizontal"
+                    BorderThickness="0"
+                    Background="Transparent">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Session ID" Binding="{Binding Id}" Width="140"/>
+                        <DataGridTextColumn Header="Peer Address" Binding="{Binding PeerAddr}" Width="*"/>
+                        <DataGridTextColumn Header="Protocol" Binding="{Binding Proto}" Width="90"/>
+                        <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="100"/>
+                        <DataGridTextColumn Header="Raw Traffic" Binding="{Binding RawBytes}" Width="110"/>
+                        <DataGridTextColumn Header="Wire Traffic" Binding="{Binding WireBytes}" Width="110"/>
+                        <DataGridTemplateColumn Header="Action" Width="100">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:ConnectionItem">
+                                    <Button
+                                        Classes="Outline"
+                                        Command="{Binding ((vm:AdminConnectionsViewModel)DataContext).DisconnectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        Content="Disconnect"
+                                        Height="24"
+                                        FontSize="10"
+                                        Padding="6,0"
+                                        Foreground="#ef4444"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Empty State -->
+                <StackPanel
+                    IsVisible="{Binding Connections.Count, Converter={x:Static common:Converters.EqualsZero}}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="8"
+                    Margin="0,40">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Radio}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="No active client connections" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                </StackPanel>
+            </Grid>
         </shadui:Card>
     </Grid>
 </UserControl>

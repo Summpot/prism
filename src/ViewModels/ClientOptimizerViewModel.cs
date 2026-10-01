@@ -6,7 +6,7 @@ using Prism.Services;
 
 namespace Prism.ViewModels;
 
-public partial class ClientOptimizerViewModel : ViewModelBase
+public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
     private bool _isLoading;
@@ -32,6 +32,15 @@ public partial class ClientOptimizerViewModel : ViewModelBase
     public ClientOptimizerViewModel()
     {
         LoadConfig();
+    }
+
+    public void OnNavigatedTo()
+    {
+        LoadConfig();
+    }
+
+    public void OnNavigatedFrom()
+    {
     }
 
     private void LoadConfig()
@@ -94,10 +103,32 @@ public partial class ClientOptimizerViewModel : ViewModelBase
             ));
 
             SavedNotice = true;
+            _ = Task.Delay(2000).ContinueWith(_ =>
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => SavedNotice = false);
+            });
         }
         catch
         {
         }
+    }
+
+    private System.Threading.CancellationTokenSource? _saveCts;
+
+    private void DebouncedSaveConfig()
+    {
+        if (_isLoading) return;
+        _saveCts?.Cancel();
+        _saveCts = new System.Threading.CancellationTokenSource();
+        var token = _saveCts.Token;
+
+        Task.Delay(300, token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => SaveConfig());
+            }
+        }, TaskScheduler.Default);
     }
 
     [RelayCommand]
@@ -164,9 +195,9 @@ public partial class ClientOptimizerViewModel : ViewModelBase
         ApplyPreset("balanced");
     }
 
-    partial void OnOptimizerEnabledChanged(bool value) => SaveConfig();
-    partial void OnOptimizerZstdLevelChanged(int value) => SaveConfig();
-    partial void OnOptimizerAdaptiveFlushChanged(bool value) => SaveConfig();
-    partial void OnOptimizerFlushIntervalMsChanged(int value) => SaveConfig();
-    partial void OnOptimizerBufferThresholdChanged(int value) => SaveConfig();
+    partial void OnOptimizerEnabledChanged(bool value) => DebouncedSaveConfig();
+    partial void OnOptimizerZstdLevelChanged(int value) => DebouncedSaveConfig();
+    partial void OnOptimizerAdaptiveFlushChanged(bool value) => DebouncedSaveConfig();
+    partial void OnOptimizerFlushIntervalMsChanged(int value) => DebouncedSaveConfig();
+    partial void OnOptimizerBufferThresholdChanged(int value) => DebouncedSaveConfig();
 }

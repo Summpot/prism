@@ -18,7 +18,7 @@
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
                     <TextBlock Text="{Binding [nav_middlewares], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" FontSize="14"/>
-                    <TextBlock Text="Installed client middlewares" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}"/>
+                    <TextBlock Text="{Binding [client_middleware_description], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="11" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <ListBox
@@ -52,7 +52,7 @@
                                               Background="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"
                                               Foreground="White" Height="20" Padding="6,0" FontSize="10"/>
                             </StackPanel>
-                            <TextBlock Text="Configure parameters, multi-lane thresholds, and packet pacing" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            <TextBlock Text="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontSize="12" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
                         <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsMiddlewareEnabled, Mode=TwoWay}" VerticalAlignment="Center"/>
                     </Grid>
@@ -62,15 +62,16 @@
                     <!-- Empty state -->
                     <TextBlock
                         IsVisible="{Binding ConfigFields.Count, Converter={x:Static common:Converters.EqualsZero}}"
-                        Text="No configurable schema parameters for this middleware."
+                        Text="{Binding [client_not_connected_service], Source={x:Static i18n:LocalizationManager.Instance}, FallbackValue='No configurable schema parameters for this middleware.'}"
                         FontSize="12"
                         Foreground="{DynamicResource MutedForegroundColor}"/>
 
-                    <!-- Fields items -->
+                    <!-- Polymorphic Fields ItemsControl with DataTemplates -->
                     <ItemsControl ItemsSource="{Binding ConfigFields}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:MiddlewareFieldItem">
-                                <StackPanel Spacing="6" Margin="0,0,0,14">
+                        <ItemsControl.DataTemplates>
+                            <!-- Boolean field template -->
+                            <DataTemplate DataType="vm:BoolMiddlewareFieldViewModel">
+                                <StackPanel Spacing="4" Margin="0,0,0,14">
                                     <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock
                                         IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
@@ -78,16 +79,38 @@
                                         FontSize="11"
                                         Foreground="{DynamicResource MutedForegroundColor}"
                                         TextWrapping="Wrap"/>
-                                    
-                                    <!-- Polymorphic Editors -->
-                                    <Grid>
-                                        <ToggleSwitch IsVisible="{Binding IsBool}" IsChecked="{Binding BoolValue, Mode=TwoWay}"/>
-                                        <NumericUpDown IsVisible="{Binding IsNumber}" Value="{Binding NumberValue, Mode=TwoWay}" Height="32" FontSize="12"/>
-                                        <TextBox IsVisible="{Binding IsString}" Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12"/>
-                                    </Grid>
+                                    <ToggleSwitch IsChecked="{Binding Value, Mode=TwoWay}"/>
                                 </StackPanel>
                             </DataTemplate>
-                        </ItemsControl.ItemTemplate>
+
+                            <!-- Numeric field template -->
+                            <DataTemplate DataType="vm:NumberMiddlewareFieldViewModel">
+                                <StackPanel Spacing="4" Margin="0,0,0,14">
+                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock
+                                        IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                        Text="{Binding Description}"
+                                        FontSize="11"
+                                        Foreground="{DynamicResource MutedForegroundColor}"
+                                        TextWrapping="Wrap"/>
+                                    <NumericUpDown Value="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12"/>
+                                </StackPanel>
+                            </DataTemplate>
+
+                            <!-- String / generic field template -->
+                            <DataTemplate DataType="vm:StringMiddlewareFieldViewModel">
+                                <StackPanel Spacing="4" Margin="0,0,0,14">
+                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock
+                                        IsVisible="{Binding Description, Converter={x:Static common:Converters.NullOrEmptyToBoolean}}"
+                                        Text="{Binding Description}"
+                                        FontSize="11"
+                                        Foreground="{DynamicResource MutedForegroundColor}"
+                                        TextWrapping="Wrap"/>
+                                    <TextBox Text="{Binding Value, Mode=TwoWay}" Height="32" FontSize="12"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.DataTemplates>
                     </ItemsControl>
 
                     <!-- Actions -->
@@ -95,14 +118,14 @@
                         <Button
                             Classes="Primary"
                             Command="{Binding SaveConfigCommand}"
-                            Content="Save Configuration"
+                            Content="{Binding [middleware_apply], Source={x:Static i18n:LocalizationManager.Instance}}"
                             Height="32"
                             FontSize="12"
                             Padding="14,0"/>
                         <Button
                             Classes="Outline"
                             Command="{Binding ResetConfigCommand}"
-                            Content="Reset Defaults"
+                            Content="{Binding [middleware_reset_defaults], Source={x:Static i18n:LocalizationManager.Instance}}"
                             Height="32"
                             FontSize="12"
                             Padding="14,0"/>

@@ -12,9 +12,10 @@ using SkiaSharp;
 
 namespace Prism.ViewModels;
 
-public partial class ClientTrafficViewModel : ViewModelBase
+public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
+    private bool _isNavigatedTo;
 
     [ObservableProperty]
     private string _statsViewMode = "session";
@@ -97,8 +98,23 @@ public partial class ClientTrafficViewModel : ViewModelBase
         _client.ThroughputSampleAdded += OnThroughputSample;
     }
 
+    public void OnNavigatedTo()
+    {
+        _isNavigatedTo = true;
+        if (_client.CurrentStatus != null)
+        {
+            OnStatusUpdated(_client.CurrentStatus);
+        }
+    }
+
+    public void OnNavigatedFrom()
+    {
+        _isNavigatedTo = false;
+    }
+
     private void OnThroughputSample(ulong bps)
     {
+        if (!_isNavigatedTo) return;
         CurrentThroughputText = $"{Formatters.FormatBytes(bps)}/s";
         ChartValues.Add((double)bps);
         if (ChartValues.Count > 30)
@@ -109,6 +125,7 @@ public partial class ClientTrafficViewModel : ViewModelBase
 
     private void OnStatusUpdated(ClientStatusResponse status)
     {
+        if (!_isNavigatedTo) return;
         if (StatsViewMode == "session")
         {
             UptimeText = Formatters.FormatUptime(_client.UptimeSeconds);

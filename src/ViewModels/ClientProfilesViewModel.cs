@@ -86,7 +86,7 @@ public class EditableProfile : ObservableObject
     }
 }
 
-public partial class ClientProfilesViewModel : ViewModelBase
+public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 {
     private readonly NativeClientService _client = NativeClientService.Instance;
 
@@ -124,8 +124,18 @@ public partial class ClientProfilesViewModel : ViewModelBase
         LoadProfiles();
     }
 
+    public void OnNavigatedTo()
+    {
+        LoadProfiles();
+    }
+
+    public void OnNavigatedFrom()
+    {
+    }
+
     private void LoadProfiles()
     {
+        var prevSelectedId = SelectedProfile?.Id;
         Profiles.Clear();
         try
         {
@@ -151,7 +161,9 @@ public partial class ClientProfilesViewModel : ViewModelBase
                 });
             }
 
-            SelectedProfile = Profiles.FirstOrDefault(p => p.IsActive) ?? Profiles.FirstOrDefault();
+            SelectedProfile = (prevSelectedId != null ? Profiles.FirstOrDefault(p => p.Id == prevSelectedId) : null)
+                ?? Profiles.FirstOrDefault(p => p.IsActive)
+                ?? Profiles.FirstOrDefault();
         }
         catch (Exception ex)
         {
@@ -183,10 +195,10 @@ public partial class ClientProfilesViewModel : ViewModelBase
             Name = string.IsNullOrWhiteSpace(parsed.Name) ? parsed.ServerAddr : parsed.Name,
             ServerAddr = parsed.ServerAddr,
             Transport = parsed.Transport,
-            AuthToken = parsed.AuthToken,
+            AuthToken = parsed.AuthToken ?? "",
             ListenAddr = parsed.ListenAddr,
             FakeLanBroadcast = parsed.FakeLanBroadcast,
-            ManagementUrl = parsed.ManagementUrl
+            ManagementUrl = parsed.ManagementUrl ?? ""
         };
 
         Profiles.Add(newProf);

@@ -14,7 +14,6 @@ public class ParsedPrismLink
     public string AuthToken { get; set; } = "";
     public string ListenAddr { get; set; } = "127.0.0.1:25565";
     public bool FakeLanBroadcast { get; set; } = true;
-    public string? ManagementUrl { get; set; }
 }
 
 public static class PrismLinkService
@@ -84,8 +83,7 @@ public static class PrismLinkService
                         Transport = transMatch.Success ? NormalizeTransport(transMatch.Groups[1].Value) : "auto",
                         AuthToken = tokenMatch.Success ? tokenMatch.Groups[1].Value : "",
                         ListenAddr = listenMatch.Success ? listenMatch.Groups[1].Value : "127.0.0.1:25565",
-                        FakeLanBroadcast = !json.Contains(@"""fake_lan_broadcast"":false"),
-                        ManagementUrl = null
+                        FakeLanBroadcast = !json.Contains(@"""fake_lan_broadcast"":false")
                     };
                 }
             }
@@ -130,8 +128,6 @@ public static class PrismLinkService
             var fakeLanStr = query["fake_lan"];
             bool fakeLan = fakeLanStr != "0" && !string.Equals(fakeLanStr, "false", StringComparison.OrdinalIgnoreCase);
 
-            var mgmt = query["management_url"] ?? query["mgmt"];
-
             return new ParsedPrismLink
             {
                 Name = name,
@@ -139,8 +135,7 @@ public static class PrismLinkService
                 Transport = transport,
                 AuthToken = token,
                 ListenAddr = listen,
-                FakeLanBroadcast = fakeLan,
-                ManagementUrl = !string.IsNullOrWhiteSpace(mgmt) ? mgmt : null
+                FakeLanBroadcast = fakeLan
             };
         }
 
@@ -156,8 +151,7 @@ public static class PrismLinkService
                     ServerAddr = uri.Host,
                     Transport = "auto",
                     ListenAddr = "127.0.0.1:25565",
-                    FakeLanBroadcast = true,
-                    ManagementUrl = trimmed.TrimEnd('/')
+                    FakeLanBroadcast = true
                 };
             }
             catch
@@ -175,8 +169,7 @@ public static class PrismLinkService
                 ServerAddr = trimmed,
                 Transport = "auto",
                 ListenAddr = "127.0.0.1:25565",
-                FakeLanBroadcast = true,
-                ManagementUrl = null
+                FakeLanBroadcast = true
             };
         }
 

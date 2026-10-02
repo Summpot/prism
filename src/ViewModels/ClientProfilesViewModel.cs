@@ -51,25 +51,11 @@ public class EditableProfile : ObservableObject
         set => SetProperty(ref _fakeLanBroadcast, value);
     }
 
-    private bool _autoConnectPanel = false;
-    public bool AutoConnectPanel
-    {
-        get => _autoConnectPanel;
-        set => SetProperty(ref _autoConnectPanel, value);
-    }
-
     private bool _autoConnect = false;
     public bool AutoConnect
     {
         get => _autoConnect;
         set => SetProperty(ref _autoConnect, value);
-    }
-
-    private string _managementUrl = "";
-    public string ManagementUrl
-    {
-        get => _managementUrl;
-        set => SetProperty(ref _managementUrl, value);
     }
 
     private string _authToken = "";
@@ -96,9 +82,7 @@ public class EditableProfile : ObservableObject
             Transport = Transport,
             ListenAddr = ListenAddr,
             FakeLanBroadcast = FakeLanBroadcast,
-            AutoConnectPanel = AutoConnectPanel,
             AutoConnect = AutoConnect,
-            ManagementUrl = ManagementUrl,
             AuthToken = AuthToken,
             IsActive = IsActive
         };
@@ -112,9 +96,7 @@ public class EditableProfile : ObservableObject
         Transport = other.Transport;
         ListenAddr = other.ListenAddr;
         FakeLanBroadcast = other.FakeLanBroadcast;
-        AutoConnectPanel = other.AutoConnectPanel;
         AutoConnect = other.AutoConnect;
-        ManagementUrl = other.ManagementUrl;
         AuthToken = other.AuthToken;
         IsActive = other.IsActive;
     }
@@ -153,9 +135,6 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 
     [ObservableProperty]
     private string _editProfileTitle = "";
-
-    [ObservableProperty]
-    private string _autoConnectPanelHint = "";
 
     private bool _suppressSelectionChange;
     private EditableProfile? _previousProfile;
@@ -225,9 +204,6 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 
         string editTpl = I18nText.T("client_edit_profile", "编辑配置：{name}");
         EditProfileTitle = editTpl.Replace("{name}", DraftProfile?.Name ?? "");
-
-        string autoSyncTpl = I18nText.T("client_auto_connect_panel_hint", "自动同步管理面板与鉴权状态 ({url})");
-        AutoConnectPanelHint = autoSyncTpl.Replace("{url}", DraftProfile?.ManagementUrl ?? "");
     }
 
     [RelayCommand]
@@ -298,8 +274,6 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
                     ListenAddr = p.ListenAddr,
                     FakeLanBroadcast = p.FakeLanBroadcast,
                     AutoConnect = cfg.ActiveConfig.AutoConnect,
-                    AutoConnectPanel = cfg.ActiveConfig.AutoConnectPanel,
-                    ManagementUrl = cfg.ActiveConfig.ManagementUrl ?? "",
                     IsActive = p.Id == activeId
                 });
             }
@@ -341,8 +315,7 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
             Transport = parsed.Transport,
             AuthToken = parsed.AuthToken ?? "",
             ListenAddr = parsed.ListenAddr,
-            FakeLanBroadcast = parsed.FakeLanBroadcast,
-            ManagementUrl = parsed.ManagementUrl ?? ""
+            FakeLanBroadcast = parsed.FakeLanBroadcast
         };
 
         Profiles.Add(newProf);
@@ -479,9 +452,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
                     AuthToken: SelectedProfile.AuthToken,
                     ListenAddr: SelectedProfile.ListenAddr,
                     FakeLanBroadcast: SelectedProfile.FakeLanBroadcast,
-                    AutoConnectPanel: SelectedProfile.AutoConnectPanel,
+                    AutoConnectPanel: null,
                     AutoConnect: SelectedProfile.AutoConnect,
-                    ManagementUrl: string.IsNullOrWhiteSpace(SelectedProfile.ManagementUrl) ? null : SelectedProfile.ManagementUrl,
+                    ManagementUrl: null,
                     TokenId: null,
                     TokenType: null,
                     UserId: null,
@@ -602,9 +575,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
                 AuthToken: SelectedProfile.AuthToken,
                 ListenAddr: SelectedProfile.ListenAddr,
                 FakeLanBroadcast: SelectedProfile.FakeLanBroadcast,
-                AutoConnectPanel: SelectedProfile.AutoConnectPanel,
+                AutoConnectPanel: null,
                 AutoConnect: SelectedProfile.AutoConnect,
-                ManagementUrl: string.IsNullOrWhiteSpace(SelectedProfile.ManagementUrl) ? null : SelectedProfile.ManagementUrl,
+                ManagementUrl: null,
                 TokenId: null,
                 TokenType: null,
                 UserId: null,

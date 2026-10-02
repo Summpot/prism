@@ -34,16 +34,10 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     private bool _silentAutostart;
 
     [ObservableProperty]
-    private bool _autoConnectPanel;
-
-    [ObservableProperty]
     private bool _fakeLanBroadcast;
 
     [ObservableProperty]
     private string _deviceId = "";
-
-    [ObservableProperty]
-    private string _managementUrl = "";
 
     [ObservableProperty]
     private string _updateChannel = "stable";
@@ -116,10 +110,8 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             _isLoading = true;
             var cfg = _client.GetConfig();
             AutoConnect = cfg.ActiveConfig.AutoConnect;
-            AutoConnectPanel = cfg.ActiveConfig.AutoConnectPanel;
             FakeLanBroadcast = cfg.ActiveConfig.FakeLanBroadcast;
             DeviceId = !string.IsNullOrWhiteSpace(cfg.DeviceId) ? cfg.DeviceId : Guid.NewGuid().ToString("N")[..16];
-            ManagementUrl = cfg.ActiveConfig.ManagementUrl ?? "";
             UpdateChannel = string.IsNullOrWhiteSpace(cfg.ActiveConfig.UpdateChannel) ? "stable" : cfg.ActiveConfig.UpdateChannel;
             AutoCheckUpdate = cfg.ActiveConfig.AutoCheckUpdate;
             Autostart = DesktopService.IsAutostartEnabled() || cfg.ActiveConfig.Autostart;
@@ -149,9 +141,9 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
                 AuthToken: null,
                 ListenAddr: null,
                 FakeLanBroadcast: FakeLanBroadcast,
-                AutoConnectPanel: AutoConnectPanel,
+                AutoConnectPanel: null,
                 AutoConnect: AutoConnect,
-                ManagementUrl: string.IsNullOrWhiteSpace(ManagementUrl) ? null : ManagementUrl,
+                ManagementUrl: null,
                 TokenId: cfg.ActiveConfig.TokenId,
                 TokenType: null,
                 UserId: null,
@@ -216,7 +208,6 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     }
 
     partial void OnAutoConnectChanged(bool value) => SaveConfig();
-    partial void OnAutoConnectPanelChanged(bool value) => SaveConfig();
     partial void OnFakeLanBroadcastChanged(bool value) => SaveConfig();
     partial void OnUpdateChannelChanged(string value)
     {
@@ -224,7 +215,6 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
         OnPropertyChanged(nameof(VersionChannelText));
     }
     partial void OnAutoCheckUpdateChanged(bool value) => SaveConfig();
-    partial void OnManagementUrlChanged(string value) => SaveConfig();
 
     [ObservableProperty]
     private bool _isAdmin;
@@ -254,12 +244,6 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     public void GoToProfiles()
     {
         NavigationService.Instance.NavigateTo("client.profiles");
-    }
-
-    [RelayCommand]
-    public void GoToAdmin()
-    {
-        NavigationService.Instance.NavigateTo("admin.overview");
     }
 
     [RelayCommand]

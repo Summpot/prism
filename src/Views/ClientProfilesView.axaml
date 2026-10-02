@@ -234,21 +234,7 @@
                                 </Grid>
                             </Border>
 
-                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
-                                <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding [client_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
-                                        <TextBlock Text="{Binding AutoConnectPanelHint}" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                    </StackPanel>
-                                    <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding DraftProfile.AutoConnectPanel, Mode=TwoWay}"/>
-                                </Grid>
-                            </Border>
 
-                            <!-- Management URL -->
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                <TextBox Text="{Binding DraftProfile.ManagementUrl, Mode=TwoWay}" FontFamily="{DynamicResource MonoFont}"/>
-                            </StackPanel>
 
                             <!-- Footer Actions Bar -->
                             <Grid ColumnDefinitions="Auto, *, Auto" Margin="0,6,0,0">

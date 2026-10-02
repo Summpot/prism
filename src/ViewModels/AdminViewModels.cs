@@ -247,13 +247,6 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
 
     private string ResolveEndpoint()
     {
-        try
-        {
-            var cfg = _client.GetConfig();
-            var management = cfg.ActiveConfig.ManagementUrl;
-            if (!string.IsNullOrWhiteSpace(management)) return management;
-        }
-        catch { }
         return _client.CurrentStatus?.ServerAddr ?? "";
     }
 

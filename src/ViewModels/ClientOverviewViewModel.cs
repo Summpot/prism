@@ -301,11 +301,9 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 RemoteLinkInput = "";
             }
 
-            // In accordance with Tauri selectClientAuthView:
-            // Having a username in config does NOT mean session is live authenticated!
-            // Live authenticated requires active tunnel connected AND session verified.
+            bool hasToken = !string.IsNullOrWhiteSpace(cfg.ActiveConfig.AuthToken);
             SessionUsername = string.IsNullOrWhiteSpace(cfg.ActiveConfig.Username) ? "User" : cfg.ActiveConfig.Username;
-            IsSessionAuthenticated = false;
+            IsSessionAuthenticated = hasToken;
 
             _isSwitchingProfile = true;
             AvailableProfiles.Clear();
@@ -335,9 +333,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
     public void UpdateComputedProperties()
     {
-        bool liveAuth = IsConnected && IsSessionAuthenticated;
-        ShowLoggedInCard = liveAuth;
-        ShowConnectAndLoginHero = !liveAuth;
+        ShowLoggedInCard = IsSessionAuthenticated;
+        ShowConnectAndLoginHero = !IsSessionAuthenticated;
 
         ShowLoginMethods = !BypassLogin && !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated && (IsGithubAuthAvailable || IsConnected);
 
@@ -415,6 +412,10 @@ public partial class ClientOverviewViewModel : ViewModelBase
                     RemoteLinkInput = value.ServerAddr;
                 }
             }
+
+            bool hasToken = !string.IsNullOrWhiteSpace(value.AuthToken);
+            IsSessionAuthenticated = hasToken;
+            UpdateComputedProperties();
         }
         catch (Exception ex)
         {
@@ -530,7 +531,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             DesktopService.PendingOAuthState = state;
             string? targetUrl = null;
 
-            // 1. If connected, prefer in-band control RPC
+            // Request login URL via in-band control RPC
             if (IsConnected)
             {
                 try
@@ -542,16 +543,6 @@ public partial class ClientOverviewViewModel : ViewModelBase
                     }
                 }
                 catch { }
-            }
-
-            // 2. Fallback to Management URL if available
-            if (string.IsNullOrWhiteSpace(targetUrl))
-            {
-                string? baseUrl = ResolveManagementBaseUrl();
-                if (!string.IsNullOrWhiteSpace(baseUrl))
-                {
-                    targetUrl = $"{baseUrl}/auth/github/login?state={state}";
-                }
             }
 
             if (string.IsNullOrWhiteSpace(targetUrl))
@@ -572,20 +563,6 @@ public partial class ClientOverviewViewModel : ViewModelBase
         {
             ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
         }
-    }
-
-    private string? ResolveManagementBaseUrl()
-    {
-        try
-        {
-            var cfg = _client.GetConfig();
-            if (!string.IsNullOrWhiteSpace(cfg?.ActiveConfig?.ManagementUrl))
-            {
-                return cfg.ActiveConfig.ManagementUrl.Trim().TrimEnd('/');
-            }
-        }
-        catch { }
-        return null;
     }
 
     [RelayCommand]
@@ -638,7 +615,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             string? role = null;
             string? tokenId = null;
 
-            // 1. If connected, exchange via in-band control RPC
+            // Exchange via in-band control RPC
             if (IsConnected)
             {
                 try
@@ -655,44 +632,6 @@ public partial class ClientOverviewViewModel : ViewModelBase
                     }
                 }
                 catch { }
-            }
-
-            // 2. Fallback to HTTP if token is still empty and management url exists
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                string? baseUrl = ResolveManagementBaseUrl();
-                if (!string.IsNullOrWhiteSpace(baseUrl))
-                {
-                    string exchangeUrl = $"{baseUrl}/auth/github/exchange";
-                    var payload = new OAuthExchangeRequest { Code = code, State = state };
-                    var json = System.Text.Json.JsonSerializer.Serialize(payload, AdminJsonContext.Default.OAuthExchangeRequest);
-                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
-                    var resp = await _httpClient.PostAsync(exchangeUrl, content);
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        var body = await resp.Content.ReadAsStringAsync();
-                        using var doc = System.Text.Json.JsonDocument.Parse(body);
-                        token = doc.RootElement.GetProperty("token").GetString() ?? "";
-                        if (doc.RootElement.TryGetProperty("token_id", out var tid)) tokenId = tid.GetString();
-                        if (doc.RootElement.TryGetProperty("user", out var userElem))
-                        {
-                            if (userElem.TryGetProperty("username", out var u) || userElem.TryGetProperty("login", out u))
-                            {
-                                username = u.GetString() ?? username;
-                            }
-                            if (userElem.TryGetProperty("avatar_url", out var av))
-                            {
-                                avatarUrl = av.GetString();
-                            }
-                            if (userElem.TryGetProperty("role", out var r))
-                            {
-                                role = r.GetString();
-                                isAdmin = string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
-                            }
-                        }
-                    }
-                }
             }
 
             if (string.IsNullOrWhiteSpace(token))
@@ -979,7 +918,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 FakeLanBroadcast: parsed?.FakeLanBroadcast,
                 AutoConnectPanel: null,
                 AutoConnect: null,
-                ManagementUrl: parsed?.ManagementUrl,
+                ManagementUrl: null,
                 TokenId: null,
                 TokenType: null,
                 UserId: null,
@@ -999,6 +938,12 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 ActiveProfileId: null,
                 ActiveConfig: patch
             ));
+
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                IsSessionAuthenticated = true;
+                UpdateComputedProperties();
+            }
 
             await _client.StartAsync(
                 serverAddr: serverAddr,

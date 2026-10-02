@@ -132,44 +132,12 @@
                                 <Separator/>
                                 <Grid ColumnDefinitions="*,Auto">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding [client_auto_connect_panel], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                        <TextBlock Classes="Caption Muted" Text="{Binding [client_auto_connect_panel_hint], Source={x:Static i18n:LocalizationManager.Instance}}" TextWrapping="Wrap"/>
-                                    </StackPanel>
-                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoConnectPanel, Mode=TwoWay}" VerticalAlignment="Center"/>
-                                </Grid>
-                                <Separator/>
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <StackPanel Spacing="4" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding [client_lan_broadcast], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                                         <TextBlock Classes="Caption Muted" Text="{Binding [client_lan_broadcast_hint], Source={x:Static i18n:LocalizationManager.Instance}}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding FakeLanBroadcast, Mode=TwoWay}" VerticalAlignment="Center"/>
                                 </Grid>
                             </StackPanel>
-                        </shadui:Card>
-
-                        <shadui:Card>
-                            <shadui:Card.Header>
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <StackPanel Spacing="4">
-                                        <shadui:CardTitle Content="{Binding [settings_management_url], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                        <shadui:CardDescription Content="{Binding [settings_management_url_desc], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                    </StackPanel>
-                                    <shadui:Badge Grid.Column="1" Classes="Outline" VerticalAlignment="Center">
-                                        <Panel>
-                                            <TextBlock IsVisible="{Binding IsAdmin}" Foreground="{DynamicResource SuccessColor}"
-                                                       Text="{Binding [settings_admin_connected], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                            <TextBlock IsVisible="{Binding !IsAdmin}"
-                                                       Text="{Binding [settings_admin_disconnected], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                        </Panel>
-                                    </shadui:Badge>
-                                </Grid>
-                            </shadui:Card.Header>
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                <TextBox Grid.Column="0" Text="{Binding ManagementUrl, Mode=TwoWay}" FontFamily="{DynamicResource MonoFont}"/>
-                                <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToAdminCommand}"
-                                        Content="{Binding [nav_admin], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                            </Grid>
                         </shadui:Card>
 
                         <shadui:Card>

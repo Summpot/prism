@@ -10,6 +10,8 @@
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:common="clr-namespace:Prism.Common"
     Title="Prism"
+    TitleFontWeight="SemiBold"
+    TitleFontSize="13"
     Width="1100"
     Height="740"
     MinWidth="880"
@@ -18,6 +20,22 @@
     WindowStartupLocation="CenterScreen"
     mc:Ignorable="d"
     x:DataType="vm:MainWindowViewModel">
+
+    <shadui:Window.LogoContent>
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="8,0,0,0" VerticalAlignment="Center">
+            <ToggleButton
+                Theme="{DynamicResource SideTogglerTheme}"
+                IsChecked="{Binding IsSidebarExpanded, Mode=TwoWay}"
+                Width="30"
+                Height="30"
+                Padding="0"
+                CornerRadius="{DynamicResource MdCornerRadius}"
+                VerticalAlignment="Center">
+                <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="16" Height="16"/>
+            </ToggleButton>
+            <Image Source="avares://Prism/Assets/logo192.png" Width="18" Height="18" VerticalAlignment="Center" IsHitTestVisible="False"/>
+        </StackPanel>
+    </shadui:Window.LogoContent>
 
     <shadui:Window.Hosts>
         <shadui:DialogHost Manager="{Binding DialogManager}" x:Name="PART_DialogHost" />
@@ -109,31 +127,6 @@
             Expanded="{Binding IsSidebarExpanded, Mode=TwoWay}"
             Width="240"
             MinWidth="60">
-            <shadui:Sidebar.Header>
-                <Grid ColumnDefinitions="Auto, *" Margin="4,0">
-                    <ToggleButton
-                        Theme="{DynamicResource SideTogglerTheme}"
-                        IsChecked="{Binding IsSidebarExpanded, Mode=TwoWay}"
-                        Width="32"
-                        Height="32"
-                        Padding="8"
-                        CornerRadius="{DynamicResource LgCornerRadius}"
-                        HorizontalAlignment="Left">
-                        <common:LucideIcon Data="{x:Static common:AppIcons.PanelLeft}" Width="16" Height="16"/>
-                    </ToggleButton>
-                    <StackPanel
-                        Grid.Column="1"
-                        Orientation="Horizontal"
-                        Spacing="8"
-                        Margin="8,0,0,0"
-                        VerticalAlignment="Center"
-                        IsVisible="{Binding IsSidebarExpanded}">
-                        <Image Source="avares://Prism/Assets/logo192.png" Width="24" Height="24"/>
-                        <TextBlock Text="Prism" Classes="Large" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Grid>
-            </shadui:Sidebar.Header>
-
             <StackPanel Spacing="3">
                 <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_client], Source={x:Static i18n:LocalizationManager.Instance}}" />
                 

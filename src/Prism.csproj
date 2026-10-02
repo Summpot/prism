@@ -35,9 +35,9 @@
       Include="ws2_32.lib userenv.lib bcrypt.lib ntdll.lib crypt32.lib secur32.lib ncrypt.lib iphlpapi.lib" />
   </ItemGroup>
 
-  <!-- NativeAOT macOS System Dependencies for Rust -->
+  <!-- NativeAOT macOS System Dependencies for Rust & Skia -->
   <ItemGroup Condition="'$(PublishAot)' == 'true' and '$([MSBuild]::IsOSPlatform(&quot;OSX&quot;))'">
-    <CustomLinkerArg Include="-framework Security -framework CoreFoundation -framework SystemConfiguration -lc++" />
+    <CustomLinkerArg Include="-framework Security -framework CoreFoundation -framework SystemConfiguration -framework CoreServices -lc++" />
   </ItemGroup>
 
   <!-- NativeAOT Linux System Dependencies for Rust -->

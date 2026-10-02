@@ -75,6 +75,25 @@ public partial class ClientLogsView : UserControl
         }
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _logsList ??= this.FindControl<ListBox>("LogsList");
+        if (_logsList != null)
+        {
+            _logsList.RemoveHandler(ScrollViewer.ScrollChangedEvent, OnLogsScrollChanged);
+            _logsList.AddHandler(ScrollViewer.ScrollChangedEvent, OnLogsScrollChanged, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+        }
+        if (_currentVm == null && DataContext is ClientLogsViewModel vm)
+        {
+            _currentVm = vm;
+            _currentVm.FilteredLogs.CollectionChanged -= OnFilteredLogsChanged;
+            _currentVm.FilteredLogs.CollectionChanged += OnFilteredLogsChanged;
+            _currentVm.ScrollToBottomRequested -= OnScrollToBottomRequested;
+            _currentVm.ScrollToBottomRequested += OnScrollToBottomRequested;
+        }
+    }
+
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);

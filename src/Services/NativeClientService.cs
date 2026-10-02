@@ -194,6 +194,15 @@ public class NativeClientService
         return await PrismNativeMethods.ClientLogsAsync(limit);
     }
 
+    public void AddLog(string level, string target, string message)
+    {
+        try
+        {
+            PrismNativeMethods.ClientAddLog(level, target, message);
+        }
+        catch { }
+    }
+
     public async Task ClearLogsAsync()
     {
         await PrismNativeMethods.ClientClearLogsAsync();

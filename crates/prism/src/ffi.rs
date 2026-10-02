@@ -324,6 +324,8 @@ impl PrismClientSession {
     #[uniffi::constructor]
     pub fn new(workdir: Option<String>) -> Result<Arc<Self>, PrismFfiError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
+        crate::prism::logging::init_desktop_or_test_subscriber();
+        tracing::info!("prism: starting desktop GUI mode");
 
         let workdir_path = if let Some(w) = workdir {
             PathBuf::from(w)
@@ -333,6 +335,7 @@ impl PrismClientSession {
         let _ = std::fs::create_dir_all(&workdir_path);
         let _ = std::fs::create_dir_all(workdir_path.join("optimizer-dicts"));
         crate::prism::tunnel::optimizer::set_dictionary_dir(workdir_path.join("optimizer-dicts"));
+        tracing::info!(workdir = %workdir_path.display(), "prism: desktop client session initialized");
 
         let storage_path = workdir_path.join("prism.db");
         let storage = match crate::prism::storage::StorageEngine::open(&storage_path) {
@@ -674,6 +677,16 @@ impl PrismClientSession {
 
     pub async fn client_clear_logs(&self) -> Result<(), PrismFfiError> {
         crate::prism::admin::do_client_clear_logs(Some(&self.client)).await;
+        Ok(())
+    }
+
+    pub fn client_add_log(
+        &self,
+        level: String,
+        target: String,
+        message: String,
+    ) -> Result<(), PrismFfiError> {
+        crate::prism::logging::append_log_entry(level, target, message);
         Ok(())
     }
 
@@ -1117,6 +1130,16 @@ pub async fn client_clear_logs() -> Result<(), PrismFfiError> {
 }
 
 #[uniffi::export]
+pub fn client_add_log(
+    level: String,
+    target: String,
+    message: String,
+) -> Result<(), PrismFfiError> {
+    let session = get_or_init_session()?;
+    session.client_add_log(level, target, message)
+}
+
+#[uniffi::export]
 pub fn client_list_middlewares() -> Result<Vec<MiddlewareItem>, PrismFfiError> {
     let session = get_or_init_session()?;
     session.client_list_middlewares()
@@ -1224,6 +1247,22 @@ mod tests {
             .client_get_config()
             .expect("client_get_config should succeed");
         assert!(!config.device_id.is_empty() || config.device_id.is_empty());
+
+        let logs = session
+            .client_logs(Some(50))
+            .await
+            .expect("client_logs should succeed");
+        assert!(!logs.is_empty(), "client_logs should contain initialization logs");
+
+        session
+            .client_add_log("INFO".to_string(), "test::target".to_string(), "custom log message".to_string())
+            .expect("client_add_log should succeed");
+
+        let updated_logs = session
+            .client_logs(Some(50))
+            .await
+            .expect("client_logs after add");
+        assert!(updated_logs.iter().any(|l| l.message == "custom log message"));
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);

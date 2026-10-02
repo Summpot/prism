@@ -108,6 +108,7 @@ public partial class App : Application
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[WARN] Auto-connect failed: {ex.Message}");
+                    client.AddLog("WARN", "client::startup", $"Auto-connect failed: {ex.Message}");
                     Dispatcher.UIThread.Post(() =>
                         AppServices.ShowError(ex.Message, I18nText.T("client_connection_failed", "Connection failed")));
                 }
@@ -122,6 +123,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Console.WriteLine($"[WARN] Startup lifecycle error: {ex.Message}");
+            NativeClientService.Instance.AddLog("WARN", "client::startup", $"Startup lifecycle error: {ex.Message}");
         }
     }
 

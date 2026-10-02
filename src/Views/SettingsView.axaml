@@ -139,18 +139,6 @@
                                 </Grid>
                             </StackPanel>
                         </shadui:Card>
-
-                        <shadui:Card>
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                                <StackPanel Spacing="4" VerticalAlignment="Center">
-                                    <TextBlock Classes="Large" Text="{Binding [settings_profiles_link_title], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                    <TextBlock Classes="Caption Muted" TextWrapping="Wrap"
-                                               Text="{Binding [settings_profiles_link_desc], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                                </StackPanel>
-                                <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToProfilesCommand}" VerticalAlignment="Center"
-                                        Content="{Binding [settings_profiles_link_btn], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                            </Grid>
-                        </shadui:Card>
                     </StackPanel>
                 </TabItem>
 

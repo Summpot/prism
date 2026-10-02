@@ -55,6 +55,11 @@
         <Style Selector="ListBox.LogList ListBoxItem:selected">
             <Setter Property="Background" Value="{DynamicResource GhostHoverColor}"/>
         </Style>
+        <!-- Library ToggleSwitch has RenderTransform scaling that causes clipping at container edges. -->
+        <Style Selector="ToggleSwitch">
+            <Setter Property="RenderTransform" Value="{x:Null}"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+        </Style>
     </Application.Styles>
     <TrayIcon.Icons>
         <TrayIcons />

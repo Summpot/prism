@@ -202,12 +202,6 @@ public partial class ClientOptimizerViewModel : ViewModelBase, INavigationAware
     }
 
     [RelayCommand]
-    public void GoToMiddleware()
-    {
-        NavigationService.Instance.NavigateTo("client.middleware");
-    }
-
-    [RelayCommand]
     public void SetLevel(object? param)
     {
         if (param is int lvl)

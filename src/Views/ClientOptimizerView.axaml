@@ -205,21 +205,6 @@
                     </Grid>
                 </StackPanel>
             </shadui:Card>
-
-            <!-- Card 4: Protocol Middleware Multi-Lane Integration -->
-            <shadui:Card>
-                <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding [optimizer_middleware_lanes_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
-                        <TextBlock Text="{Binding [optimizer_middleware_lanes_desc], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
-                    </StackPanel>
-                    <Button Grid.Column="1" Classes="Outline" Command="{Binding GoToMiddlewareCommand}" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding [optimizer_go_to_middleware], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                    </Button>
-                </Grid>
-            </shadui:Card>
-
         </StackPanel>
     </ScrollViewer>
 </UserControl>

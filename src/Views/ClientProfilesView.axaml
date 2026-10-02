@@ -88,10 +88,11 @@
                                     <Setter Property="CornerRadius" Value="6"/>
                                     <Setter Property="Background" Value="Transparent"/>
                                 </Style>
-                                <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-                                    <Setter Property="Background" Value="{DynamicResource GhostColor}"/>
-                                    <Setter Property="BorderBrush" Value="{DynamicResource PrimaryColor}"/>
-                                    <Setter Property="BorderThickness" Value="1"/>
+                                <Style Selector="ListBoxItem /template/ PathIcon#CheckSelected">
+                                    <Setter Property="IsVisible" Value="False"/>
+                                </Style>
+                                <Style Selector="ListBoxItem:selected /template/ PathIcon#CheckSelected">
+                                    <Setter Property="IsVisible" Value="False"/>
                                 </Style>
                             </ListBox.Styles>
                             <ListBox.ItemTemplate>

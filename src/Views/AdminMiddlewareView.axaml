@@ -35,15 +35,28 @@
                 <ListBox
                     ItemsSource="{Binding Middlewares}"
                     SelectedItem="{Binding SelectedMiddleware, Mode=TwoWay}"
-                    Background="Transparent">
+                    Background="Transparent"
+                    BorderThickness="0">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="8,6"/>
+                            <Setter Property="Margin" Value="0,2"/>
+                            <Setter Property="CornerRadius" Value="6"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                        </Style>
+                        <Style Selector="ListBoxItem /template/ PathIcon#CheckSelected">
+                            <Setter Property="IsVisible" Value="False"/>
+                        </Style>
+                        <Style Selector="ListBoxItem:selected /template/ PathIcon#CheckSelected">
+                            <Setter Property="IsVisible" Value="False"/>
+                        </Style>
+                    </ListBox.Styles>
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="services:AdminMiddlewareItem">
-                            <Border Padding="8,6" CornerRadius="6">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding EffectiveConfig.Count, Converter={x:Static common:Converters.SettingsCountLabel}}" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                </StackPanel>
-                            </Border>
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding EffectiveConfig.Count, Converter={x:Static common:Converters.SettingsCountLabel}}" Foreground="{DynamicResource MutedForegroundColor}"/>
+                            </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>

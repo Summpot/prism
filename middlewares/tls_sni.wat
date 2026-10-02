@@ -14,10 +14,6 @@
 ;;         Action 1 (FRAME_DEFER): sliced TLS record frame, Value = total record bytes
 
 (component
-  (type $Config (record
-    (field "dummy" u32)
-  ))
-  (export "config" (type $Config))
 
   (core module $main
     (memory (export "memory") 4)

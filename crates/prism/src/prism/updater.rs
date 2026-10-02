@@ -317,6 +317,21 @@ pub async fn download_and_install_update(
                     tracing::info!(path = ?exe_path, "spawning extracted NSIS installer helper");
                     spawn_windows_installer_and_restart(&exe_path)?;
                 } else {
+                    if let Ok(current_exe) = std::env::current_exe() {
+                        if let Some(target_dir) = current_exe.parent() {
+                            if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
+                                for entry in entries.flatten() {
+                                    let p = entry.path();
+                                    if p != exe_path && p.is_file() {
+                                        if let Some(fname) = p.file_name() {
+                                            let dest = target_dir.join(fname);
+                                            let _ = std::fs::copy(&p, &dest);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     self_replace::self_replace(&exe_path)?;
                     restart_app()?;
                 }
@@ -524,7 +539,6 @@ fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyh
 
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const DETACHED_PROCESS: u32 = 0x00000008;
 
     std::process::Command::new("powershell")
         .args([
@@ -535,7 +549,7 @@ fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyh
             "-Command",
             &ps_script,
         ])
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
 
     std::process::exit(0);

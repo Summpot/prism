@@ -232,9 +232,14 @@ jobs:
             Write-Warning "WiX Toolset not found; skipping MSI build"
           }
 
-          # 3. Updater Zip archive (contains NSIS installer for full compatibility with updater)
+          # 3. Updater Zip archive (contains standalone desktop binary for updater self_replace compatibility)
           $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
-          Compress-Archive -Path $nsisOut -DestinationPath $zipOut -CompressionLevel NoCompression -Force
+          $filesToZip = @($binPath)
+          $angleDll = Join-Path $binDir "av_libglesv2.dll"
+          if (Test-Path $angleDll) {
+            $filesToZip += $angleDll
+          }
+          Compress-Archive -Path $filesToZip -DestinationPath $zipOut -CompressionLevel NoCompression -Force
 
           # 4. Sign updater artifacts with Tauri CLI signer
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {

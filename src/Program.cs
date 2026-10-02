@@ -18,9 +18,44 @@ internal sealed class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Handle restart handover: wait for previous instance to exit if PRISM_RESTART_PID is present
+        if (int.TryParse(Environment.GetEnvironmentVariable("PRISM_RESTART_PID"), out int restartPid))
+        {
+            try
+            {
+                using var prevProc = System.Diagnostics.Process.GetProcessById(restartPid);
+                prevProc.WaitForExit(5000);
+            }
+            catch
+            {
+                // Process already terminated
+            }
+        }
+
         // A named mutex and a named pipe are the single-instance path on Windows, Linux, and macOS.
-        using var mutex = new Mutex(true, MutexName, out bool isFirstInstance);
-        if (!isFirstInstance)
+        Mutex? mutex = null;
+        bool isFirstInstance = false;
+        for (int i = 0; i < 10; i++)
+        {
+            try
+            {
+                mutex = new Mutex(true, MutexName, out isFirstInstance);
+                if (isFirstInstance)
+                {
+                    break;
+                }
+                mutex.Dispose();
+                mutex = null;
+            }
+            catch
+            {
+                mutex?.Dispose();
+                mutex = null;
+            }
+            Thread.Sleep(100);
+        }
+
+        if (!isFirstInstance || mutex == null)
         {
             // Another instance is already running; forward args and exit immediately
             try
@@ -39,23 +74,26 @@ internal sealed class Program
             return;
         }
 
-        using var cts = new CancellationTokenSource();
-        _ = Task.Run(() => RunIpcServerAsync(cts.Token));
+        using (mutex)
+        {
+            using var cts = new CancellationTokenSource();
+            _ = Task.Run(() => RunIpcServerAsync(cts.Token));
 
-        DesktopService.RegisterPrismProtocol();
+            DesktopService.RegisterPrismProtocol();
 
-        try
-        {
-            BuildAvaloniaApp()
-                .StartWithClassicDesktopLifetime(args);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[FATAL] Unhandled application exception: {ex}");
-        }
-        finally
-        {
-            cts.Cancel();
+            try
+            {
+                BuildAvaloniaApp()
+                    .StartWithClassicDesktopLifetime(args);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FATAL] Unhandled application exception: {ex}");
+            }
+            finally
+            {
+                cts.Cancel();
+            }
         }
     }
 

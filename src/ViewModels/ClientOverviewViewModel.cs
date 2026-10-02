@@ -190,15 +190,20 @@ public partial class ClientOverviewViewModel : ViewModelBase
         OnPropertyChanged(nameof(TunnelButtonText));
     }
 
-    public string TunnelButtonText => IsRunning
-        ? (I18nText.T("client_disconnect_tunnel", "断开隧道"))
-        : (I18nText.T("client_connect", "连接"));
-
     [ObservableProperty]
     private bool _isConnected;
 
     [ObservableProperty]
     private bool _isConnecting;
+
+    partial void OnIsConnectingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(TunnelButtonText));
+    }
+
+    public string TunnelButtonText => IsConnecting
+        ? (I18nText.T("client_connecting", "正在连接…"))
+        : (I18nText.T("client_connect", "连接"));
 
     [ObservableProperty]
     private string _profileName = "Default";
@@ -890,16 +895,15 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [RelayCommand]
     public async Task ConnectFromLinkAsync()
     {
-        if (IsRunning)
-        {
-            await ToggleTunnelAsync();
-            return;
-        }
         if (string.IsNullOrWhiteSpace(RemoteLinkInput)) return;
 
         try
         {
             ErrorMessage = null;
+            if (IsRunning)
+            {
+                await _client.StopAsync();
+            }
             string raw = RemoteLinkInput.Contains("://") ? RemoteLinkInput : $"{SelectedProtocol}{RemoteLinkInput}";
             
             var parsed = PrismLinkService.Parse(raw);

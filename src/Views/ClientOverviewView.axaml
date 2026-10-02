@@ -63,16 +63,6 @@
             </shadui:Card>
 
             <shadui:Card IsVisible="{Binding ShowConnectAndLoginHero}">
-                <shadui:Card.Header>
-                    <Grid ColumnDefinitions="*, Auto" ColumnSpacing="12">
-                        <shadui:CardTitle Grid.Column="0" Content="{Binding [client_connect_and_login], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                        <TextBlock
-                            Grid.Column="1"
-                            Classes="Caption Muted"
-                            Text="{Binding [client_anonymous_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
-                            VerticalAlignment="Center"/>
-                    </Grid>
-                </shadui:Card.Header>
                 <StackPanel Spacing="16">
                     <Grid ColumnDefinitions="Auto, *, Auto" ColumnSpacing="8">
                         <ComboBox
@@ -114,7 +104,7 @@
                             Command="{Binding ConnectFromLinkCommand}"
                             VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <common:LucideIcon Data="{x:Static common:AppIcons.Power}" Width="16" Height="16"/>
+                                <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding TunnelButtonText}"/>
                             </StackPanel>
                         </Button>

@@ -801,6 +801,11 @@ impl PrismClientSession {
                 .map(|c| c.update_channel)
                 .unwrap_or_else(|| "release".to_string())
         });
+        if let Some(ref storage) = self.storage {
+            let mut patch = crate::prism::storage::ClientConfigPatch::default();
+            patch.update_channel = Some(resolved_channel.clone());
+            let _ = storage.apply_config_patch(None, &patch);
+        }
         let client = updater_http_client()?;
         let (_, update) = crate::prism::updater::check_update(
             &client,

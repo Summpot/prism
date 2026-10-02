@@ -40,7 +40,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     private string _deviceId = "";
 
     [ObservableProperty]
-    private string _updateChannel = "stable";
+    private string _updateChannel = "release";
 
     [ObservableProperty]
     private bool _autoCheckUpdate = true;
@@ -67,7 +67,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     ];
 
     public static readonly string[] AvailableThemes = ["Default", "Light", "Dark"];
-    public static readonly string[] AvailableUpdateChannels = ["stable", "beta", "alpha", "dev"];
+    public static readonly string[] AvailableUpdateChannels = ["release", "dev"];
 
     public string AppVersion
     {
@@ -112,7 +112,7 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
             AutoConnect = cfg.ActiveConfig.AutoConnect;
             FakeLanBroadcast = cfg.ActiveConfig.FakeLanBroadcast;
             DeviceId = !string.IsNullOrWhiteSpace(cfg.DeviceId) ? cfg.DeviceId : Guid.NewGuid().ToString("N")[..16];
-            UpdateChannel = string.IsNullOrWhiteSpace(cfg.ActiveConfig.UpdateChannel) ? "stable" : cfg.ActiveConfig.UpdateChannel;
+            UpdateChannel = string.Equals(cfg.ActiveConfig.UpdateChannel, "dev", StringComparison.OrdinalIgnoreCase) ? "dev" : "release";
             AutoCheckUpdate = cfg.ActiveConfig.AutoCheckUpdate;
             Autostart = DesktopService.IsAutostartEnabled() || cfg.ActiveConfig.Autostart;
             SilentAutostart = cfg.ActiveConfig.SilentAutostart;

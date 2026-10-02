@@ -251,6 +251,13 @@ public static class Converters
             "disabled" => Prism.I18n.LocalizationManager.Instance["status_disabled"] ?? "DISABLED",
             _ => r?.ToUpperInvariant() ?? ""
         });
+
+    public static readonly IValueConverter UpdateChannelLabel =
+        new FuncValueConverter<string?, string>(ch => ch?.ToLowerInvariant() switch
+        {
+            "dev" => Prism.I18n.LocalizationManager.Instance["client_update_channel_dev"] ?? "Dev (Preview)",
+            _ => Prism.I18n.LocalizationManager.Instance["client_update_channel_release"] ?? "Release (Stable)"
+        });
 }
 
 public class LocaleOption

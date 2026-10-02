@@ -182,9 +182,15 @@
                                         <TextBlock Classes="Caption Muted" TextWrapping="Wrap"
                                                    Text="{Binding [settings_update_channel_desc], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                                     </StackPanel>
-                                    <ComboBox Grid.Column="1" MinWidth="140"
+                                    <ComboBox Grid.Column="1" MinWidth="180"
                                               ItemsSource="{x:Static vm:SettingsViewModel.AvailableUpdateChannels}"
-                                              SelectedItem="{Binding UpdateChannel, Mode=TwoWay}"/>
+                                              SelectedItem="{Binding UpdateChannel, Mode=TwoWay}">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Converter={x:Static common:Converters.UpdateChannelLabel}}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                 </Grid>
                                 <Separator/>
                                 <StackPanel Orientation="Horizontal" Spacing="8">

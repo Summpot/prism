@@ -20,11 +20,12 @@
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="16"
                   IsVisible="{Binding IsReady}">
         <StackPanel Spacing="12" MaxWidth="{DynamicResource PageMaxWidth}" HorizontalAlignment="Left">
-            <controls:PageHeader
-                Title="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}"
-                Description="{Binding [dashboard_description], Source={x:Static i18n:LocalizationManager.Instance}}"
-                Icon="{x:Static common:AppIcons.Activity}">
+            <Grid ColumnDefinitions="*, Auto">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding [nav_overview], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}">
                         <TextBlock Text="{Binding AutoRefreshText}"/>
                     </Button>
@@ -36,7 +37,7 @@
                         </StackPanel>
                     </Button>
                 </StackPanel>
-            </controls:PageHeader>
+            </Grid>
 
             <controls:ErrorBanner Message="{Binding ErrorMessage}" RetryCommand="{Binding LoadDataCommand}"/>
 

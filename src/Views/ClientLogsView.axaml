@@ -14,18 +14,12 @@
     mc:Ignorable="d">
 
     <Grid RowDefinitions="Auto, *" Margin="{DynamicResource PageMargin}">
-        <controls:PageHeader
-            Grid.Row="0"
-            Title="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}"
-            Description="{Binding [client_logs_description], Source={x:Static i18n:LocalizationManager.Instance}}"
-            Icon="{x:Static common:AppIcons.Terminal}"
-            Margin="0,0,0,12">
-            <controls:PageHeader.Badge>
-                <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding StatusCountText}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
-                </Border>
-            </controls:PageHeader.Badge>
-            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <!-- Level Filter Group (Segmented) -->
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <ToggleButton Classes="Segment"
@@ -70,7 +64,7 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </controls:PageHeader>
+        </Grid>
 
         <!-- Terminal Viewport Card -->
         <Border Grid.Row="1"

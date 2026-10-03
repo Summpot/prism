@@ -31,9 +31,6 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     private string _scrollButtonText = "";
 
     [ObservableProperty]
-    private string _statusCountText = "0 / 0";
-
-    [ObservableProperty]
     private bool _hasLogs;
 
     [ObservableProperty]
@@ -181,7 +178,6 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         HasLogs = FilteredLogs.Count > 0;
         IsEmpty = !HasLogs;
         ShowScrollToBottom = !IsAtBottom && HasLogs;
-        StatusCountText = $"{FilteredLogs.Count} / {logs.Count}";
     }
 
     partial void OnFilterLevelChanged(string value)

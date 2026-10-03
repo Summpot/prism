@@ -17,16 +17,13 @@
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
     <Grid RowDefinitions="Auto, Auto, *" Margin="{DynamicResource PageMargin}" IsVisible="{Binding IsReady}">
-        <controls:PageHeader
-            Grid.Row="0"
-            Title="{Binding [nav_connector_traffic], Source={x:Static i18n:LocalizationManager.Instance}}"
-            Description="{Binding [admin_connectors_subtitle], Source={x:Static i18n:LocalizationManager.Instance}}"
-            Icon="{x:Static common:AppIcons.Plug}"
-            Margin="0,0,0,16">
-            <controls:PageHeader.Badge>
-                <shadui:Badge Content="{Binding Connectors.Count}" VerticalAlignment="Center"/>
-            </controls:PageHeader.Badge>
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <common:LucideIcon Data="{x:Static common:AppIcons.Plug}" Width="16" Height="16" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding [nav_connector_traffic], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
+                <shadui:Badge Content="{Binding Connectors.Count}" VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [admin_connectors_filter], Source={x:Static i18n:LocalizationManager.Instance}}"
@@ -42,7 +39,7 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </controls:PageHeader>
+        </Grid>
 
         <controls:ErrorBanner
             Grid.Row="1"

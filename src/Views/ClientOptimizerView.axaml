@@ -8,25 +8,23 @@
     xmlns:i18n="clr-namespace:Prism.I18n"
     xmlns:vm="clr-namespace:Prism.ViewModels"
     xmlns:common="clr-namespace:Prism.Common"
-    xmlns:controls="clr-namespace:Prism.Views.Controls"
     x:DataType="vm:ClientOptimizerViewModel"
     mc:Ignorable="d">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageMargin}">
 
-            <controls:PageHeader
-                Title="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}"
-                Description="{Binding [optimizer_description], Source={x:Static i18n:LocalizationManager.Instance}}"
-                Icon="{x:Static common:AppIcons.Zap}">
-                <controls:PageHeader.Badge>
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
                     <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
                         <TextBlock Text="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
                                    FontWeight="SemiBold"
                                    Foreground="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
                     </Border>
-                </controls:PageHeader.Badge>
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Button Classes="Outline" Command="{Binding GoToTrafficCommand}">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16" Foreground="{DynamicResource SuccessColor}"/>
@@ -44,7 +42,7 @@
                         <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}" FontWeight="Medium"/>
                     </StackPanel>
                 </StackPanel>
-            </controls:PageHeader>
+            </Grid>
 
             <!-- Card 0: Quick Presets -->
             <shadui:Card>

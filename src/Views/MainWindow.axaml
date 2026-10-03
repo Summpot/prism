@@ -123,11 +123,14 @@
         <!-- Sidebar Navigation -->
         <shadui:Sidebar
             Grid.Column="0"
+            BorderBrush="{DynamicResource BorderColor30}"
+            BorderThickness="0,0,1,0"
             CurrentRoute="{Binding Navigation.CurrentRoute, Mode=TwoWay}"
             Expanded="{Binding IsSidebarExpanded, Mode=TwoWay}"
-            Width="240"
-            MinWidth="60">
-            <StackPanel Spacing="3">
+            MinWidth="60"
+            Padding="{Binding IsSidebarExpanded, Converter={x:Static common:Converters.SidebarPadding}}"
+            Width="220">
+            <StackPanel Spacing="4">
                 <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_client], Source={x:Static i18n:LocalizationManager.Instance}}" />
                 
                 <shadui:SidebarItem 
@@ -197,7 +200,7 @@
                 </shadui:SidebarItem>
 
                 <!-- Admin Section (Shown when IsAdmin is true) -->
-                <StackPanel Spacing="3" IsVisible="{Binding IsAdmin}">
+                <StackPanel Spacing="4" IsVisible="{Binding IsAdmin}">
                     <shadui:SidebarItemLabel AsSeparator="True" Text="{Binding [nav_admin], Source={x:Static i18n:LocalizationManager.Instance}}" />
                     
                     <shadui:SidebarItem 

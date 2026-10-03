@@ -12,6 +12,11 @@ public static class Converters
     public static readonly IValueConverter BooleanNegation =
         new FuncValueConverter<bool, bool>(b => !b);
 
+    // ShadUI demo gutter. The sidebar scrollbar is overlaid, so the right inset keeps it off the items.
+    public static readonly IValueConverter SidebarPadding =
+        new FuncValueConverter<bool, Thickness>(expanded =>
+            expanded ? new Thickness(16, 8) : new Thickness(8));
+
     public static readonly IValueConverter EqualsZero =
         new FuncValueConverter<int, bool>(c => c == 0);
 

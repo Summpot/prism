@@ -98,6 +98,21 @@ public partial class ClientOverviewViewModel : ViewModelBase
     private bool _showLoginMethods = true;
 
     [ObservableProperty]
+    private bool _loginRequired;
+
+    [ObservableProperty]
+    private bool _showGitHubLogin;
+
+    [ObservableProperty]
+    private bool _showAnonymousLogin;
+
+    [ObservableProperty]
+    private string _loginMethodsBadgeText = "";
+
+    [ObservableProperty]
+    private string? _providersError;
+
+    [ObservableProperty]
     private bool _bypassLogin;
 
     [RelayCommand]
@@ -249,8 +264,12 @@ public partial class ClientOverviewViewModel : ViewModelBase
     [ObservableProperty]
     private bool _showOAuthExchanging;
 
+    partial void OnShowOAuthExchangingChanged(bool value) => UpdateComputedProperties();
+
     [ObservableProperty]
     private bool _showOAuthWaiting;
+
+    partial void OnShowOAuthWaitingChanged(bool value) => UpdateComputedProperties();
 
     [ObservableProperty]
     private string _manualCallbackInput = "";
@@ -341,7 +360,15 @@ public partial class ClientOverviewViewModel : ViewModelBase
         ShowLoggedInCard = IsSessionAuthenticated;
         ShowConnectAndLoginHero = !IsSessionAuthenticated;
 
-        ShowLoginMethods = !BypassLogin && !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated && (IsGithubAuthAvailable || IsConnected);
+        LoginRequired = IsConnected && !IsSessionAuthenticated && DiscoveredServices.Count == 0;
+        ShowGitHubLogin = IsGithubAuthAvailable || LoginRequired;
+        ShowAnonymousLogin = !LoginRequired;
+        LoginMethodsBadgeText = LoginRequired
+            ? I18nText.T("client_waiting_for_login", "等待登录")
+            : I18nText.T("client_optional_login", "可选登录");
+
+        ShowLoginMethods = !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated
+            && (LoginRequired || (!BypassLogin && (IsGithubAuthAvailable || IsConnected || !string.IsNullOrWhiteSpace(ProvidersError))));
 
         string host = !string.IsNullOrWhiteSpace(ServerAddress) ? ServerAddress : RemoteLinkInput;
         string listen = !string.IsNullOrWhiteSpace(ListenAddress) ? ListenAddress : "127.0.0.1:25565";
@@ -482,27 +509,14 @@ public partial class ClientOverviewViewModel : ViewModelBase
             }
             catch { }
 
-            if (IsConnected && !string.IsNullOrWhiteSpace(result.Token))
-            {
-                try
-                {
-                    var authedSession = await AdminApiClient.Instance.AuthenticateAsync(result.Token);
-                    if (authedSession.Authenticated)
-                    {
-                        SessionUsername = authedSession.DisplayName ?? authedSession.Username ?? result.Username ?? "User";
-                        SessionIsAdmin = authedSession.IsAdmin;
-                        SessionRole = authedSession.Role ?? "";
-                    }
-                }
-                catch { }
-            }
-
             IsSessionAuthenticated = true;
-            SessionUsername = result.Username ?? SessionUsername ?? "User";
+            SessionUsername = string.IsNullOrWhiteSpace(result.Username) ? (string.IsNullOrWhiteSpace(SessionUsername) ? "User" : SessionUsername) : result.Username;
             SessionIsAdmin = SessionIsAdmin || string.Equals(result.Role, "admin", StringComparison.OrdinalIgnoreCase);
             ShowOAuthWaiting = false;
             ShowOAuthExchanging = false;
             ManualCallbackInput = "";
+            UpdateComputedProperties();
+            await ReconnectTunnelWithTokenAsync(result.Token);
         }
         else if (result.Kind == "auth-code" && !string.IsNullOrWhiteSpace(result.Code))
         {
@@ -547,7 +561,13 @@ public partial class ClientOverviewViewModel : ViewModelBase
                         targetUrl = resp.Url;
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    ErrorMessage = string.IsNullOrWhiteSpace(ex.Message)
+                        ? I18nText.T("client_probe_failed")
+                        : ex.Message;
+                    return;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(targetUrl))
@@ -619,8 +639,10 @@ public partial class ClientOverviewViewModel : ViewModelBase
             bool isAdmin = false;
             string? role = null;
             string? tokenId = null;
+            string? userId = null;
+            ulong? expiresAt = null;
 
-            // Exchange via in-band control RPC
+            // Exchange on the current control channel before restarting the tunnel.
             if (IsConnected)
             {
                 try
@@ -628,11 +650,16 @@ public partial class ClientOverviewViewModel : ViewModelBase
                     var exchangeResp = await AdminApiClient.Instance.ExchangeGitHubCodeAsync(code, deviceId);
                     token = exchangeResp.Token;
                     tokenId = exchangeResp.TokenId;
+                    if (exchangeResp.ExpiresAtUnixMs is long expiresMs && expiresMs > 0)
+                    {
+                        expiresAt = (ulong)expiresMs;
+                    }
                     if (exchangeResp.User != null)
                     {
                         username = !string.IsNullOrWhiteSpace(exchangeResp.User.DisplayName) ? exchangeResp.User.DisplayName : exchangeResp.User.Username;
                         avatarUrl = exchangeResp.User.AvatarUrl;
                         role = exchangeResp.User.Role;
+                        userId = exchangeResp.User.Id;
                         isAdmin = string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
                     }
                 }
@@ -659,9 +686,9 @@ public partial class ClientOverviewViewModel : ViewModelBase
                     ManagementUrl: null,
                     TokenId: tokenId ?? cfg?.ActiveConfig?.TokenId,
                     TokenType: null,
-                    UserId: null,
+                    UserId: string.IsNullOrWhiteSpace(userId) ? null : userId,
                     Username: username,
-                    ExpiresAt: null,
+                    ExpiresAt: expiresAt,
                     AutoCheckUpdate: null,
                     UpdateChannel: null,
                     Autostart: null,
@@ -679,22 +706,6 @@ public partial class ClientOverviewViewModel : ViewModelBase
             }
             catch { }
 
-            if (IsConnected && !string.IsNullOrWhiteSpace(token))
-            {
-                try
-                {
-                    var authedSession = await AdminApiClient.Instance.AuthenticateAsync(token);
-                    if (authedSession.Authenticated)
-                    {
-                        username = authedSession.DisplayName ?? authedSession.Username ?? username;
-                        avatarUrl = authedSession.AvatarUrl ?? avatarUrl;
-                        role = authedSession.Role ?? role;
-                        isAdmin = authedSession.IsAdmin;
-                    }
-                }
-                catch { }
-            }
-
             IsSessionAuthenticated = true;
             SessionUsername = username;
             SessionAvatarUrl = avatarUrl;
@@ -703,11 +714,15 @@ public partial class ClientOverviewViewModel : ViewModelBase
             ShowOAuthWaiting = false;
             ShowOAuthExchanging = false;
             ManualCallbackInput = "";
+            ProvidersError = null;
+            UpdateComputedProperties();
 
             if (!string.IsNullOrWhiteSpace(avatarUrl))
             {
                 _ = LoadAvatarBitmapAsync(avatarUrl);
             }
+
+            await ReconnectTunnelWithTokenAsync(token);
         }
         catch (Exception ex)
         {
@@ -796,7 +811,11 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
         UpdateComputedProperties();
 
-        if (status.Running && (!_wasRunning || (DateTime.UtcNow - _lastSessionCheck).TotalSeconds > 30))
+        var sessionDue = !_wasRunning || (DateTime.UtcNow - _lastSessionCheck).TotalSeconds > 30;
+        var probeDue = !IsSessionAuthenticated
+            && !string.IsNullOrWhiteSpace(ProvidersError)
+            && (DateTime.UtcNow - _lastSessionCheck).TotalSeconds > 3;
+        if (status.Running && (sessionDue || probeDue))
         {
             _lastSessionCheck = DateTime.UtcNow;
             _ = RefreshControlSessionAsync();
@@ -985,6 +1004,59 @@ public partial class ClientOverviewViewModel : ViewModelBase
         _client.ResetStats();
     }
 
+    private async Task ReconnectTunnelWithTokenAsync(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        try
+        {
+            await _client.StartAsync(authToken: token);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            return;
+        }
+
+        _lastSessionCheck = DateTime.MinValue;
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            await Task.Delay(500);
+            try
+            {
+                var session = await AdminApiClient.Instance.GetSessionAsync();
+                if (session.Authenticated)
+                {
+                    ApplyControlSession(session);
+                    return;
+                }
+            }
+            catch
+            {
+                // The new control channel is still opening.
+            }
+        }
+    }
+
+    private void ApplyControlSession(AdminSessionResponse session)
+    {
+        IsSessionAuthenticated = true;
+        var name = session.DisplayName ?? session.Username;
+        SessionUsername = string.IsNullOrWhiteSpace(name) ? (string.IsNullOrWhiteSpace(SessionUsername) ? "User" : SessionUsername) : name;
+        SessionIsAdmin = session.IsAdmin;
+        SessionRole = session.Role ?? "";
+        if (!string.IsNullOrWhiteSpace(session.AvatarUrl) && session.AvatarUrl != SessionAvatarUrl)
+        {
+            SessionAvatarUrl = session.AvatarUrl;
+            _ = LoadAvatarBitmapAsync(session.AvatarUrl);
+        }
+        ProvidersError = null;
+        UpdateComputedProperties();
+    }
+
     private async Task RefreshControlSessionAsync()
     {
         try
@@ -992,29 +1064,27 @@ public partial class ClientOverviewViewModel : ViewModelBase
             var session = await AdminApiClient.Instance.GetSessionAsync();
             if (session.Authenticated)
             {
-                IsSessionAuthenticated = true;
-                SessionUsername = session.Username ?? session.DisplayName ?? "User";
-                SessionIsAdmin = session.IsAdmin;
-                SessionRole = session.Role ?? "";
-                if (!string.IsNullOrWhiteSpace(session.AvatarUrl) && session.AvatarUrl != SessionAvatarUrl)
-                {
-                    SessionAvatarUrl = session.AvatarUrl;
-                    _ = LoadAvatarBitmapAsync(session.AvatarUrl);
-                }
+                ApplyControlSession(session);
             }
-
-            try
-            {
-                var providers = await AdminApiClient.Instance.GetAuthProvidersAsync();
-                IsGithubAuthAvailable = providers.GithubEnabled || providers.Providers.Contains("github");
-            }
-            catch { }
-            UpdateComputedProperties();
         }
         catch
         {
-            // Control RPC is only accessible once tunnel is ready
+            // Control RPC is only accessible once the tunnel is ready.
         }
+
+        try
+        {
+            var providers = await AdminApiClient.Instance.GetAuthProvidersAsync();
+            IsGithubAuthAvailable = providers.GithubEnabled || providers.Providers.Contains("github");
+            ProvidersError = null;
+        }
+        catch (Exception ex)
+        {
+            ProvidersError = string.IsNullOrWhiteSpace(ex.Message)
+                ? I18nText.T("client_probe_failed")
+                : ex.Message;
+        }
+        UpdateComputedProperties();
     }
 
     [RelayCommand]

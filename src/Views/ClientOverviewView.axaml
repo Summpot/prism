@@ -120,13 +120,15 @@
                             <shadui:Badge
                                 Grid.Column="1"
                                 Classes="Outline"
-                                Content="{Binding [client_waiting_for_login], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                                Content="{Binding LoginMethodsBadgeText}"/>
                         </Grid>
+
+                        <controls:ErrorBanner Message="{Binding ProvidersError}"/>
 
                         <Button
                             Classes="Outline"
                             Command="{Binding StartGitHubLoginCommand}"
-                            IsVisible="{Binding IsGithubAuthAvailable}"
+                            IsVisible="{Binding ShowGitHubLogin}"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Left">
                             <Grid ColumnDefinitions="Auto, *">
@@ -153,6 +155,7 @@
                         <Button
                             Classes="Ghost"
                             Command="{Binding DismissLoginMethodsCommand}"
+                            IsVisible="{Binding ShowAnonymousLogin}"
                             HorizontalAlignment="Center"
                             Content="{Binding [client_anonymous], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>

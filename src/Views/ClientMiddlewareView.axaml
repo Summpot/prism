@@ -13,12 +13,12 @@
     x:DataType="vm:ClientMiddlewareViewModel">
 
     <Grid RowDefinitions="Auto, *" Margin="{DynamicResource PageMargin}">
-        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,24">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <common:LucideIcon Data="{x:Static common:AppIcons.Sliders}" Width="16" Height="16" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding [client_middleware_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <Button Classes="Outline" Command="{Binding ResetConfigCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
@@ -39,9 +39,9 @@
             <!-- Left: Middlewares List -->
             <shadui:Card Grid.Column="0">
                 <Grid RowDefinitions="Auto, *">
-                    <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,10">
+                    <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
                         <TextBlock Text="{Binding [middleware_selector], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                        <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="6,1" VerticalAlignment="Center">
                             <TextBlock Text="{Binding Middlewares.Count, StringFormat='{}{0}'}" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </Border>
                     </Grid>
@@ -68,10 +68,10 @@
                         </ListBox.Styles>
                         <ListBox.ItemTemplate>
                             <DataTemplate x:DataType="native:MiddlewareItem">
-                                <StackPanel Spacing="3">
+                                <StackPanel Spacing="4">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                                        <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                        <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding [middleware_badge], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold" Foreground="{DynamicResource MutedForegroundColor}"/>
                                         </Border>
                                     </StackPanel>
@@ -89,16 +89,16 @@
             <!-- Right: Dynamic Schema Form -->
             <shadui:Card Grid.Column="2">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="14">
+                    <StackPanel Spacing="16">
                         <!-- Middleware Title & Toggle -->
                         <Grid ColumnDefinitions="*, Auto">
-                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <TextBlock Text="{Binding SelectedMiddleware.Name}" FontWeight="Bold"
                                                IsVisible="{Binding SelectedMiddleware, Converter={x:Static common:Converters.NotNullToBoolean}}"/>
                                     <TextBlock Text="{Binding [middleware_select_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Bold"
                                                IsVisible="{Binding SelectedMiddleware, Converter={x:Static common:Converters.NullToTrue}}"/>
-                                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="6,1" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
                                                    FontWeight="SemiBold"
                                                    Foreground="{Binding IsMiddlewareEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
@@ -122,12 +122,12 @@
                             <ItemsControl.DataTemplates>
                                 <!-- Boolean field template -->
                                 <DataTemplate DataType="vm:BoolMiddlewareFieldViewModel">
-                                    <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
+                                    <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="12,8" Margin="0,0,0,8">
                                         <Grid ColumnDefinitions="*, Auto">
-                                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                            <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <TextBlock Text="{Binding Label}" FontWeight="Medium"/>
-                                                    <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                    <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                                     </Border>
                                                 </StackPanel>
@@ -144,10 +144,10 @@
 
                                 <!-- Numeric field template -->
                                 <DataTemplate DataType="vm:NumberMiddlewareFieldViewModel">
-                                    <StackPanel Spacing="4" Margin="0,0,0,10">
+                                    <StackPanel Spacing="4" Margin="0,0,0,16">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <TextBlock Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                             </Border>
                                         </StackPanel>
@@ -170,10 +170,10 @@
 
                                 <!-- ListString field template -->
                                 <DataTemplate DataType="vm:ListStringMiddlewareFieldViewModel">
-                                    <StackPanel Spacing="4" Margin="0,0,0,10">
+                                    <StackPanel Spacing="4" Margin="0,0,0,16">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <TextBlock Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                             </Border>
                                         </StackPanel>
@@ -196,10 +196,10 @@
 
                                 <!-- String field template -->
                                 <DataTemplate DataType="vm:StringMiddlewareFieldViewModel">
-                                    <StackPanel Spacing="4" Margin="0,0,0,10">
+                                    <StackPanel Spacing="4" Margin="0,0,0,16">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <TextBlock Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource MutedForegroundColor}"/>
-                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                            <Border IsVisible="{Binding IsModified}" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource PrimaryColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding [middleware_modified], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" Foreground="{DynamicResource PrimaryColor}"/>
                                             </Border>
                                         </StackPanel>

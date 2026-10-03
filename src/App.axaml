@@ -19,8 +19,10 @@
             <SolidColorBrush x:Key="StatusWarningBrush" Color="{DynamicResource WarningColor}"/>
             <SolidColorBrush x:Key="StatusDestructiveBrush" Color="{DynamicResource DestructiveColor}"/>
             <FontFamily x:Key="MonoFont">Consolas, Menlo, "DejaVu Sans Mono", monospace</FontFamily>
-            <Thickness x:Key="PageMargin">24,20</Thickness>
-            <x:Double x:Key="PageMaxWidth">960</x:Double>
+            <!-- ShadUI demo page shell: header uses PageMargin, scrolling body uses PageContentMargin. -->
+            <Thickness x:Key="PageMargin">48,24</Thickness>
+            <Thickness x:Key="PageContentMargin">48,0,48,24</Thickness>
+            <x:Double x:Key="PageMaxWidth">900</x:Double>
         </ResourceDictionary>
     </Application.Resources>
     <Application.Styles>

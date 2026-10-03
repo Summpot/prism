@@ -31,7 +31,7 @@
                  PlaceholderText="{Binding [admin_users_service_rules_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
                  shadui:ControlAssist.Label="{Binding [users_rules_label], Source={x:Static i18n:LocalizationManager.Instance}}"/>
 
-        <StackPanel Margin="0,8,0,0" Spacing="8">
+        <StackPanel Margin="0,24,0,0" Spacing="16">
             <Button Classes="Primary"
                     Command="{Binding Owner.SaveUserChangesCommand}"
                     HotKey="Enter"

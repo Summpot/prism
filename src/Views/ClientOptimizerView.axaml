@@ -11,16 +11,18 @@
     x:DataType="vm:ClientOptimizerViewModel"
     mc:Ignorable="d">
 
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageMargin}">
-
-            <Grid ColumnDefinitions="*, Auto">
+    <DockPanel>
+        <Grid
+            DockPanel.Dock="Top"
+            ColumnDefinitions="*, Auto"
+            Margin="{DynamicResource PageMargin}"
+            MaxWidth="{DynamicResource PageMaxWidth}">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
-                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding [optimizer_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
+                    <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="6,2" VerticalAlignment="Center">
                         <TextBlock Text="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToLabel}}"
-                                   FontWeight="SemiBold"
+                                   Classes="Caption"
                                    Foreground="{Binding OptimizerEnabled, Converter={x:Static common:Converters.ActiveStatusToBrush}}"/>
                     </Border>
                 </StackPanel>
@@ -42,12 +44,14 @@
                         <TextBlock Text="{Binding [optimizer_save_success], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource SuccessColor}" FontWeight="Medium"/>
                     </StackPanel>
                 </StackPanel>
-            </Grid>
+        </Grid>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageContentMargin}">
 
             <!-- Card 0: Quick Presets -->
             <shadui:Card>
                 <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                         <TextBlock Text="{Binding [optimizer_presets_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding [optimizer_presets_desc], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                     </StackPanel>
@@ -89,12 +93,12 @@
             </shadui:Card>
 
             <!-- 2-Column: Master Switch Card & Compression Level Card -->
-            <Grid ColumnDefinitions="*, 10, *">
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
                 <!-- Left: Master Switch Card -->
                 <shadui:Card Grid.Column="0">
-                    <StackPanel Spacing="10">
+                    <StackPanel Spacing="8">
                         <Grid ColumnDefinitions="*, Auto">
-                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
                                     <TextBlock Text="{Binding [optimizer_general_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
@@ -104,7 +108,7 @@
                             <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" IsChecked="{Binding OptimizerEnabled, Mode=TwoWay}"/>
                         </Grid>
 
-                        <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,4,0,0">
+                        <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="10" Margin="0,4,0,0">
                             <TextBlock Text="{Binding [optimizer_enabled_hint], Source={x:Static i18n:LocalizationManager.Instance}}"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap"
@@ -114,10 +118,10 @@
                 </shadui:Card>
 
                 <!-- Right: Zstandard Compression Level Card -->
-                <shadui:Card Grid.Column="2" IsEnabled="{Binding OptimizerEnabled}">
-                    <StackPanel Spacing="10">
+                <shadui:Card Grid.Column="1" IsEnabled="{Binding OptimizerEnabled}">
+                    <StackPanel Spacing="8">
                         <Grid ColumnDefinitions="*, Auto">
-                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <common:LucideIcon Data="{x:Static common:AppIcons.Cpu}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
                                     <TextBlock Text="{Binding [optimizer_compression_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
@@ -152,10 +156,10 @@
 
             <!-- Card 3: Batching & Latency Control Card -->
             <shadui:Card IsEnabled="{Binding OptimizerEnabled}">
-                <StackPanel Spacing="12">
-                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <StackPanel Spacing="16">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                         <common:LucideIcon Data="{x:Static common:AppIcons.Gauge}" Width="16" Height="16" Foreground="{DynamicResource PrimaryColor}"/>
-                        <StackPanel Spacing="1">
+                        <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [optimizer_batching_card], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold"/>
                             <TextBlock Text="{Binding [optimizer_batching_card_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </StackPanel>
@@ -163,7 +167,7 @@
 
                     <Grid ColumnDefinitions="*, 8, *, 8, *" Margin="0,4,0,0">
                         <!-- Adaptive Flush -->
-                        <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12">
+                        <Border Grid.Column="0" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="12">
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [optimizer_adaptive_flush_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium" VerticalAlignment="Center"/>
@@ -174,11 +178,11 @@
                         </Border>
 
                         <!-- Base Flush Interval -->
-                        <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12">
+                        <Border Grid.Column="2" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="12">
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [optimizer_flush_interval_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
-                                    <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0">
+                                    <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0">
                                         <TextBlock Text="{Binding OptimizerFlushIntervalMs, StringFormat='{}{0} ms'}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </Border>
                                 </Grid>
@@ -188,11 +192,11 @@
                         </Border>
 
                         <!-- Buffer Threshold -->
-                        <Border Grid.Column="4" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12">
+                        <Border Grid.Column="4" Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="12">
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [optimizer_buffer_threshold_label], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
-                                    <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0">
+                                    <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0">
                                         <TextBlock Text="{Binding OptimizerBufferThreshold, StringFormat='{}{0} B'}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </Border>
                                 </Grid>
@@ -204,5 +208,6 @@
                 </StackPanel>
             </shadui:Card>
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

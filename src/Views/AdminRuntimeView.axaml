@@ -15,38 +15,42 @@
     <Panel>
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
-    <ScrollViewer VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsReady}">
-        <StackPanel Margin="16" Spacing="12">
-            <Grid ColumnDefinitions="*, Auto">
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <common:LucideIcon Data="{x:Static common:AppIcons.Cpu}" Width="16" Height="16" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}">
-                        <TextBlock Text="{Binding AutoRefreshText}"/>
-                    </Button>
-                    <Button Classes="Outline" Command="{Binding LoadDataCommand}"
-                            IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
-                            <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}"/>
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
-            </Grid>
-
+    <DockPanel IsVisible="{Binding IsReady}">
+        <Grid
+            DockPanel.Dock="Top"
+            ColumnDefinitions="*, Auto"
+            Margin="{DynamicResource PageMargin}"
+            MaxWidth="{DynamicResource PageMaxWidth}">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <common:LucideIcon Data="{x:Static common:AppIcons.Cpu}" Width="16" Height="16" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding [nav_runtime], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Classes="Outline" Command="{Binding ToggleAutoRefreshCommand}">
+                    <TextBlock Text="{Binding AutoRefreshText}"/>
+                </Button>
+                <Button Classes="Outline" Command="{Binding LoadDataCommand}"
+                        IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
+                        <TextBlock Text="{Binding [common_refresh], Source={x:Static i18n:LocalizationManager.Instance}}"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="{DynamicResource PageContentMargin}" MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16">
             <controls:ErrorBanner Message="{Binding ErrorMessage}" RetryCommand="{Binding LoadDataCommand}"/>
 
             <!-- Diagnostics Card -->
             <shadui:Card>
-                <StackPanel Spacing="12">
+                <StackPanel Spacing="16">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <common:LucideIcon Data="{x:Static common:AppIcons.Activity}" Width="16" Height="16" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding [runtime_title], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="14"/>
+                        <shadui:CardTitle VerticalAlignment="Center" Content="{Binding [runtime_title], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>
 
-                    <Separator Height="1" Background="{DynamicResource BorderColor}"/>
+                    <Separator />
 
                     <Grid ColumnDefinitions="160, *" RowDefinitions="Auto, Auto" Margin="0,4">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [runtime_health], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="0,6"/>
@@ -57,7 +61,7 @@
                         </StackPanel>
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding [runtime_config_path], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="0,6"/>
-                        <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="4" Padding="8,4" HorizontalAlignment="Left" Margin="0,6">
+                        <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBackgroundColor}" CornerRadius="{DynamicResource SmCornerRadius}" Padding="8,4" HorizontalAlignment="Left" Margin="0,8">
                             <TextBlock Text="{Binding ConfigPath}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource ForegroundColor}"/>
                         </Border>
                     </Grid>
@@ -66,13 +70,13 @@
 
             <!-- Operations Card -->
             <shadui:Card>
-                <StackPanel Spacing="12">
+                <StackPanel Spacing="16">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <common:LucideIcon Data="{x:Static common:AppIcons.Zap}" Width="16" Height="16" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding [admin_runtime_live_ops], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" FontSize="14"/>
+                        <shadui:CardTitle VerticalAlignment="Center" Content="{Binding [admin_runtime_live_ops], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                     </StackPanel>
 
-                    <Separator Height="1" Background="{DynamicResource BorderColor}"/>
+                    <Separator />
 
                     <Grid ColumnDefinitions="*, Auto" Margin="0,4">
                         <StackPanel Grid.Column="0" Spacing="4">
@@ -85,7 +89,7 @@
                         <Button Grid.Column="1" Classes="Primary" Command="{Binding TriggerReloadCommand}"
                                  IsEnabled="{Binding IsLoading, Converter={x:Static common:Converters.BooleanNegation}}"
                                  VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
                                 <common:LucideIcon Data="{x:Static common:AppIcons.RotateCcw}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding [admin_reload], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                             </StackPanel>
@@ -94,6 +98,7 @@
                 </StackPanel>
             </shadui:Card>
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
     </Panel>
 </UserControl>

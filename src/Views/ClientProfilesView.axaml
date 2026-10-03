@@ -13,12 +13,12 @@
     mc:Ignorable="d">
 
     <Grid RowDefinitions="Auto, *" Margin="{DynamicResource PageMargin}">
-        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,24">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <common:LucideIcon Data="{x:Static common:AppIcons.SlidersHorizontal}" Width="16" Height="16" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding [client_settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding [client_settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <Button Classes="Outline" Command="{Binding NewProfileCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <common:LucideIcon Data="{x:Static common:AppIcons.Plus}" Width="16" Height="16"/>
@@ -48,10 +48,10 @@
             <shadui:Card Grid.Column="0">
                 <Grid RowDefinitions="Auto, Auto, *">
                     <!-- Column Header -->
-                    <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,10">
+                    <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
                         <TextBlock Text="{Binding [client_saved_profiles], Source={x:Static i18n:LocalizationManager.Instance}}"
                                    FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                        <Border Grid.Column="1" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="6,1" VerticalAlignment="Center">
                             <TextBlock Text="{Binding ProfilesCountText}" Foreground="{DynamicResource MutedForegroundColor}"/>
                         </Border>
                     </Grid>
@@ -61,7 +61,7 @@
                             Background="{DynamicResource GhostColor}"
                             BorderBrush="{DynamicResource BorderColor}"
                             BorderThickness="1"
-                            CornerRadius="6"
+                            CornerRadius="{DynamicResource SmCornerRadius}"
                             Padding="8"
                             Margin="0,0,0,8">
                         <StackPanel Spacing="6">
@@ -96,10 +96,10 @@
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="vm:EditableProfile">
                                     <Grid ColumnDefinitions="*, Auto">
-                                        <StackPanel Grid.Column="0" Spacing="2">
+                                        <StackPanel Grid.Column="0" Spacing="4">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                                                <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                                <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="4,0" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Transport}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                                 </Border>
                                                 <shadui:Badge Classes="Secondary" IsVisible="{Binding IsActive}" VerticalAlignment="Center"
@@ -134,7 +134,7 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
                             Spacing="8"
-                            Margin="16">
+                            Margin="24">
                             <common:LucideIcon Data="{x:Static common:AppIcons.Sliders}" Width="28" Height="28" Foreground="{DynamicResource MutedForegroundColor}" Opacity="0.4"/>
                             <TextBlock Text="{Binding [client_no_profiles], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" TextAlignment="Center"/>
                         </StackPanel>
@@ -156,7 +156,7 @@
                         <StackPanel Spacing="12">
                             <!-- Form Header -->
                             <Grid ColumnDefinitions="*, Auto">
-                                <StackPanel Grid.Column="0" Spacing="2">
+                                <StackPanel Grid.Column="0" Spacing="4">
                                     <TextBlock Text="{Binding EditProfileTitle}" FontWeight="Bold"/>
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <TextBlock Text="{Binding DraftProfile.Id, StringFormat='ID: {0}'}" FontFamily="{DynamicResource MonoFont}" Foreground="{DynamicResource MutedForegroundColor}"/>
@@ -213,9 +213,9 @@
                             </Grid>
 
                             <!-- Switch Toggles -->
-                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="12,8">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding [client_lan_broadcast], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
                                         <TextBlock Text="{Binding [client_lan_broadcast_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>
@@ -223,9 +223,9 @@
                                 </Grid>
                             </Border>
 
-                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="12,8">
+                            <Border Background="{DynamicResource GhostColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="{DynamicResource SmCornerRadius}" Padding="12,8">
                                 <Grid ColumnDefinitions="*, Auto">
-                                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding [client_auto_connect], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="Medium"/>
                                         <TextBlock Text="{Binding [client_auto_connect_hint], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                                     </StackPanel>

@@ -17,10 +17,10 @@
     <controls:AdminReady State="{Binding ReadyState}" ConnectCommand="{Binding GoToConnectCommand}"
                          IsVisible="{Binding IsReady, Converter={x:Static common:Converters.BooleanNegation}}"/>
     <Grid RowDefinitions="Auto, Auto, Auto, *" Margin="{DynamicResource PageMargin}" IsVisible="{Binding IsReady}">
-        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
+        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,24">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <common:LucideIcon Data="{x:Static common:AppIcons.Users}" Width="16" Height="16" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding [nav_users], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBox
@@ -44,11 +44,11 @@
             Grid.Row="1"
             Message="{Binding ErrorMessage}"
             RetryCommand="{Binding RefreshCommand}"
-            Margin="0,0,0,12"/>
+            Margin="0,0,0,16"/>
 
-        <shadui:Card Grid.Row="2" Margin="0,0,0,12" IsVisible="{Binding HasSession}">
+        <shadui:Card Grid.Row="2" Margin="0,0,0,16" IsVisible="{Binding HasSession}">
             <Grid ColumnDefinitions="*, Auto">
-                <StackPanel Spacing="2">
+                <StackPanel Spacing="4">
                     <TextBlock Text="{Binding [session_logged_in], Source={x:Static i18n:LocalizationManager.Instance}}" Foreground="{DynamicResource MutedForegroundColor}"/>
                     <TextBlock Text="{Binding SessionName}" FontWeight="SemiBold"/>
                     <TextBlock Text="{Binding SessionDetail}" Foreground="{DynamicResource MutedForegroundColor}"/>
@@ -124,7 +124,7 @@
             <TabItem Header="{Binding [admin_col_access_tokens], Source={x:Static i18n:LocalizationManager.Instance}}">
                 <Grid RowDefinitions="Auto, *" Margin="0,16,0,0">
                         <!-- Toolbar -->
-                        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+                        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
                             <TextBlock Text="{Binding [admin_users_active_tokens], Source={x:Static i18n:LocalizationManager.Instance}}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             <Button Grid.Column="1" Classes="Primary" Command="{Binding OpenCreateTokenDialogCommand}">
                                 <StackPanel Orientation="Horizontal" Spacing="4">

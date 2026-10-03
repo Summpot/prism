@@ -11,17 +11,20 @@
     mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
     x:DataType="vm:SettingsViewModel">
 
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageMargin}">
-
-            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding [settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h4" VerticalAlignment="Center"/>
-                <shadui:Badge Classes="Outline" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding AppVersion}" FontFamily="{DynamicResource MonoFont}"/>
-                </shadui:Badge>
-            </StackPanel>
-
+    <DockPanel>
+        <StackPanel
+            DockPanel.Dock="Top"
+            Orientation="Horizontal"
+            Spacing="8"
+            VerticalAlignment="Center"
+            Margin="{DynamicResource PageMargin}"
+            MaxWidth="{DynamicResource PageMaxWidth}">
+            <common:LucideIcon Data="{x:Static common:AppIcons.Settings}" Width="16" Height="16" VerticalAlignment="Center"/>
+            <TextBlock Text="{Binding [settings_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
+            <shadui:Badge Classes="Outline" VerticalAlignment="Center" FontFamily="{DynamicResource MonoFont}" Content="{Binding AppVersion}"/>
+        </StackPanel>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="{DynamicResource PageMaxWidth}" Spacing="16" Margin="{DynamicResource PageContentMargin}">
             <TabControl>
                 <TabItem>
                     <TabItem.Header>
@@ -223,7 +226,7 @@
                                                            Foreground="{DynamicResource PrimaryForegroundColor}"
                                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                         <TextBlock Classes="h4" Text="Prism"/>
                                         <TextBlock Classes="Caption Muted" Text="{Binding [brand_tagline], Source={x:Static i18n:LocalizationManager.Instance}}"/>
                                     </StackPanel>
@@ -267,5 +270,6 @@
                 </TabItem>
             </TabControl>
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

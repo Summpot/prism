@@ -16,7 +16,7 @@
                  PlaceholderText="{Binding [users_token_name_placeholder], Source={x:Static i18n:LocalizationManager.Instance}}"
                  shadui:ControlAssist.Label="{Binding [users_token_name], Source={x:Static i18n:LocalizationManager.Instance}}"/>
 
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
             <ComboBox Grid.Column="0"
                       ItemsSource="{Binding Owner.TokenTypeValues}"
                       SelectedItem="{Binding Owner.NewTokenType, Mode=TwoWay}"
@@ -66,7 +66,7 @@
             </StackPanel>
         </Border>
 
-        <StackPanel Margin="0,8,0,0" Spacing="8">
+        <StackPanel Margin="0,24,0,0" Spacing="16">
             <Button Classes="Primary"
                     Command="{Binding Owner.SubmitCreateTokenCommand}"
                     HotKey="Enter"

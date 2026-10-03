@@ -100,16 +100,26 @@ Section "Install" SecInstall
     WriteRegStr HKCU "Software\Classes\prism\shell" "" "open"
     WriteRegStr HKCU "Software\Classes\prism\shell\open\command" "" '"$INSTDIR\prism.exe" "%1"'
     
+    ; Clean up transitional uninstall key and legacy install directory if present
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client"
+    ${If} ${FileExists} "$LOCALAPPDATA\Prism\prism.exe"
+    ${AndIf} "$INSTDIR" != "$LOCALAPPDATA\Prism"
+        Delete "$LOCALAPPDATA\Prism\prism.exe"
+        Delete "$LOCALAPPDATA\Prism\uninstall.exe"
+        RMDir "$LOCALAPPDATA\Prism"
+    ${EndIf}
+
     ; Register Add/Remove Programs uninstall entry
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "DisplayName" "${PRODUCT_NAME}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "DisplayVersion" "${VERSION}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "DisplayIcon" "$INSTDIR\prism.exe,0"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "Publisher" "${PRODUCT_PUBLISHER}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "HelpLink" "${PRODUCT_WEB_SITE}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "UninstallString" '"$INSTDIR\uninstall.exe"'
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
-    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "NoModify" 1
-    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client" "NoRepair" 1
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayName" "${PRODUCT_NAME}"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayVersion" "${VERSION}"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayIcon" "$INSTDIR\prism.exe,0"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "Publisher" "${PRODUCT_PUBLISHER}"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "HelpLink" "${PRODUCT_WEB_SITE}"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "NoModify" 1
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "NoRepair" 1
 SectionEnd
 
 Function .onInstSuccess
@@ -129,6 +139,7 @@ Section "Uninstall"
     
     ; Remove registry entries
     DeleteRegKey HKCU "Software\Classes\prism"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.prism.client"
     DeleteRegKey HKCU "Software\Prism"
     

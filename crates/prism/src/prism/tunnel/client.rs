@@ -1559,6 +1559,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_controller_lifecycle() {
+        let _log_guard = crate::prism::logging::TEST_LOG_MUTEX.lock().await;
         crate::prism::logging::init_desktop_or_test_subscriber();
         let controller = ClientController::new(None);
         let status = controller.status().await;

@@ -1204,6 +1204,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ffi_session_lifecycle_and_status() {
+        let _log_guard = crate::prism::logging::TEST_LOG_MUTEX.lock().await;
         let temp_dir = std::env::temp_dir().join(format!("prism-ffi-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
 

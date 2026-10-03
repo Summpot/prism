@@ -21,6 +21,10 @@ pub struct LogEntry {
 static GLOBAL_LOG_BUFFER: LazyLock<RwLock<VecDeque<LogEntry>>> =
     LazyLock::new(|| RwLock::new(VecDeque::with_capacity(1000)));
 
+#[cfg(test)]
+pub static TEST_LOG_MUTEX: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 pub fn now_timestamp() -> String {
     let now = SystemTime::now();
     let duration = now

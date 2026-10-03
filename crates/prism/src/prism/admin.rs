@@ -2228,6 +2228,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_endpoints() {
+        let _log_guard = crate::prism::logging::TEST_LOG_MUTEX.lock().await;
         crate::prism::logging::init_desktop_or_test_subscriber();
         let (reload_tx, _) = watch::channel(telemetry::ReloadSignal::new());
         let (shutdown_tx, shutdown_rx) = watch::channel(false);

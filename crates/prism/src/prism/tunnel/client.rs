@@ -151,20 +151,31 @@ impl Client {
         Ok(stream)
     }
 
-    /// Active `$control` control channel, if the current tunnel session finished handshake.
-    pub async fn control_channel(&self) -> Option<Arc<ControlChannel>> {
-        self.control.read().await.clone()
-    }
+    /// Ensures an active `$control` control channel exists. If absent or closed,
+    /// attempts to re-establish on the current tunnel transport session.
+    pub async fn ensure_control_channel(&self) -> Result<Arc<ControlChannel>, ControlRpcError> {
+        // Fast path: existing channel is alive and healthy
+        {
+            let guard = self.control.read().await;
+            if let Some(ref ch) = *guard {
+                if !ch.is_closed() {
+                    return Ok(ch.clone());
+                }
+            }
+        }
 
-    /// RPC over the persistent `$control` control channel.
-    pub async fn control_rpc(&self, method: ControlMethod) -> Result<ControlPayload, ControlRpcError> {
-        let ch = self.control_channel().await.ok_or_else(|| {
-            ControlRpcError::unavailable("tunnel client: not connected to server")
-        })?;
-        ch.call(method).await
-    }
+        if !self.is_connected().await {
+            return Err(ControlRpcError::unavailable("tunnel client: not connected to server"));
+        }
 
-    async fn establish_control(&self) {
+        let mut guard = self.control.write().await;
+        // Double-check under write lock
+        if let Some(ref ch) = *guard {
+            if !ch.is_closed() {
+                return Ok(ch.clone());
+            }
+        }
+
         match self.open_control_stream().await {
             Ok(stream) => match control::connect(stream, control::client_features()).await {
                 Ok(ch) => {
@@ -174,29 +185,73 @@ impl Client {
                     );
                     let token = self.config.auth_token.trim();
                     if !token.is_empty() && !token.starts_with("***") {
-                        match ch.call(control::ControlMethod::Authenticate {
-                            token: token.to_string(),
-                        }).await {
+                        match ch
+                            .call(control::ControlMethod::Authenticate {
+                                token: token.to_string(),
+                            })
+                            .await
+                        {
                             Ok(_) => {
                                 tracing::info!("tunnel client: $control authenticated on connect");
                             }
                             Err(err) => {
-                                tracing::debug!(err = %err, "tunnel client: $control initial authenticate returned error");
+                                tracing::debug!(
+                                    err = %err,
+                                    "tunnel client: $control initial authenticate returned error"
+                                );
                             }
                         }
                     }
-                    *self.control.write().await = Some(ch);
+                    *guard = Some(ch.clone());
+                    Ok(ch)
                 }
                 Err(err) => {
                     tracing::warn!(err = %err, "tunnel client: $control handshake failed");
-                    *self.control.write().await = None;
+                    *guard = None;
+                    Err(ControlRpcError::unavailable(format!("$control handshake failed: {err}")))
                 }
             },
             Err(err) => {
                 tracing::warn!(err = %err, "tunnel client: failed to open $control stream");
-                *self.control.write().await = None;
+                *guard = None;
+                Err(ControlRpcError::unavailable(format!("failed to open $control stream: {err}")))
             }
         }
+    }
+
+    /// Active `$control` control channel, if the current tunnel session finished handshake.
+    pub async fn control_channel(&self) -> Option<Arc<ControlChannel>> {
+        self.ensure_control_channel().await.ok()
+    }
+
+    /// RPC over the persistent `$control` control channel with transparent recovery if closed.
+    pub async fn control_rpc(&self, method: ControlMethod) -> Result<ControlPayload, ControlRpcError> {
+        let ch = self.ensure_control_channel().await?;
+        match ch.call(method.clone()).await {
+            Ok(res) => Ok(res),
+            Err(err)
+                if matches!(err.code, crate::prism::control::ControlErrorCode::Unavailable)
+                    && err.message.contains("closed") =>
+            {
+                tracing::debug!("$control channel closed during RPC; attempting transparent re-establishment");
+                // Invalidate the closed channel so ensure_control_channel creates a fresh one
+                {
+                    let mut guard = self.control.write().await;
+                    if let Some(ref current) = *guard {
+                        if current.is_closed() {
+                            *guard = None;
+                        }
+                    }
+                }
+                let ch2 = self.ensure_control_channel().await?;
+                ch2.call(method).await
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn establish_control(&self) {
+        let _ = self.ensure_control_channel().await;
     }
 
     async fn clear_control(&self) {
@@ -1973,6 +2028,20 @@ mod tests {
             payload,
             Some(ControlPayload::Health { ok: true }),
             "in-band $control RPC health"
+        );
+
+        // Simulate a closed/dropped control channel stream
+        if let Some(ch) = client.control.write().await.as_ref() {
+            ch.close();
+        }
+        assert!(client.control.read().await.as_ref().unwrap().is_closed());
+
+        // The next control_rpc call must transparently self-heal and succeed!
+        let recovered = client.control_rpc(ControlMethod::Health).await.unwrap();
+        assert_eq!(
+            recovered,
+            ControlPayload::Health { ok: true },
+            "should recover seamlessly after control channel was closed"
         );
 
         shutdown_tx.send(true).unwrap();

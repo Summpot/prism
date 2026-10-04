@@ -326,11 +326,27 @@ pub async fn serve_with_shared_identity(
                             method,
                         )
                         .await;
-                        if framed
-                            .send(encode_msg(&ControlMsg::Response { id, result })?)
-                            .await
-                            .is_err()
-                        {
+                        let encoded = match encode_msg(&ControlMsg::Response { id, result }) {
+                            Ok(bytes) => bytes,
+                            Err(err) => {
+                                tracing::warn!(
+                                    err = %err,
+                                    id,
+                                    "failed to encode control response; falling back to error response"
+                                );
+                                let fallback = ControlMsg::Response {
+                                    id,
+                                    result: Err(ControlRpcError::internal(format!(
+                                        "response serialization failed: {err}"
+                                    ))),
+                                };
+                                match encode_msg(&fallback) {
+                                    Ok(bytes) => bytes,
+                                    Err(_) => break,
+                                }
+                            }
+                        };
+                        if framed.send(encoded).await.is_err() {
                             break;
                         }
                     }
@@ -458,6 +474,7 @@ fn spawn_client_session(
     let pending_w = pending.clone();
     let closed_w = closed.clone();
     let mut shutdown_w = shutdown_tx.subscribe();
+    let shutdown_from_w = shutdown_tx.clone();
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -481,6 +498,7 @@ fn spawn_client_session(
         }
         let _ = SinkExt::close(&mut sink).await;
         closed_w.store(true, Ordering::Relaxed);
+        let _ = shutdown_from_w.send(true);
         pending_w
             .fail_all(ControlRpcError::unavailable("control channel closed"))
             .await;
@@ -490,6 +508,7 @@ fn spawn_client_session(
     let events_r = events.clone();
     let closed_r = closed.clone();
     let mut shutdown_r = shutdown_tx.subscribe();
+    let shutdown_from_r = shutdown_tx.clone();
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -499,9 +518,24 @@ fn spawn_client_session(
                     }
                 }
                 next = stream.next() => {
-                    let Some(frame) = next else { break };
-                    let Ok(buf) = frame else { break };
-                    let Ok(msg) = decode_frame_or_reject(&buf) else { break };
+                    let Some(frame) = next else {
+                        tracing::debug!("$control client reader: remote stream EOF");
+                        break;
+                    };
+                    let buf = match frame {
+                        Ok(b) => b,
+                        Err(err) => {
+                            tracing::debug!(err = %err, "$control client reader: frame read error");
+                            break;
+                        }
+                    };
+                    let msg = match decode_frame_or_reject(&buf) {
+                        Ok(m) => m,
+                        Err(err) => {
+                            tracing::warn!(err = %err, "$control client reader: frame decode error");
+                            break;
+                        }
+                    };
                     match msg {
                         ControlMsg::Response { id, result } => {
                             if let Some(tx) = pending_r.take(id).await {
@@ -518,6 +552,7 @@ fn spawn_client_session(
             }
         }
         closed_r.store(true, Ordering::Relaxed);
+        let _ = shutdown_from_r.send(true);
         pending_r
             .fail_all(ControlRpcError::unavailable("control channel closed"))
             .await;

@@ -63,7 +63,7 @@ internal sealed class Program
                 using var pipeClient = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
                 pipeClient.Connect(1500);
                 using var writer = new StreamWriter(pipeClient, Encoding.UTF8);
-                string payload = args.Length > 0 ? string.Join("\n", args) : "--show";
+                string payload = args.Length > 0 ? string.Join("\n", args) : "activate";
                 writer.WriteLine(payload);
                 writer.Flush();
             }

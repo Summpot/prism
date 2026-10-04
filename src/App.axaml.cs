@@ -60,8 +60,7 @@ public partial class App : Application
             };
 
             var args = desktop.Args ?? Array.Empty<string>();
-            bool isRestartOrUpdated = args.Any(a => a == "--updated" || a == "--show") ||
-                                      !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED")) ||
+            bool isRestartOrUpdated = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED")) ||
                                       !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_RESTART_PID"));
 
             bool isAutostart = !isRestartOrUpdated && args.Contains("--autostart");
@@ -113,8 +112,7 @@ public partial class App : Application
     {
         try
         {
-            bool wasUpdated = args.Any(a => a == "--updated") ||
-                              !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED"));
+            bool wasUpdated = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED"));
             if (wasUpdated)
             {
                 var ver = typeof(App).Assembly.GetName().Version;

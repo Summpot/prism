@@ -375,7 +375,7 @@ pub async fn download_and_install_update(
                     .status();
 
                 let _ = std::process::Command::new("open")
-                    .args(["-n", target_app.to_str().unwrap(), "--args", "--updated"])
+                    .args(["-n", target_app.to_str().unwrap()])
                     .spawn();
                 std::process::exit(0);
             } else {
@@ -401,15 +401,11 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut cleaned: Vec<String> = raw_args
+    raw_args
         .into_iter()
         .map(|s| s.as_ref().to_string())
         .filter(|a| a != "--autostart")
-        .collect();
-    if !cleaned.iter().any(|a| a == "--updated") {
-        cleaned.push("--updated".to_string());
-    }
-    cleaned
+        .collect()
 }
 
 #[cfg(target_os = "windows")]
@@ -537,13 +533,7 @@ mod tests {
     fn test_clean_restart_args() {
         let raw = vec!["--autostart", "--foo", "bar"];
         let cleaned = clean_restart_args(raw);
-        assert_eq!(cleaned, vec!["--foo", "bar", "--updated"]);
+        assert_eq!(cleaned, vec!["--foo", "bar"]);
         assert!(!cleaned.iter().any(|a| a == "--autostart"));
-        assert!(cleaned.iter().any(|a| a == "--updated"));
-
-        // If already has --updated, don't duplicate
-        let raw2 = vec!["--updated"];
-        let cleaned2 = clean_restart_args(raw2);
-        assert_eq!(cleaned2, vec!["--updated"]);
     }
 }

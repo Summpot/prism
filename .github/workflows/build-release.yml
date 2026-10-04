@@ -513,15 +513,23 @@ jobs:
           KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if [ -n "$KEY_CONTENT" ]; then
-            echo "$KEY_CONTENT" > /tmp/minisign.key
+            if echo "$KEY_CONTENT" | grep -q "untrusted comment:"; then
+              echo "$KEY_CONTENT" > /tmp/minisign.key
+            else
+              echo "$KEY_CONTENT" | base64 -d > /tmp/minisign.key
+            fi
+
             for f in dist/*.exe dist/*.msi dist/*.zip dist/*.AppImage dist/*.tar.gz dist/*.dmg; do
               if [ -f "$f" ]; then
                 echo "Signing $f..."
-                if [ -n "$KEY_PASSWORD" ]; then
+                if grep -q "untrusted comment: minisign secret key" /tmp/minisign.key; then
+                  minisign -S -W -s /tmp/minisign.key -m "$f" -x "$f.sig"
+                elif [ -n "$KEY_PASSWORD" ]; then
                   echo "$KEY_PASSWORD" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig"
                 else
-                  minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig"
+                  minisign -S -W -s /tmp/minisign.key -m "$f" -x "$f.sig"
                 fi
+                base64 -w 0 "$f.sig" > "$f.sig.b64" && mv "$f.sig.b64" "$f.sig"
               fi
             done
             rm -f /tmp/minisign.key

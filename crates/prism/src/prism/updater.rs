@@ -2,6 +2,7 @@
 //! asset with minisign, then replaces the running binary.
 
 use std::collections::HashMap;
+#[allow(unused_imports)]
 use std::path::PathBuf;
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};
@@ -327,7 +328,6 @@ pub async fn download_and_install_update(
             std::process::Command::new(&appimage_path)
                 .args(args)
                 .env("PRISM_RESTART_PID", pid.to_string())
-                .env("PRISM_UPDATED", "1")
                 .spawn()?;
             std::process::exit(0);
         } else {
@@ -413,61 +413,21 @@ fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyh
     let current_exe = std::env::current_exe()?;
     let install_dir = current_exe
         .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
-    let pid = std::process::id();
-    let current_args = clean_restart_args(std::env::args().skip(1));
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
 
     tracing::info!(
         installer = ?installer_path,
-        target_dir = ?install_dir,
-        current_exe = ?current_exe,
-        pid,
-        args = ?current_args,
-        "spawning Windows installer helper to replace binary and restart"
+        install_dir = ?install_dir,
+        "spawning Windows installer directly to perform silent update and restart"
     );
 
-    let ps_installer = installer_path.display().to_string().replace('\'', "''");
-    let ps_target_exe = current_exe.display().to_string().replace('\'', "''");
-    let ps_install_dir = install_dir.display().to_string().replace('\'', "''");
-
-    let args_clause = if current_args.is_empty() {
-        String::new()
-    } else {
-        let quoted: Vec<String> = current_args
-            .iter()
-            .map(|a| format!("'{}'", a.replace('\'', "''")))
-            .collect();
-        format!("-ArgumentList {}", quoted.join(","))
-    };
-
-    let ps_script = format!(
-        "Wait-Process -Id {pid} -Timeout 20 -ErrorAction SilentlyContinue; \
-         Start-Sleep -Milliseconds 600; \
-         $p = Start-Process -FilePath '{ps_installer}' -ArgumentList '/S', \"/D={ps_install_dir}\" -Wait -PassThru; \
-         Start-Sleep -Milliseconds 500; \
-         $env:PRISM_UPDATED = '1'; \
-         $env:PRISM_RESTART_PID = '{pid}'; \
-         if (Test-Path -LiteralPath '{ps_target_exe}') {{ \
-             Start-Process -FilePath '{ps_target_exe}' -WindowStyle Normal {args_clause}; \
-         }} \
-         Remove-Item -LiteralPath '{ps_installer}' -Force -ErrorAction SilentlyContinue;"
-    );
-
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &ps_script,
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()?;
+    let mut cmd = std::process::Command::new(installer_path);
+    cmd.arg("/S").arg("/R");
+    if !install_dir.is_empty() {
+        cmd.arg(format!("/D={install_dir}"));
+    }
+    cmd.spawn()?;
 
     std::process::exit(0);
 }
@@ -480,7 +440,6 @@ pub fn restart_app() -> anyhow::Result<()> {
     std::process::Command::new(current_exe)
         .args(args)
         .env("PRISM_RESTART_PID", pid.to_string())
-        .env("PRISM_UPDATED", "1")
         .spawn()?;
     std::process::exit(0);
 }

@@ -60,10 +60,7 @@ public partial class App : Application
             };
 
             var args = desktop.Args ?? Array.Empty<string>();
-            bool isRestartOrUpdated = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED")) ||
-                                      !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_RESTART_PID"));
-
-            bool isAutostart = !isRestartOrUpdated && args.Contains("--autostart");
+            bool isAutostart = args.Contains("--autostart");
             if (isAutostart)
             {
                 if (_trayReady)
@@ -112,19 +109,6 @@ public partial class App : Application
     {
         try
         {
-            bool wasUpdated = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED"));
-            if (wasUpdated)
-            {
-                var ver = typeof(App).Assembly.GetName().Version;
-                string verStr = ver == null ? "v0.1.0" : $"v{ver.ToString(3)}";
-                Dispatcher.UIThread.Post(() =>
-                {
-                    AppServices.ShowSuccess(
-                        Messages.ClientUpdateUpToDate(verStr),
-                        Messages.ClientUpdatePromptTitle());
-                });
-            }
-
             var client = NativeClientService.Instance;
             var cfg = client.GetConfig();
 

@@ -126,7 +126,11 @@ Function .onInstSuccess
     ${GetOptions} $CMDLINE "/R" $R0
     ${IfNot} ${Errors}
         ${GetOptions} $CMDLINE "/ARGS" $R1
-        Exec '"$INSTDIR\prism.exe" $R1'
+        ${If} ${Errors}
+            Exec '"$INSTDIR\prism.exe"'
+        ${Else}
+            Exec '"$INSTDIR\prism.exe" $R1'
+        ${EndIf}
     ${EndIf}
 FunctionEnd
 

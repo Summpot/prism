@@ -132,6 +132,8 @@
   "client_logs_filter": "筛选日志…",
   "client_logs_scroll": "滚动吸附：{state}",
   "client_logs_auto_scroll": "自动滚屏",
+  "client_logs_wrap": "自动换行：{state}",
+  "client_logs_word_wrap": "自动换行",
   "client_logs_on": "开启",
   "client_logs_paused": "暂停",
   "client_logs_off": "关闭",

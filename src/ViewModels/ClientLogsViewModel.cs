@@ -31,6 +31,12 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     private string _scrollButtonText = "";
 
     [ObservableProperty]
+    private bool _isWordWrap = true;
+
+    [ObservableProperty]
+    private string _wrapButtonText = "";
+
+    [ObservableProperty]
     private bool _hasLogs;
 
     [ObservableProperty]
@@ -56,6 +62,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     {
         _client.LogsUpdated += OnLogsUpdated;
         UpdateScrollButtonText();
+        UpdateWrapButtonText();
         OnLogsUpdated(_client.CurrentLogs);
     }
 
@@ -63,6 +70,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     {
         base.OnLocaleChanged();
         UpdateScrollButtonText();
+        UpdateWrapButtonText();
     }
 
     public void OnNavigatedTo()
@@ -90,6 +98,15 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         {
             CopyButtonText = I18nText.T("client_logs_copy_all", "复制全部");
         }
+    }
+
+    private void UpdateWrapButtonText()
+    {
+        string stateStr = IsWordWrap
+            ? I18nText.T("client_logs_on", "开启")
+            : I18nText.T("client_logs_off", "关闭");
+        string template = I18nText.T("client_logs_wrap", "自动换行：{state}");
+        WrapButtonText = template.Replace("{state}", stateStr);
     }
 
     private void OnLogsUpdated(List<ClientLogEntry> logs)
@@ -195,6 +212,15 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         UpdateScrollButtonText();
     }
 
+    partial void OnIsWordWrapChanged(bool value)
+    {
+        UpdateWrapButtonText();
+        if (AutoScroll && IsAtBottom)
+        {
+            ScrollToBottomRequested?.Invoke();
+        }
+    }
+
     partial void OnIsAtBottomChanged(bool value)
     {
         UpdateScrollButtonText();
@@ -205,6 +231,12 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     public void SetFilter(string level)
     {
         FilterLevel = level;
+    }
+
+    [RelayCommand]
+    public void ToggleWordWrap()
+    {
+        IsWordWrap = !IsWordWrap;
     }
 
     [RelayCommand]

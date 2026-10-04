@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Avalonia;
+using Avalonia.Controls.Primitives;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
 
@@ -9,6 +10,14 @@ namespace Prism.Common;
 
 public static class Converters
 {
+    public static readonly IValueConverter BoolToTextWrapping =
+        new FuncValueConverter<bool, TextWrapping>(wrap =>
+            wrap ? TextWrapping.Wrap : TextWrapping.NoWrap);
+
+    public static readonly IValueConverter BoolToHorizontalScrollBarVisibility =
+        new FuncValueConverter<bool, ScrollBarVisibility>(wrap =>
+            wrap ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto);
+
     public static readonly IValueConverter BooleanNegation =
         new FuncValueConverter<bool, bool>(b => !b);
 

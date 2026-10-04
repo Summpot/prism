@@ -132,6 +132,8 @@
   "client_logs_filter": "Filter logs…",
   "client_logs_scroll": "Scroll follow: {state}",
   "client_logs_auto_scroll": "Auto-scroll",
+  "client_logs_wrap": "Word wrap: {state}",
+  "client_logs_word_wrap": "Word wrap",
   "client_logs_on": "on",
   "client_logs_paused": "paused",
   "client_logs_off": "off",

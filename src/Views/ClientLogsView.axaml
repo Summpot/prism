@@ -1,5 +1,6 @@
 <UserControl
     x:Class="Prism.Views.ClientLogsView"
+    x:Name="Root"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -47,6 +48,11 @@
                         Command="{Binding ToggleAutoScrollCommand}"
                         Content="{Binding ScrollButtonText}"/>
 
+                <!-- Auto-Wrap Button -->
+                <Button Classes="Outline"
+                        Command="{Binding ToggleWordWrapCommand}"
+                        Content="{Binding WrapButtonText}"/>
+
                 <!-- Clear Logs Button -->
                 <Button Classes="Outline"
                         Command="{Binding ClearLogsCommand}">
@@ -89,7 +95,8 @@
                     IsVisible="{Binding HasLogs}"
                     ItemsSource="{Binding FilteredLogs}"
                     Background="Transparent"
-                    BorderThickness="0">
+                    BorderThickness="0"
+                    ScrollViewer.HorizontalScrollBarVisibility="{Binding IsWordWrap, Converter={x:Static common:Converters.BoolToHorizontalScrollBarVisibility}}">
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="native:ClientLogEntry">
                             <Grid ColumnDefinitions="Auto, Auto, Auto, *" Margin="0,1">
@@ -131,7 +138,7 @@
                                     Grid.Column="3"
                                     Text="{Binding Message}"
                                     FontFamily="{DynamicResource MonoFont}"
-                                    TextWrapping="Wrap"
+                                    TextWrapping="{Binding #Root.((vm:ClientLogsViewModel)DataContext).IsWordWrap, Converter={x:Static common:Converters.BoolToTextWrapping}}"
                                     VerticalAlignment="Center"/>
                             </Grid>
                         </DataTemplate>

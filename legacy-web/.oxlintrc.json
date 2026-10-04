@@ -1,7 +1,0 @@
-{
-	"ignorePatterns": ["src/components/ui/**", "dist/**", "node_modules/**"],
-	"rules": {
-		"no-underscore-dangle": "off",
-		"react/set-state-in-effect": "warn"
-	}
-}

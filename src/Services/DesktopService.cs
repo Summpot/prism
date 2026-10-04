@@ -207,7 +207,7 @@ public static class DesktopService
                 if (key == null) return;
                 if (enable)
                 {
-                    string cmd = silent ? $"\"{exePath}\" --silent" : $"\"{exePath}\"";
+                    string cmd = silent ? $"\"{exePath}\" --autostart" : $"\"{exePath}\"";
                     key.SetValue("Prism", cmd);
                 }
                 else
@@ -223,7 +223,7 @@ public static class DesktopService
                 if (enable)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                    string args = silent ? " --silent" : "";
+                    string args = silent ? " --autostart" : "";
                     var desktop = new StringBuilder();
                     desktop.AppendLine("[Desktop Entry]");
                     desktop.AppendLine("Type=Application");
@@ -246,7 +246,7 @@ public static class DesktopService
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                     string argsXml = silent
-                        ? "\n    <string>--silent</string>"
+                        ? "\n    <string>--autostart</string>"
                         : "";
                     var plist = $"""
 <?xml version="1.0" encoding="UTF-8"?>

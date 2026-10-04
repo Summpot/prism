@@ -84,7 +84,7 @@ pub fn parse_minisign_signature(raw: &str) -> anyhow::Result<Signature> {
 
 pub fn current_platform_keys() -> &'static [&'static str] {
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return &["windows-x86_64", "windows-x86_64-nsis"];
+    return &["windows-x86_64"];
     #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
     return &["windows-aarch64"];
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -92,9 +92,9 @@ pub fn current_platform_keys() -> &'static [&'static str] {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     return &["darwin-aarch64"];
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    return &["linux-x86_64", "linux-x86_64-appimage"];
+    return &["linux-x86_64"];
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    return &["linux-aarch64", "linux-aarch64-appimage"];
+    return &["linux-aarch64"];
 
     #[cfg(not(any(
         all(target_os = "windows", any(target_arch = "x86_64", target_arch = "aarch64")),
@@ -276,80 +276,11 @@ pub async fn download_and_install_update(
 
     #[cfg(target_os = "windows")]
     {
-        if filename.ends_with(".zip") {
-            let unpack_dir = temp_dir.join(format!("prism-unpack-{}", version));
-            let _ = std::fs::create_dir_all(&unpack_dir);
-            // bsdtar is built into Windows 10/11
-            let status = std::process::Command::new("tar")
-                .args(["-xf", temp_asset_path.to_str().unwrap(), "-C", unpack_dir.to_str().unwrap()])
-                .status();
-
-            let mut extracted_exe = if status.map(|s| s.success()).unwrap_or(false) {
-                find_best_executable(&unpack_dir)
-            } else {
-                None
-            };
-
-            if extracted_exe.is_none() {
-                // Fallback to PowerShell Expand-Archive if tar is unavailable or fails
-                let _ = std::process::Command::new("powershell")
-                    .args([
-                        "-NoProfile",
-                        "-Command",
-                        &format!(
-                            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-                            temp_asset_path.display(),
-                            unpack_dir.display()
-                        ),
-                    ])
-                    .status();
-
-                extracted_exe = find_best_executable(&unpack_dir);
-            }
-
-            if let Some(exe_path) = extracted_exe {
-                let name = exe_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_ascii_lowercase();
-                if name.contains("setup") || name.contains("installer") {
-                    tracing::info!(path = ?exe_path, "spawning extracted NSIS installer helper");
-                    spawn_windows_installer_and_restart(&exe_path)?;
-                } else {
-                    if let Ok(current_exe) = std::env::current_exe() {
-                        if let Some(target_dir) = current_exe.parent() {
-                            if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
-                                for entry in entries.flatten() {
-                                    let p = entry.path();
-                                    if p != exe_path && p.is_file() {
-                                        if let Some(fname) = p.file_name() {
-                                            let dest = target_dir.join(fname);
-                                            let _ = std::fs::copy(&p, &dest);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    self_replace::self_replace(&exe_path)?;
-                    restart_app()?;
-                }
-            } else {
-                anyhow::bail!("failed to extract or locate executable in downloaded Windows update archive");
-            }
-        } else if filename.ends_with(".exe") {
-            let name = filename.to_ascii_lowercase();
-            if name.contains("setup") || name.contains("installer") {
-                tracing::info!(path = ?temp_asset_path, "spawning NSIS installer helper");
-                spawn_windows_installer_and_restart(&temp_asset_path)?;
-            } else {
-                self_replace::self_replace(&temp_asset_path)?;
-                restart_app()?;
-            }
+        if filename.ends_with(".exe") {
+            tracing::info!(path = ?temp_asset_path, "spawning Windows NSIS installer to update Prism");
+            spawn_windows_installer_and_restart(&temp_asset_path)?;
         } else {
-            self_replace::self_replace(&temp_asset_path)?;
-            restart_app()?;
+            anyhow::bail!("unsupported Windows update package format: {filename}");
         }
     }
 
@@ -391,11 +322,12 @@ pub async fn download_and_install_update(
         if let Ok(appimage_path) = std::env::var("APPIMAGE") {
             tracing::info!(source = ?target_path, target = ?appimage_path, "replacing running AppImage");
             std::fs::copy(&target_path, &appimage_path)?;
-            let args: Vec<String> = std::env::args().skip(1).collect();
+            let args = clean_restart_args(std::env::args().skip(1));
             let pid = std::process::id();
             std::process::Command::new(&appimage_path)
                 .args(args)
                 .env("PRISM_RESTART_PID", pid.to_string())
+                .env("PRISM_UPDATED", "1")
                 .spawn()?;
             std::process::exit(0);
         } else {
@@ -443,7 +375,7 @@ pub async fn download_and_install_update(
                     .status();
 
                 let _ = std::process::Command::new("open")
-                    .arg(target_app.to_str().unwrap())
+                    .args(["-n", target_app.to_str().unwrap(), "--args", "--updated"])
                     .spawn();
                 std::process::exit(0);
             } else {
@@ -464,34 +396,20 @@ pub async fn download_and_install_update(
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
-fn find_best_executable(dir: &std::path::Path) -> Option<PathBuf> {
-    let mut exe_candidates = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_file() && p.extension().map(|e| e == "exe").unwrap_or(false) {
-                exe_candidates.push(p);
-            }
-        }
+pub fn clean_restart_args<I, S>(raw_args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut cleaned: Vec<String> = raw_args
+        .into_iter()
+        .map(|s| s.as_ref().to_string())
+        .filter(|a| a != "--autostart")
+        .collect();
+    if !cleaned.iter().any(|a| a == "--updated") {
+        cleaned.push("--updated".to_string());
     }
-    let mut installer_candidate = None;
-    for cand in exe_candidates {
-        let name = cand
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_ascii_lowercase();
-        if name.contains("uninstall") {
-            continue;
-        }
-        if name.contains("setup") || name.contains("installer") {
-            installer_candidate = Some(cand);
-        } else {
-            return Some(cand);
-        }
-    }
-    installer_candidate
+    cleaned
 }
 
 #[cfg(target_os = "windows")]
@@ -502,13 +420,14 @@ fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyh
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
     let pid = std::process::id();
-    let current_args: Vec<String> = std::env::args().skip(1).collect();
+    let current_args = clean_restart_args(std::env::args().skip(1));
 
     tracing::info!(
         installer = ?installer_path,
         target_dir = ?install_dir,
         current_exe = ?current_exe,
         pid,
+        args = ?current_args,
         "spawning Windows installer helper to replace binary and restart"
     );
 
@@ -531,8 +450,10 @@ fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyh
          Start-Sleep -Milliseconds 600; \
          $p = Start-Process -FilePath '{ps_installer}' -ArgumentList '/S', \"/D={ps_install_dir}\" -Wait -PassThru; \
          Start-Sleep -Milliseconds 500; \
+         $env:PRISM_UPDATED = '1'; \
+         $env:PRISM_RESTART_PID = '{pid}'; \
          if (Test-Path -LiteralPath '{ps_target_exe}') {{ \
-             Start-Process -FilePath '{ps_target_exe}' {args_clause}; \
+             Start-Process -FilePath '{ps_target_exe}' -WindowStyle Normal {args_clause}; \
          }} \
          Remove-Item -LiteralPath '{ps_installer}' -Force -ErrorAction SilentlyContinue;"
     );
@@ -557,12 +478,13 @@ fn spawn_windows_installer_and_restart(installer_path: &std::path::Path) -> anyh
 
 pub fn restart_app() -> anyhow::Result<()> {
     let current_exe = std::env::current_exe()?;
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = clean_restart_args(std::env::args().skip(1));
     let pid = std::process::id();
-    tracing::info!(exe = ?current_exe, pid, "restarting Prism client");
+    tracing::info!(exe = ?current_exe, pid, args = ?args, "restarting Prism client");
     std::process::Command::new(current_exe)
         .args(args)
         .env("PRISM_RESTART_PID", pid.to_string())
+        .env("PRISM_UPDATED", "1")
         .spawn()?;
     std::process::exit(0);
 }
@@ -609,5 +531,19 @@ mod tests {
         assert!(parse_minisign_signature("").is_err());
         assert!(parse_minisign_signature("   ").is_err());
         assert!(parse_minisign_signature("not-a-sig").is_err());
+    }
+
+    #[test]
+    fn test_clean_restart_args() {
+        let raw = vec!["--autostart", "--foo", "bar"];
+        let cleaned = clean_restart_args(raw);
+        assert_eq!(cleaned, vec!["--foo", "bar", "--updated"]);
+        assert!(!cleaned.iter().any(|a| a == "--autostart"));
+        assert!(cleaned.iter().any(|a| a == "--updated"));
+
+        // If already has --updated, don't duplicate
+        let raw2 = vec!["--updated"];
+        let cleaned2 = clean_restart_args(raw2);
+        assert_eq!(cleaned2, vec!["--updated"]);
     }
 }

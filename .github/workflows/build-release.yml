@@ -232,22 +232,14 @@ jobs:
             Write-Warning "WiX Toolset not found; skipping MSI build"
           }
 
-          # 3. Updater Zip archive (contains standalone desktop binary for updater self_replace compatibility)
-          $zipOut = Join-Path $outdir "prism_${version}_x64.nsis.zip"
+          # 3. Optional standalone zip archive
+          $zipOut = Join-Path $outdir "prism_${version}_x64.zip"
           $filesToZip = @($binPath)
           $angleDll = Join-Path $binDir "av_libglesv2.dll"
           if (Test-Path $angleDll) {
             $filesToZip += $angleDll
           }
           Compress-Archive -Path $filesToZip -DestinationPath $zipOut -CompressionLevel NoCompression -Force
-
-          # 4. Sign updater artifacts with Tauri CLI signer
-          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-            Get-ChildItem -Path $outdir -File | Where-Object { $_.Extension -in '.exe', '.msi', '.zip' } | ForEach-Object {
-              Write-Host "Signing $($_.Name)..."
-              npx --yes @tauri-apps/cli signer sign $_.FullName
-            }
-          }
 
       - name: Package desktop (macos)
         if: matrix.desktop && runner.os == 'macOS'
@@ -309,15 +301,6 @@ jobs:
           # 3. Package App tarball for updater
           tar -czf "${OUTDIR}/Prism_${VERSION}_${DMG_ARCH}.app.tar.gz" Prism.app
 
-          # 4. Sign updater artifacts with Tauri CLI signer
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-            for f in "${OUTDIR}"/*.dmg "${OUTDIR}"/*.tar.gz; do
-              if [[ -f "$f" ]]; then
-                echo "Signing $f..."
-                npx --yes @tauri-apps/cli signer sign "$f"
-              fi
-            done
-          fi
 
       - name: Package desktop (linux)
         if: matrix.desktop && runner.os == 'Linux'
@@ -416,15 +399,6 @@ jobs:
             tar -czf "${OUTDIR}/Prism_${VERSION}_${ARCH}.AppImage.tar.gz" -C "${OUTDIR}" "Prism_${VERSION}_${ARCH}.AppImage"
           fi
 
-          # 4. Sign updater artifacts with Tauri CLI signer
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-            for f in "${OUTDIR}"/*.AppImage "${OUTDIR}"/*.tar.gz "${OUTDIR}"/*.deb "${OUTDIR}"/*.rpm; do
-              if [[ -f "$f" ]]; then
-                echo "Signing $f..."
-                npx --yes @tauri-apps/cli signer sign "$f"
-              fi
-            done
-          fi
 
       - name: Prepare artifacts (headless unix)
         if: ${{ !matrix.desktop && runner.os != 'Windows' }}
@@ -530,6 +504,29 @@ jobs:
           git tag -f dev "${GITHUB_SHA}"
           git push -f origin dev || true
 
+      - name: Install Minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Sign updater artifacts with Minisign
+        env:
+          KEY_CONTENT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEY_CONTENT" ]; then
+            echo "$KEY_CONTENT" > /tmp/minisign.key
+            for f in dist/*.exe dist/*.msi dist/*.zip dist/*.AppImage dist/*.tar.gz dist/*.dmg; do
+              if [ -f "$f" ]; then
+                echo "Signing $f..."
+                if [ -n "$KEY_PASSWORD" ]; then
+                  echo "$KEY_PASSWORD" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig"
+                else
+                  minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig"
+                fi
+              fi
+            done
+            rm -f /tmp/minisign.key
+          fi
+
       - name: Generate updater manifest (latest.json)
         shell: bash
         run: |
@@ -579,10 +576,10 @@ jobs:
             return true;
           }
 
-          // Windows x86_64 (prefer NSIS zip for Tauri updater compatibility, then setup.exe)
-          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*\.nsis\.zip$/i) ||
-          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*(setup\.exe|\.zip)$/i) ||
-          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(setup\.exe|\.nsis\.zip|\.zip)$/i);
+          // Windows x86_64: prioritize direct NSIS setup installer (.exe)
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*-setup\.exe$/i) ||
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(setup\.exe|\.exe)$/i) ||
+          registerPlatform(["windows-x86_64", "windows-x86_64-nsis"], /(x64|x86_64).*\.zip$/i);
 
           // Windows x86_64 MSI
           registerPlatform("windows-x86_64-msi", /(x64|x86_64).*\.msi$/i);

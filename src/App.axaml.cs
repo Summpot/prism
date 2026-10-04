@@ -60,8 +60,12 @@ public partial class App : Application
             };
 
             var args = desktop.Args ?? Array.Empty<string>();
-            bool isSilent = args.Any(a => a == "--silent" || a == "--minimized" || a == "--autostart");
-            if (isSilent)
+            bool isRestartOrUpdated = args.Any(a => a == "--updated" || a == "--show") ||
+                                      !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED")) ||
+                                      !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_RESTART_PID"));
+
+            bool isAutostart = !isRestartOrUpdated && args.Contains("--autostart");
+            if (isAutostart)
             {
                 if (_trayReady)
                 {
@@ -76,6 +80,19 @@ public partial class App : Application
             else
             {
                 mainWindow.Show();
+                mainWindow.WindowState = WindowState.Normal;
+                mainWindow.Activate();
+
+                // Ensure the window is brought to front and not hidden even if parent process had SW_HIDE
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!mainWindow.IsVisible)
+                    {
+                        mainWindow.Show();
+                    }
+                    mainWindow.WindowState = WindowState.Normal;
+                    mainWindow.Activate();
+                }, DispatcherPriority.Loaded);
             }
 
             foreach (var arg in args)
@@ -86,16 +103,30 @@ public partial class App : Application
                 }
             }
 
-            _ = RunStartupLifecycleAsync();
+            _ = RunStartupLifecycleAsync(args);
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    private async Task RunStartupLifecycleAsync()
+    private async Task RunStartupLifecycleAsync(string[] args)
     {
         try
         {
+            bool wasUpdated = args.Any(a => a == "--updated") ||
+                              !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PRISM_UPDATED"));
+            if (wasUpdated)
+            {
+                var ver = typeof(App).Assembly.GetName().Version;
+                string verStr = ver == null ? "v0.1.0" : $"v{ver.ToString(3)}";
+                Dispatcher.UIThread.Post(() =>
+                {
+                    AppServices.ShowSuccess(
+                        Messages.ClientUpdateUpToDate(verStr),
+                        Messages.ClientUpdatePromptTitle());
+                });
+            }
+
             var client = NativeClientService.Instance;
             var cfg = client.GetConfig();
 
@@ -155,6 +186,9 @@ public partial class App : Application
 
             try
             {
+                AppServices.ShowInfo(
+                    Messages.ClientUpdatePromptUpdating(),
+                    Messages.ClientUpdatePromptTitle());
                 await NativeClientService.Instance.InstallUpdateAsync(channel);
             }
             catch (Exception installEx)

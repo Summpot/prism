@@ -316,6 +316,9 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
         {
             IsInstallingUpdate = true;
             UpdateStatusMessage = Messages.ClientUpdateInstalling();
+            AppServices.ShowInfo(
+                Messages.ClientUpdatePromptUpdating(),
+                Messages.ClientUpdatePromptTitle());
             await _client.InstallUpdateAsync(UpdateChannel);
             UpdateStatusMessage = Messages.ClientUpdatePromptUpdating();
         }

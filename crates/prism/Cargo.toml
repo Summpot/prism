@@ -27,7 +27,6 @@ dashmap = "6.2"
 directories = "6.0"
 futures-util = "0.3"
 humantime = "2.4"
-keyring = "3"
 instant-acme = { version = "0.8.5", default-features = false, features = [
 	"hyper-rustls",
 	"ring",
@@ -38,7 +37,6 @@ pin-project-lite = "0.2"
 quinn = "0.11"
 rand = "0.10"
 rcgen = "0.14"
-rusqlite = { version = "0.40", features = ["bundled"] }
 regex = "1.13"
 # Explicitly enable ring so the binary always has a usable rustls crypto backend.
 # Quinn may also enable aws-lc-rs; main installs ring as the process default.
@@ -94,6 +92,7 @@ hickory-resolver = { version = "0.26.2", default-features = false, features = [
 	"system-config",
 	"tokio",
 ] }
+redb = "4.3.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

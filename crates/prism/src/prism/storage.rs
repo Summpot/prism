@@ -1,14 +1,15 @@
 use std::{
+    collections::HashMap,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use anyhow::Context;
-use rusqlite::{Connection, params};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
 use crate::prism::admin::ClientProfile;
-use crate::prism::secrets;
+use crate::prism::auth::{PersistedAuthState, TokenRecord, UserRecord};
 use crate::prism::tunnel::optimizer::OptimizerStatsSnapshot;
 
 // ============================================================================
@@ -73,7 +74,48 @@ impl Default for ClientConfigState {
     }
 }
 
-/// Partial update for `/client/config` and Tauri `client_save_config`.
+/// Global client settings independent of individual tunnel profiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClientAppSettings {
+    pub active_profile_id: Option<String>,
+    pub device_id: String,
+    pub auto_connect: bool,
+    pub auto_connect_panel: bool,
+    pub management_url: String,
+    pub auto_check_update: bool,
+    pub update_channel: String,
+    pub autostart: bool,
+    pub silent_autostart: bool,
+    pub optimizer_enabled: bool,
+    pub optimizer_zstd_level: i32,
+    pub optimizer_adaptive_flush: bool,
+    pub optimizer_flush_interval_ms: u64,
+    pub optimizer_buffer_threshold: usize,
+}
+
+impl Default for ClientAppSettings {
+    fn default() -> Self {
+        Self {
+            active_profile_id: None,
+            device_id: String::new(),
+            auto_connect: true,
+            auto_connect_panel: true,
+            management_url: String::new(),
+            auto_check_update: true,
+            update_channel: "release".into(),
+            autostart: false,
+            silent_autostart: true,
+            optimizer_enabled: true,
+            optimizer_zstd_level: 3,
+            optimizer_adaptive_flush: true,
+            optimizer_flush_interval_ms: 20,
+            optimizer_buffer_threshold: 64 * 1024,
+        }
+    }
+}
+
+/// Partial update for `/client/config` and UniFFI `client_save_config`.
 /// Missing fields leave the stored value unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClientConfigPatch {
@@ -263,12 +305,24 @@ pub struct ClientConfigResponse {
 }
 
 // ============================================================================
+// redb Table Definitions
+// ============================================================================
+
+pub const TABLE_PROFILES: TableDefinition<&str, &[u8]> = TableDefinition::new("profiles");
+pub const TABLE_SETTINGS: TableDefinition<&str, &str> = TableDefinition::new("settings");
+pub const TABLE_CUMULATIVE_STATS: TableDefinition<&str, &[u8]> = TableDefinition::new("cumulative_stats");
+pub const TABLE_MIDDLEWARE_CONFIGS: TableDefinition<&str, &[u8]> = TableDefinition::new("middleware_configs");
+pub const TABLE_AUTH_USERS: TableDefinition<&str, &[u8]> = TableDefinition::new("auth_users");
+pub const TABLE_AUTH_TOKENS: TableDefinition<&str, &[u8]> = TableDefinition::new("auth_tokens");
+pub const TABLE_AUTH_META: TableDefinition<&str, &str> = TableDefinition::new("auth_meta");
+
+// ============================================================================
 // Storage Engine
 // ============================================================================
 
+#[derive(Clone)]
 pub struct StorageEngine {
-    conn: Arc<Mutex<Connection>>,
-    use_keyring: bool,
+    db: Arc<Database>,
 }
 
 impl std::fmt::Debug for StorageEngine {
@@ -278,7 +332,7 @@ impl std::fmt::Debug for StorageEngine {
 }
 
 impl StorageEngine {
-    /// Opens or creates the SQLite database at the specified file path.
+    /// Opens or creates the redb database at the specified file path.
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -289,8 +343,13 @@ impl StorageEngine {
             }
         }
 
-        let conn = Connection::open(path)
-            .with_context(|| format!("failed to open or create sqlite at {}", path.display()))?;
+        let db = if path.exists() {
+            Database::open(path)
+                .with_context(|| format!("failed to open redb at {}", path.display()))?
+        } else {
+            Database::create(path)
+                .with_context(|| format!("failed to create redb at {}", path.display()))?
+        };
 
         #[cfg(unix)]
         {
@@ -298,81 +357,24 @@ impl StorageEngine {
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
         }
 
-        // Configure connection for high-concurrency, low-latency daemon operations
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA busy_timeout = 5000;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA foreign_keys = ON;",
-        )?;
-
-        #[cfg(unix)]
+        // Initialize all tables on startup
+        let write_txn = db.begin_write()?;
         {
-            use std::os::unix::fs::PermissionsExt;
-            for suffix in ["-wal", "-shm"] {
-                let side_file = format!("{}{suffix}", path.display());
-                let side_path = std::path::Path::new(&side_file);
-                if side_path.exists() {
-                    let _ = std::fs::set_permissions(side_path, std::fs::Permissions::from_mode(0o600));
-                }
-            }
+            let _ = write_txn.open_table(TABLE_PROFILES)?;
+            let _ = write_txn.open_table(TABLE_SETTINGS)?;
+            let _ = write_txn.open_table(TABLE_CUMULATIVE_STATS)?;
+            let _ = write_txn.open_table(TABLE_MIDDLEWARE_CONFIGS)?;
+            let _ = write_txn.open_table(TABLE_AUTH_USERS)?;
+            let _ = write_txn.open_table(TABLE_AUTH_TOKENS)?;
+            let _ = write_txn.open_table(TABLE_AUTH_META)?;
         }
+        write_txn.commit()?;
 
-        // Create structured tables
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS client_profiles (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                server_addr TEXT NOT NULL,
-                transport TEXT NOT NULL,
-                auth_token TEXT NOT NULL DEFAULT '',
-                listen_addr TEXT NOT NULL,
-                fake_lan_broadcast INTEGER NOT NULL DEFAULT 1,
-                display_order INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            );
+        Ok(Self { db: Arc::new(db) })
+    }
 
-            CREATE TABLE IF NOT EXISTS client_state (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS cumulative_stats (
-                scope TEXT PRIMARY KEY,
-                raw_bytes INTEGER NOT NULL DEFAULT 0,
-                wire_bytes INTEGER NOT NULL DEFAULT 0,
-                saved_bytes INTEGER NOT NULL DEFAULT 0,
-                saved_ratio REAL NOT NULL DEFAULT 0.0,
-                sessions_count INTEGER NOT NULL DEFAULT 0,
-                last_session_at INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS middleware_configs (
-                name TEXT PRIMARY KEY,
-                config_json TEXT NOT NULL,
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            );
-
-            CREATE TABLE IF NOT EXISTS client_credentials (
-                profile_id TEXT PRIMARY KEY,
-                server_addr TEXT NOT NULL,
-                token_id TEXT NOT NULL DEFAULT '',
-                token_type TEXT NOT NULL DEFAULT 'static',
-                user_id TEXT NOT NULL DEFAULT '',
-                username TEXT NOT NULL DEFAULT '',
-                issued_at INTEGER NOT NULL DEFAULT 0,
-                expires_at INTEGER,
-                token_blob TEXT NOT NULL DEFAULT '',
-                keyring_ok INTEGER NOT NULL DEFAULT 0
-            );",
-        )?;
-
-        let engine = Self {
-            conn: Arc::new(Mutex::new(conn)),
-            use_keyring: !cfg!(test),
-        };
-        engine.migrate_legacy_plaintext_tokens()?;
-        Ok(engine)
+    pub fn db(&self) -> Arc<Database> {
+        self.db.clone()
     }
 
     fn now_unix_ms() -> u64 {
@@ -382,117 +384,21 @@ impl StorageEngine {
             .as_millis() as u64
     }
 
-    fn infer_token_type(token: &str, explicit: &str) -> String {
-        let explicit = explicit.trim();
-        if !explicit.is_empty() {
-            return explicit.to_string();
-        }
-        let token = token.trim();
-        if token.starts_with("prism_cl_") || token.starts_with("prism_adm_") {
-            "oauth_pat".into()
-        } else if token.is_empty() {
-            String::new()
-        } else {
-            "static".into()
-        }
-    }
-
-    fn credential_expired(expires_at: Option<u64>) -> bool {
-        match expires_at {
-            Some(exp) if exp > 0 => Self::now_unix_ms() > exp,
-            _ => false,
-        }
-    }
-
-    fn migrate_legacy_plaintext_tokens(&self) -> anyhow::Result<()> {
-        let profiles = {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-            let mut stmt = conn.prepare(
-                "SELECT id, server_addr, auth_token FROM client_profiles WHERE auth_token != ''",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?;
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r?);
-            }
-            out
-        };
-
-        for (id, server_addr, token) in profiles {
-            let cred = TunnelCredential {
-                profile_id: id.clone(),
-                server_addr,
-                token_id: String::new(),
-                token_type: Self::infer_token_type(&token, ""),
-                user_id: String::new(),
-                username: String::new(),
-                issued_at: Self::now_unix_ms(),
-                expires_at: None,
-                token,
-            };
-            self.upsert_credential(&cred)?;
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-            conn.execute(
-                "UPDATE client_profiles SET auth_token = '' WHERE id = ?1",
-                params![id],
-            )?;
-        }
-
-        let mut active = self.load_active_config_raw()?;
-        if !active.auth_token.trim().is_empty() {
-            if let Some(id) = self.load_active_profile_id()? {
-                let cred = TunnelCredential {
-                    profile_id: id,
-                    server_addr: active.server_addr.clone(),
-                    token_id: active.token_id.clone(),
-                    token_type: Self::infer_token_type(&active.auth_token, &active.token_type),
-                    user_id: active.user_id.clone(),
-                    username: active.username.clone(),
-                    issued_at: Self::now_unix_ms(),
-                    expires_at: active.expires_at,
-                    token: active.auth_token.clone(),
-                };
-                self.upsert_credential(&cred)?;
-            }
-            active.auth_token.clear();
-            self.write_active_config_json(&active)?;
-        }
-
-        Ok(())
-    }
-
     // ========================================================================
-    // Device identity
+    // Device Identity
     // ========================================================================
 
-    /// Returns a stable per-install device id, creating one on first use.
     pub fn load_or_create_device_id(&self) -> anyhow::Result<String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt = conn.prepare("SELECT value FROM client_state WHERE key = 'device_id'")?;
-        let mut rows = stmt.query([])?;
-        if let Some(row) = rows.next()? {
-            let val: String = row.get(0)?;
-            if !val.trim().is_empty() {
-                return Ok(val);
+        {
+            let read_txn = self.db.begin_read()?;
+            let table = read_txn.open_table(TABLE_SETTINGS)?;
+            if let Some(guard) = table.get("device_id")? {
+                let val = guard.value().trim();
+                if !val.is_empty() {
+                    return Ok(val.to_string());
+                }
             }
         }
-        drop(rows);
-        drop(stmt);
 
         let mut bytes = [0u8; 16];
         {
@@ -505,577 +411,221 @@ impl StorageEngine {
             let _ = write!(hex, "{b:02x}");
         }
         let id = format!("prism_dev_{hex}");
-        conn.execute(
-            "INSERT INTO client_state (key, value) VALUES ('device_id', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![id],
-        )?;
+
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_SETTINGS)?;
+            table.insert("device_id", id.as_str())?;
+        }
+        write_txn.commit()?;
+
         Ok(id)
     }
 
     // ========================================================================
-    // Tunnel credentials
+    // Profiles
     // ========================================================================
 
-    /// Inserts or replaces the tunnel credential bound to a profile.
-    pub fn upsert_credential(&self, cred: &TunnelCredential) -> anyhow::Result<()> {
-        let token = cred.token.trim();
-        if cred.profile_id.trim().is_empty() || token.is_empty() {
-            return Ok(());
-        }
-
-        let mut keyring_ok = false;
-        if self.use_keyring && secrets::store_tunnel_token(&cred.profile_id, token) {
-            keyring_ok = true;
-        } else if self.use_keyring {
-            tracing::warn!(
-                profile_id = %cred.profile_id,
-                "storage: system keyring unavailable; storing tunnel token in local SQLite database"
-            );
-        }
-        // Do not store plaintext token in sqlite when the keyring successfully stores it.
-        let token_blob = if keyring_ok {
-            String::new()
-        } else {
-            token.to_string()
-        };
-
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "INSERT INTO client_credentials (
-                profile_id, server_addr, token_id, token_type, user_id, username,
-                issued_at, expires_at, token_blob, keyring_ok
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-             ON CONFLICT(profile_id) DO UPDATE SET
-                server_addr = excluded.server_addr,
-                token_id = excluded.token_id,
-                token_type = excluded.token_type,
-                user_id = excluded.user_id,
-                username = excluded.username,
-                issued_at = excluded.issued_at,
-                expires_at = excluded.expires_at,
-                token_blob = excluded.token_blob,
-                keyring_ok = excluded.keyring_ok",
-            params![
-                cred.profile_id,
-                cred.server_addr,
-                cred.token_id,
-                Self::infer_token_type(token, &cred.token_type),
-                cred.user_id,
-                cred.username,
-                cred.issued_at as i64,
-                cred.expires_at.map(|v| v as i64),
-                token_blob,
-                if keyring_ok { 1i64 } else { 0i64 },
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Loads the credential for a profile, including the raw token when available.
-    pub fn load_credential(&self, profile_id: &str) -> anyhow::Result<Option<TunnelCredential>> {
-        let row = {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-            let mut stmt = conn.prepare(
-                "SELECT server_addr, token_id, token_type, user_id, username, issued_at, expires_at, token_blob, keyring_ok
-                 FROM client_credentials WHERE profile_id = ?1",
-            )?;
-            let mut rows = stmt.query(params![profile_id])?;
-            if let Some(row) = rows.next()? {
-                let expires_at: Option<i64> = row.get(6)?;
-                Some(TunnelCredential {
-                    profile_id: profile_id.to_string(),
-                    server_addr: row.get(0)?,
-                    token_id: row.get(1)?,
-                    token_type: row.get(2)?,
-                    user_id: row.get(3)?,
-                    username: row.get(4)?,
-                    issued_at: row.get::<_, i64>(5)? as u64,
-                    expires_at: expires_at.filter(|v| *v > 0).map(|v| v as u64),
-                    token: row.get::<_, String>(7)?,
-                })
-            } else {
-                None
-            }
-        };
-
-        let Some(mut cred) = row else {
-            return Ok(None);
-        };
-
-        if Self::credential_expired(cred.expires_at) {
-            self.delete_credential(profile_id)?;
-            return Ok(None);
-        }
-
-        if self.use_keyring {
-            if let Some(token) = secrets::load_tunnel_token(profile_id) {
-                cred.token = token;
-            }
-        }
-
-        if cred.token.trim().is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(cred))
-    }
-
-    /// Deletes the credential (keyring + sqlite) for a profile.
-    pub fn delete_credential(&self, profile_id: &str) -> anyhow::Result<()> {
-        if self.use_keyring {
-            secrets::delete_tunnel_token(profile_id);
-        }
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "DELETE FROM client_credentials WHERE profile_id = ?1",
-            params![profile_id],
-        )?;
-        Ok(())
-    }
-
-    fn hydrate_profile_token(&self, profile: &mut ClientProfile) {
-        match self.load_credential(&profile.id) {
-            Ok(Some(cred)) if !cred.token.trim().is_empty() => {
-                profile.auth_token = cred.token;
-            }
-            _ => {}
-        }
-    }
-
-    fn credential_from_profile_and_config(
-        profile_id: &str,
-        profile: Option<&ClientProfile>,
-        config: &ClientConfigState,
-    ) -> Option<TunnelCredential> {
-        let token = config.auth_token.trim();
-        let token = if token.is_empty() {
-            profile.map(|p| p.auth_token.trim()).unwrap_or("")
-        } else {
-            token
-        };
-        if token.is_empty() {
-            return None;
-        }
-        Some(TunnelCredential {
-            profile_id: profile_id.to_string(),
-            server_addr: if !config.server_addr.trim().is_empty() {
-                config.server_addr.clone()
-            } else {
-                profile.map(|p| p.server_addr.clone()).unwrap_or_default()
-            },
-            token_id: config.token_id.clone(),
-            token_type: Self::infer_token_type(token, &config.token_type),
-            user_id: config.user_id.clone(),
-            username: config.username.clone(),
-            issued_at: Self::now_unix_ms(),
-            expires_at: config.expires_at,
-            token: token.to_string(),
-        })
-    }
-
-    /// Inserts or updates a single profile without replacing the rest of the list.
-    pub fn upsert_profile(&self, profile: &ClientProfile) -> anyhow::Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM client_profiles WHERE id = ?1",
-                params![profile.id],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
-        if exists {
-            conn.execute(
-                "UPDATE client_profiles SET
-                    name = ?2,
-                    server_addr = ?3,
-                    transport = ?4,
-                    auth_token = '',
-                    listen_addr = ?5,
-                    fake_lan_broadcast = ?6,
-                    updated_at = unixepoch()
-                 WHERE id = ?1",
-                params![
-                    profile.id,
-                    profile.name,
-                    profile.server_addr,
-                    profile.transport,
-                    profile.listen_addr,
-                    if profile.fake_lan_broadcast {
-                        1i64
-                    } else {
-                        0i64
-                    },
-                ],
-            )?;
-        } else {
-            let next_order: i64 = conn
-                .query_row(
-                    "SELECT IFNULL(MAX(display_order), -1) + 1 FROM client_profiles",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            conn.execute(
-                "INSERT INTO client_profiles (
-                    id, name, server_addr, transport, auth_token, listen_addr,
-                    fake_lan_broadcast, display_order, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, unixepoch())",
-                params![
-                    profile.id,
-                    profile.name,
-                    profile.server_addr,
-                    profile.transport,
-                    profile.listen_addr,
-                    if profile.fake_lan_broadcast {
-                        1i64
-                    } else {
-                        0i64
-                    },
-                    next_order,
-                ],
-            )?;
-        }
-        drop(conn);
-
-        if !profile.auth_token.trim().is_empty() && !profile.auth_token.starts_with("***") {
-            self.upsert_credential(&TunnelCredential {
-                profile_id: profile.id.clone(),
-                server_addr: profile.server_addr.clone(),
-                token_id: String::new(),
-                token_type: Self::infer_token_type(&profile.auth_token, ""),
-                user_id: String::new(),
-                username: String::new(),
-                issued_at: Self::now_unix_ms(),
-                expires_at: None,
-                token: profile.auth_token.clone(),
-            })?;
-        }
-        Ok(())
-    }
-
-    // ========================================================================
-    // Client Profiles Operations
-    // ========================================================================
-
-    /// Loads all saved client profiles ordered by display order and creation.
     pub fn load_profiles(&self) -> anyhow::Result<Vec<ClientProfile>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt = conn.prepare(
-            "SELECT id, name, server_addr, transport, auth_token, listen_addr, fake_lan_broadcast
-             FROM client_profiles
-             ORDER BY display_order ASC, updated_at ASC",
-        )?;
-
-        let rows = stmt.query_map([], |row| {
-            let fake_lan: i64 = row.get(6)?;
-            Ok(ClientProfile {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                server_addr: row.get(2)?,
-                transport: row.get(3)?,
-                auth_token: row.get(4)?,
-                listen_addr: row.get(5)?,
-                fake_lan_broadcast: fake_lan != 0,
-            })
-        })?;
-
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_PROFILES)?;
         let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        drop(stmt);
-        drop(conn);
-        for profile in &mut out {
-            self.hydrate_profile_token(profile);
+        for item in table.iter()? {
+            let (_, v_guard) = item?;
+            if let Ok(profile) = serde_json::from_slice::<ClientProfile>(v_guard.value()) {
+                out.push(profile);
+            }
         }
         Ok(out)
     }
 
-    /// Persists the full list of client profiles atomically in a single transaction.
-    /// Empty `auth_token` values keep any previously stored credential.
+    pub fn load_profile(&self, id: &str) -> anyhow::Result<Option<ClientProfile>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_PROFILES)?;
+        if let Some(guard) = table.get(id)? {
+            let profile = serde_json::from_slice::<ClientProfile>(guard.value())?;
+            return Ok(Some(profile));
+        }
+        Ok(None)
+    }
+
     pub fn save_profiles(&self, profiles: &[ClientProfile]) -> anyhow::Result<()> {
-        let existing_ids: Vec<String> = {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-            let mut stmt = conn.prepare("SELECT id FROM client_profiles")?;
-            let rows = stmt.query_map([], |row| row.get(0))?;
-            let mut ids = Vec::new();
-            for r in rows {
-                ids.push(r?);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_PROFILES)?;
+            let existing_keys: Vec<String> = table
+                .iter()?
+                .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for k in existing_keys {
+                table.remove(k.as_str())?;
             }
-            ids
+            for p in profiles {
+                let bytes = serde_json::to_vec(p)?;
+                table.insert(p.id.as_str(), bytes.as_slice())?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn upsert_profile(&self, profile: &ClientProfile) -> anyhow::Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_PROFILES)?;
+            let bytes = serde_json::to_vec(profile)?;
+            table.insert(profile.id.as_str(), bytes.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_profile(&self, id: &str) -> anyhow::Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_PROFILES)?;
+            table.remove(id)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    // ========================================================================
+    // Active Profile & Config
+    // ========================================================================
+
+    pub fn load_active_profile_id(&self) -> anyhow::Result<Option<String>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_SETTINGS)?;
+        if let Some(guard) = table.get("active_profile_id")? {
+            let val = guard.value().trim();
+            if !val.is_empty() {
+                return Ok(Some(val.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn save_active_profile_id(&self, id: &str) -> anyhow::Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_SETTINGS)?;
+            table.insert("active_profile_id", id)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn load_app_settings(&self) -> anyhow::Result<ClientAppSettings> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_SETTINGS)?;
+        if let Some(guard) = table.get("app_settings")? {
+            if let Ok(settings) = serde_json::from_str::<ClientAppSettings>(guard.value()) {
+                return Ok(settings);
+            }
+        }
+        Ok(ClientAppSettings::default())
+    }
+
+    pub fn save_app_settings(&self, settings: &ClientAppSettings) -> anyhow::Result<()> {
+        let json = serde_json::to_string(settings)?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_SETTINGS)?;
+            table.insert("app_settings", json.as_str())?;
+            if let Some(ref pid) = settings.active_profile_id {
+                table.insert("active_profile_id", pid.as_str())?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn load_active_config(&self) -> anyhow::Result<ClientConfigState> {
+        let active_id = self.load_active_profile_id()?;
+        let profiles = self.load_profiles().unwrap_or_default();
+        let target_profile = if let Some(ref aid) = active_id {
+            profiles.iter().find(|p| &p.id == aid).cloned()
+        } else {
+            profiles.first().cloned()
         };
 
-        let mut conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let tx = conn.transaction()?;
-        tx.execute("DELETE FROM client_profiles", [])?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO client_profiles (id, name, server_addr, transport, auth_token, listen_addr, fake_lan_broadcast, display_order, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, unixepoch())",
-            )?;
-            for (idx, p) in profiles.iter().enumerate() {
-                stmt.execute(params![
-                    p.id,
-                    p.name,
-                    p.server_addr,
-                    p.transport,
-                    p.listen_addr,
-                    if p.fake_lan_broadcast { 1i64 } else { 0i64 },
-                    idx as i64,
-                ])?;
-            }
-        }
-        tx.commit()?;
-        drop(conn);
+        let app_settings = self.load_app_settings().unwrap_or_default();
 
-        let keep: std::collections::HashSet<&str> =
-            profiles.iter().map(|p| p.id.as_str()).collect();
-        for id in existing_ids {
-            if !keep.contains(id.as_str()) {
-                let _ = self.delete_credential(&id);
-            }
+        let mut state = ClientConfigState::default();
+        state.active_profile_id_apply(&app_settings);
+
+        if let Some(p) = target_profile {
+            state.profile_name = p.name;
+            state.server_addr = p.server_addr;
+            state.transport = p.transport;
+            state.auth_token = p.auth_token;
+            state.listen_addr = p.listen_addr;
+            state.fake_lan_broadcast = p.fake_lan_broadcast;
         }
-        for p in profiles {
-            if !p.auth_token.trim().is_empty() {
-                self.upsert_credential(&TunnelCredential {
-                    profile_id: p.id.clone(),
-                    server_addr: p.server_addr.clone(),
-                    token_id: String::new(),
-                    token_type: Self::infer_token_type(&p.auth_token, ""),
-                    user_id: String::new(),
-                    username: String::new(),
-                    issued_at: Self::now_unix_ms(),
-                    expires_at: None,
-                    token: p.auth_token.clone(),
-                })?;
-            }
-        }
-        Ok(())
+
+        Ok(state)
     }
 
-    // ========================================================================
-    // Active Profile & Form Config State Operations
-    // ========================================================================
-
-    /// Loads the currently selected active profile ID.
-    pub fn load_active_profile_id(&self) -> anyhow::Result<Option<String>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt =
-            conn.prepare("SELECT value FROM client_state WHERE key = 'active_profile_id'")?;
-        let mut rows = stmt.query([])?;
-        if let Some(row) = rows.next()? {
-            let val: String = row.get(0)?;
-            if val.trim().is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(val))
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Saves the currently selected active profile ID.
-    pub fn save_active_profile_id(&self, id: &str) -> anyhow::Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "INSERT INTO client_state (key, value) VALUES ('active_profile_id', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![id],
-        )?;
-        Ok(())
-    }
-
-    fn load_active_config_raw(&self) -> anyhow::Result<ClientConfigState> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt =
-            conn.prepare("SELECT value FROM client_state WHERE key = 'active_config'")?;
-        let mut rows = stmt.query([])?;
-        if let Some(row) = rows.next()? {
-            let json_str: String = row.get(0)?;
-            let cfg: ClientConfigState = serde_json::from_str(&json_str).unwrap_or_default();
-            Ok(cfg)
-        } else {
-            Ok(ClientConfigState::default())
-        }
-    }
-
-    fn write_active_config_json(&self, config: &ClientConfigState) -> anyhow::Result<()> {
-        let mut stored = config.clone();
-        stored.auth_token.clear();
-        let json_str = serde_json::to_string(&stored)?;
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "INSERT INTO client_state (key, value) VALUES ('active_config', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![json_str],
-        )?;
-        Ok(())
-    }
-
-    /// Loads the active form configuration state, hydrating the tunnel token from the credential store.
-    pub fn load_active_config(&self) -> anyhow::Result<ClientConfigState> {
-        let mut cfg = self.load_active_config_raw()?;
-        if let Some(id) = self.load_active_profile_id()? {
-            if let Ok(Some(cred)) = self.load_credential(&id) {
-                if !cred.token.trim().is_empty() {
-                    cfg.auth_token = cred.token;
-                    if cfg.token_id.is_empty() {
-                        cfg.token_id = cred.token_id;
-                    }
-                    if cfg.token_type.is_empty() {
-                        cfg.token_type = cred.token_type;
-                    }
-                    if cfg.user_id.is_empty() {
-                        cfg.user_id = cred.user_id;
-                    }
-                    if cfg.username.is_empty() {
-                        cfg.username = cred.username;
-                    }
-                    if cfg.expires_at.is_none() {
-                        cfg.expires_at = cred.expires_at;
-                    }
-                }
-            }
-        }
-        Ok(cfg)
-    }
-
-    /// Saves the active form configuration state. Raw tokens are stored via the credential store.
     pub fn save_active_config(&self, config: &ClientConfigState) -> anyhow::Result<()> {
-        if let Some(id) = self.load_active_profile_id()?
-            && let Some(cred) = Self::credential_from_profile_and_config(&id, None, config)
-        {
-            self.upsert_credential(&cred)?;
-        }
-        self.write_active_config_json(config)
+        let active_id = self
+            .load_active_profile_id()?
+            .unwrap_or_else(|| "default".to_string());
+
+        let profile = ClientProfile {
+            id: active_id.clone(),
+            name: config.profile_name.clone(),
+            server_addr: config.server_addr.clone(),
+            transport: config.transport.clone(),
+            auth_token: config.auth_token.clone(),
+            listen_addr: config.listen_addr.clone(),
+            fake_lan_broadcast: config.fake_lan_broadcast,
+        };
+        self.upsert_profile(&profile)?;
+        self.save_active_profile_id(&active_id)?;
+
+        let mut settings = self.load_app_settings().unwrap_or_default();
+        settings.active_profile_id = Some(active_id);
+        settings.auto_connect = config.auto_connect;
+        settings.auto_connect_panel = config.auto_connect_panel;
+        settings.management_url = config.management_url.clone();
+        settings.auto_check_update = config.auto_check_update;
+        settings.update_channel = config.update_channel.clone();
+        settings.autostart = config.autostart;
+        settings.silent_autostart = config.silent_autostart;
+        settings.optimizer_enabled = config.optimizer_enabled;
+        settings.optimizer_zstd_level = config.optimizer_zstd_level;
+        settings.optimizer_adaptive_flush = config.optimizer_adaptive_flush;
+        settings.optimizer_flush_interval_ms = config.optimizer_flush_interval_ms;
+        settings.optimizer_buffer_threshold = config.optimizer_buffer_threshold;
+        self.save_app_settings(&settings)?;
+
+        Ok(())
     }
 
-    /// Applies a partial config update, preserving unspecified fields and existing credentials.
     pub fn apply_config_patch(
         &self,
-        active_profile_id: Option<&str>,
+        profile_id: Option<&str>,
         patch: &ClientConfigPatch,
-    ) -> anyhow::Result<ClientConfigState> {
-        if let Some(id) = active_profile_id.filter(|s| !s.trim().is_empty()) {
-            self.save_active_profile_id(id)?;
-            if patch.is_empty() {
-                if let Some(profile) = self.load_profiles()?.into_iter().find(|item| item.id == id)
-                {
-                    let mut cfg = self.load_active_config_raw()?;
-                    cfg.profile_name = profile.name;
-                    cfg.server_addr = profile.server_addr;
-                    cfg.transport = profile.transport;
-                    cfg.listen_addr = profile.listen_addr;
-                    cfg.fake_lan_broadcast = profile.fake_lan_broadcast;
-                    cfg.auth_token = profile.auth_token;
-                    self.write_active_config_json(&cfg)?;
-                }
-                return self.load_active_config();
-            }
+    ) -> anyhow::Result<()> {
+        if let Some(pid) = profile_id {
+            self.save_active_profile_id(pid)?;
         }
-        let mut cfg = self.load_active_config()?;
-        if let Some(id) = self.load_active_profile_id()? {
-            if let Some(profile) = self.load_profiles()?.into_iter().find(|item| item.id == id) {
-                if cfg.auth_token.trim().is_empty() {
-                    cfg.auth_token = profile.auth_token.clone();
-                }
-                if patch.server_addr.is_none() && cfg.server_addr != profile.server_addr {
-                    cfg.profile_name = profile.name;
-                    cfg.server_addr = profile.server_addr;
-                    if patch.transport.is_none() {
-                        cfg.transport = profile.transport;
-                    }
-                    if patch.listen_addr.is_none() {
-                        cfg.listen_addr = profile.listen_addr;
-                    }
-                    if patch.fake_lan_broadcast.is_none() {
-                        cfg.fake_lan_broadcast = profile.fake_lan_broadcast;
-                    }
-                }
-            }
-        }
-        cfg.apply_patch(patch);
-
-        let mut profile_id = self.load_active_profile_id()?;
-        if profile_id.is_none()
-            && (!cfg.server_addr.trim().is_empty() || !cfg.auth_token.trim().is_empty())
-        {
-            let generated = format!("profile-{}", Self::now_unix_ms());
-            self.save_active_profile_id(&generated)?;
-            profile_id = Some(generated);
-        }
-
-        if let Some(id) = profile_id {
-            if let Some(cred) = Self::credential_from_profile_and_config(&id, None, &cfg) {
-                self.upsert_credential(&cred)?;
-            }
-            let mut profile = ClientProfile {
-                id: id.clone(),
-                name: cfg.profile_name.clone(),
-                server_addr: cfg.server_addr.clone(),
-                transport: cfg.transport.clone(),
-                auth_token: cfg.auth_token.clone(),
-                listen_addr: cfg.listen_addr.clone(),
-                fake_lan_broadcast: cfg.fake_lan_broadcast,
-            };
-            if profile.auth_token.trim().is_empty() {
-                if let Ok(Some(cred)) = self.load_credential(&id) {
-                    profile.auth_token = cred.token;
-                }
-            }
-            self.upsert_profile(&profile)?;
-        }
-        self.write_active_config_json(&cfg)?;
-        Ok(cfg)
+        let mut active = self.load_active_config()?;
+        active.apply_patch(patch);
+        self.save_active_config(&active)?;
+        Ok(())
     }
 
-    /// Gets a consolidated snapshot of the client configuration, profiles, and cumulative stats.
     pub fn get_client_config_snapshot(&self) -> ClientConfigResponse {
+        let active_profile_id = self.load_active_profile_id().ok().flatten();
+        let active_config = self.load_active_config().unwrap_or_default();
         let profiles = self.load_profiles().unwrap_or_default();
-        let active_profile_id = self.load_active_profile_id().unwrap_or_default();
-        let mut active_config = self.load_active_config().unwrap_or_default();
-        if active_config.auth_token.trim().is_empty() {
-            if let Some(id) = active_profile_id.as_deref() {
-                if let Some(p) = profiles.iter().find(|item| item.id == id) {
-                    active_config.auth_token = p.auth_token.clone();
-                }
-            }
-        }
         let cum = self.load_cumulative_stats().unwrap_or_default();
+        let device_id = self
+            .load_or_create_device_id()
+            .unwrap_or_else(|_| "prism_dev_unknown".to_string());
+
         let cumulative_stats = OptimizerStatsSnapshot {
             raw_bytes: cum.raw_bytes,
             wire_bytes: cum.wire_bytes,
@@ -1083,231 +633,272 @@ impl StorageEngine {
             saved_ratio: cum.saved_ratio,
             ..Default::default()
         };
+
         ClientConfigResponse {
             active_profile_id,
             active_config,
             profiles,
             cumulative_stats,
-            device_id: self.load_or_create_device_id().unwrap_or_default(),
+            device_id,
         }
     }
 
     // ========================================================================
-    // Scoped Cumulative Statistics Operations
+    // Legacy Credential Compatibility Shims
     // ========================================================================
 
-    /// Loads client-scoped cumulative lifetime statistics.
+    pub fn load_credential(&self, profile_id: &str) -> anyhow::Result<Option<TunnelCredential>> {
+        if let Ok(Some(p)) = self.load_profile(profile_id) {
+            if !p.auth_token.is_empty() {
+                return Ok(Some(TunnelCredential {
+                    profile_id: p.id,
+                    server_addr: p.server_addr,
+                    token: p.auth_token,
+                    ..Default::default()
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn upsert_credential(&self, cred: &TunnelCredential) -> anyhow::Result<()> {
+        if let Ok(Some(mut p)) = self.load_profile(&cred.profile_id) {
+            p.auth_token = cred.token.clone();
+            self.upsert_profile(&p)?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_credential(&self, profile_id: &str) -> anyhow::Result<()> {
+        if let Ok(Some(mut p)) = self.load_profile(profile_id) {
+            p.auth_token.clear();
+            self.upsert_profile(&p)?;
+        }
+        Ok(())
+    }
+
+    // ========================================================================
+    // Cumulative Statistics
+    // ========================================================================
+
     pub fn load_cumulative_stats(&self) -> anyhow::Result<ClientCumulativeStats> {
-        self.load_scoped_stats("client")
+        self.load_scoped_stats("default")
     }
 
-    /// Loads cumulative lifetime statistics for any specified scope (e.g. 'client', 'connector:<name>', 'server').
     pub fn load_scoped_stats(&self, scope: &str) -> anyhow::Result<ClientCumulativeStats> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt = conn.prepare(
-            "SELECT raw_bytes, wire_bytes, saved_bytes, saved_ratio, sessions_count, last_session_at
-             FROM cumulative_stats
-             WHERE scope = ?1",
-        )?;
-        let mut rows = stmt.query(params![scope])?;
-        if let Some(row) = rows.next()? {
-            let raw: i64 = row.get(0)?;
-            let wire: i64 = row.get(1)?;
-            let saved: i64 = row.get(2)?;
-            let ratio: f64 = row.get(3)?;
-            let count: i64 = row.get(4)?;
-            let last_at: i64 = row.get(5)?;
-            Ok(ClientCumulativeStats {
-                raw_bytes: raw as u64,
-                wire_bytes: wire as u64,
-                saved_bytes: saved as u64,
-                saved_ratio: ratio,
-                sessions_count: count as u64,
-                last_session_at: last_at as u64,
-            })
-        } else {
-            Ok(ClientCumulativeStats::default())
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_CUMULATIVE_STATS)?;
+        if let Some(guard) = table.get(scope)? {
+            if let Ok(stats) = serde_json::from_slice::<ClientCumulativeStats>(guard.value()) {
+                return Ok(stats);
+            }
         }
+        Ok(ClientCumulativeStats::default())
     }
 
-    /// Records completed session statistics into client cumulative metrics.
     pub fn record_session_stats(
         &self,
-        session: &OptimizerStatsSnapshot,
+        delta: &OptimizerStatsSnapshot,
     ) -> anyhow::Result<ClientCumulativeStats> {
-        self.record_scoped_session_stats("client", session)
+        self.record_scoped_session_stats("default", delta)
     }
 
-    /// Records completed session statistics into scoped cumulative metrics.
     pub fn record_scoped_session_stats(
         &self,
         scope: &str,
-        session: &OptimizerStatsSnapshot,
+        delta: &OptimizerStatsSnapshot,
     ) -> anyhow::Result<ClientCumulativeStats> {
-        let prev = self.load_scoped_stats(scope)?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let raw_bytes = prev.raw_bytes.saturating_add(session.raw_bytes);
-        let wire_bytes = prev.wire_bytes.saturating_add(session.wire_bytes);
-        let saved_bytes = if raw_bytes >= wire_bytes {
-            raw_bytes - wire_bytes
+        let mut cur = self.load_scoped_stats(scope).unwrap_or_default();
+        cur.raw_bytes = cur.raw_bytes.saturating_add(delta.raw_bytes);
+        cur.wire_bytes = cur.wire_bytes.saturating_add(delta.wire_bytes);
+        cur.saved_bytes = cur.saved_bytes.saturating_add(delta.saved_bytes);
+        cur.sessions_count = cur.sessions_count.saturating_add(1);
+        cur.last_session_at = Self::now_unix_ms();
+        if cur.raw_bytes > 0 {
+            let saved = cur.raw_bytes.saturating_sub(cur.wire_bytes) as f64;
+            cur.saved_ratio = (saved / cur.raw_bytes as f64).clamp(0.0, 1.0);
         } else {
-            0
-        };
-        let saved_ratio = if raw_bytes > 0 && wire_bytes <= raw_bytes {
-            (raw_bytes - wire_bytes) as f64 / raw_bytes as f64
-        } else {
-            0.0
-        };
-        let sessions_count = prev.sessions_count.saturating_add(1);
-        let last_session_at = now;
+            cur.saved_ratio = 0.0;
+        }
 
-        let next = ClientCumulativeStats {
-            raw_bytes,
-            wire_bytes,
-            saved_bytes,
-            saved_ratio,
-            sessions_count,
-            last_session_at,
-        };
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_CUMULATIVE_STATS)?;
+            let bytes = serde_json::to_vec(&cur)?;
+            table.insert(scope, bytes.as_slice())?;
+        }
+        write_txn.commit()?;
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "INSERT INTO cumulative_stats (scope, raw_bytes, wire_bytes, saved_bytes, saved_ratio, sessions_count, last_session_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(scope) DO UPDATE SET
-                raw_bytes = excluded.raw_bytes,
-                wire_bytes = excluded.wire_bytes,
-                saved_bytes = excluded.saved_bytes,
-                saved_ratio = excluded.saved_ratio,
-                sessions_count = excluded.sessions_count,
-                last_session_at = excluded.last_session_at",
-            params![
-                scope,
-                raw_bytes as i64,
-                wire_bytes as i64,
-                saved_bytes as i64,
-                saved_ratio,
-                sessions_count as i64,
-                last_session_at as i64,
-            ],
-        )?;
-
-        Ok(next)
+        Ok(cur)
     }
 
-    /// Resets client cumulative statistics back to zero.
     pub fn reset_cumulative_stats(&self) -> anyhow::Result<()> {
-        self.reset_scoped_stats("client")
+        self.reset_scoped_stats("default")
     }
 
-    /// Resets cumulative statistics for a specific scope back to zero.
     pub fn reset_scoped_stats(&self, scope: &str) -> anyhow::Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "DELETE FROM cumulative_stats WHERE scope = ?1",
-            params![scope],
-        )?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_CUMULATIVE_STATS)?;
+            table.remove(scope)?;
+        }
+        write_txn.commit()?;
         Ok(())
     }
 
     // ========================================================================
-    // Middleware Dynamic Configs Operations
+    // Middleware Configs
     // ========================================================================
 
-    /// Persists dynamic middleware configuration JSON for a named middleware.
     pub fn save_middleware_config(
         &self,
         name: &str,
-        config: &std::collections::HashMap<String, serde_json::Value>,
+        config: &HashMap<String, serde_json::Value>,
     ) -> anyhow::Result<()> {
-        let json_str = serde_json::to_string(config)?;
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "INSERT INTO middleware_configs (name, config_json, updated_at)
-             VALUES (?1, ?2, unixepoch())
-             ON CONFLICT(name) DO UPDATE SET
-                 config_json = excluded.config_json,
-                 updated_at = excluded.updated_at",
-            params![name.trim().to_ascii_lowercase(), json_str],
-        )?;
+        let key = name.trim().to_ascii_lowercase();
+        let bytes = serde_json::to_vec(config)?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_MIDDLEWARE_CONFIGS)?;
+            table.insert(key.as_str(), bytes.as_slice())?;
+        }
+        write_txn.commit()?;
         Ok(())
     }
 
-    /// Loads the stored dynamic middleware configuration for a named middleware if any.
     pub fn load_middleware_config(
         &self,
         name: &str,
-    ) -> anyhow::Result<Option<std::collections::HashMap<String, serde_json::Value>>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt =
-            conn.prepare("SELECT config_json FROM middleware_configs WHERE name = ?1")?;
-        let mut rows = stmt.query(params![name.trim().to_ascii_lowercase()])?;
-        if let Some(row) = rows.next()? {
-            let s: String = row.get(0)?;
-            let cfg = serde_json::from_str(&s)?;
-            Ok(Some(cfg))
-        } else {
-            Ok(None)
+    ) -> anyhow::Result<Option<HashMap<String, serde_json::Value>>> {
+        let key = name.trim().to_ascii_lowercase();
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_MIDDLEWARE_CONFIGS)?;
+        if let Some(guard) = table.get(key.as_str())? {
+            let map = serde_json::from_slice::<HashMap<String, serde_json::Value>>(guard.value())?;
+            return Ok(Some(map));
         }
+        Ok(None)
     }
 
-    /// Loads all stored dynamic middleware configurations across all middlewares.
     pub fn load_all_middleware_configs(
         &self,
-    ) -> anyhow::Result<
-        std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
-    > {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        let mut stmt = conn.prepare("SELECT name, config_json FROM middleware_configs")?;
-        let rows = stmt.query_map([], |row| {
-            let name: String = row.get(0)?;
-            let s: String = row.get(1)?;
-            Ok((name, s))
-        })?;
-
-        let mut out = std::collections::HashMap::new();
-        for r in rows {
-            let (name, s) = r?;
-            if let Ok(cfg) = serde_json::from_str(&s) {
-                out.insert(name, cfg);
+    ) -> anyhow::Result<HashMap<String, HashMap<String, serde_json::Value>>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TABLE_MIDDLEWARE_CONFIGS)?;
+        let mut out = HashMap::new();
+        for item in table.iter()? {
+            let (k_guard, v_guard) = item?;
+            if let Ok(map) = serde_json::from_slice::<HashMap<String, serde_json::Value>>(v_guard.value()) {
+                out.insert(k_guard.value().to_string(), map);
             }
         }
         Ok(out)
     }
 
-    /// Deletes stored dynamic configuration for a named middleware, resetting it to default.
     pub fn delete_middleware_config(&self, name: &str) -> anyhow::Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| anyhow::anyhow!("sqlite lock error: {e}"))?;
-        conn.execute(
-            "DELETE FROM middleware_configs WHERE name = ?1",
-            params![name.trim().to_ascii_lowercase()],
-        )?;
+        let key = name.trim().to_ascii_lowercase();
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE_MIDDLEWARE_CONFIGS)?;
+            table.remove(key.as_str())?;
+        }
+        write_txn.commit()?;
         Ok(())
+    }
+
+    // ========================================================================
+    // Server Auth Persistence
+    // ========================================================================
+
+    pub fn load_auth_state(&self) -> anyhow::Result<Option<PersistedAuthState>> {
+        let read_txn = self.db.begin_read()?;
+        let meta_tbl = read_txn.open_table(TABLE_AUTH_META)?;
+        let initialized = meta_tbl
+            .get("initialized")?
+            .map(|v| v.value() == "1")
+            .unwrap_or(false);
+
+        if !initialized {
+            return Ok(None);
+        }
+
+        let mut state = PersistedAuthState::default();
+        let users_tbl = read_txn.open_table(TABLE_AUTH_USERS)?;
+        for item in users_tbl.iter()? {
+            let (k, v) = item?;
+            if let Ok(user) = serde_json::from_slice::<UserRecord>(v.value()) {
+                state.users.insert(k.value().to_string(), user);
+            }
+        }
+
+        let tokens_tbl = read_txn.open_table(TABLE_AUTH_TOKENS)?;
+        for item in tokens_tbl.iter()? {
+            let (k, v) = item?;
+            if let Ok(token) = serde_json::from_slice::<TokenRecord>(v.value()) {
+                state.tokens.insert(k.value().to_string(), token);
+            }
+        }
+
+        Ok(Some(state))
+    }
+
+    pub fn save_auth_state(&self, state: &PersistedAuthState) -> anyhow::Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut users_tbl = write_txn.open_table(TABLE_AUTH_USERS)?;
+            let user_keys: Vec<String> = users_tbl
+                .iter()?
+                .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for k in user_keys {
+                users_tbl.remove(k.as_str())?;
+            }
+            for (id, user) in &state.users {
+                let json = serde_json::to_vec(user)?;
+                users_tbl.insert(id.as_str(), json.as_slice())?;
+            }
+        }
+        {
+            let mut tokens_tbl = write_txn.open_table(TABLE_AUTH_TOKENS)?;
+            let token_keys: Vec<String> = tokens_tbl
+                .iter()?
+                .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            for k in token_keys {
+                tokens_tbl.remove(k.as_str())?;
+            }
+            for (hash, token) in &state.tokens {
+                let json = serde_json::to_vec(token)?;
+                tokens_tbl.insert(hash.as_str(), json.as_slice())?;
+            }
+        }
+        {
+            let mut meta_tbl = write_txn.open_table(TABLE_AUTH_META)?;
+            meta_tbl.insert("initialized", "1")?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+}
+
+trait ClientConfigStateExt {
+    fn active_profile_id_apply(&mut self, s: &ClientAppSettings);
+}
+
+impl ClientConfigStateExt for ClientConfigState {
+    fn active_profile_id_apply(&mut self, s: &ClientAppSettings) {
+        self.auto_connect = s.auto_connect;
+        self.auto_connect_panel = s.auto_connect_panel;
+        self.management_url = s.management_url.clone();
+        self.auto_check_update = s.auto_check_update;
+        self.update_channel = s.update_channel.clone();
+        self.autostart = s.autostart;
+        self.silent_autostart = s.silent_autostart;
+        self.optimizer_enabled = s.optimizer_enabled;
+        self.optimizer_zstd_level = s.optimizer_zstd_level;
+        self.optimizer_adaptive_flush = s.optimizer_adaptive_flush;
+        self.optimizer_flush_interval_ms = s.optimizer_flush_interval_ms;
+        self.optimizer_buffer_threshold = s.optimizer_buffer_threshold;
     }
 }
 
@@ -1321,13 +912,13 @@ mod tests {
 
     fn temp_db_path() -> std::path::PathBuf {
         let n = rand::random::<u64>();
-        std::env::temp_dir().join(format!("prism_test_{n}.db"))
+        std::env::temp_dir().join(format!("prism_test_{n}.redb"))
     }
 
     #[test]
     fn test_storage_open_and_profiles_roundtrip() {
         let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
+        let storage = StorageEngine::open(&path).expect("open redb");
 
         let initial = storage.load_profiles().unwrap();
         assert!(initial.is_empty());
@@ -1347,7 +938,7 @@ mod tests {
                 name: "Server Two".into(),
                 server_addr: "2.2.2.2:7000".into(),
                 transport: "kcp".into(),
-                auth_token: "".into(),
+                auth_token: "tok2".into(),
                 listen_addr: "127.0.0.1:25566".into(),
                 fake_lan_broadcast: false,
             },
@@ -1355,276 +946,25 @@ mod tests {
 
         storage.save_profiles(&profiles).unwrap();
         let loaded = storage.load_profiles().unwrap();
-        assert_eq!(loaded, profiles);
+        assert_eq!(loaded.len(), 2);
+
+        let p1 = storage.load_profile("p1").unwrap().unwrap();
+        assert_eq!(p1.name, "Server One");
+        assert_eq!(p1.auth_token, "tok1");
 
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn test_storage_active_config_and_profile_id() {
+    fn test_device_id_stable() {
         let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
+        let storage = StorageEngine::open(&path).expect("open redb");
 
-        assert_eq!(storage.load_active_profile_id().unwrap(), None);
-
-        storage.save_active_profile_id("test-id-123").unwrap();
-        assert_eq!(
-            storage.load_active_profile_id().unwrap().as_deref(),
-            Some("test-id-123")
-        );
-
-        let cfg = ClientConfigState {
-            profile_name: "My Custom Realm".into(),
-            server_addr: "play.custom.gg:7000".into(),
-            transport: "kcp".into(),
-            auth_token: "xyz".into(),
-            listen_addr: "0.0.0.0:25565".into(),
-            fake_lan_broadcast: false,
-            auto_connect_panel: true,
-            ..Default::default()
-        };
-
-        storage.save_active_profile_id("test-id-123").unwrap();
-        storage
-            .upsert_profile(&ClientProfile {
-                id: "test-id-123".into(),
-                name: cfg.profile_name.clone(),
-                server_addr: cfg.server_addr.clone(),
-                transport: cfg.transport.clone(),
-                auth_token: cfg.auth_token.clone(),
-                listen_addr: cfg.listen_addr.clone(),
-                fake_lan_broadcast: cfg.fake_lan_broadcast,
-            })
-            .unwrap();
-        storage.save_active_config(&cfg).unwrap();
-        let loaded_cfg = storage.load_active_config().unwrap();
-        assert_eq!(loaded_cfg.auth_token, "xyz");
-        assert_eq!(loaded_cfg.server_addr, cfg.server_addr);
-        assert_eq!(loaded_cfg.profile_name, cfg.profile_name);
+        let dev1 = storage.load_or_create_device_id().unwrap();
+        let dev2 = storage.load_or_create_device_id().unwrap();
+        assert_eq!(dev1, dev2);
+        assert!(dev1.starts_with("prism_dev_"));
 
         let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn test_storage_cumulative_stats_accumulation() {
-        let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
-
-        let init = storage.load_cumulative_stats().unwrap();
-        assert_eq!(init.raw_bytes, 0);
-        assert_eq!(init.sessions_count, 0);
-
-        let delta1 = OptimizerStatsSnapshot {
-            raw_bytes: 1000,
-            wire_bytes: 600,
-            saved_ratio: 0.4,
-            ..Default::default()
-        };
-
-        let cum1 = storage.record_session_stats(&delta1).unwrap();
-        assert_eq!(cum1.raw_bytes, 1000);
-        assert_eq!(cum1.wire_bytes, 600);
-        assert_eq!(cum1.saved_bytes, 400);
-        assert!((cum1.saved_ratio - 0.4).abs() < 1e-4);
-        assert_eq!(cum1.sessions_count, 1);
-
-        let delta2 = OptimizerStatsSnapshot {
-            raw_bytes: 2000,
-            wire_bytes: 1200,
-            saved_ratio: 0.4,
-            ..Default::default()
-        };
-
-        let cum2 = storage.record_session_stats(&delta2).unwrap();
-        assert_eq!(cum2.raw_bytes, 3000);
-        assert_eq!(cum2.wire_bytes, 1800);
-        assert_eq!(cum2.saved_bytes, 1200);
-        assert!((cum2.saved_ratio - 0.4).abs() < 1e-4);
-        assert_eq!(cum2.sessions_count, 2);
-
-        storage.reset_cumulative_stats().unwrap();
-        let cum_reset = storage.load_cumulative_stats().unwrap();
-        assert_eq!(cum_reset.raw_bytes, 0);
-
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn test_middleware_config_storage() {
-        let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
-
-        let mut config = std::collections::HashMap::new();
-        config.insert("recompress-threshold".to_string(), serde_json::json!(512));
-        config.insert(
-            "discovery-targets".to_string(),
-            serde_json::json!("127.0.0.1:4445"),
-        );
-
-        storage
-            .save_middleware_config("minecraft", &config)
-            .expect("save config");
-
-        let loaded = storage
-            .load_middleware_config("minecraft")
-            .expect("load config")
-            .expect("some config");
-        assert_eq!(
-            loaded.get("recompress-threshold").unwrap(),
-            &serde_json::json!(512)
-        );
-
-        let all = storage.load_all_middleware_configs().expect("load all");
-        assert!(all.contains_key("minecraft"));
-
-        storage
-            .delete_middleware_config("minecraft")
-            .expect("delete config");
-        let after_delete = storage
-            .load_middleware_config("minecraft")
-            .expect("load config");
-        assert!(after_delete.is_none());
-
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn test_config_state_deserializes_with_missing_fields() {
-        let cfg: ClientConfigState =
-            serde_json::from_str(r#"{"server_addr":"relay.example:7000","auth_token":"tok"}"#)
-                .unwrap();
-        assert_eq!(cfg.server_addr, "relay.example:7000");
-        assert_eq!(cfg.auth_token, "tok");
-        assert_eq!(cfg.profile_name, "Default Realm");
-        assert!(cfg.auto_connect);
-        assert!(cfg.auto_connect_panel);
-    }
-
-    #[test]
-    fn test_credential_roundtrip_and_empty_token_preserves_secret() {
-        let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
-
-        let profile = ClientProfile {
-            id: "p-secret".into(),
-            name: "Secret Realm".into(),
-            server_addr: "relay.example:7000".into(),
-            transport: "quic".into(),
-            auth_token: "prism_cl_abc".into(),
-            listen_addr: "127.0.0.1:25565".into(),
-            fake_lan_broadcast: true,
-        };
-        storage.upsert_profile(&profile).unwrap();
-        storage.save_active_profile_id("p-secret").unwrap();
-
-        let loaded = storage.load_profiles().unwrap();
-        assert_eq!(loaded[0].auth_token, "prism_cl_abc");
-
-        let mut stripped = loaded[0].clone();
-        stripped.auth_token.clear();
-        storage.save_profiles(&[stripped]).unwrap();
-        let reloaded = storage.load_profiles().unwrap();
-        assert_eq!(reloaded[0].auth_token, "prism_cl_abc");
-
-        let patch = ClientConfigPatch {
-            transport: Some("kcp".into()),
-            ..Default::default()
-        };
-        let cfg = storage
-            .apply_config_patch(Some("p-secret"), &patch)
-            .unwrap();
-        assert_eq!(cfg.transport, "kcp");
-        assert_eq!(cfg.auth_token, "prism_cl_abc");
-
-        let snap = storage.get_client_config_snapshot();
-        assert!(!snap.device_id.is_empty());
-        assert!(snap.device_id.starts_with("prism_dev_"));
-        assert_eq!(snap.active_config.auth_token, "prism_cl_abc");
-
-        let other = ClientProfile {
-            id: "p-other".into(),
-            name: "Other".into(),
-            server_addr: "other.example:7000".into(),
-            transport: "tcp".into(),
-            auth_token: "tok-other".into(),
-            listen_addr: "127.0.0.1:25566".into(),
-            fake_lan_broadcast: false,
-        };
-        storage.upsert_profile(&other).unwrap();
-        let all = storage.load_profiles().unwrap();
-        assert_eq!(all.len(), 2);
-
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn test_expired_credential_is_dropped() {
-        let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
-        storage
-            .upsert_credential(&TunnelCredential {
-                profile_id: "p-exp".into(),
-                server_addr: "relay.example:7000".into(),
-                token_id: "tok_old".into(),
-                token_type: "oauth_pat".into(),
-                user_id: "gh_1".into(),
-                username: "alice".into(),
-                issued_at: 1,
-                expires_at: Some(1),
-                token: "prism_cl_expired".into(),
-            })
-            .unwrap();
-        assert!(storage.load_credential("p-exp").unwrap().is_none());
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn test_restart_hydrates_token_even_if_server_addr_differs() {
-        let path = temp_db_path();
-        let storage = StorageEngine::open(&path).expect("open sqlite");
-        storage.save_active_profile_id("p-login").unwrap();
-        storage
-            .upsert_credential(&TunnelCredential {
-                profile_id: "p-login".into(),
-                server_addr: "play.example:7000".into(),
-                token_id: "tok_1".into(),
-                token_type: "oauth_pat".into(),
-                user_id: "gh_1".into(),
-                username: "alice".into(),
-                issued_at: 1,
-                expires_at: None,
-                token: "prism_cl_saved".into(),
-            })
-            .unwrap();
-        storage
-            .write_active_config_json(&ClientConfigState {
-                server_addr: "play.example".into(),
-                ..Default::default()
-            })
-            .unwrap();
-
-        let cfg = storage.load_active_config().unwrap();
-        assert_eq!(cfg.auth_token, "prism_cl_saved");
-        let snap = storage.get_client_config_snapshot();
-        assert_eq!(snap.active_config.auth_token, "prism_cl_saved");
-
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn test_autostart_and_silent_autostart_patch() {
-        let mut state = ClientConfigState::default();
-        assert!(!state.autostart);
-        assert!(state.silent_autostart);
-
-        let patch = ClientConfigPatch {
-            autostart: Some(true),
-            silent_autostart: Some(false),
-            ..Default::default()
-        };
-        assert!(!patch.is_empty());
-        state.apply_patch(&patch);
-        assert!(state.autostart);
-        assert!(!state.silent_autostart);
     }
 }

@@ -10,7 +10,6 @@ pub mod net;
 pub mod proxy;
 pub mod router;
 pub mod runtime_paths;
-pub mod secrets;
 pub mod storage;
 pub mod telemetry;
 pub mod tunnel;

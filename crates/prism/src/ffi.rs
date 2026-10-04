@@ -337,7 +337,7 @@ impl PrismClientSession {
         crate::prism::tunnel::optimizer::set_dictionary_dir(workdir_path.join("optimizer-dicts"));
         tracing::info!(workdir = %workdir_path.display(), "prism: desktop client session initialized");
 
-        let storage_path = workdir_path.join("prism.db");
+        let storage_path = workdir_path.join("prism.redb");
         let storage = match crate::prism::storage::StorageEngine::open(&storage_path) {
             Ok(s) => Some(Arc::new(s)),
             Err(err) => {
@@ -543,6 +543,35 @@ impl PrismClientSession {
             })
             .collect();
         crate::prism::admin::do_client_save_profiles(self.storage.as_deref(), &native)?;
+        Ok(())
+    }
+
+    pub fn client_save_profile(&self, profile: ClientProfile) -> Result<(), PrismFfiError> {
+        if let Some(ref storage) = self.storage {
+            storage.upsert_profile(&crate::prism::admin::ClientProfile {
+                id: profile.id,
+                name: profile.name,
+                server_addr: profile.server_addr,
+                transport: profile.transport,
+                auth_token: profile.auth_token,
+                listen_addr: profile.listen_addr,
+                fake_lan_broadcast: profile.fake_lan_broadcast,
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn client_delete_profile(&self, id: String) -> Result<(), PrismFfiError> {
+        if let Some(ref storage) = self.storage {
+            storage.delete_profile(&id)?;
+        }
+        Ok(())
+    }
+
+    pub fn client_set_active_profile(&self, id: String) -> Result<(), PrismFfiError> {
+        if let Some(ref storage) = self.storage {
+            storage.save_active_profile_id(&id)?;
+        }
         Ok(())
     }
 
@@ -1091,6 +1120,24 @@ pub fn client_get_profiles() -> Result<Vec<ClientProfile>, PrismFfiError> {
 pub fn client_save_profiles(profiles: Vec<ClientProfile>) -> Result<(), PrismFfiError> {
     let session = get_or_init_session()?;
     session.client_save_profiles(profiles)
+}
+
+#[uniffi::export]
+pub fn client_save_profile(profile: ClientProfile) -> Result<(), PrismFfiError> {
+    let session = get_or_init_session()?;
+    session.client_save_profile(profile)
+}
+
+#[uniffi::export]
+pub fn client_delete_profile(id: String) -> Result<(), PrismFfiError> {
+    let session = get_or_init_session()?;
+    session.client_delete_profile(id)
+}
+
+#[uniffi::export]
+pub fn client_set_active_profile(id: String) -> Result<(), PrismFfiError> {
+    let session = get_or_init_session()?;
+    session.client_set_active_profile(id)
 }
 
 #[uniffi::export]

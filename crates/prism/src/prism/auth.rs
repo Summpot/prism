@@ -1,12 +1,9 @@
 //! Authentication, user management, and service ACL control for Prism.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use anyhow::Context;
 use rand::{RngExt, rng};
-use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
@@ -241,129 +238,17 @@ fn default_auth_mode() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct PersistedAuthState {
+pub struct PersistedAuthState {
     #[serde(default = "default_schema_version")]
-    schema_version: u32,
+    pub schema_version: u32,
     #[serde(default)]
-    users: HashMap<String, UserRecord>,
+    pub users: HashMap<String, UserRecord>,
     #[serde(default)]
-    tokens: HashMap<String, TokenRecord>,
+    pub tokens: HashMap<String, TokenRecord>,
 }
 
 fn default_schema_version() -> u32 {
     1
-}
-
-struct LoadedAuthDb {
-    state: PersistedAuthState,
-    initialized: bool,
-}
-
-fn open_auth_db(path: &Path) -> anyhow::Result<Connection> {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let conn = Connection::open(path)
-        .with_context(|| format!("failed to open auth sqlite at {}", path.display()))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA busy_timeout = 5000;
-         PRAGMA synchronous = NORMAL;
-         CREATE TABLE IF NOT EXISTS auth_users (
-            id TEXT PRIMARY KEY,
-            record_json TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS auth_tokens (
-            token_hash TEXT PRIMARY KEY,
-            record_json TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS auth_meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-         );",
-    )?;
-    Ok(conn)
-}
-
-fn load_auth_state_from_db(path: &Path) -> anyhow::Result<LoadedAuthDb> {
-    let conn = open_auth_db(path)?;
-    let initialized: bool = conn
-        .query_row(
-            "SELECT value FROM auth_meta WHERE key = 'initialized'",
-            [],
-            |row| {
-                let v: String = row.get(0)?;
-                Ok(v == "1")
-            },
-        )
-        .unwrap_or(false);
-
-    let mut state = PersistedAuthState::default();
-    {
-        let mut stmt = conn.prepare("SELECT id, record_json FROM auth_users")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for r in rows {
-            let (id, json) = r?;
-            if let Ok(user) = serde_json::from_str::<UserRecord>(&json) {
-                state.users.insert(id, user);
-            }
-        }
-    }
-    {
-        let mut stmt = conn.prepare("SELECT token_hash, record_json FROM auth_tokens")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for r in rows {
-            let (hash, json) = r?;
-            if let Ok(token) = serde_json::from_str::<TokenRecord>(&json) {
-                state.tokens.insert(hash, token);
-            }
-        }
-    }
-    if !initialized && (!state.users.is_empty() || !state.tokens.is_empty()) {
-        return Ok(LoadedAuthDb {
-            state,
-            initialized: true,
-        });
-    }
-    Ok(LoadedAuthDb { state, initialized })
-}
-
-fn save_auth_state_to_db(path: &Path, state: &PersistedAuthState) -> anyhow::Result<()> {
-    let mut conn = open_auth_db(path)?;
-    let tx = conn.transaction()?;
-    tx.execute("DELETE FROM auth_users", [])?;
-    tx.execute("DELETE FROM auth_tokens", [])?;
-    {
-        let mut stmt = tx.prepare("INSERT INTO auth_users (id, record_json) VALUES (?1, ?2)")?;
-        for (id, user) in &state.users {
-            stmt.execute(params![id, serde_json::to_string(user)?])?;
-        }
-    }
-    {
-        let mut stmt =
-            tx.prepare("INSERT INTO auth_tokens (token_hash, record_json) VALUES (?1, ?2)")?;
-        for (hash, token) in &state.tokens {
-            stmt.execute(params![hash, serde_json::to_string(token)?])?;
-        }
-    }
-    tx.execute(
-        "INSERT INTO auth_meta (key, value) VALUES ('initialized', '1')
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        [],
-    )?;
-    tx.commit()?;
-    Ok(())
 }
 
 /// GitHub user profile returned by API.
@@ -384,8 +269,7 @@ pub struct GitHubOrg {
 /// Central authentication and user management plane.
 pub struct AuthManager {
     config: AuthConfig,
-    json_path: Option<PathBuf>,
-    db_path: Option<PathBuf>,
+    storage: Option<Arc<crate::prism::storage::StorageEngine>>,
     state: RwLock<PersistedAuthState>,
     http_client: reqwest::Client,
     oauth_states: RwLock<HashMap<String, Instant>>,
@@ -393,48 +277,20 @@ pub struct AuthManager {
 
 impl std::fmt::Debug for AuthManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuthManager")
-            .field("db_path", &self.db_path)
-            .field("json_path", &self.json_path)
-            .finish_non_exhaustive()
+        f.debug_struct("AuthManager").finish_non_exhaustive()
     }
 }
 
 impl AuthManager {
     /// Creates a new AuthManager with persistence and optional GitHub integration.
-    pub fn new(config: AuthConfig, workdir: Option<&Path>) -> Self {
-        let json_path = workdir.map(|p| p.join("auth-state.json"));
-        let db_path = workdir.map(|p| p.join("prism.db"));
-
+    pub fn new(
+        config: AuthConfig,
+        storage: Option<Arc<crate::prism::storage::StorageEngine>>,
+    ) -> Self {
         let mut state = PersistedAuthState::default();
-        let mut loaded_from_db = false;
-        if let Some(ref db) = db_path {
-            match load_auth_state_from_db(db) {
-                Ok(db_state) => {
-                    loaded_from_db = db_state.initialized;
-                    if loaded_from_db {
-                        state = db_state.state;
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(err = %err, path = %db.display(), "auth: failed to load sqlite state");
-                }
-            }
-        }
-        if !loaded_from_db {
-            if let Some(ref path) = json_path {
-                if path.is_file() {
-                    match std::fs::read_to_string(path) {
-                        Ok(content) => {
-                            state = serde_json::from_str::<PersistedAuthState>(&content)
-                                .unwrap_or_default();
-                        }
-                        Err(_) => {}
-                    }
-                }
-            }
-            if let Some(ref db) = db_path {
-                let _ = save_auth_state_to_db(db, &state);
+        if let Some(ref s) = storage {
+            if let Ok(Some(loaded)) = s.load_auth_state() {
+                state = loaded;
             }
         }
 
@@ -445,8 +301,7 @@ impl AuthManager {
 
         Self {
             config,
-            json_path,
-            db_path,
+            storage,
             state: RwLock::new(state),
             http_client,
             oauth_states: RwLock::new(HashMap::new()),
@@ -469,35 +324,11 @@ impl AuthManager {
         guard.remove(state).is_some()
     }
 
-    /// Saves state to sqlite (preferred) or the legacy JSON file.
+    /// Saves state to persistent storage.
     async fn save_state(&self) -> anyhow::Result<()> {
         let guard = self.state.read().await;
-        if let Some(ref db) = self.db_path {
-            save_auth_state_to_db(db, &*guard)?;
-            return Ok(());
-        }
-        let Some(ref path) = self.json_path else {
-            return Ok(());
-        };
-        let data = serde_json::to_string_pretty(&*guard)?;
-        drop(guard);
-
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let tmp = path.with_extension("json.tmp");
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(data.as_bytes())?;
-            f.sync_all()?;
-        }
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-        }
-        if std::fs::rename(&tmp, path).is_err() {
-            std::fs::copy(&tmp, path)?;
-            let _ = std::fs::remove_file(&tmp);
+        if let Some(ref storage) = self.storage {
+            storage.save_auth_state(&*guard)?;
         }
         Ok(())
     }
@@ -1050,11 +881,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_device_token_rotation_and_sqlite_persist() {
+    async fn test_device_token_rotation_and_redb_persist() {
         let dir = std::env::temp_dir().join(format!("prism_auth_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&dir);
+        let storage_path = dir.join("prism.redb");
+        let storage = Arc::new(crate::prism::storage::StorageEngine::open(&storage_path).unwrap());
 
-        let auth = AuthManager::new(AuthConfig::default(), Some(&dir));
+        let auth = AuthManager::new(AuthConfig::default(), Some(storage.clone()));
         let user = UserRecord {
             id: "user_1".into(),
             username: "alice".into(),
@@ -1108,7 +941,7 @@ mod tests {
         assert!(auth.verify_token(&tok_b).await.is_some());
 
         drop(auth);
-        let reloaded = AuthManager::new(AuthConfig::default(), Some(&dir));
+        let reloaded = AuthManager::new(AuthConfig::default(), Some(storage));
         assert!(reloaded.verify_token(&tok2).await.is_some());
         assert!(reloaded.verify_token(&tok_b).await.is_some());
         assert!(reloaded.get_user("user_1").await.is_some());

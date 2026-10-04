@@ -179,6 +179,21 @@ public class NativeClientService
         PrismNativeMethods.ClientSaveProfiles(profiles);
     }
 
+    public void SaveProfile(ClientProfile profile)
+    {
+        PrismNativeMethods.ClientSaveProfile(profile);
+    }
+
+    public void DeleteProfile(string id)
+    {
+        PrismNativeMethods.ClientDeleteProfile(id);
+    }
+
+    public void SetActiveProfile(string id)
+    {
+        PrismNativeMethods.ClientSetActiveProfile(id);
+    }
+
     public ClientConfigResponse GetConfig()
     {
         return PrismNativeMethods.ClientGetConfig();

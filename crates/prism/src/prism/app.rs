@@ -81,13 +81,22 @@ pub async fn run(
         "prism: starting"
     );
 
+    let storage_path = paths.workdir.join("prism.redb");
+    let storage = match crate::prism::storage::StorageEngine::open(&storage_path) {
+        Ok(s) => Some(Arc::new(s)),
+        Err(err) => {
+            tracing::warn!(err = %err, "failed to open storage engine at {}; continuing without DB", storage_path.display());
+            None
+        }
+    };
+
     // Shared state for admin endpoints.
     let sessions = Arc::new(telemetry::SessionRegistry::new());
     let optimizer = Arc::new(telemetry::OptimizerStatsRegistry::new());
     let tunnel_manager = Arc::new(tunnel::manager::Manager::new());
     let auth_manager = Arc::new(crate::prism::auth::AuthManager::new(
         cfg.auth.clone(),
-        Some(&paths.workdir),
+        storage.clone(),
     ));
 
     // Routing stack.
@@ -140,15 +149,6 @@ pub async fn run(
     let client_controller = Arc::new(tunnel::client::ClientController::new(Some(
         paths.middleware_dir.clone(),
     )));
-
-    let storage_path = paths.workdir.join("prism.db");
-    let storage = match crate::prism::storage::StorageEngine::open(&storage_path) {
-        Ok(s) => Some(Arc::new(s)),
-        Err(err) => {
-            tracing::warn!(err = %err, "failed to open storage engine at {}; continuing without DB", storage_path.display());
-            None
-        }
-    };
 
     // HTTP admin is only bound when `admin_addr` is set.
     // In-band `$admin` uses AdminState directly and does not dial loopback HTTP.

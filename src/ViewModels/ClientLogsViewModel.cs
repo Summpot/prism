@@ -6,8 +6,10 @@ using System.Text;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Input.Platform;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Prism.Common;
 using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
@@ -58,6 +60,16 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
 
     public ObservableCollection<ClientLogEntry> FilteredLogs { get; } = new();
 
+    public IBrush AutoScrollBrush => !AutoScroll
+        ? Converters.ThemeBrush("MutedForegroundColor", "#9ca3af")
+        : (IsAtBottom
+            ? Converters.ThemeBrush("PrimaryColor", "#2563eb")
+            : Converters.ThemeBrush("WarningColor", "#f59e0b"));
+
+    public IBrush WrapBrush => IsWordWrap
+        ? Converters.ThemeBrush("PrimaryColor", "#2563eb")
+        : Converters.ThemeBrush("MutedForegroundColor", "#9ca3af");
+
     public ClientLogsViewModel()
     {
         _client.LogsUpdated += OnLogsUpdated;
@@ -71,6 +83,8 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
         base.OnLocaleChanged();
         UpdateScrollButtonText();
         UpdateWrapButtonText();
+        OnPropertyChanged(nameof(AutoScrollBrush));
+        OnPropertyChanged(nameof(WrapBrush));
     }
 
     public void OnNavigatedTo()
@@ -208,11 +222,13 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     partial void OnAutoScrollChanged(bool value)
     {
         UpdateScrollButtonText();
+        OnPropertyChanged(nameof(AutoScrollBrush));
     }
 
     partial void OnIsWordWrapChanged(bool value)
     {
         UpdateWrapButtonText();
+        OnPropertyChanged(nameof(WrapBrush));
         if (AutoScroll && IsAtBottom)
         {
             ScrollToBottomRequested?.Invoke();
@@ -223,6 +239,7 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     {
         UpdateScrollButtonText();
         ShowScrollToBottom = !value && FilteredLogs.Count > 0;
+        OnPropertyChanged(nameof(AutoScrollBrush));
     }
 
     [RelayCommand]

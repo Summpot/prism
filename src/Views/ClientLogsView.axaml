@@ -15,14 +15,14 @@
     mc:Ignorable="d">
 
     <Grid RowDefinitions="Auto, *" Margin="{DynamicResource PageMargin}">
-        <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,24">
-            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto, *" Margin="0,0,0,24">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,16,0">
                 <common:LucideIcon Data="{x:Static common:AppIcons.Terminal}" Width="16" Height="16" VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding [client_logs_title], Source={x:Static i18n:LocalizationManager.Instance}}" Classes="h2" VerticalAlignment="Center"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Right">
                 <!-- Level Filter Group (Segmented) -->
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="6">
                     <ToggleButton Classes="Segment"
                                   IsChecked="{Binding FilterLevel, Converter={x:Static common:Converters.RouteEquals}, ConverterParameter=ALL, Mode=OneWay}"
                                   Command="{Binding SetFilterCommand}" CommandParameter="ALL" Content="ALL"/>
@@ -41,34 +41,50 @@
                 <TextBox
                     Text="{Binding SearchQuery, Mode=TwoWay}"
                     PlaceholderText="{Binding [client_logs_filter], Source={x:Static i18n:LocalizationManager.Instance}}"
-                    Width="130" />
+                    Width="120" />
 
-                <!-- Auto-Scroll Button -->
-                <Button Classes="Outline"
-                        Command="{Binding ToggleAutoScrollCommand}"
-                        Content="{Binding ScrollButtonText}"/>
+                <!-- Action Tools -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <!-- Auto-Scroll Button -->
+                    <Button Classes="Outline"
+                            Width="32" Height="32" Padding="0"
+                            Command="{Binding ToggleAutoScrollCommand}"
+                            ToolTip.Tip="{Binding ScrollButtonText}">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.ArrowDownToLine}"
+                                           Foreground="{Binding AutoScrollBrush}"
+                                           Width="16" Height="16"/>
+                    </Button>
 
-                <!-- Auto-Wrap Button -->
-                <Button Classes="Outline"
-                        Command="{Binding ToggleWordWrapCommand}"
-                        Content="{Binding WrapButtonText}"/>
+                    <!-- Auto-Wrap Button -->
+                    <Button Classes="Outline"
+                            Width="32" Height="32" Padding="0"
+                            Command="{Binding ToggleWordWrapCommand}"
+                            ToolTip.Tip="{Binding WrapButtonText}">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.WrapText}"
+                                           Foreground="{Binding WrapBrush}"
+                                           Width="16" Height="16"/>
+                    </Button>
 
-                <!-- Clear Logs Button -->
-                <Button Classes="Outline"
-                        Command="{Binding ClearLogsCommand}">
-                    <TextBlock Text="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}"
-                               Foreground="{DynamicResource DestructiveColor}"/>
-                </Button>
+                    <!-- Clear Logs Button -->
+                    <Button Classes="Outline"
+                            Width="32" Height="32" Padding="0"
+                            Command="{Binding ClearLogsCommand}"
+                            ToolTip.Tip="{Binding [client_logs_clear], Source={x:Static i18n:LocalizationManager.Instance}}">
+                        <common:LucideIcon Data="{x:Static common:AppIcons.Trash2}"
+                                           Foreground="{DynamicResource DestructiveColor}"
+                                           Width="16" Height="16"/>
+                    </Button>
 
-                <!-- Copy All Logs Button -->
-                <Button Classes="Outline"
-                        Command="{Binding CopyAllLogsCommand}">
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <common:LucideIcon IsVisible="{Binding !CopiedAll}" Data="{x:Static common:AppIcons.Copy}" Width="16" Height="16"/>
-                        <common:LucideIcon IsVisible="{Binding CopiedAll}" Data="{x:Static common:AppIcons.Check}" Width="16" Height="16" Foreground="{DynamicResource SuccessColor}"/>
-                        <TextBlock Text="{Binding CopyButtonText}"/>
-                    </StackPanel>
-                </Button>
+                    <!-- Copy All Logs Button -->
+                    <Button Classes="Outline"
+                            Width="32" Height="32" Padding="0"
+                            Command="{Binding CopyAllLogsCommand}"
+                            ToolTip.Tip="{Binding CopyButtonText}">
+                        <common:LucideIcon Data="{Binding CopiedAll, Converter={x:Static common:Converters.BoolToCopyOrCheckIcon}}"
+                                           Foreground="{Binding CopiedAll, Converter={x:Static common:Converters.BoolToCopyOrCheckBrush}}"
+                                           Width="16" Height="16"/>
+                    </Button>
+                </StackPanel>
             </StackPanel>
         </Grid>
 

@@ -187,7 +187,7 @@ public static class Converters
         new FuncValueConverter<bool, IBrush>(active =>
             active ? ThemeBrush("SuccessColor", "#10b981") : ThemeBrush("MutedForegroundColor", "#6b7280"));
 
-    private static IBrush ThemeBrush(string key, string fallbackHex)
+    public static IBrush ThemeBrush(string key, string fallbackHex)
     {
         if (TryGetThemeColor(key, out var color))
         {

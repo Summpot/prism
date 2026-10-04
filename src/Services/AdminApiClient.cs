@@ -465,7 +465,7 @@ public class AdminApiClient
         if (!resp.Ok)
         {
             throw new Exception(string.IsNullOrWhiteSpace(resp.Message)
-                ? Prism.I18n.I18nText.T("close_connection_failed", "Failed to close connection.")
+                ? Prism.I18n.Messages.CloseConnectionFailed()
                 : resp.Message);
         }
     }

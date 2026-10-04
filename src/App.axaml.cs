@@ -110,7 +110,7 @@ public partial class App : Application
                     Console.WriteLine($"[WARN] Auto-connect failed: {ex.Message}");
                     client.AddLog("WARN", "client::startup", $"Auto-connect failed: {ex.Message}");
                     Dispatcher.UIThread.Post(() =>
-                        AppServices.ShowError(ex.Message, I18nText.T("client_connection_failed", "Connection failed")));
+                        AppServices.ShowError(ex.Message, Messages.ClientConnectionFailed()));
                 }
             }
 
@@ -135,8 +135,8 @@ public partial class App : Application
             if (!res.Available || string.IsNullOrWhiteSpace(res.Version)) return;
             if (string.Equals(_dismissedUpdateVersion, res.Version, StringComparison.Ordinal)) return;
 
-            string title = I18nText.T("client_update_prompt_title", "New Version Available");
-            string body = I18nText.Format("client_update_prompt_desc", ("version", res.Version));
+            string title = Messages.ClientUpdatePromptTitle();
+            string body = Messages.ClientUpdatePromptDesc(res.Version);
             if (!string.IsNullOrWhiteSpace(res.Body))
             {
                 body = body + "\n\n" + res.Body;
@@ -145,7 +145,7 @@ public partial class App : Application
             bool confirm = await AppServices.ConfirmAsync(
                 title,
                 body,
-                I18nText.T("client_update_prompt_confirm", "Update & Restart"));
+                Messages.ClientUpdatePromptConfirm());
 
             if (!confirm)
             {
@@ -160,8 +160,8 @@ public partial class App : Application
             catch (Exception installEx)
             {
                 AppServices.ShowError(
-                    I18nText.Format("client_update_failed", ("error", installEx.Message)),
-                    I18nText.T("client_update_prompt_title"));
+                    Messages.ClientUpdateFailed(installEx.Message),
+                    Messages.ClientUpdatePromptTitle());
             }
         }
         catch (Exception ex)
@@ -193,7 +193,7 @@ public partial class App : Application
 
             var menu = new NativeMenu();
 
-            var showItem = new NativeMenuItem(I18nText.T("tray_open"));
+            var showItem = new NativeMenuItem(Messages.TrayOpen());
             showItem.Click += (_, _) =>
             {
                 mainWindow.Show();
@@ -202,11 +202,11 @@ public partial class App : Application
             };
             menu.Items.Add(showItem);
 
-            _hideItem = new NativeMenuItem(I18nText.T("tray_hide"));
+            _hideItem = new NativeMenuItem(Messages.TrayHide());
             _hideItem.Click += (_, _) => mainWindow.Hide();
             menu.Items.Add(_hideItem);
 
-            _toggleTunnelItem = new NativeMenuItem(I18nText.T("tray_connect"));
+            _toggleTunnelItem = new NativeMenuItem(Messages.TrayConnect());
             _toggleTunnelItem.Click += async (_, _) =>
             {
                 try
@@ -231,7 +231,7 @@ public partial class App : Application
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
-            var exitItem = new NativeMenuItem(I18nText.T("tray_exit"));
+            var exitItem = new NativeMenuItem(Messages.TrayExit());
             exitItem.Click += (_, _) => ExitApp(desktop);
             menu.Items.Add(exitItem);
 
@@ -244,23 +244,23 @@ public partial class App : Application
             {
                 var status = NativeClientService.Instance.CurrentStatus;
                 bool isRunning = status?.Running == true;
-                showItem.Header = I18nText.T("tray_open");
-                exitItem.Header = I18nText.T("tray_exit");
+                showItem.Header = Messages.TrayOpen();
+                exitItem.Header = Messages.TrayExit();
                 if (_hideItem != null)
                 {
-                    _hideItem.Header = I18nText.T("tray_hide");
+                    _hideItem.Header = Messages.TrayHide();
                 }
                 if (_toggleTunnelItem != null)
                 {
                     _toggleTunnelItem.Header = isRunning
-                        ? I18nText.T("tray_disconnect")
-                        : I18nText.T("tray_connect");
+                        ? Messages.TrayDisconnect()
+                        : Messages.TrayConnect();
                 }
                 if (_trayIcon != null)
                 {
                     _trayIcon.ToolTipText = isRunning
-                        ? I18nText.Format("tray_running", ("0", status?.ServerAddr ?? ""))
-                        : I18nText.T("tray_idle");
+                        ? Messages.TrayRunning().Replace("{0}", status?.ServerAddr ?? "")
+                        : Messages.TrayIdle();
                 }
             }
 

@@ -327,9 +327,9 @@ public partial class ClientTrafficViewModel : ViewModelBase, INavigationAware
     public async Task ResetStatsAsync()
     {
         if (!await AppServices.ConfirmAsync(
-                I18nText.T("common_confirm"),
-                I18nText.T("confirm_reset_stats"),
-                I18nText.T("client_reset")))
+                Messages.CommonConfirm(),
+                Messages.ConfirmResetStats(),
+                Messages.ClientReset()))
         {
             return;
         }

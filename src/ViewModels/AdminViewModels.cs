@@ -144,10 +144,9 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -255,15 +254,15 @@ public partial class AdminOverviewViewModel : ViewModelBase, INavigationAware
     {
         try
         {
-            ReloadMessage = I18nText.T("common_loading");
+            ReloadMessage = Messages.CommonLoading();
             var res = await _api.TriggerReloadAsync();
-            ReloadMessage = I18nText.Format("reload_ok", ("seq", res.Seq));
+            ReloadMessage = Messages.ReloadOk(res.Seq);
             AppServices.ShowSuccess(ReloadMessage);
         }
         catch (Exception ex)
         {
             ReloadMessage = ex.Message;
-            AppServices.ShowError(ex.Message, I18nText.T("reload_failed"));
+            AppServices.ShowError(ex.Message, Messages.ReloadFailed());
         }
     }
 }
@@ -356,10 +355,9 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -475,9 +473,9 @@ public partial class AdminConnectionsViewModel : ViewModelBase, INavigationAware
     {
         if (item == null) return;
         if (!await AppServices.ConfirmAsync(
-                I18nText.T("common_confirm"),
-                I18nText.T("confirm_disconnect_session"),
-                I18nText.T("session_disconnect"),
+                Messages.CommonConfirm(),
+                Messages.ConfirmDisconnectSession(),
+                Messages.SessionDisconnect(),
                 destructive: true))
         {
             return;
@@ -528,9 +526,9 @@ public class ServiceRowItem : ObservableObject
             Primary = snap.Primary,
             RouteOnly = s.RouteOnly,
             IsActive = true,
-            RoleText = snap.Primary ? I18nText.T("services_primary") : I18nText.T("services_secondary"),
-            RouteText = s.RouteOnly ? I18nText.T("services_route_only") : "",
-            ClientDisplay = string.IsNullOrWhiteSpace(snap.ClientId) ? I18nText.T("admin_unknown") : snap.ClientId
+            RoleText = snap.Primary ? Messages.ServicesPrimary() : Messages.ServicesSecondary(),
+            RouteText = s.RouteOnly ? Messages.ServicesRouteOnly() : "",
+            ClientDisplay = string.IsNullOrWhiteSpace(snap.ClientId) ? Messages.AdminUnknown() : snap.ClientId
         };
     }
 }
@@ -609,10 +607,9 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -682,7 +679,7 @@ public partial class AdminTunnelServicesViewModel : ViewModelBase, INavigationAw
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
         finally
         {
@@ -860,10 +857,9 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -939,10 +935,10 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
                     : "";
                 string expires = t.ExpiresAtUnixMs.HasValue
                     ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
-                    : I18nText.T("common_never");
+                    : Messages.CommonNever();
                 string lastUsed = t.LastUsedUnixMs > 0
                     ? DateTimeOffset.FromUnixTimeMilliseconds(t.LastUsedUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
-                    : I18nText.T("users_never");
+                    : Messages.UsersNever();
 
                 _allTokens.Add(new TokenRowItem
                 {
@@ -964,7 +960,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
         finally
         {
@@ -1039,7 +1035,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             ErrorMessage = null;
             if (string.IsNullOrWhiteSpace(SelectedUserId))
             {
-                ErrorMessage = I18nText.T("common_error");
+                ErrorMessage = Messages.CommonError();
                 return;
             }
             string uid = SelectedUserId;
@@ -1052,10 +1048,10 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
                 : "";
             string expires = t.ExpiresAtUnixMs.HasValue
                 ? DateTimeOffset.FromUnixTimeMilliseconds(t.ExpiresAtUnixMs.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
-                : I18nText.T("common_never");
+                : Messages.CommonNever();
             string lastUsed = t.LastUsedUnixMs > 0
                 ? DateTimeOffset.FromUnixTimeMilliseconds(t.LastUsedUnixMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
-                : I18nText.T("users_never");
+                : Messages.UsersNever();
 
             var row = new TokenRowItem
             {
@@ -1069,12 +1065,12 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             _allTokens.Insert(0, row);
             ApplyUserFilter();
 
-            AppServices.ShowSuccess(I18nText.Format("token_created_detail", ("name", t.Name)), I18nText.T("token_created"));
+            AppServices.ShowSuccess(Messages.TokenCreatedDetail(t.Name), Messages.TokenCreated());
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, I18nText.T("token_create_failed"));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
+            AppServices.ShowError(ex.Message, Messages.TokenCreateFailed());
         }
     }
 
@@ -1088,13 +1084,13 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             await _api.PutUserAsync(item.Id, newRole, item.ServiceRules);
             item.Role = newRole.ToUpperInvariant();
             AppServices.ShowSuccess(
-                I18nText.Format("users_role_updated", ("username", item.Username), ("role", item.Role)),
-                I18nText.T("users_role_update_title"));
+                Messages.UsersRoleUpdated(item.Username, item.Role),
+                Messages.UsersRoleUpdateTitle());
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, I18nText.T("users_role_update_failed"));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
+            AppServices.ShowError(ex.Message, Messages.UsersRoleUpdateFailed());
         }
     }
 
@@ -1103,9 +1099,9 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     {
         if (item == null) return;
         if (!await AppServices.ConfirmAsync(
-                I18nText.T("common_confirm"),
-                I18nText.T("confirm_revoke_token"),
-                I18nText.T("common_delete"),
+                Messages.CommonConfirm(),
+                Messages.ConfirmRevokeToken(),
+                Messages.CommonDelete(),
                 destructive: true))
         {
             return;
@@ -1117,12 +1113,12 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             await _api.RevokeTokenAsync(item.Id);
             _allTokens.Remove(item);
             Tokens.Remove(item);
-            AppServices.ShowSuccess(I18nText.Format("token_revoked_detail", ("name", item.Name)), I18nText.T("token_revoked"));
+            AppServices.ShowSuccess(Messages.TokenRevokedDetail(item.Name), Messages.TokenRevoked());
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, I18nText.T("token_revoke_failed"));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
+            AppServices.ShowError(ex.Message, Messages.TokenRevokeFailed());
         }
     }
 
@@ -1134,7 +1130,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(CreatedRawToken);
-            AppServices.ShowSuccess(I18nText.T("token_copied"), I18nText.T("common_copied"));
+            AppServices.ShowSuccess(Messages.TokenCopied(), Messages.CommonCopied());
         }
     }
 
@@ -1143,7 +1139,7 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
     {
         if (item == null) return;
         EditingUser = item;
-        EditUserTitle = I18nText.Format("users_edit_title", ("username", item.Username));
+        EditUserTitle = Messages.UsersEditTitle(item.Username);
         EditRole = item.Role.ToLowerInvariant();
         EditServiceRules = string.Join(Environment.NewLine, item.ServiceRules);
         ShowEditUserDialog = true;
@@ -1189,14 +1185,14 @@ public partial class AdminUsersViewModel : ViewModelBase, INavigationAware
             EditingUser.ServiceRules = rules;
 
             AppServices.ShowSuccess(
-                I18nText.Format("user_updated", ("name", EditingUser.Username)),
-                I18nText.T("user_saved"));
+                Messages.UserUpdated(EditingUser.Username),
+                Messages.UserSaved());
             CloseEditUserDialog();
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
-            AppServices.ShowError(ex.Message, I18nText.T("common_save_failed"));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
+            AppServices.ShowError(ex.Message, Messages.CommonSaveFailed());
         }
     }
 }
@@ -1288,10 +1284,9 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -1373,7 +1368,7 @@ public partial class AdminTrafficViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
         finally
         {
@@ -1453,10 +1448,9 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -1546,7 +1540,7 @@ public partial class AdminConnectorsViewModel : ViewModelBase, INavigationAware
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
         finally
         {
@@ -1666,14 +1660,14 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
 
             string currentName = SelectedMiddleware.Name;
             var updated = await _api.UpdateMiddlewareConfigAsync(currentName, dict);
-            StatusMessage = I18nText.Format("middleware_saved", ("name", currentName));
-            AppServices.ShowSuccess(StatusMessage, I18nText.T("common_success"));
+            StatusMessage = Messages.MiddlewareSaved(currentName);
+            AppServices.ShowSuccess(StatusMessage, Messages.CommonSuccess());
             await LoadDataAsync(currentName);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
-            AppServices.ShowError(ex.Message, I18nText.T("common_save_failed"));
+            AppServices.ShowError(ex.Message, Messages.CommonSaveFailed());
         }
         finally
         {
@@ -1691,14 +1685,14 @@ public partial class AdminMiddlewareViewModel : ViewModelBase, INavigationAware
             IsLoading = true;
             string currentName = SelectedMiddleware.Name;
             var reset = await _api.ResetMiddlewareConfigAsync(currentName);
-            StatusMessage = I18nText.Format("middleware_reset_ok", ("name", currentName));
-            AppServices.ShowSuccess(StatusMessage, I18nText.T("common_success"));
+            StatusMessage = Messages.MiddlewareResetOk(currentName);
+            AppServices.ShowSuccess(StatusMessage, Messages.CommonSuccess());
             await LoadDataAsync(currentName);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
-            AppServices.ShowError(ex.Message, I18nText.T("common_reset_failed"));
+            AppServices.ShowError(ex.Message, Messages.CommonResetFailed());
         }
         finally
         {
@@ -1768,10 +1762,9 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
     private void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "开")
-            : I18nText.T("admin_off", "关");
-        string template = I18nText.T("admin_auto_refresh", "自动刷新：{state}");
-        AutoRefreshText = template.Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]
@@ -1815,13 +1808,13 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
             await Task.WhenAll(healthTask, pathTask);
 
             IsHealthy = (await healthTask).Ok;
-            HealthText = IsHealthy ? I18nText.T("runtime_health_ok") : I18nText.T("runtime_health_down");
+            HealthText = IsHealthy ? Messages.RuntimeHealthOk() : Messages.RuntimeHealthDown();
             var path = (await pathTask).Path;
             ConfigPath = string.IsNullOrWhiteSpace(path) ? "" : path;
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
         finally
         {
@@ -1835,14 +1828,14 @@ public partial class AdminRuntimeViewModel : ViewModelBase, INavigationAware
         try
         {
             var res = await _api.TriggerReloadAsync();
-            ReloadResult = I18nText.Format("admin_reload_sent", ("seq", res.Seq));
-            AppServices.ShowSuccess(ReloadResult, I18nText.T("admin_reload"));
+            ReloadResult = Messages.AdminReloadSent(res.Seq);
+            AppServices.ShowSuccess(ReloadResult, Messages.AdminReload());
             await LoadDataAsync();
         }
         catch (Exception ex)
         {
-            ReloadResult = I18nText.Format("admin_reload_failed", ("message", ex.Message));
-            AppServices.ShowError(ex.Message, I18nText.T("reload_failed"));
+            ReloadResult = Messages.AdminReloadFailed(ex.Message);
+            AppServices.ShowError(ex.Message, Messages.ReloadFailed());
         }
     }
 }

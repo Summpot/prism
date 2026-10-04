@@ -89,24 +89,22 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     {
         string stateStr = AutoScroll
             ? (IsAtBottom
-                ? I18nText.T("client_logs_on", "开启")
-                : I18nText.T("client_logs_paused", "暂停"))
-            : I18nText.T("client_logs_off", "关闭");
-        string template = I18nText.T("client_logs_scroll", "滚动吸附：{state}");
-        ScrollButtonText = template.Replace("{state}", stateStr);
+                ? Messages.ClientLogsOn()
+                : Messages.ClientLogsPaused())
+            : Messages.ClientLogsOff();
+        ScrollButtonText = Messages.ClientLogsScroll(stateStr);
         if (!CopiedAll)
         {
-            CopyButtonText = I18nText.T("client_logs_copy_all", "复制全部");
+            CopyButtonText = Messages.ClientLogsCopyAll();
         }
     }
 
     private void UpdateWrapButtonText()
     {
         string stateStr = IsWordWrap
-            ? I18nText.T("client_logs_on", "开启")
-            : I18nText.T("client_logs_off", "关闭");
-        string template = I18nText.T("client_logs_wrap", "自动换行：{state}");
-        WrapButtonText = template.Replace("{state}", stateStr);
+            ? Messages.ClientLogsOn()
+            : Messages.ClientLogsOff();
+        WrapButtonText = Messages.ClientLogsWrap(stateStr);
     }
 
     private void OnLogsUpdated(List<ClientLogEntry> logs)
@@ -264,14 +262,14 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
     public async Task ClearLogsAsync()
     {
         if (!await AppServices.ConfirmAsync(
-                I18nText.T("common_confirm"),
-                I18nText.T("confirm_clear_logs"),
-                I18nText.T("client_logs_clear")))
+                Messages.CommonConfirm(),
+                Messages.ConfirmClearLogs(),
+                Messages.ClientLogsClear()))
         {
             return;
         }
         await _client.ClearLogsAsync();
-        AppServices.ShowInfo(I18nText.T("logs_cleared"));
+        AppServices.ShowInfo(Messages.LogsCleared());
     }
 
     [RelayCommand]
@@ -293,13 +291,13 @@ public partial class ClientLogsViewModel : ViewModelBase, INavigationAware
 
             await desktop.MainWindow.Clipboard.SetTextAsync(text);
             CopiedAll = true;
-            CopyButtonText = I18nText.T("common_copied", "已复制");
+            CopyButtonText = Messages.CommonCopied();
             _ = Task.Delay(2000).ContinueWith(_ =>
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
                     CopiedAll = false;
-                    CopyButtonText = I18nText.T("client_logs_copy_all", "复制全部");
+                    CopyButtonText = Messages.ClientLogsCopyAll();
                 });
             });
         }

@@ -13,22 +13,22 @@ public static class AppServices
 
     public static void ShowSuccess(string message, string? title = null)
     {
-        Show(title ?? I18nText.T("common_success", "Success"), message, 2.5, Notification.Success);
+        Show(title ?? Messages.CommonSuccess(), message, 2.5, Notification.Success);
     }
 
     public static void ShowError(string message, string? title = null)
     {
-        Show(title ?? I18nText.T("common_error", "Error"), message, 4.0, Notification.Error);
+        Show(title ?? Messages.CommonError(), message, 4.0, Notification.Error);
     }
 
     public static void ShowInfo(string message, string? title = null)
     {
-        Show(title ?? I18nText.T("common_info", "Notice"), message, 2.5, Notification.Info);
+        Show(title ?? Messages.CommonInfo(), message, 2.5, Notification.Info);
     }
 
     public static void ShowWarning(string message, string? title = null)
     {
-        Show(title ?? I18nText.T("common_warning", "Warning"), message, 3.5, Notification.Warning);
+        Show(title ?? Messages.CommonWarning(), message, 3.5, Notification.Warning);
     }
 
     private static void Show(string title, string message, double delaySeconds, Notification kind)
@@ -66,11 +66,11 @@ public static class AppServices
                 DialogManager
                     .CreateDialog(title, message)
                     .WithPrimaryButton(
-                        confirmText ?? I18nText.T("common_confirm", "Confirm"),
+                        confirmText ?? Messages.CommonConfirm(),
                         () => tcs.TrySetResult(true),
                         primaryStyle)
                     .WithCancelButton(
-                        I18nText.T("common_cancel", "Cancel"),
+                        Messages.CommonCancel(),
                         () => tcs.TrySetResult(false))
                     .Show();
             }

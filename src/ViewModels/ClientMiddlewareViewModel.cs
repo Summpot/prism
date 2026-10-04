@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Prism.I18n;
 using Prism.Native;
 using Prism.Services;
 
@@ -179,7 +180,7 @@ public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
 
             string currentName = SelectedMiddleware.Name;
             var updated = _client.UpdateMiddlewareConfig(currentName, dict);
-            StatusMessage = I18n.I18nText.T("middleware_applied");
+            StatusMessage = Messages.MiddlewareApplied(currentName);
             LoadData(currentName);
             AppServices.ShowSuccess(StatusMessage);
         }
@@ -194,9 +195,9 @@ public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
     {
         if (SelectedMiddleware == null) return;
         if (!await AppServices.ConfirmAsync(
-                I18n.I18nText.T("common_confirm"),
-                I18n.I18nText.T("confirm_reset_middleware"),
-                I18n.I18nText.T("common_reset")))
+                Messages.CommonConfirm(),
+                Messages.ConfirmResetMiddleware(),
+                Messages.CommonReset()))
         {
             return;
         }
@@ -205,7 +206,7 @@ public partial class ClientMiddlewareViewModel : ViewModelBase, INavigationAware
         {
             string currentName = SelectedMiddleware.Name;
             var reset = _client.ResetMiddlewareConfig(currentName);
-            StatusMessage = I18n.I18nText.T("middleware_reset_done");
+            StatusMessage = Messages.MiddlewareResetDone(currentName);
             LoadData(currentName);
             AppServices.ShowSuccess(StatusMessage);
         }

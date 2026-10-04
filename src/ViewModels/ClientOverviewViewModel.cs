@@ -180,7 +180,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(ServerAddress);
-            AppServices.ShowSuccess(I18nText.T("common_copied"), I18nText.T("common_copy"));
+            AppServices.ShowSuccess(Messages.CommonCopied(), Messages.CommonCopy());
         }
     }
 
@@ -193,7 +193,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
             desktop.MainWindow?.Clipboard != null)
         {
             await desktop.MainWindow.Clipboard.SetTextAsync(fullUrl);
-            AppServices.ShowSuccess(I18nText.T("common_copied"), I18nText.T("common_copy"));
+            AppServices.ShowSuccess(Messages.CommonCopied(), Messages.CommonCopy());
         }
     }
 
@@ -217,8 +217,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
     }
 
     public string TunnelButtonText => IsConnecting
-        ? (I18nText.T("client_connecting", "正在连接…"))
-        : (I18nText.T("client_connect", "连接"));
+        ? Messages.ClientConnecting()
+        : Messages.ClientConnect();
 
     [ObservableProperty]
     private string _profileName = "Default";
@@ -364,8 +364,8 @@ public partial class ClientOverviewViewModel : ViewModelBase
         ShowGitHubLogin = IsGithubAuthAvailable || LoginRequired;
         ShowAnonymousLogin = !LoginRequired;
         LoginMethodsBadgeText = LoginRequired
-            ? I18nText.T("client_waiting_for_login", "等待登录")
-            : I18nText.T("client_optional_login", "可选登录");
+            ? Messages.ClientWaitingForLogin()
+            : Messages.ClientOptionalLogin();
 
         ShowLoginMethods = !ShowOAuthWaiting && !ShowOAuthExchanging && !IsSessionAuthenticated
             && (LoginRequired || (!BypassLogin && (IsGithubAuthAvailable || IsConnected || !string.IsNullOrWhiteSpace(ProvidersError))));
@@ -374,18 +374,18 @@ public partial class ClientOverviewViewModel : ViewModelBase
         string listen = !string.IsNullOrWhiteSpace(ListenAddress) ? ListenAddress : "127.0.0.1:25565";
         MappingText = $"{host} -> {listen}";
 
-        string activeWord = I18nText.T("client_active", "活动");
+        string activeWord = Messages.ClientActive();
         DiscoveredServicesBadgeText = $"{DiscoveredServices.Count} {activeWord}";
 
         if (IsConnected)
         {
-            DiscoveredServicesEmptyTitle = I18nText.T("client_waiting_services", "等待 Connector 发布远端服务…");
+            DiscoveredServicesEmptyTitle = Messages.ClientWaitingServices();
             DiscoveredServicesEmptyHint = "";
         }
         else
         {
-            DiscoveredServicesEmptyTitle = I18nText.T("client_not_connected_service", "未连接远端服务");
-            DiscoveredServicesEmptyHint = I18nText.T("client_service_hint", "连接后将在此展示远端 Connector 发布的本地映射端口和服务信息");
+            DiscoveredServicesEmptyTitle = Messages.ClientNotConnectedService();
+            DiscoveredServicesEmptyHint = Messages.ClientServiceHint();
         }
         OnPropertyChanged(nameof(TunnelButtonText));
     }
@@ -451,7 +451,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
     }
 
@@ -472,7 +472,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         {
             if (IsSessionAuthenticated)
             {
-                ErrorMessage = I18nText.T("client_oauth_unsolicited");
+                ErrorMessage = Messages.ClientOauthUnsolicited();
                 return;
             }
             try
@@ -564,7 +564,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
                 catch (Exception ex)
                 {
                     ErrorMessage = string.IsNullOrWhiteSpace(ex.Message)
-                        ? I18nText.T("client_probe_failed")
+                        ? Messages.ClientProbeFailed()
                         : ex.Message;
                     return;
                 }
@@ -572,7 +572,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
             if (string.IsNullOrWhiteSpace(targetUrl))
             {
-                ErrorMessage = I18nText.T("client_probe_failed");
+                ErrorMessage = Messages.ClientProbeFailed();
                 return;
             }
 
@@ -586,7 +586,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = I18nText.Format("admin_load_failed", ("error", ex.Message));
+            ErrorMessage = Messages.AdminLoadFailed(ex.Message);
         }
     }
 
@@ -624,7 +624,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(DesktopService.PendingOAuthState) &&
             !string.Equals(DesktopService.PendingOAuthState, state, StringComparison.Ordinal))
         {
-            ErrorMessage = I18nText.T("client_oauth_state_mismatch");
+            ErrorMessage = Messages.ClientOauthStateMismatch();
             return;
         }
         ShowOAuthExchanging = true;
@@ -668,7 +668,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
 
             if (string.IsNullOrWhiteSpace(token))
             {
-                ErrorMessage = I18nText.T("client_github_exchange_failed");
+                ErrorMessage = Messages.ClientGithubExchangeFailed();
                 return;
             }
 
@@ -1081,7 +1081,7 @@ public partial class ClientOverviewViewModel : ViewModelBase
         catch (Exception ex)
         {
             ProvidersError = string.IsNullOrWhiteSpace(ex.Message)
-                ? I18nText.T("client_probe_failed")
+                ? Messages.ClientProbeFailed()
                 : ex.Message;
         }
         UpdateComputedProperties();

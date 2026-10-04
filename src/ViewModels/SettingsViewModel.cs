@@ -174,6 +174,14 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
     {
         LocalizationManager.Instance.CurrentLocale = value;
         DesktopService.SetUiLocale(value);
+        if (UpdateAvailable)
+        {
+            UpdateStatusMessage = Messages.ClientUpdateFound(LatestVersion ?? "");
+        }
+        else if (!string.IsNullOrEmpty(UpdateStatusMessage))
+        {
+            UpdateStatusMessage = Messages.ClientUpdateUpToDate(AppVersion);
+        }
     }
 
     partial void OnSelectedThemeChanged(string value)
@@ -276,23 +284,24 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
         try
         {
             IsCheckingUpdate = true;
-            UpdateStatusMessage = LocalizationManager.Instance["client_update_checking"] ?? "Checking for updates...";
+            UpdateStatusMessage = Messages.ClientUpdateChecking();
             var res = await _client.CheckUpdateAsync(UpdateChannel);
             UpdateAvailable = res.Available;
             LatestVersion = res.Version ?? "";
             UpdateChangelog = res.Body ?? "";
             if (res.Available)
             {
-                UpdateStatusMessage = I18nText.Format("client_update_found", ("version", res.Version ?? ""));
+                UpdateStatusMessage = Messages.ClientUpdateFound(res.Version ?? "");
             }
             else
             {
-                UpdateStatusMessage = LocalizationManager.Instance["client_update_up_to_date"] ?? "You are already using the latest version.";
+                var currentVer = !string.IsNullOrWhiteSpace(res.CurrentVersion) ? res.CurrentVersion : AppVersion;
+                UpdateStatusMessage = Messages.ClientUpdateUpToDate(currentVer);
             }
         }
         catch (Exception ex)
         {
-            UpdateStatusMessage = I18nText.Format("client_update_check_failed", ("error", ex.Message));
+            UpdateStatusMessage = Messages.ClientUpdateCheckFailed(ex.Message);
         }
         finally
         {
@@ -306,14 +315,14 @@ public partial class SettingsViewModel : ViewModelBase, INavigationAware
         try
         {
             IsInstallingUpdate = true;
-            UpdateStatusMessage = LocalizationManager.Instance["client_update_installing"] ?? "Downloading and applying update...";
+            UpdateStatusMessage = Messages.ClientUpdateInstalling();
             await _client.InstallUpdateAsync(UpdateChannel);
-            UpdateStatusMessage = I18nText.T("client_update_prompt_updating");
+            UpdateStatusMessage = Messages.ClientUpdatePromptUpdating();
         }
         catch (Exception ex)
         {
-            UpdateStatusMessage = I18nText.Format("client_update_failed", ("error", ex.Message));
-            AppServices.ShowError(UpdateStatusMessage, I18nText.T("client_update_prompt_title"));
+            UpdateStatusMessage = Messages.ClientUpdateFailed(ex.Message);
+            AppServices.ShowError(UpdateStatusMessage, Messages.ClientUpdatePromptTitle());
         }
         finally
         {

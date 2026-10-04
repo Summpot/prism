@@ -45,7 +45,7 @@ public static class Converters
 
     public static readonly IValueConverter SettingsCountLabel =
         new FuncValueConverter<int, string>(c =>
-            Prism.I18n.I18nText.Format("middleware_settings_count", ("count", c)));
+            Prism.I18n.Messages.MiddlewareSettingsCount(c));
 
     public static readonly IValueConverter AvatarInitials =
         new FuncValueConverter<string?, string>(name =>
@@ -85,9 +85,9 @@ public static class Converters
     public static readonly IValueConverter TokenTypeLabel =
         new FuncValueConverter<string?, string>(value => value?.ToLowerInvariant() switch
         {
-            "admin" => Prism.I18n.I18nText.T("users_token_type_admin"),
-            "connector" => Prism.I18n.I18nText.T("users_token_type_connector"),
-            "client" => Prism.I18n.I18nText.T("users_token_type_client"),
+            "admin" => Prism.I18n.Messages.UsersTokenTypeAdmin(),
+            "connector" => Prism.I18n.Messages.UsersTokenTypeConnector(),
+            "client" => Prism.I18n.Messages.UsersTokenTypeClient(),
             _ => value ?? ""
         });
 
@@ -126,9 +126,9 @@ public static class Converters
         {
             var value = values.Count > 0 ? values[0]?.ToString() ?? "" : "";
             var template = values.Count > 1 ? values[1]?.ToString() : null;
-            if (string.IsNullOrEmpty(template))
+            if (string.IsNullOrEmpty(template) || template == "middleware_default")
             {
-                template = Prism.I18n.I18nText.T("middleware_default", "Default: {value}");
+                return Prism.I18n.Messages.MiddlewareDefault(value);
             }
 
             return template.Replace("{value}", value);

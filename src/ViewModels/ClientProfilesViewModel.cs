@@ -156,9 +156,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
             Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
             {
                 bool discard = await AppServices.ConfirmAsync(
-                    I18nText.T("nodecfg_unsaved", "未保存的更改"),
-                    I18nText.T("client_discard_prompt", "当前配置存在未保存的修改，确定要放弃修改并切换吗？"),
-                    I18nText.T("common_discard", "放弃"));
+                    Messages.NodecfgUnsaved(),
+                    Messages.ClientDiscardPrompt(),
+                    Messages.CommonDiscard());
                 if (!discard)
                 {
                     _suppressSelectionChange = true;
@@ -199,11 +199,8 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
 
     private void UpdateComputed()
     {
-        string tpl = I18nText.T("client_profile_count", "{count} 个配置");
-        ProfilesCountText = tpl.Replace("{count}", Profiles.Count.ToString());
-
-        string editTpl = I18nText.T("client_edit_profile", "编辑配置：{name}");
-        EditProfileTitle = editTpl.Replace("{name}", DraftProfile?.Name ?? "");
+        ProfilesCountText = Messages.ClientProfileCount(Profiles.Count);
+        EditProfileTitle = Messages.ClientEditProfile(DraftProfile?.Name ?? "");
     }
 
     [RelayCommand]
@@ -219,7 +216,7 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
             };
             DraftProfile = draft;
             IsDirty = false;
-            AppServices.ShowInfo(I18nText.T("client_reverted_toast", "已放弃对配置的修改"), I18nText.T("common_revert", "已还原"));
+            AppServices.ShowInfo(Messages.ClientRevertedToast(), Messages.CommonRevert());
         }
     }
 
@@ -510,13 +507,13 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
                 ));
             }
 
-            StatusMessage = I18n.I18nText.T("common_save");
+            StatusMessage = Messages.CommonSave();
             AppServices.ShowSuccess(SelectedProfile.Name);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
-            AppServices.ShowError(ex.Message, I18n.I18nText.T("common_save_failed"));
+            AppServices.ShowError(ex.Message, Messages.CommonSaveFailed());
         }
     }
 
@@ -526,9 +523,9 @@ public partial class ClientProfilesViewModel : ViewModelBase, INavigationAware
         var target = profile ?? SelectedProfile;
         if (target == null) return;
         if (!await AppServices.ConfirmAsync(
-                I18n.I18nText.T("common_confirm"),
-                I18n.I18nText.T("confirm_delete_profile"),
-                I18n.I18nText.T("common_delete"),
+                Messages.CommonConfirm(),
+                Messages.ConfirmDeleteProfile(),
+                Messages.CommonDelete(),
                 destructive: true))
         {
             return;

@@ -73,9 +73,9 @@ public abstract partial class AdminPageViewModelBase : ViewModelBase, INavigatio
     protected void UpdateAutoRefreshText()
     {
         string stateStr = AutoRefresh
-            ? I18nText.T("admin_on", "on")
-            : I18nText.T("admin_off", "off");
-        AutoRefreshText = I18nText.T("admin_auto_refresh", "Auto-refresh {state}").Replace("{state}", stateStr);
+            ? Messages.AdminOn()
+            : Messages.AdminOff();
+        AutoRefreshText = Messages.AdminAutoRefresh(stateStr);
     }
 
     [RelayCommand]

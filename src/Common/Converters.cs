@@ -138,13 +138,47 @@ public static class Converters
         new FuncValueConverter<string?, string>(ts =>
         {
             if (string.IsNullOrEmpty(ts)) return "";
-            if (ts.Length > 8 && ts.Contains('T'))
+            var s = ts.Trim();
+            if (s.Contains('T'))
             {
-                var parts = ts.Split('T');
-                if (parts.Length > 1 && parts[1].Length >= 8)
-                    return "[" + parts[1].Substring(0, 8) + "]";
+                var parts = s.Split('T');
+                if (parts.Length > 1) s = parts[1];
             }
-            return "[" + ts + "]";
+            else if (s.Contains(' '))
+            {
+                var parts = s.Split(' ');
+                if (parts.Length > 1) s = parts[1];
+            }
+            var dotIdx = s.IndexOf('.');
+            if (dotIdx > 0)
+            {
+                s = s.Substring(0, dotIdx);
+            }
+            else if (s.Length > 8)
+            {
+                s = s.Substring(0, 8);
+            }
+            return "[" + s + "]";
+        });
+
+    public static readonly IValueConverter LogTargetToShortStr =
+        new FuncValueConverter<string?, string>(target =>
+        {
+            if (string.IsNullOrWhiteSpace(target)) return "";
+            var t = target.Trim();
+            if (t.StartsWith("prism_native::prism::", StringComparison.OrdinalIgnoreCase))
+                t = t.Substring("prism_native::prism::".Length);
+            else if (t.StartsWith("prism_native::", StringComparison.OrdinalIgnoreCase))
+                t = t.Substring("prism_native::".Length);
+            else if (t.StartsWith("prism::", StringComparison.OrdinalIgnoreCase))
+                t = t.Substring("prism::".Length);
+
+            var parts = t.Split(new[] { "::" }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 2)
+            {
+                t = $"{parts[^2]}::{parts[^1]}";
+            }
+            return string.IsNullOrEmpty(t) ? "" : $"{t}:";
         });
 
     public static readonly IValueConverter RunningToTunnelText =

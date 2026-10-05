@@ -120,6 +120,7 @@
                                 <TextBlock
                                     Grid.Column="0"
                                     Text="{Binding Timestamp, Converter={x:Static common:Converters.TimestampToTimeStr}}"
+                                    ToolTip.Tip="{Binding Timestamp}"
                                     FontFamily="{DynamicResource MonoFont}"
                                     Foreground="{DynamicResource MutedForegroundColor}"
                                     Margin="0,0,8,0"
@@ -142,7 +143,8 @@
                                 <!-- Target -->
                                 <TextBlock
                                     Grid.Column="2"
-                                    Text="{Binding Target, StringFormat='{}{0}:'}"
+                                    Text="{Binding Target, Converter={x:Static common:Converters.LogTargetToShortStr}}"
+                                    ToolTip.Tip="{Binding Target}"
                                     FontFamily="{DynamicResource MonoFont}"
                                     FontWeight="SemiBold"
                                     Foreground="{DynamicResource MutedForegroundColor}"

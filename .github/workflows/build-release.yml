@@ -522,13 +522,7 @@ jobs:
             for f in dist/*.exe dist/*.msi dist/*.zip dist/*.AppImage dist/*.tar.gz dist/*.dmg; do
               if [ -f "$f" ]; then
                 echo "Signing $f..."
-                if grep -q "untrusted comment: minisign secret key" /tmp/minisign.key; then
-                  minisign -S -W -s /tmp/minisign.key -m "$f" -x "$f.sig"
-                elif [ -n "$KEY_PASSWORD" ]; then
-                  echo "$KEY_PASSWORD" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig"
-                else
-                  minisign -S -W -s /tmp/minisign.key -m "$f" -x "$f.sig"
-                fi
+                printf '%s\n' "${KEY_PASSWORD:-}" | minisign -S -s /tmp/minisign.key -m "$f" -x "$f.sig"
                 base64 -w 0 "$f.sig" > "$f.sig.b64" && mv "$f.sig.b64" "$f.sig"
               fi
             done

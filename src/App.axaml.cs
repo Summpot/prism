@@ -16,6 +16,7 @@ namespace Prism;
 public partial class App : Application
 {
     private static App? s_current;
+    private MainWindow? _mainWindow;
     private TrayIcon? _trayIcon;
     private NativeMenuItem? _toggleTunnelItem;
     private NativeMenuItem? _hideItem;
@@ -47,6 +48,7 @@ public partial class App : Application
                 DataContext = new ViewModels.MainWindowViewModel()
             };
             desktop.MainWindow = mainWindow;
+            _mainWindow = mainWindow;
 
             _trayReady = SetupTrayIcon(desktop, mainWindow);
 
@@ -61,17 +63,20 @@ public partial class App : Application
 
             var args = desktop.Args ?? Array.Empty<string>();
             bool isAutostart = args.Contains("--autostart");
-            if (isAutostart)
+            if (isAutostart && _trayReady)
             {
-                if (_trayReady)
-                {
-                    mainWindow.Hide();
-                }
-                else
-                {
-                    mainWindow.WindowState = WindowState.Minimized;
-                    mainWindow.Show();
-                }
+                // Silent autostart: stay in the tray without ever showing the main window.
+                // ClassicDesktopStyleApplicationLifetime.StartCore calls MainWindow.Show() itself
+                // as soon as this method returns, so MainWindow is detached for that one call and
+                // restored on the first dispatcher turn, which runs after the initial show.
+                desktop.MainWindow = null;
+                Dispatcher.UIThread.Post(() => desktop.MainWindow = mainWindow, DispatcherPriority.Loaded);
+            }
+            else if (isAutostart)
+            {
+                // Without a tray icon a hidden window would be unreachable, so minimize instead.
+                mainWindow.WindowState = WindowState.Minimized;
+                mainWindow.Show();
             }
             else
             {
@@ -315,14 +320,22 @@ public partial class App : Application
 
     public static void HandleIncomingArgs(string[] args)
     {
-        if (s_current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop && desktop.MainWindow != null)
+        // MainWindow is briefly null while the silent-autostart branch hands it back, so fall back
+        // to the window instance the app owns.
+        var window = s_current?._mainWindow ??
+                     (s_current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (window != null)
         {
-            if (!desktop.MainWindow.IsVisible)
+            if (s_current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
-                desktop.MainWindow.Show();
+                desktop.MainWindow ??= window;
             }
-            desktop.MainWindow.WindowState = WindowState.Normal;
-            desktop.MainWindow.Activate();
+            if (!window.IsVisible)
+            {
+                window.Show();
+            }
+            window.WindowState = WindowState.Normal;
+            window.Activate();
 
             foreach (var a in args)
             {
